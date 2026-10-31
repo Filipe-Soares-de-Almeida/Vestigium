@@ -1,0 +1,19 @@
+# Text files are stored and checked out with LF line endings.
+* text=auto eol=lf
+
+# Windows batch files keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never diffed, never converted.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.woff2 binary
+*.pdf   binary
+*.zip   binary
+*.db    binary
+*.dmp   binary
+*.etl   binary

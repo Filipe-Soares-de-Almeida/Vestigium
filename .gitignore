@@ -1,0 +1,39 @@
+# Local working files
+.project/
+
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.superpowers/
+docs/superpowers/
+
+# impeccable
+.impeccable/
+.impeccable-live/
+PRODUCT.md
+DESIGN.md
+
+# Real captures from a machine: dumps, traces, recorded databases
+captures/
+*.dmp
+*.etl
+*.db
+*.db-wal
+*.db-shm
+
+# Rust build output
+/target/
+
+# Node toolchain and front-end build output
+node_modules/
+dist/
+
+# Editor and OS noise
+.vs/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

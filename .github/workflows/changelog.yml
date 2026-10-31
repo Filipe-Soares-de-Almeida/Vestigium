@@ -1,0 +1,26 @@
+name: Changelog
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  entry-present:
+    name: Changelog entry present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require a CHANGELOG.md change
+        run: |
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md was updated."
+          else
+            echo "::error::This pull request does not touch CHANGELOG.md."
+            echo "Add an entry under '## [Unreleased]' describing the change for a human reader."
+            echo "If the change genuinely has no user-visible effect, apply the 'no-changelog' label."
+            exit 1
+          fi
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
