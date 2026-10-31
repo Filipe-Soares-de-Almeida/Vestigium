@@ -1,0 +1,121 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+/// Cumulative counters of one process, as read from one snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessCounters {
+    pub pid: u32,
+    pub parent_pid: u32,
+    pub name: String,
+    /// Creation time as a Windows FILETIME; tells a reused PID apart.
+    pub create_time: i64,
+    pub cpu_time_100ns: u64,
+    pub working_set: u64,
+    pub private_bytes: u64,
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+    pub threads: u32,
+    pub context_switches: u64,
+}
+
+/// Rates of one process over the interval between two snapshots.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessSample {
+    pub pid: u32,
+    pub name: String,
+    /// Share of the whole machine, 0 to 100.
+    pub cpu_pct: f32,
+    pub private_bytes: u64,
+    pub read_bps: f32,
+    pub write_bps: f32,
+}
+
+/// The busiest processes at one moment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessTop {
+    /// Unix epoch, milliseconds.
+    pub ts_ms: i64,
+    pub entries: Vec<ProcessSample>,
+}
+
+/// Union of the `per_metric` heaviest processes by CPU, private memory and I/O, sorted by CPU.
+pub fn top_processes(
+    prev: &[ProcessCounters],
+    curr: &[ProcessCounters],
+    elapsed_ms: u64,
+    logical_cpus: u32,
+    per_metric: usize,
+) -> Vec<ProcessSample> {
+    let previous: HashMap<(u32, i64), &ProcessCounters> =
+        prev.iter().map(|p| ((p.pid, p.create_time), p)).collect();
+    let elapsed_s = elapsed_ms as f64 / 1000.0;
+    let capacity_100ns = elapsed_ms as f64 * 10_000.0 * f64::from(logical_cpus);
+
+    let samples: Vec<ProcessSample> = curr
+        .iter()
+        .filter(|p| p.pid != 0)
+        .map(|p| {
+            let (cpu, read, write) = match previous.get(&(p.pid, p.create_time)) {
+                Some(old) => (
+                    p.cpu_time_100ns.saturating_sub(old.cpu_time_100ns),
+                    p.read_bytes.saturating_sub(old.read_bytes),
+                    p.write_bytes.saturating_sub(old.write_bytes),
+                ),
+                None => (0, 0, 0),
+            };
+            let rate = |delta: u64| {
+                if elapsed_s > 0.0 {
+                    (delta as f64 / elapsed_s) as f32
+                } else {
+                    0.0
+                }
+            };
+            ProcessSample {
+                pid: p.pid,
+                name: p.name.clone(),
+                cpu_pct: if capacity_100ns > 0.0 {
+                    (cpu as f64 / capacity_100ns * 100.0) as f32
+                } else {
+                    0.0
+                },
+                private_bytes: p.private_bytes,
+                read_bps: rate(read),
+                write_bps: rate(write),
+            }
+        })
+        .collect();
+
+    let mut chosen = vec![false; samples.len()];
+    mark_heaviest(&samples, &mut chosen, per_metric, |s| f64::from(s.cpu_pct));
+    mark_heaviest(&samples, &mut chosen, per_metric, |s| {
+        s.private_bytes as f64
+    });
+    mark_heaviest(&samples, &mut chosen, per_metric, |s| {
+        f64::from(s.read_bps) + f64::from(s.write_bps)
+    });
+
+    let mut top: Vec<ProcessSample> = samples
+        .into_iter()
+        .zip(chosen)
+        .filter_map(|(sample, keep)| keep.then_some(sample))
+        .collect();
+    top.sort_by(|a, b| b.cpu_pct.total_cmp(&a.cpu_pct));
+    top
+}
+
+/// Marks the `n` samples with the largest non-zero `key`.
+fn mark_heaviest(
+    samples: &[ProcessSample],
+    chosen: &mut [bool],
+    n: usize,
+    key: impl Fn(&ProcessSample) -> f64,
+) {
+    let mut order: Vec<usize> = (0..samples.len())
+        .filter(|&i| key(&samples[i]) > 0.0)
+        .collect();
+    order.sort_by(|&a, &b| key(&samples[b]).total_cmp(&key(&samples[a])));
+    for &i in order.iter().take(n) {
+        chosen[i] = true;
+    }
+}
