@@ -21,6 +21,8 @@ pub enum StoreError {
     UnknownFormat(u8),
     #[error("empty segment")]
     EmptySegment,
+    #[error("compressed segment is corrupt")]
+    Corrupt,
     #[error("database schema {found} is newer than this version supports ({supported})")]
     NewerSchema { found: u32, supported: u32 },
     #[error("cannot create the data folder: {0}")]

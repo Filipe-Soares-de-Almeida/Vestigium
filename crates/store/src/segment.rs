@@ -3,8 +3,12 @@ use serde::de::DeserializeOwned;
 
 use crate::StoreError;
 
-/// Version of the BLOB layout, stored as its first byte.
-const FORMAT: u8 = 1;
+/// BLOB layouts, stored as the first byte: postcard, or postcard compressed with deflate.
+const FORMAT_POSTCARD: u8 = 1;
+const FORMAT_DEFLATE: u8 = 2;
+const DEFLATE_LEVEL: u8 = 6;
+/// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory.
+const MAX_INFLATED: usize = 16 << 20;
 
 /// Which kind of item a segment holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,15 +27,23 @@ pub struct Segment {
     pub data: Vec<u8>,
 }
 
-/// Packs items into a segment BLOB: the format byte, then postcard.
+/// Packs items into a segment BLOB: the format byte, then deflate of the postcard bytes.
 pub fn encode<T: Serialize>(items: &[T]) -> Vec<u8> {
-    postcard::to_extend(items, vec![FORMAT]).expect("postcard serializes plain data into a Vec")
+    let raw = postcard::to_stdvec(items).expect("postcard serializes plain data into a Vec");
+    let mut data = vec![FORMAT_DEFLATE];
+    data.extend(miniz_oxide::deflate::compress_to_vec(&raw, DEFLATE_LEVEL));
+    data
 }
 
 pub fn decode<T: DeserializeOwned>(data: &[u8]) -> Result<Vec<T>, StoreError> {
     match data.split_first() {
         None => Err(StoreError::EmptySegment),
-        Some((&FORMAT, body)) => Ok(postcard::from_bytes(body)?),
+        Some((&FORMAT_POSTCARD, body)) => Ok(postcard::from_bytes(body)?),
+        Some((&FORMAT_DEFLATE, body)) => {
+            let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(body, MAX_INFLATED)
+                .map_err(|_| StoreError::Corrupt)?;
+            Ok(postcard::from_bytes(&raw)?)
+        }
         Some((&other, _)) => Err(StoreError::UnknownFormat(other)),
     }
 }

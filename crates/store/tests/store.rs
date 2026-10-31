@@ -168,13 +168,45 @@ fn segments_query_filters_by_series() {
 }
 
 #[test]
+fn encode_writes_compressed_format() {
+    let samples: Vec<Sample> = (0..60).map(|s| sample(s * 1_000)).collect();
+    let data = encode(&samples);
+    let raw = postcard::to_stdvec(&samples).unwrap();
+
+    assert_eq!(data[0], 2);
+    assert!(
+        data.len() < raw.len() / 2,
+        "{} vs {}",
+        data.len(),
+        raw.len()
+    );
+    assert_eq!(decode::<Sample>(&data).unwrap(), samples);
+}
+
+#[test]
+fn uncompressed_format_still_decodes() {
+    let samples = vec![sample(1_000), sample(2_000)];
+    let mut data = vec![1u8];
+    data.extend(postcard::to_stdvec(&samples).unwrap());
+
+    assert_eq!(decode::<Sample>(&data).unwrap(), samples);
+}
+
+#[test]
+fn corrupt_compressed_segment_is_an_error() {
+    let data = [2u8, 0xFF, 0xFF, 0xFF, 0x00, 0x13];
+
+    assert!(matches!(decode::<Sample>(&data), Err(StoreError::Corrupt)));
+}
+
+#[test]
 fn decode_rejects_unknown_format() {
     let mut data = encode(&[sample(0)]);
-    data[0] = 2;
+    data[0] = 3;
 
     assert!(matches!(
         decode::<Sample>(&data),
-        Err(StoreError::UnknownFormat(2))
+        Err(StoreError::UnknownFormat(3))
     ));
     assert!(matches!(
         decode::<Sample>(&[]),

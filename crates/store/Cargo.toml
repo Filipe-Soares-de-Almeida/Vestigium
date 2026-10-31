@@ -12,6 +12,7 @@ vestigium-core = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 postcard = { workspace = true }
+miniz_oxide = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
