@@ -40,5 +40,8 @@ How to use this file:
 - The background watcher now runs as `Vestigium.exe` and the window as `Vestigium.Window.exe`.
   Task Manager and the startup apps list show the watcher as Vestigium, with its icon, instead of
   a bare file name.
+- The background watcher saves its history once a minute, compressed, and hands memory it only
+  needed at startup back to Windows: about 30 MB of disk writes a day and 5 MB of memory in use,
+  measured on a typical desktop.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

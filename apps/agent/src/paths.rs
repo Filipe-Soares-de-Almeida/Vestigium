@@ -1,17 +1,9 @@
 use std::path::PathBuf;
 
-use windows::Win32::System::Com::CoTaskMemFree;
-use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-
 /// `%LOCALAPPDATA%\Vestigium\data`, kept apart from the installed binaries.
-pub fn data_dir() -> windows::core::Result<PathBuf> {
-    // SAFETY: returns a CoTaskMemAlloc'd path, freed below.
-    let raw = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None)? };
-    // SAFETY: `raw` is a NUL-terminated string from the call above.
-    let local = String::from_utf16_lossy(unsafe { raw.as_wide() });
-    // SAFETY: frees the string allocated by SHGetKnownFolderPath, exactly once.
-    unsafe { CoTaskMemFree(Some(raw.0.cast_const().cast())) };
-    Ok(PathBuf::from(local).join("Vestigium").join("data"))
+pub fn data_dir() -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
+    Some(PathBuf::from(local).join("Vestigium").join("data"))
 }
 
 /// The window executable next to the agent: the installed name, then the development build name.

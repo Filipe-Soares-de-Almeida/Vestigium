@@ -12,6 +12,7 @@ use vestigium_collect::{
 use vestigium_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
 use vestigium_ipc::AgentStatus;
 use vestigium_store::{Batcher, Ring, Store};
+use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use crate::app::{lock, now_ms};
 
@@ -22,6 +23,8 @@ const TOP_PER_METRIC: usize = 5;
 const RING_SAMPLES: usize = 600;
 const RING_TOPS: usize = 600 / TOP_EVERY;
 const SNAPSHOT_BUFFER: usize = 512 * 1024;
+/// Ticks after a start or a resume before idle pages are handed back to Windows.
+const TRIM_AFTER_TICKS: usize = 10;
 
 /// Lets the owner wait for the sampler to write its last batch and stop.
 #[derive(Debug)]
@@ -126,6 +129,7 @@ impl Sampler {
         sources.prime();
         let mut next_tick = monotonic_ms() + TICK_MS;
         let mut ticks = 0usize;
+        let mut trim_at = Some(TRIM_AFTER_TICKS);
         loop {
             match gate.state() {
                 GateState::Stopping => return,
@@ -139,6 +143,7 @@ impl Sampler {
                     self.probe_rx.try_iter().for_each(drop);
                     sources.prime();
                     next_tick = monotonic_ms() + TICK_MS;
+                    trim_at = Some(ticks + TRIM_AFTER_TICKS);
                     continue;
                 }
                 GateState::Running => {}
@@ -159,6 +164,10 @@ impl Sampler {
             ticks += 1;
             if let Err(err) = self.tick(&mut sources, woke, sampler_lag_ms, ticks) {
                 self.report(&err);
+            }
+            if trim_at == Some(ticks) {
+                trim_at = None;
+                release_idle_pages();
             }
         }
     }
@@ -240,6 +249,12 @@ impl Sampler {
     fn report(&self, err: &dyn std::fmt::Display) {
         lock(&self.status).last_error = Some(err.to_string());
     }
+}
+
+/// Hands back the pages only startup touched (PDH name tables, DLL setup); the rest fault back in.
+fn release_idle_pages() {
+    // SAFETY: (usize::MAX, usize::MAX) asks Windows to trim this process's working set.
+    let _ = unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
 }
 
 #[cfg(test)]

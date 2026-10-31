@@ -19,7 +19,7 @@ use crate::sampler::run_sampler;
 use crate::tray::{Action, Tray};
 use crate::{paths, shutdown};
 
-const DEFAULT_FLUSH: Duration = Duration::from_secs(5);
+const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 const PROBE_PERIOD: Duration = Duration::from_millis(100);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -88,7 +88,7 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     };
     let data_dir = match options.data_dir {
         Some(dir) => dir,
-        None => paths::data_dir().map_err(failed)?,
+        None => paths::data_dir().ok_or_else(|| failed("the LOCALAPPDATA folder is not set"))?,
     };
     let store = Store::open(&data_dir.join("vestigium.db")).map_err(failed)?;
     let gate = RunGate::new();
@@ -172,9 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn options_default_to_five_second_batches() {
+    fn options_default_to_one_minute_batches() {
         let options = Options::parse(args(&[]));
-        assert_eq!(options.flush, Duration::from_secs(5));
+        assert_eq!(options.flush, Duration::from_secs(60));
         assert_eq!(options.data_dir, None);
     }
 
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn options_ignore_a_bad_number() {
         let options = Options::parse(args(&["--flush-secs", "soon"]));
-        assert_eq!(options.flush, Duration::from_secs(5));
+        assert_eq!(options.flush, DEFAULT_FLUSH);
     }
 
     #[test]
