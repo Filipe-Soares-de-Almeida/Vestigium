@@ -72,6 +72,14 @@ fn open_sets_wal_and_schema_version() {
 }
 
 #[test]
+fn open_keeps_the_page_cache_small() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+
+    assert_eq!(store.cache_size_kib().unwrap(), 256);
+}
+
+#[test]
 fn reopen_keeps_version() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vestigium.db");

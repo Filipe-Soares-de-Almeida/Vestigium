@@ -5,6 +5,8 @@ use rusqlite::{Connection, params};
 use crate::{Segment, Series, StoreError};
 
 pub const SCHEMA_VERSION: u32 = 1;
+/// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
+const CACHE_KIB: i64 = 256;
 
 /// Migration `n` moves the schema from version `n` to `n + 1`.
 const MIGRATIONS: &[&str] = &["CREATE TABLE segment (
@@ -41,12 +43,21 @@ impl Store {
         }
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |_| Ok(()))?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "cache_size", -CACHE_KIB)?;
         migrate(&mut conn, found)?;
         Ok(Store { conn })
     }
 
     pub fn schema_version(&self) -> Result<u32, StoreError> {
         user_version(&self.conn)
+    }
+
+    /// Page cache size in KiB.
+    pub fn cache_size_kib(&self) -> Result<i64, StoreError> {
+        let size: i64 = self
+            .conn
+            .pragma_query_value(None, "cache_size", |row| row.get(0))?;
+        Ok(-size)
     }
 
     pub fn journal_mode(&self) -> Result<String, StoreError> {
