@@ -1,4 +1,4 @@
-use windows::Win32::System::ProcessStatus::{GetPerformanceInfo, PERFORMANCE_INFORMATION};
+use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows::Win32::System::Threading::{ALL_PROCESSOR_GROUPS, GetActiveProcessorCount};
 
 use crate::CollectError;
@@ -11,15 +11,20 @@ pub struct MemoryInfo {
     pub commit_limit_bytes: u64,
 }
 
+/// Reads physical memory and commit charge; the commit limit is the "total page file" of the API.
 pub fn memory_info() -> Result<MemoryInfo, CollectError> {
-    let mut info = PERFORMANCE_INFORMATION::default();
-    // SAFETY: fills `info`, whose size is passed alongside it.
-    unsafe { GetPerformanceInfo(&mut info, size_of::<PERFORMANCE_INFORMATION>() as u32)? };
-    let page = info.PageSize as u64;
+    let mut status = MEMORYSTATUSEX {
+        dwLength: size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: fills `status`, whose length field is set.
+    unsafe { GlobalMemoryStatusEx(&mut status)? };
     Ok(MemoryInfo {
-        avail_bytes: info.PhysicalAvailable as u64 * page,
-        commit_bytes: info.CommitTotal as u64 * page,
-        commit_limit_bytes: info.CommitLimit as u64 * page,
+        avail_bytes: status.ullAvailPhys,
+        commit_bytes: status
+            .ullTotalPageFile
+            .saturating_sub(status.ullAvailPageFile),
+        commit_limit_bytes: status.ullTotalPageFile,
     })
 }
 
