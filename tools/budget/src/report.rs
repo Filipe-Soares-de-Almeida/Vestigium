@@ -22,7 +22,7 @@ pub struct Budgets {
     pub cpu_pct: f64,
     pub working_set_mb: f64,
     pub writes_mb_per_day: f64,
-    pub wakeups_per_s: f64,
+    pub context_switches_per_s: f64,
 }
 
 /// The default-mode budgets of the agent.
@@ -30,7 +30,7 @@ pub const AGENT: Budgets = Budgets {
     cpu_pct: 0.3,
     working_set_mb: 15.0,
     writes_mb_per_day: 50.0,
-    wakeups_per_s: 12.0,
+    context_switches_per_s: 30.0,
 };
 
 /// What a run of observations adds up to.
@@ -43,7 +43,7 @@ pub struct Report {
     pub ws_max_mb: f64,
     pub private_avg_mb: f64,
     pub private_max_mb: f64,
-    pub wakeups_per_s: f64,
+    pub context_switches_per_s: f64,
     pub writes_mb_per_day: f64,
     pub reads_mb_per_day: f64,
     pub endpoints: usize,
@@ -88,7 +88,7 @@ pub fn report(
         ws_max_mb: max(|o| o.working_set),
         private_avg_mb: mean(|o| o.private_bytes),
         private_max_mb: max(|o| o.private_bytes),
-        wakeups_per_s: if span_ms > 0.0 {
+        context_switches_per_s: if span_ms > 0.0 {
             last.context_switches.saturating_sub(first.context_switches) as f64 * 1000.0 / span_ms
         } else {
             0.0
@@ -128,7 +128,7 @@ fn empty(endpoints: usize, budgets: &Budgets) -> Report {
         ws_max_mb: 0.0,
         private_avg_mb: 0.0,
         private_max_mb: 0.0,
-        wakeups_per_s: 0.0,
+        context_switches_per_s: 0.0,
         writes_mb_per_day: 0.0,
         reads_mb_per_day: 0.0,
         endpoints,
@@ -144,7 +144,10 @@ impl Report {
             ("CPU", self.cpu_avg_pct > b.cpu_pct),
             ("working set", self.ws_max_mb > b.working_set_mb),
             ("disk writes", self.writes_mb_per_day > b.writes_mb_per_day),
-            ("wakeups", self.wakeups_per_s > b.wakeups_per_s),
+            (
+                "context switches",
+                self.context_switches_per_s > b.context_switches_per_s,
+            ),
             ("network", self.endpoints > 0),
         ]
         .into_iter()
@@ -183,9 +186,9 @@ impl Report {
                 String::new(),
             ),
             (
-                "Wakeups (context switches)",
-                format!("{:.1} /s", self.wakeups_per_s),
-                format!("<= {} /s", b.wakeups_per_s),
+                "Context switches (wakeups + preemptions)",
+                format!("{:.1} /s", self.context_switches_per_s),
+                format!("<= {} /s", b.context_switches_per_s),
             ),
             (
                 "Disk writes",
@@ -268,11 +271,11 @@ mod tests {
     }
 
     #[test]
-    fn wakeups_are_context_switches_per_s() {
+    fn context_switches_are_counted_per_second() {
         let mut end = at(60.0);
         end.context_switches = 600;
         let r = report(&[at(0.0), end], 8, 0, &AGENT);
-        assert!((r.wakeups_per_s - 10.0).abs() < 1e-9);
+        assert!((r.context_switches_per_s - 10.0).abs() < 1e-9);
     }
 
     #[test]
