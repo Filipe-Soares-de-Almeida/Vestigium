@@ -1,4 +1,4 @@
-//! Named pipe between the Argos agent and its interface.
+//! Named pipe between the Vestigium agent and its interface.
 
 use std::path::PathBuf;
 

@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use argos_ipc::{
+use vestigium_ipc::{
     AgentStatus, IpcError, MAX_FRAME, PROTOCOL_VERSION, Request, Response, read_frame,
     user_only_sddl, write_frame,
 };

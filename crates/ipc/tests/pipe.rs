@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 
-use argos_ipc::{
+use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeClient, PipeServer, Request, Response,
     current_user_sid, pipe_name,
 };
@@ -35,7 +35,7 @@ fn start_server(name: &str) {
 
 #[test]
 fn pipe_name_is_under_the_pipe_namespace() {
-    assert_eq!(pipe_name("S-1-5-21-1"), r"\\.\pipe\argos-S-1-5-21-1");
+    assert_eq!(pipe_name("S-1-5-21-1"), r"\\.\pipe\vestigium-S-1-5-21-1");
 }
 
 #[test]

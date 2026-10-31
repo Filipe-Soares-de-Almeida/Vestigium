@@ -1,6 +1,6 @@
 [package]
-name = "argos-collect"
-description = "Windows data sources of Argos."
+name = "vestigium-collect"
+description = "Windows data sources of Vestigium."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-argos-core = { workspace = true }
+vestigium-core = { workspace = true }
 thiserror = { workspace = true }
 
 [dependencies.windows]

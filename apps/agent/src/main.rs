@@ -8,7 +8,7 @@ mod sampler;
 mod shutdown;
 mod tray;
 
-use argos_i18n::{Catalog, Lang};
+use vestigium_i18n::{Catalog, Lang};
 use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
 fn main() {

@@ -35,7 +35,7 @@ How to use this file:
 
 ### Changed
 
-- The project is now called Argos, and its GitHub repository was renamed to match. Links to the
-  old address redirect.
+- The project is now called Vestigium, and its GitHub repository was renamed to match. Links to
+  the old addresses redirect.
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Argos/commits/main
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

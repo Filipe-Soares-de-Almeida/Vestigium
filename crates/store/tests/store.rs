@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use argos_core::{CoreLoad, DiskLoad, ProcessSample, ProcessTop, Sample};
-use argos_store::{
+use vestigium_core::{CoreLoad, DiskLoad, ProcessSample, ProcessTop, Sample};
+use vestigium_store::{
     Batcher, Ring, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
 };
 
@@ -63,7 +63,7 @@ fn segment(start_ms: i64, end_ms: i64) -> Segment {
 #[test]
 fn open_sets_wal_and_schema_version() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("nested").join("argos.db");
+    let path = dir.path().join("nested").join("vestigium.db");
 
     let store = Store::open(&path).unwrap();
 
@@ -74,7 +74,7 @@ fn open_sets_wal_and_schema_version() {
 #[test]
 fn reopen_keeps_version() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("argos.db");
+    let path = dir.path().join("vestigium.db");
     drop(Store::open(&path).unwrap());
 
     let store = Store::open(&path).unwrap();
@@ -85,7 +85,7 @@ fn reopen_keeps_version() {
 #[test]
 fn newer_schema_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("argos.db");
+    let path = dir.path().join("vestigium.db");
     {
         let raw = rusqlite::Connection::open(&path).unwrap();
         raw.pragma_update(None, "user_version", 99).unwrap();
@@ -114,7 +114,7 @@ fn newer_schema_is_refused() {
 #[test]
 fn segments_round_trip() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(&dir.path().join("argos.db")).unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
     let samples = vec![sample(1_000), sample(2_000), sample(3_000)];
 
     store
@@ -134,7 +134,7 @@ fn segments_round_trip() {
 #[test]
 fn segments_query_returns_overlaps() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(&dir.path().join("argos.db")).unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
     store
         .append(&[segment(0, 10), segment(10, 20), segment(20, 30)])
         .unwrap();
@@ -148,7 +148,7 @@ fn segments_query_returns_overlaps() {
 #[test]
 fn segments_query_filters_by_series() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(&dir.path().join("argos.db")).unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
     store
         .append(&[
             segment(0, 10),

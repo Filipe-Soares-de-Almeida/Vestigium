@@ -1,4 +1,4 @@
-//! Domain types and rules for Argos.
+//! Domain types and rules for Vestigium.
 
 mod gate;
 mod process;

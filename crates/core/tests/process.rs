@@ -1,4 +1,4 @@
-use argos_core::{ProcessCounters, top_processes};
+use vestigium_core::{ProcessCounters, top_processes};
 
 fn counters(pid: u32, name: &str) -> ProcessCounters {
     ProcessCounters {

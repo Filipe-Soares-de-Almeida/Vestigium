@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Argos",
-  "mainBinaryName": "Argos",
+  "productName": "Vestigium",
+  "mainBinaryName": "Vestigium",
   "version": "0.0.0",
-  "identifier": "app.argos-diagnostics",
+  "identifier": "app.vestigium",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Argos",
+        "title": "Vestigium",
         "width": 1100,
         "height": 720
       }

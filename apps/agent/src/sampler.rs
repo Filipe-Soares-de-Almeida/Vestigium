@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use argos_collect::{
+use vestigium_collect::{
     CollectError, HighResTimer, PdhSampler, ProcessSnapshotter, logical_cpus, memory_info,
     monotonic_ms,
 };
-use argos_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
-use argos_ipc::AgentStatus;
-use argos_store::{Batcher, Ring, Store};
+use vestigium_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
+use vestigium_ipc::AgentStatus;
+use vestigium_store::{Batcher, Ring, Store};
 
 use crate::app::{lock, now_ms};
 
@@ -223,8 +223,8 @@ impl Sampler {
 mod tests {
     use std::sync::mpsc;
 
-    use argos_core::Sample;
-    use argos_store::{Series, decode};
+    use vestigium_core::Sample;
+    use vestigium_store::{Series, decode};
 
     use super::*;
 
@@ -232,7 +232,7 @@ mod tests {
         dir: &std::path::Path,
         flush: Duration,
     ) -> (Arc<RunGate>, SamplerHandle, Arc<Mutex<AgentStatus>>) {
-        let store = Store::open(&dir.join("argos.db")).unwrap();
+        let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let gate = RunGate::new();
         let (_probe_tx, probe_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(AgentStatus::default()));
@@ -241,7 +241,7 @@ mod tests {
     }
 
     fn samples(dir: &std::path::Path) -> (usize, usize, Option<i64>) {
-        let store = Store::open(&dir.join("argos.db")).unwrap();
+        let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let segments = store.segments(Series::Samples, i64::MIN, i64::MAX).unwrap();
         let count = segments
             .iter()

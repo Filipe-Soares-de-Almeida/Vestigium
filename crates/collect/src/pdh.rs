@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use argos_core::{CoreLoad, DiskLoad};
+use vestigium_core::{CoreLoad, DiskLoad};
 use windows::Win32::System::Performance::{
     PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE,
     PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,

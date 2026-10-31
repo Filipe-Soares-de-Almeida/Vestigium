@@ -1,4 +1,4 @@
-//! Local SQLite history of Argos.
+//! Local SQLite history of Vestigium.
 
 mod batch;
 mod ring;

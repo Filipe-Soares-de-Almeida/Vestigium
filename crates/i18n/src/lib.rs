@@ -1,4 +1,4 @@
-//! UI text catalogs for Argos.
+//! UI text catalogs for Vestigium.
 
 use std::collections::HashMap;
 

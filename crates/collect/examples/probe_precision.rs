@@ -4,8 +4,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use argos_collect::spawn_probe;
-use argos_core::{GateState, RunGate};
+use vestigium_collect::spawn_probe;
+use vestigium_core::{GateState, RunGate};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 

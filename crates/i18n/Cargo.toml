@@ -1,6 +1,6 @@
 [package]
-name = "argos-i18n"
-description = "UI text catalogs for Argos."
+name = "vestigium-i18n"
+description = "UI text catalogs for Vestigium."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use argos_core::{ProcessTop, Sample};
+use vestigium_core::{ProcessTop, Sample};
 
 use crate::{Segment, Series, encode};
 

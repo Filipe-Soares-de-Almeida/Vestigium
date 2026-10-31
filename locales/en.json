@@ -1,12 +1,12 @@
 {
-  "tray.tooltip.watching": "Argos — watching",
-  "tray.tooltip.paused": "Argos — paused",
-  "tray.open": "Open Argos",
+  "tray.tooltip.watching": "Vestigium — watching",
+  "tray.tooltip.paused": "Vestigium — paused",
+  "tray.open": "Open Vestigium",
   "tray.pause": "Pause watching",
   "tray.resume": "Resume watching",
   "tray.autostart": "Start with Windows",
   "tray.exit": "Exit",
-  "error.startup.title": "Argos could not start",
+  "error.startup.title": "Vestigium could not start",
   "error.startup.body": "The watcher stopped before it started: {error}",
   "ui.placeholder": "Watching runs in the background. This window is a placeholder."
 }

@@ -1,4 +1,4 @@
-//! Windows data sources of Argos.
+//! Windows data sources of Vestigium.
 
 mod memory;
 mod pdh;

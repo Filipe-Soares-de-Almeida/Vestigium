@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use argos_core::{ProcessTop, Sample};
-use argos_store::{Series, Store, decode};
+use vestigium_core::{ProcessTop, Sample};
+use vestigium_store::{Series, Store, decode};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path: PathBuf = std::env::args_os()

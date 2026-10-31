@@ -1,6 +1,6 @@
 [package]
-name = "argos-core"
-description = "Domain types and rules for Argos."
+name = "vestigium-core"
+description = "Domain types and rules for Vestigium."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

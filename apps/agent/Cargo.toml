@@ -1,6 +1,6 @@
 [package]
-name = "argos-agent"
-description = "Background watcher of Argos."
+name = "vestigium-agent"
+description = "Background watcher of Vestigium."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,11 +8,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-argos-collect = { workspace = true }
-argos-core = { workspace = true }
-argos-i18n = { workspace = true }
-argos-ipc = { workspace = true }
-argos-store = { workspace = true }
+vestigium-collect = { workspace = true }
+vestigium-core = { workspace = true }
+vestigium-i18n = { workspace = true }
+vestigium-ipc = { workspace = true }
+vestigium-store = { workspace = true }
 tray-icon = { workspace = true }
 
 [dependencies.windows]

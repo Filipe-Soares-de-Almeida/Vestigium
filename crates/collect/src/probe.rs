@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use argos_core::{GateState, RunGate};
+use vestigium_core::{GateState, RunGate};
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
 };

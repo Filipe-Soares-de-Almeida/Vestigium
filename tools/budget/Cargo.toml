@@ -1,6 +1,6 @@
 [package]
-name = "argos-budget"
-description = "Measures a running process against the Argos budgets."
+name = "vestigium-budget"
+description = "Measures a running process against the Vestigium budgets."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-argos-collect = { workspace = true }
-argos-core = { workspace = true }
+vestigium-collect = { workspace = true }
+vestigium-core = { workspace = true }
 
 [dependencies.windows]
 workspace = true

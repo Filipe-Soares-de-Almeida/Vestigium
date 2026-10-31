@@ -1,4 +1,4 @@
-<h1 align="center">Argos</h1>
+<h1 align="center">Vestigium</h1>
 
 <p align="center">
   <b>All-in-one freeze diagnostics for Windows PCs.</b><br>
@@ -15,7 +15,7 @@
 
 ---
 
-Argos is an all-in-one app for finding out why a Windows PC freezes,
+Vestigium is an all-in-one app for finding out why a Windows PC freezes,
 stutters or crashes, and what to do about it. It turns each freeze into a report naming the
 likely culprit with the evidence behind it, reads the crash dumps Windows keeps,
 names the drivers that hold the system up, checks disks and hardware for
@@ -28,7 +28,7 @@ Portuguese, for anyone chasing a freeze that is gone by the time Task Manager
 opens. It watches the one PC it is installed on.
 
 > [!WARNING]
-> Argos is in early development. There is no build to install yet.
+> Vestigium is in early development. There is no build to install yet.
 
 ## Highlights
 
@@ -66,4 +66,4 @@ opens. It watches the one PC it is installed on.
 
 ## Licence
 
-Argos is released under the [MIT licence](LICENSE).
+Vestigium is released under the [MIT licence](LICENSE).

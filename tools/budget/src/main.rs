@@ -1,6 +1,6 @@
-//! Measures a running process against the Argos budgets.
+//! Measures a running process against the Vestigium budgets.
 //!
-//! `argos-budget watch --name <exe> --minutes <m>` and `argos-budget tree --pid <pid>`.
+//! `vestigium-budget watch --name <exe> --minutes <m>` and `vestigium-budget tree --pid <pid>`.
 
 mod net;
 mod report;
@@ -10,8 +10,8 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Duration;
 
-use argos_collect::{ProcessSnapshotter, logical_cpus, monotonic_ms};
-use argos_core::ProcessCounters;
+use vestigium_collect::{ProcessSnapshotter, logical_cpus, monotonic_ms};
+use vestigium_core::ProcessCounters;
 
 use crate::report::{AGENT, Observation, report};
 
@@ -51,7 +51,7 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> String {
-    "usage: argos-budget watch --name <exe> --minutes <m> | tree --pid <pid>".to_string()
+    "usage: vestigium-budget watch --name <exe> --minutes <m> | tree --pid <pid>".to_string()
 }
 
 /// Samples the process once a second; true when it stayed within every budget.

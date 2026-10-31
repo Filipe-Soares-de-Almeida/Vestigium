@@ -21,7 +21,7 @@ pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::
     let class = WNDCLASSW {
         lpfnWndProc: Some(session_proc),
         hInstance: instance.into(),
-        lpszClassName: w!("ArgosAgentSession"),
+        lpszClassName: w!("VestigiumAgentSession"),
         ..Default::default()
     };
     // SAFETY: registers a class whose strings are static.
@@ -30,8 +30,8 @@ pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::
     unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
-            w!("ArgosAgentSession"),
-            w!("Argos agent"),
+            w!("VestigiumAgentSession"),
+            w!("Vestigium agent"),
             WS_OVERLAPPED,
             0,
             0,

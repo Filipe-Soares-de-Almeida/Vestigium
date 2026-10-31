@@ -19,11 +19,11 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-argos-collect = { path = "crates/collect" }
-argos-core = { path = "crates/core" }
-argos-i18n = { path = "crates/i18n" }
-argos-ipc = { path = "crates/ipc" }
-argos-store = { path = "crates/store" }
+vestigium-collect = { path = "crates/collect" }
+vestigium-core = { path = "crates/core" }
+vestigium-i18n = { path = "crates/i18n" }
+vestigium-ipc = { path = "crates/ipc" }
+vestigium-store = { path = "crates/store" }
 windows = "0.62"
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

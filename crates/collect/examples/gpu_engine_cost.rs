@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::thread;
 use std::time::Duration;
 
-use argos_collect::{logical_cpus, monotonic_ms};
+use vestigium_collect::{logical_cpus, monotonic_ms};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Performance::{
     PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,

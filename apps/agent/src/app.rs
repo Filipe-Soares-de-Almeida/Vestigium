@@ -3,15 +3,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use argos_collect::spawn_probe;
-use argos_core::{GateState, RunGate};
-use argos_i18n::Catalog;
-use argos_ipc::{
+use tray_icon::menu::MenuEvent;
+use vestigium_collect::spawn_probe;
+use vestigium_core::{GateState, RunGate};
+use vestigium_i18n::Catalog;
+use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
     pipe_name,
 };
-use argos_store::Store;
-use tray_icon::menu::MenuEvent;
+use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
@@ -90,7 +90,7 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
         Some(dir) => dir,
         None => paths::data_dir().map_err(failed)?,
     };
-    let store = Store::open(&data_dir.join("argos.db")).map_err(failed)?;
+    let store = Store::open(&data_dir.join("vestigium.db")).map_err(failed)?;
     let gate = RunGate::new();
     let status = Arc::new(Mutex::new(AgentStatus {
         started_at_ms: now_ms(),
@@ -163,7 +163,7 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use argos_ipc::PROTOCOL_VERSION;
+    use vestigium_ipc::PROTOCOL_VERSION;
 
     use super::*;
 
