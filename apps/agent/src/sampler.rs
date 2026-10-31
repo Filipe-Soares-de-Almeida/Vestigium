@@ -169,6 +169,7 @@ impl Sampler {
             };
             self.samples.push(sample.clone());
             self.batcher.push_sample(sample);
+            lock(&self.status).last_sample_ms = Some(ts_ms);
         }
 
         if self.snapshots.len() > TOP_EVERY {
@@ -194,9 +195,6 @@ impl Sampler {
             self.batcher.push_processes(top);
         }
 
-        let mut status = lock(&self.status);
-        status.last_sample_ms = Some(ts_ms);
-        drop(status);
         if self.batcher.due(ts_ms) {
             self.flush();
         }
@@ -222,6 +220,7 @@ impl Sampler {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::time::Instant;
 
     use vestigium_core::Sample;
     use vestigium_store::{Series, decode};
@@ -250,38 +249,77 @@ mod tests {
         (segments.len(), count, segments.last().map(|s| s.end_ms))
     }
 
+    /// Polls `done` until it holds or `timeout` passes; CI runners are slow and noisy.
+    fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if done() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        done()
+    }
+
+    const PATIENCE: Duration = Duration::from_secs(15);
+    const NEVER_DUE: Duration = Duration::from_secs(3600);
+
+    fn sampled(status: &Mutex<AgentStatus>) -> bool {
+        lock(status).last_sample_ms.is_some()
+    }
+
     #[test]
-    fn sampler_writes_and_flushes_on_stop() {
+    fn sampler_writes_a_batch_once_it_is_due() {
         let dir = tempfile::tempdir().unwrap();
         let (gate, handle, status) = start(dir.path(), Duration::from_secs(1));
 
-        thread::sleep(Duration::from_millis(3_500));
+        let written = wait_until(PATIENCE, || samples(dir.path()).0 >= 1);
         gate.set(GateState::Stopping);
-        let stopped_at = now_ms();
+        assert!(handle.wait(Duration::from_secs(3)), "sampler did not stop");
+
+        assert!(written, "no batch was written while running");
+        assert_eq!(lock(&status).last_error, None);
+    }
+
+    #[test]
+    fn sampler_writes_what_it_holds_when_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, handle, status) = start(dir.path(), NEVER_DUE);
+        assert!(wait_until(PATIENCE, || sampled(&status)), "no sample taken");
+        assert_eq!(samples(dir.path()).0, 0, "nothing is due within the hour");
+
+        gate.set(GateState::Stopping);
         assert!(handle.wait(Duration::from_secs(3)), "sampler did not stop");
 
         let (segments, count, last_end) = samples(dir.path());
-        assert!(segments >= 2, "{segments} segments");
-        assert!(count >= 3, "{count} samples");
-        assert!(stopped_at - last_end.unwrap() <= 1_500);
-        assert_eq!(lock(&status).last_error, None);
+        assert_eq!(segments, 1);
+        assert!(count >= 1);
+        assert_eq!(last_end, lock(&status).last_sample_ms);
     }
 
     #[test]
     fn paused_sampler_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let (gate, handle, _status) = start(dir.path(), Duration::from_secs(1));
-        thread::sleep(Duration::from_millis(1_500));
+        let (gate, handle, status) = start(dir.path(), NEVER_DUE);
+        assert!(wait_until(PATIENCE, || sampled(&status)), "no sample taken");
 
         gate.set(GateState::Paused);
-        thread::sleep(Duration::from_millis(1_200));
+        assert!(
+            wait_until(PATIENCE, || samples(dir.path()).0 == 1),
+            "pausing did not write the buffered batch"
+        );
         let before = samples(dir.path()).1;
-        thread::sleep(Duration::from_millis(3_000));
-        let after = samples(dir.path()).1;
+        thread::sleep(Duration::from_secs(3));
+        let after_pause = samples(dir.path()).1;
         gate.set(GateState::Stopping);
-        assert!(handle.wait(Duration::from_secs(3)));
+        assert!(handle.wait(Duration::from_secs(3)), "sampler did not stop");
 
         assert!(before >= 1);
-        assert_eq!(before, after);
+        assert_eq!(after_pause, before);
+        assert_eq!(
+            samples(dir.path()).1,
+            before,
+            "stopping while paused adds nothing"
+        );
     }
 }
