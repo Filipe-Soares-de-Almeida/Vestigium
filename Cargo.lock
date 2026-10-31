@@ -1276,6 +1276,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "watchmypc-budget"
+version = "0.0.0"
+dependencies = [
+ "watchmypc-collect",
+ "watchmypc-core",
+ "windows",
+]
+
+[[package]]
 name = "watchmypc-collect"
 version = "0.0.0"
 dependencies = [

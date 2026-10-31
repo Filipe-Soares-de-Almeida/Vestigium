@@ -1,0 +1,19 @@
+[package]
+name = "watchmypc-budget"
+description = "Measures a running process against the WatchMyPC budgets."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+watchmypc-collect = { workspace = true }
+watchmypc-core = { workspace = true }
+
+[dependencies.windows]
+workspace = true
+features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"]
+
+[lints]
+workspace = true
