@@ -1,9 +1,15 @@
 //! Windows data sources of WatchMyPC.
 
+mod memory;
+mod pdh;
 mod probe;
+mod processes;
 mod timer;
 
+pub use memory::{MemoryInfo, logical_cpus, memory_info};
+pub use pdh::{CpuInstance, PdhReading, PdhSampler, parse_cpu_instance};
 pub use probe::spawn_probe;
+pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms};
 
 /// Why a data source failed.
