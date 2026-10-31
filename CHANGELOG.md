@@ -30,5 +30,7 @@ How to use this file:
   the busiest processes every second, checks for system stalls ten times a second, and keeps the
   history in a local database. It needs no administrator rights, opens no network connection, and
   saves what it has before Windows signs you out or shuts down.
+- A first application window, opened from the tray icon. Only one window opens at a time, and
+  closing it ends the program completely: nothing keeps running in the background.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/WatchMyPC/commits/main

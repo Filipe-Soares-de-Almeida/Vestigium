@@ -30,6 +30,10 @@ captures/
 node_modules/
 dist/
 
+# Tauri: generated schemas and sidecar binaries copied in for bundling
+apps/ui/src-tauri/gen/
+apps/ui/src-tauri/binaries/
+
 # Editor and OS noise
 .vs/
 .idea/
