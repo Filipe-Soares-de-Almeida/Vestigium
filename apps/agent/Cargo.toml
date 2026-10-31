@@ -1,6 +1,6 @@
 [package]
 name = "watchmypc-agent"
-description = "Background recorder of WatchMyPC."
+description = "Background watcher of WatchMyPC."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

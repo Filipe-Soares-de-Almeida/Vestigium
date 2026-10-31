@@ -20,7 +20,7 @@ stutters or crashes, and what to do about it. It turns each freeze into a report
 likely culprit with the evidence behind it, reads the crash dumps Windows keeps,
 names the drivers that hold the system up, checks disks and hardware for
 trouble, tests RAM and storage, and suggests the Windows settings worth
-changing, each one reversible. A small agent records the PC in the background,
+changing, each one reversible. A small agent watches the PC in the background,
 so the evidence is there when you need it.
 
 It runs on Windows 10 22H2 and Windows 11 (x64), in English and Brazilian
@@ -37,7 +37,7 @@ opens. It watches the one PC it is installed on.
   says when it happened, how long it lasted, what was running and which cause
   the readings point to — a storage reset, the graphics driver, memory
   pressure, CPU throttling, one app. When nothing matches, it says so.
-- **The minutes before are already recorded.** The agent keeps a rolling
+- **The minutes before are already stored.** The agent keeps a rolling
   window of system load, the busiest processes and Windows events, so a report
   covers what led up to a stop of a fraction of a second or a full minute, and
   a sensitive mode also catches the short hitches that break games, audio and
@@ -58,8 +58,8 @@ opens. It watches the one PC it is installed on.
 - **Light, local, no account.** The agent runs as your user from the tray and
   the app exits when its window closes. Tasks that need administrator rights —
   the driver capture, dump cleanup, some health checks, fixes and tests — ask
-  for them one at a time. No telemetry: everything it records stays in one file
-  in your user profile. The project aims to keep the recorder as light as
+  for them one at a time. No telemetry: everything it stores stays in one file
+  in your user profile. The project aims to keep the watcher as light as
   possible.
 
 ---

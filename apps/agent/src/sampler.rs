@@ -16,7 +16,7 @@ use watchmypc_store::{Batcher, Ring, Store};
 use crate::app::{lock, now_ms};
 
 const TICK_MS: f64 = 1000.0;
-/// Seconds between two recorded process rankings.
+/// Seconds between two stored process rankings.
 const TOP_EVERY: usize = 5;
 const TOP_PER_METRIC: usize = 5;
 const RING_SAMPLES: usize = 600;
@@ -39,7 +39,7 @@ impl SamplerHandle {
     }
 }
 
-/// Starts the 1 Hz sampler, which records into `store` in batches of `flush`.
+/// Starts the 1 Hz sampler, which writes into `store` in batches of `flush`.
 pub fn run_sampler(
     store: Store,
     flush: Duration,

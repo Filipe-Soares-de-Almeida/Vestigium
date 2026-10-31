@@ -1,6 +1,6 @@
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
-/// What the recording threads should be doing.
+/// What the watcher threads should be doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GateState {
     Running,

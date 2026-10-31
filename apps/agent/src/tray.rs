@@ -30,7 +30,7 @@ pub struct Tray {
 }
 
 struct Texts {
-    recording: String,
+    watching: String,
     paused: String,
     pause: String,
     resume: String,
@@ -39,7 +39,7 @@ struct Texts {
 impl Tray {
     pub fn new(catalog: &Catalog, exe: &Path, ui_exe: Option<PathBuf>) -> Result<Tray, String> {
         let text = Texts {
-            recording: catalog.get("tray.tooltip.recording").to_string(),
+            watching: catalog.get("tray.tooltip.watching").to_string(),
             paused: catalog.get("tray.tooltip.paused").to_string(),
             pause: catalog.get("tray.pause").to_string(),
             resume: catalog.get("tray.resume").to_string(),
@@ -65,7 +65,7 @@ impl Tray {
         .map_err(|err| err.to_string())?;
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip(&text.recording)
+            .with_tooltip(&text.watching)
             .with_icon(icon::placeholder())
             .build()
             .map_err(|err| err.to_string())?;
@@ -115,7 +115,7 @@ impl Tray {
         let (tooltip, item) = if paused {
             (&self.text.paused, &self.text.resume)
         } else {
-            (&self.text.recording, &self.text.pause)
+            (&self.text.watching, &self.text.pause)
         };
         let _ = self.icon.set_tooltip(Some(tooltip));
         self.pause.set_text(item);

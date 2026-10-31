@@ -24,9 +24,9 @@ How to use this file:
 
 ### Added
 
-- A tray icon for the background recorder, with options to pause it, start it with Windows, and
-  exit. Only one recorder runs per user; starting it again while it runs does nothing.
-- The background recorder samples CPU, per-core DPC and interrupt time, memory, physical disks and
+- A tray icon for the background watcher, with options to pause it, start it with Windows, and
+  exit. Only one watcher runs per user; starting it again while it runs does nothing.
+- The background watcher samples CPU, per-core DPC and interrupt time, memory, physical disks and
   the busiest processes every second, checks for system stalls ten times a second, and keeps the
   history in a local database. It needs no administrator rights, opens no network connection, and
   saves what it has before Windows signs you out or shuts down.
