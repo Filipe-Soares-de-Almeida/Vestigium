@@ -35,6 +35,7 @@ How to use this file:
 
 ### Changed
 
-- The project is now called Argos.
+- The project is now called Argos, and its GitHub repository was renamed to match. Links to the
+  old address redirect.
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/WatchMyPC/commits/main
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Argos/commits/main
