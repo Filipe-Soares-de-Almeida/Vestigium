@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use vestigium_core::{CoreLoad, DiskLoad};
+use vestigium_core::DiskLoad;
 use windows::Win32::System::Performance::{
     PDH_CSTATUS_NEW_DATA, PDH_CSTATUS_VALID_DATA, PDH_FMT_COUNTERVALUE,
     PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
@@ -11,13 +11,8 @@ use windows::core::{HSTRING, PCWSTR};
 
 use crate::CollectError;
 
-const CPU_PATHS: [&str; 5] = [
-    r"\Processor Information(*)\% Processor Time",
-    r"\Processor Information(*)\% DPC Time",
-    r"\Processor Information(*)\% Interrupt Time",
-    r"\Processor Information(*)\% Performance Limit",
-    r"\Processor Information(*)\% Processor Performance",
-];
+const PERF_LIMIT_PATH: &str = r"\Processor Information(_Total)\% Performance Limit";
+const PROC_PERF_PATH: &str = r"\Processor Information(_Total)\% Processor Performance";
 const HARD_FAULTS_PATH: &str = r"\Memory\Pages Input/sec";
 const DISK_PATHS: [&str; 4] = [
     r"\PhysicalDisk(*)\% Idle Time",
@@ -27,48 +22,21 @@ const DISK_PATHS: [&str; 4] = [
 ];
 const TOTAL: &str = "_Total";
 
-/// The PDH counters of one second, system-wide.
+/// The PDH counters of one second, system-wide; per-core CPU comes from `CpuSampler`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PdhReading {
-    pub cpu_pct: f32,
-    pub dpc_pct: f32,
-    pub isr_pct: f32,
     pub perf_limit_pct: f32,
     pub proc_perf_pct: f32,
     pub hard_faults_per_s: f32,
-    pub cores: Vec<CoreLoad>,
     pub disks: Vec<DiskLoad>,
-}
-
-/// An instance of the "Processor Information" counter set.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CpuInstance {
-    Total,
-    GroupTotal,
-    Core { group: u16, index: u16 },
-}
-
-/// Parses "_Total", "0,_Total" and "0,3".
-pub fn parse_cpu_instance(name: &str) -> Option<CpuInstance> {
-    if name == TOTAL {
-        return Some(CpuInstance::Total);
-    }
-    let (group, index) = name.split_once(',')?;
-    let group = group.parse().ok()?;
-    if index == TOTAL {
-        return Some(CpuInstance::GroupTotal);
-    }
-    Some(CpuInstance::Core {
-        group,
-        index: index.parse().ok()?,
-    })
 }
 
 /// One PDH query holding every counter of the 1 Hz sample, added by English path.
 #[derive(Debug)]
 pub struct PdhSampler {
     query: Query,
-    cpu: [PDH_HCOUNTER; 5],
+    perf_limit: PDH_HCOUNTER,
+    proc_perf: PDH_HCOUNTER,
     hard_faults: PDH_HCOUNTER,
     disk: [PDH_HCOUNTER; 4],
     buf: Vec<u64>,
@@ -83,10 +51,8 @@ impl PdhSampler {
             PdhOpenQueryW(PCWSTR::null(), 0, &mut handle)
         })?;
         let query = Query(handle);
-        let mut cpu = [PDH_HCOUNTER::default(); 5];
-        for (slot, path) in cpu.iter_mut().zip(CPU_PATHS) {
-            *slot = query.add(path)?;
-        }
+        let perf_limit = query.add(PERF_LIMIT_PATH)?;
+        let proc_perf = query.add(PROC_PERF_PATH)?;
         let hard_faults = query.add(HARD_FAULTS_PATH)?;
         let mut disk = [PDH_HCOUNTER::default(); 4];
         for (slot, path) in disk.iter_mut().zip(DISK_PATHS) {
@@ -94,7 +60,8 @@ impl PdhSampler {
         }
         Ok(PdhSampler {
             query,
-            cpu,
+            perf_limit,
+            proc_perf,
             hard_faults,
             disk,
             buf: Vec::new(),
@@ -113,30 +80,9 @@ impl PdhSampler {
             return Ok(None);
         }
 
-        let cpu = self.cpu;
-        let [time, dpc, isr, limit, perf] = cpu.map(|c| self.read_array(c));
-        let (time, dpc, isr, limit, perf) = (time?, dpc?, isr?, limit?, perf?);
-        let total =
-            |values: &HashMap<String, f64>| values.get(TOTAL).copied().unwrap_or(0.0) as f32;
-
-        let mut cores: Vec<(CpuInstance, &str)> = time
-            .keys()
-            .filter_map(|name| Some((parse_cpu_instance(name)?, name.as_str())))
-            .filter(|(instance, _)| matches!(instance, CpuInstance::Core { .. }))
-            .collect();
-        cores.sort();
         let value = |values: &HashMap<String, f64>, name: &str| {
             values.get(name).copied().unwrap_or(0.0) as f32
         };
-        let cores = cores
-            .into_iter()
-            .map(|(_, name)| CoreLoad {
-                cpu_pct: value(&time, name),
-                dpc_pct: value(&dpc, name),
-                isr_pct: value(&isr, name),
-            })
-            .collect();
-
         let disk = self.disk;
         let [idle, transfer, queue, bytes] = disk.map(|c| self.read_array(c));
         let (idle, transfer, queue, bytes) = (idle?, transfer?, queue?, bytes?);
@@ -154,13 +100,9 @@ impl PdhSampler {
             .collect();
 
         Ok(Some(PdhReading {
-            cpu_pct: total(&time),
-            dpc_pct: total(&dpc),
-            isr_pct: total(&isr),
-            perf_limit_pct: total(&limit),
-            proc_perf_pct: total(&perf),
+            perf_limit_pct: self.read_single(self.perf_limit)? as f32,
+            proc_perf_pct: self.read_single(self.proc_perf)? as f32,
             hard_faults_per_s: self.read_single(self.hard_faults)? as f32,
-            cores,
             disks,
         }))
     }

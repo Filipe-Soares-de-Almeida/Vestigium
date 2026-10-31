@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    CollectError, HighResTimer, PdhSampler, ProcessSnapshotter, logical_cpus, memory_info,
-    monotonic_ms,
+    CollectError, CpuSampler, HighResTimer, PdhSampler, ProcessSnapshotter, logical_cpus,
+    memory_info, monotonic_ms,
 };
 use vestigium_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
 use vestigium_ipc::AgentStatus;
@@ -72,6 +72,26 @@ struct Sampler {
     logical_cpus: u32,
 }
 
+/// The data sources a tick reads, opened once on the sampler thread.
+struct Sources {
+    cpu: CpuSampler,
+    pdh: PdhSampler,
+    processes: ProcessSnapshotter,
+}
+
+impl Sources {
+    /// Takes the first readings, which only set the baseline for rates.
+    fn prime(&mut self) {
+        let _ = self.cpu.sample();
+        let _ = self.pdh.sample();
+    }
+
+    fn reset(&mut self) {
+        self.cpu.reset();
+        self.pdh.reset();
+    }
+}
+
 impl Sampler {
     fn new(
         store: Store,
@@ -94,12 +114,16 @@ impl Sampler {
     /// Ticks once a second until the gate says stop; pausing writes the batch and blocks.
     fn run(&mut self, gate: &RunGate) {
         let opened = PdhSampler::open().and_then(|pdh| HighResTimer::new().map(|t| (pdh, t)));
-        let (mut pdh, timer) = match opened {
+        let (pdh, timer) = match opened {
             Ok(parts) => parts,
             Err(err) => return self.report(&err),
         };
-        let mut snapshotter = ProcessSnapshotter::with_capacity(SNAPSHOT_BUFFER);
-        let _ = pdh.sample();
+        let mut sources = Sources {
+            cpu: CpuSampler::new(),
+            pdh,
+            processes: ProcessSnapshotter::with_capacity(SNAPSHOT_BUFFER),
+        };
+        sources.prime();
         let mut next_tick = monotonic_ms() + TICK_MS;
         let mut ticks = 0usize;
         loop {
@@ -107,13 +131,13 @@ impl Sampler {
                 GateState::Stopping => return,
                 GateState::Paused => {
                     self.flush();
-                    pdh.reset();
+                    sources.reset();
                     self.snapshots.clear();
                     if gate.wait_while_paused() == GateState::Stopping {
                         return;
                     }
                     self.probe_rx.try_iter().for_each(drop);
-                    let _ = pdh.sample();
+                    sources.prime();
                     next_tick = monotonic_ms() + TICK_MS;
                     continue;
                 }
@@ -133,7 +157,7 @@ impl Sampler {
             }
 
             ticks += 1;
-            if let Err(err) = self.tick(&mut pdh, &mut snapshotter, woke, sampler_lag_ms, ticks) {
+            if let Err(err) = self.tick(&mut sources, woke, sampler_lag_ms, ticks) {
                 self.report(&err);
             }
         }
@@ -141,8 +165,7 @@ impl Sampler {
 
     fn tick(
         &mut self,
-        pdh: &mut PdhSampler,
-        snapshotter: &mut ProcessSnapshotter,
+        sources: &mut Sources,
         woke: f64,
         sampler_lag_ms: f32,
         ticks: usize,
@@ -150,12 +173,13 @@ impl Sampler {
         let ts_ms = now_ms();
         let probe_max_lag_ms = self.probe_rx.try_iter().fold(0.0, f32::max);
         let memory = memory_info()?;
-        if let Some(pdh) = pdh.sample()? {
+        let (cpu, pdh) = (sources.cpu.sample()?, sources.pdh.sample()?);
+        if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
             let sample = Sample {
                 ts_ms,
-                cpu_pct: pdh.cpu_pct,
-                dpc_pct: pdh.dpc_pct,
-                isr_pct: pdh.isr_pct,
+                cpu_pct: cpu.cpu_pct,
+                dpc_pct: cpu.dpc_pct,
+                isr_pct: cpu.isr_pct,
                 perf_limit_pct: pdh.perf_limit_pct,
                 proc_perf_pct: pdh.proc_perf_pct,
                 mem_avail_bytes: memory.avail_bytes,
@@ -164,7 +188,7 @@ impl Sampler {
                 hard_faults_per_s: pdh.hard_faults_per_s,
                 probe_max_lag_ms,
                 sampler_lag_ms,
-                cores: pdh.cores,
+                cores: cpu.cores,
                 disks: pdh.disks,
             };
             self.samples.push(sample.clone());
@@ -175,7 +199,8 @@ impl Sampler {
         if self.snapshots.len() > TOP_EVERY {
             self.snapshots.pop_front();
         }
-        self.snapshots.push_back((woke, snapshotter.snapshot()?));
+        self.snapshots
+            .push_back((woke, sources.processes.snapshot()?));
         if ticks.is_multiple_of(TOP_EVERY)
             && self.snapshots.len() > TOP_EVERY
             && let (Some((then, old)), Some((now, new))) =

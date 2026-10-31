@@ -1,27 +1,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vestigium_collect::{
-    CpuInstance, PdhSampler, ProcessSnapshotter, logical_cpus, memory_info, parse_cpu_instance,
-};
-
-#[test]
-fn parse_cpu_instance_cases() {
-    assert!(matches!(
-        parse_cpu_instance("_Total"),
-        Some(CpuInstance::Total)
-    ));
-    assert!(matches!(
-        parse_cpu_instance("0,_Total"),
-        Some(CpuInstance::GroupTotal)
-    ));
-    assert!(matches!(
-        parse_cpu_instance("1,3"),
-        Some(CpuInstance::Core { group: 1, index: 3 })
-    ));
-    assert!(parse_cpu_instance("x").is_none());
-    assert!(parse_cpu_instance("0,").is_none());
-}
+use vestigium_collect::{PdhSampler, ProcessSnapshotter, memory_info};
 
 #[test]
 fn first_sample_after_open_is_none() {
@@ -42,13 +22,11 @@ fn pdh_english_paths_open_and_read() {
         .expect("second collection has rates");
 
     assert!(
-        (0.0..=100.0).contains(&reading.cpu_pct),
-        "cpu {}",
-        reading.cpu_pct
+        (0.0..=100.0).contains(&reading.perf_limit_pct),
+        "{reading:?}"
     );
-    assert!(reading.dpc_pct >= 0.0 && reading.isr_pct >= 0.0);
+    assert!(reading.proc_perf_pct >= 0.0, "{reading:?}");
     assert!(reading.hard_faults_per_s >= 0.0);
-    assert_eq!(reading.cores.len(), logical_cpus() as usize);
     assert!(!reading.disks.is_empty());
     for disk in &reading.disks {
         assert_ne!(disk.name, "_Total");

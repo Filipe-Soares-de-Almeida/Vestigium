@@ -1,13 +1,15 @@
 //! Windows data sources of Vestigium.
 
+mod cpu;
 mod memory;
 mod pdh;
 mod probe;
 mod processes;
 mod timer;
 
+pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
-pub use pdh::{CpuInstance, PdhReading, PdhSampler, parse_cpu_instance};
+pub use pdh::{PdhReading, PdhSampler};
 pub use probe::spawn_probe;
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms};
