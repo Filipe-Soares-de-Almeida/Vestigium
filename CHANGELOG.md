@@ -22,6 +22,9 @@ How to use this file:
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- A tray icon for the background recorder, with options to pause it, start it with Windows, and
+  exit. Only one recorder runs per user; starting it again while it runs does nothing.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/WatchMyPC/commits/main
