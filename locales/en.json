@@ -1,0 +1,12 @@
+{
+  "tray.tooltip.recording": "WatchMyPC — recording",
+  "tray.tooltip.paused": "WatchMyPC — paused",
+  "tray.open": "Open WatchMyPC",
+  "tray.pause": "Pause recording",
+  "tray.resume": "Resume recording",
+  "tray.autostart": "Start with Windows",
+  "tray.exit": "Exit",
+  "error.startup.title": "WatchMyPC could not start",
+  "error.startup.body": "The recorder stopped before it began: {error}",
+  "ui.placeholder": "Recording runs in the background. This window is a placeholder."
+}

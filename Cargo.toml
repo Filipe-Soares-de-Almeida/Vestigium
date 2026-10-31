@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core"]
+members = ["crates/core", "crates/i18n"]
 
 [workspace.package]
 version = "0.0.0"
@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 watchmypc-core = { path = "crates/core" }
+watchmypc-i18n = { path = "crates/i18n" }
 windows = "0.62"
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

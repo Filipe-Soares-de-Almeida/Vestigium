@@ -1,0 +1,12 @@
+{
+  "tray.tooltip.recording": "WatchMyPC — gravando",
+  "tray.tooltip.paused": "WatchMyPC — pausado",
+  "tray.open": "Abrir o WatchMyPC",
+  "tray.pause": "Pausar a gravação",
+  "tray.resume": "Retomar a gravação",
+  "tray.autostart": "Iniciar com o Windows",
+  "tray.exit": "Sair",
+  "error.startup.title": "O WatchMyPC não conseguiu iniciar",
+  "error.startup.body": "O gravador parou antes de começar: {error}",
+  "ui.placeholder": "A gravação roda em segundo plano. Esta janela é provisória."
+}
