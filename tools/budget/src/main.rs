@@ -119,20 +119,23 @@ fn tree(pid: u32) -> Result<bool, String> {
             .into_iter()
             .filter_map(|child| procs.iter().find(|p| p.pid == child)),
     );
-    println!("| PID | Name | Working set |\n|---|---|---|");
+    println!("| PID | Name | Working set | Private |\n|---|---|---|---|");
     for p in &members {
         println!(
-            "| {} | {} | {:.1} MB |",
+            "| {} | {} | {:.1} MB | {:.1} MB |",
             p.pid,
             p.name,
-            p.working_set as f64 / MB
+            p.working_set as f64 / MB,
+            p.private_bytes as f64 / MB
         );
     }
-    let total: u64 = members.iter().map(|p| p.working_set).sum();
+    let working_set: u64 = members.iter().map(|p| p.working_set).sum();
+    let private: u64 = members.iter().map(|p| p.private_bytes).sum();
     println!(
-        "| | **{} processes** | **{:.1} MB** |",
+        "| | **{} processes** | **{:.1} MB** | **{:.1} MB** |",
         members.len(),
-        total as f64 / MB
+        working_set as f64 / MB,
+        private as f64 / MB
     );
     Ok(true)
 }
