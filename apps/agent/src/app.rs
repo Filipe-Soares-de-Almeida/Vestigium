@@ -1,22 +1,28 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tray_icon::menu::MenuEvent;
+use watchmypc_collect::spawn_probe;
 use watchmypc_core::{GateState, RunGate};
 use watchmypc_i18n::Catalog;
 use watchmypc_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
     pipe_name,
 };
+use watchmypc_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
+use crate::sampler::run_sampler;
 use crate::tray::{Action, Tray};
 use crate::{paths, shutdown};
 
 const DEFAULT_FLUSH: Duration = Duration::from_secs(5);
+const PROBE_PERIOD: Duration = Duration::from_millis(100);
+/// How long Exit and logoff wait for the last batch to be written.
+const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Command-line options, for tests and measurements.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,15 +86,30 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
         Err(IpcError::AlreadyRunning) => return Err(StartError::AlreadyRunning),
         bound => bound.map_err(failed)?,
     };
-    let _data_dir = match options.data_dir {
+    let data_dir = match options.data_dir {
         Some(dir) => dir,
         None => paths::data_dir().map_err(failed)?,
     };
+    let store = Store::open(&data_dir.join("watchmypc.db")).map_err(failed)?;
     let gate = RunGate::new();
     let status = Arc::new(Mutex::new(AgentStatus {
         started_at_ms: now_ms(),
         ..AgentStatus::default()
     }));
+
+    let (probe_tx, probe_rx) = mpsc::channel();
+    spawn_probe(PROBE_PERIOD, gate.clone(), probe_tx).map_err(failed)?;
+    let sampler = Arc::new(
+        run_sampler(store, options.flush, gate.clone(), probe_rx, status.clone())
+            .map_err(failed)?,
+    );
+    let stop = {
+        let gate = gate.clone();
+        move || {
+            gate.set(GateState::Stopping);
+            sampler.wait(STOP_TIMEOUT);
+        }
+    };
 
     {
         let status = status.clone();
@@ -100,9 +121,10 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
 
     let exe = std::env::current_exe().map_err(failed)?;
     let tray = Tray::new(catalog, &exe, paths::ui_exe()).map_err(failed)?;
+    let stop = Arc::new(stop);
     {
-        let gate = gate.clone();
-        shutdown::watch_session_end(move || gate.set(GateState::Stopping)).map_err(failed)?;
+        let stop = stop.clone();
+        shutdown::watch_session_end(move || stop()).map_err(failed)?;
     }
     shutdown::pump(|| {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
@@ -111,7 +133,7 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
             }
         }
     });
-    gate.set(GateState::Stopping);
+    stop();
     Ok(())
 }
 

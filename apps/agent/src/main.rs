@@ -4,6 +4,7 @@ mod app;
 mod autostart;
 mod icon;
 mod paths;
+mod sampler;
 mod shutdown;
 mod tray;
 

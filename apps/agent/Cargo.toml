@@ -8,9 +8,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+watchmypc-collect = { workspace = true }
 watchmypc-core = { workspace = true }
 watchmypc-i18n = { workspace = true }
 watchmypc-ipc = { workspace = true }
+watchmypc-store = { workspace = true }
 tray-icon = { workspace = true }
 
 [dependencies.windows]
@@ -25,6 +27,9 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
