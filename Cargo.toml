@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/i18n", "crates/ipc", "crates/store"]
+members = ["crates/collect", "crates/core", "crates/i18n", "crates/ipc", "crates/store"]
 
 [workspace.package]
 version = "0.0.0"
@@ -10,6 +10,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+watchmypc-collect = { path = "crates/collect" }
 watchmypc-core = { path = "crates/core" }
 watchmypc-i18n = { path = "crates/i18n" }
 watchmypc-ipc = { path = "crates/ipc" }
