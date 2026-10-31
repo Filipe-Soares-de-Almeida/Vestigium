@@ -19,11 +19,11 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-watchmypc-collect = { path = "crates/collect" }
-watchmypc-core = { path = "crates/core" }
-watchmypc-i18n = { path = "crates/i18n" }
-watchmypc-ipc = { path = "crates/ipc" }
-watchmypc-store = { path = "crates/store" }
+argos-collect = { path = "crates/collect" }
+argos-core = { path = "crates/core" }
+argos-i18n = { path = "crates/i18n" }
+argos-ipc = { path = "crates/ipc" }
+argos-store = { path = "crates/store" }
 windows = "0.62"
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

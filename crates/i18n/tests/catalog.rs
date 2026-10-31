@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 
-use watchmypc_i18n::{Catalog, Lang};
+use argos_i18n::{Catalog, Lang};
 
 fn keys(lang: Lang) -> BTreeSet<String> {
     Catalog::load(lang).keys().map(str::to_string).collect()

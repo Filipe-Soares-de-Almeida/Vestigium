@@ -1,12 +1,12 @@
 {
-  "tray.tooltip.watching": "WatchMyPC — watching",
-  "tray.tooltip.paused": "WatchMyPC — paused",
-  "tray.open": "Open WatchMyPC",
+  "tray.tooltip.watching": "Argos — watching",
+  "tray.tooltip.paused": "Argos — paused",
+  "tray.open": "Open Argos",
   "tray.pause": "Pause watching",
   "tray.resume": "Resume watching",
   "tray.autostart": "Start with Windows",
   "tray.exit": "Exit",
-  "error.startup.title": "WatchMyPC could not start",
+  "error.startup.title": "Argos could not start",
   "error.startup.body": "The watcher stopped before it started: {error}",
   "ui.placeholder": "Watching runs in the background. This window is a placeholder."
 }

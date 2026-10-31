@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-budget"
-description = "Measures a running process against the WatchMyPC budgets."
+name = "argos-budget"
+description = "Measures a running process against the Argos budgets."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-watchmypc-collect = { workspace = true }
-watchmypc-core = { workspace = true }
+argos-collect = { workspace = true }
+argos-core = { workspace = true }
 
 [dependencies.windows]
 workspace = true

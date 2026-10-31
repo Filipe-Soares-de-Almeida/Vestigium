@@ -1,4 +1,4 @@
-//! Local SQLite history of WatchMyPC.
+//! Local SQLite history of Argos.
 
 mod batch;
 mod ring;

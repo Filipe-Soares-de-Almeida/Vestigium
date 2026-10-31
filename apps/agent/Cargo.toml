@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-agent"
-description = "Background watcher of WatchMyPC."
+name = "argos-agent"
+description = "Background watcher of Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,11 +8,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-watchmypc-collect = { workspace = true }
-watchmypc-core = { workspace = true }
-watchmypc-i18n = { workspace = true }
-watchmypc-ipc = { workspace = true }
-watchmypc-store = { workspace = true }
+argos-collect = { workspace = true }
+argos-core = { workspace = true }
+argos-i18n = { workspace = true }
+argos-ipc = { workspace = true }
+argos-store = { workspace = true }
 tray-icon = { workspace = true }
 
 [dependencies.windows]

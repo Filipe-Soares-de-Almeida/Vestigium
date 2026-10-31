@@ -29,7 +29,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Full pipe path for `suffix`; the agent uses the user's SID.
 pub fn pipe_name(suffix: &str) -> String {
-    format!(r"\\.\pipe\watchmypc-{suffix}")
+    format!(r"\\.\pipe\argos-{suffix}")
 }
 
 /// The agent's end: one instance, local clients of the same user only, one client at a time.

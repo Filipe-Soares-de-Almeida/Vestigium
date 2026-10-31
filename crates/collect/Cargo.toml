@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-collect"
-description = "Windows data sources of WatchMyPC."
+name = "argos-collect"
+description = "Windows data sources of Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-watchmypc-core = { workspace = true }
+argos-core = { workspace = true }
 thiserror = { workspace = true }
 
 [dependencies.windows]

@@ -1,4 +1,4 @@
-//! Domain types and rules for WatchMyPC.
+//! Domain types and rules for Argos.
 
 mod gate;
 mod process;

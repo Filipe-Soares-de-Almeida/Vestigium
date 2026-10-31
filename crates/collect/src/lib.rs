@@ -1,4 +1,4 @@
-//! Windows data sources of WatchMyPC.
+//! Windows data sources of Argos.
 
 mod memory;
 mod pdh;

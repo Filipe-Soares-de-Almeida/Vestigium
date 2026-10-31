@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-core"
-description = "Domain types and rules for WatchMyPC."
+name = "argos-core"
+description = "Domain types and rules for Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

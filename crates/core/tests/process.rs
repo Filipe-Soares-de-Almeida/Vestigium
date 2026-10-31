@@ -1,4 +1,4 @@
-use watchmypc_core::{ProcessCounters, top_processes};
+use argos_core::{ProcessCounters, top_processes};
 
 fn counters(pid: u32, name: &str) -> ProcessCounters {
     ProcessCounters {

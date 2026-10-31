@@ -10,7 +10,7 @@ use windows::core::HSTRING;
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const APPROVED_KEY: &str =
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-const VALUE: &str = "WatchMyPC";
+const VALUE: &str = "Argos";
 
 /// True when Windows will start this executable at logon.
 pub fn is_enabled(exe: &Path) -> bool {
@@ -127,11 +127,11 @@ fn startup_approved_allows(data: Option<&[u8]>) -> bool {
 mod tests {
     use super::*;
 
-    const EXE: &str = r"C:\Apps\WatchMyPC\watchmypc-agent.exe";
+    const EXE: &str = r"C:\Apps\Argos\argos-agent.exe";
 
     #[test]
     fn run_value_matches_quoted_path() {
-        let value = r#""C:\apps\watchmypc\WATCHMYPC-AGENT.exe""#;
+        let value = r#""C:\apps\argos\ARGOS-AGENT.exe""#;
         assert!(run_value_matches(value, Path::new(EXE)));
     }
 
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn run_value_rejects_another_path() {
-        let value = r#""C:\Old\WatchMyPC\watchmypc-agent.exe""#;
+        let value = r#""C:\Old\Argos\argos-agent.exe""#;
         assert!(!run_value_matches(value, Path::new(EXE)));
     }
 

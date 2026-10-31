@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-ui"
-description = "Interface of WatchMyPC."
+name = "argos-ui"
+description = "Interface of Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "WatchMyPC"
+name = "Argos"
 path = "src/main.rs"
 
 [build-dependencies]

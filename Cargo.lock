@@ -48,6 +48,83 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "argos-agent"
+version = "0.0.0"
+dependencies = [
+ "argos-collect",
+ "argos-core",
+ "argos-i18n",
+ "argos-ipc",
+ "argos-store",
+ "tempfile",
+ "tray-icon 0.26.1",
+ "windows",
+]
+
+[[package]]
+name = "argos-budget"
+version = "0.0.0"
+dependencies = [
+ "argos-collect",
+ "argos-core",
+ "windows",
+]
+
+[[package]]
+name = "argos-collect"
+version = "0.0.0"
+dependencies = [
+ "argos-core",
+ "thiserror 2.0.21",
+ "windows",
+]
+
+[[package]]
+name = "argos-core"
+version = "0.0.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "argos-i18n"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "argos-ipc"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows",
+]
+
+[[package]]
+name = "argos-store"
+version = "0.0.0"
+dependencies = [
+ "argos-core",
+ "postcard",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "argos-ui"
+version = "0.0.0"
+dependencies = [
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-single-instance",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4246,83 +4323,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "watchmypc-agent"
-version = "0.0.0"
-dependencies = [
- "tempfile",
- "tray-icon 0.26.1",
- "watchmypc-collect",
- "watchmypc-core",
- "watchmypc-i18n",
- "watchmypc-ipc",
- "watchmypc-store",
- "windows",
-]
-
-[[package]]
-name = "watchmypc-budget"
-version = "0.0.0"
-dependencies = [
- "watchmypc-collect",
- "watchmypc-core",
- "windows",
-]
-
-[[package]]
-name = "watchmypc-collect"
-version = "0.0.0"
-dependencies = [
- "thiserror 2.0.21",
- "watchmypc-core",
- "windows",
-]
-
-[[package]]
-name = "watchmypc-core"
-version = "0.0.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "watchmypc-i18n"
-version = "0.0.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "watchmypc-ipc"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "windows",
-]
-
-[[package]]
-name = "watchmypc-store"
-version = "0.0.0"
-dependencies = [
- "postcard",
- "rusqlite",
- "serde",
- "tempfile",
- "thiserror 2.0.21",
- "watchmypc-core",
-]
-
-[[package]]
-name = "watchmypc-ui"
-version = "0.0.0"
-dependencies = [
- "tauri",
- "tauri-build",
- "tauri-plugin-single-instance",
 ]
 
 [[package]]

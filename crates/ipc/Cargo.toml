@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-ipc"
-description = "Named pipe between the WatchMyPC agent and its interface."
+name = "argos-ipc"
+description = "Named pipe between the Argos agent and its interface."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

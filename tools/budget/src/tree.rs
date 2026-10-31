@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use watchmypc_core::ProcessCounters;
+use argos_core::ProcessCounters;
 
 /// Every process started, directly or not, by `root`, in breadth-first order.
 pub fn descendants(procs: &[ProcessCounters], root: u32) -> Vec<u32> {

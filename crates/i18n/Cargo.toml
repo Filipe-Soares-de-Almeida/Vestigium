@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-i18n"
-description = "UI text catalogs for WatchMyPC."
+name = "argos-i18n"
+description = "UI text catalogs for Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,12 +1,12 @@
 {
-  "tray.tooltip.watching": "WatchMyPC — observando",
-  "tray.tooltip.paused": "WatchMyPC — pausado",
-  "tray.open": "Abrir o WatchMyPC",
+  "tray.tooltip.watching": "Argos — observando",
+  "tray.tooltip.paused": "Argos — pausado",
+  "tray.open": "Abrir o Argos",
   "tray.pause": "Pausar a observação",
   "tray.resume": "Retomar a observação",
   "tray.autostart": "Iniciar com o Windows",
   "tray.exit": "Sair",
-  "error.startup.title": "O WatchMyPC não conseguiu iniciar",
+  "error.startup.title": "O Argos não conseguiu iniciar",
   "error.startup.body": "O observador parou antes de começar: {error}",
   "ui.placeholder": "A observação roda em segundo plano. Esta janela é provisória."
 }

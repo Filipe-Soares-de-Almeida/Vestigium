@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
+use argos_core::{GateState, RunGate};
+use argos_i18n::Catalog;
+use argos_ipc::AgentStatus;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
-use watchmypc_core::{GateState, RunGate};
-use watchmypc_i18n::Catalog;
-use watchmypc_ipc::AgentStatus;
 
 use crate::{autostart, icon};
 

@@ -1,4 +1,4 @@
-//! UI text catalogs for WatchMyPC.
+//! UI text catalogs for Argos.
 
 use std::collections::HashMap;
 

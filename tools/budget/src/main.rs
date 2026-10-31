@@ -1,6 +1,6 @@
-//! Measures a running process against the WatchMyPC budgets.
+//! Measures a running process against the Argos budgets.
 //!
-//! `watchmypc-budget watch --name <exe> --minutes <m>` and `watchmypc-budget tree --pid <pid>`.
+//! `argos-budget watch --name <exe> --minutes <m>` and `argos-budget tree --pid <pid>`.
 
 mod net;
 mod report;
@@ -10,8 +10,8 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Duration;
 
-use watchmypc_collect::{ProcessSnapshotter, logical_cpus, monotonic_ms};
-use watchmypc_core::ProcessCounters;
+use argos_collect::{ProcessSnapshotter, logical_cpus, monotonic_ms};
+use argos_core::ProcessCounters;
 
 use crate::report::{AGENT, Observation, report};
 
@@ -51,7 +51,7 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> String {
-    "usage: watchmypc-budget watch --name <exe> --minutes <m> | tree --pid <pid>".to_string()
+    "usage: argos-budget watch --name <exe> --minutes <m> | tree --pid <pid>".to_string()
 }
 
 /// Samples the process once a second; true when it stayed within every budget.

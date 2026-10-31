@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use watchmypc_ipc::{
+use argos_ipc::{
     AgentStatus, IpcError, MAX_FRAME, PROTOCOL_VERSION, Request, Response, read_frame,
     user_only_sddl, write_frame,
 };

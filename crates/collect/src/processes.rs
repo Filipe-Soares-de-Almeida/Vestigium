@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use watchmypc_core::ProcessCounters;
+use argos_core::ProcessCounters;
 use windows::Wdk::System::SystemInformation::{NtQuerySystemInformation, SystemProcessInformation};
 use windows::Win32::Foundation::STATUS_INFO_LENGTH_MISMATCH;
 

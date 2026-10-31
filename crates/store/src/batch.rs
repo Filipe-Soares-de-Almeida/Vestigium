@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use watchmypc_core::{ProcessTop, Sample};
+use argos_core::{ProcessTop, Sample};
 
 use crate::{Segment, Series, encode};
 

@@ -3,15 +3,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tray_icon::menu::MenuEvent;
-use watchmypc_collect::spawn_probe;
-use watchmypc_core::{GateState, RunGate};
-use watchmypc_i18n::Catalog;
-use watchmypc_ipc::{
+use argos_collect::spawn_probe;
+use argos_core::{GateState, RunGate};
+use argos_i18n::Catalog;
+use argos_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
     pipe_name,
 };
-use watchmypc_store::Store;
+use argos_store::Store;
+use tray_icon::menu::MenuEvent;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
@@ -90,7 +90,7 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
         Some(dir) => dir,
         None => paths::data_dir().map_err(failed)?,
     };
-    let store = Store::open(&data_dir.join("watchmypc.db")).map_err(failed)?;
+    let store = Store::open(&data_dir.join("argos.db")).map_err(failed)?;
     let gate = RunGate::new();
     let status = Arc::new(Mutex::new(AgentStatus {
         started_at_ms: now_ms(),
@@ -163,7 +163,7 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use watchmypc_ipc::PROTOCOL_VERSION;
+    use argos_ipc::PROTOCOL_VERSION;
 
     use super::*;
 

@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use watchmypc_collect::{HighResTimer, monotonic_ms, spawn_probe};
-use watchmypc_core::{GateState, RunGate};
+use argos_collect::{HighResTimer, monotonic_ms, spawn_probe};
+use argos_core::{GateState, RunGate};
 
 #[test]
 fn timer_waits_at_least_the_period() {

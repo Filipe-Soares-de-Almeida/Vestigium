@@ -1,6 +1,6 @@
+use argos_core::{GateState, RunGate};
 use std::thread;
 use std::time::{Duration, Instant};
-use watchmypc_core::{GateState, RunGate};
 
 #[test]
 fn running_gate_does_not_block() {

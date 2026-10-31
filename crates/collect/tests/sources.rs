@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use watchmypc_collect::{
+use argos_collect::{
     CpuInstance, PdhSampler, ProcessSnapshotter, logical_cpus, memory_info, parse_cpu_instance,
 };
 
@@ -125,7 +125,7 @@ fn snapshot_grows_a_small_buffer() {
     assert!(!snapshotter.snapshot().unwrap().is_empty());
 }
 
-fn own(snapshotter: &mut ProcessSnapshotter, pid: u32) -> watchmypc_core::ProcessCounters {
+fn own(snapshotter: &mut ProcessSnapshotter, pid: u32) -> argos_core::ProcessCounters {
     snapshotter
         .snapshot()
         .unwrap()
@@ -135,7 +135,7 @@ fn own(snapshotter: &mut ProcessSnapshotter, pid: u32) -> watchmypc_core::Proces
 }
 
 fn tempfile_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("watchmypc-sources-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("argos-sources-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

@@ -33,4 +33,8 @@ How to use this file:
 - A first application window, opened from the tray icon. Only one window opens at a time, and
   closing it ends the program completely: nothing keeps running in the background.
 
+### Changed
+
+- The project is now called Argos.
+
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/WatchMyPC/commits/main

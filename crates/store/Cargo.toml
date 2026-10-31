@@ -1,6 +1,6 @@
 [package]
-name = "watchmypc-store"
-description = "Local SQLite history of WatchMyPC."
+name = "argos-store"
+description = "Local SQLite history of Argos."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-watchmypc-core = { workspace = true }
+argos-core = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 postcard = { workspace = true }
