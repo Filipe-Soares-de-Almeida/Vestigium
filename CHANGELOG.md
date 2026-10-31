@@ -37,5 +37,8 @@ How to use this file:
 
 - The project is now called Vestigium, and its GitHub repository was renamed to match. Links to
   the old addresses redirect.
+- The background watcher now runs as `Vestigium.exe` and the window as `Vestigium.Window.exe`.
+  Task Manager and the startup apps list show the watcher as Vestigium, with its icon, instead of
+  a bare file name.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

@@ -127,11 +127,11 @@ fn startup_approved_allows(data: Option<&[u8]>) -> bool {
 mod tests {
     use super::*;
 
-    const EXE: &str = r"C:\Apps\Vestigium\vestigium-agent.exe";
+    const EXE: &str = r"C:\Apps\Vestigium\Vestigium.exe";
 
     #[test]
     fn run_value_matches_quoted_path() {
-        let value = r#""C:\apps\vestigium\VESTIGIUM-AGENT.exe""#;
+        let value = r#""C:\apps\vestigium\VESTIGIUM.exe""#;
         assert!(run_value_matches(value, Path::new(EXE)));
     }
 
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn run_value_rejects_another_path() {
-        let value = r#""C:\Old\Vestigium\vestigium-agent.exe""#;
+        let value = r#""C:\Old\Vestigium\Vestigium.exe""#;
         assert!(!run_value_matches(value, Path::new(EXE)));
     }
 

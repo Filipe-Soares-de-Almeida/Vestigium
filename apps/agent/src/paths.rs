@@ -14,10 +14,11 @@ pub fn data_dir() -> windows::core::Result<PathBuf> {
     Ok(PathBuf::from(local).join("Vestigium").join("data"))
 }
 
-/// The interface executable installed next to the agent, if there is one.
+/// The window executable next to the agent: the installed name, then the development build name.
 pub fn ui_exe() -> Option<PathBuf> {
-    let path = std::env::current_exe()
-        .ok()?
-        .with_file_name("Vestigium.exe");
-    path.is_file().then_some(path)
+    let exe = std::env::current_exe().ok()?;
+    ["Vestigium.Window.exe", "vestigium-window.exe"]
+        .into_iter()
+        .map(|name| exe.with_file_name(name))
+        .find(|path| path.is_file())
 }

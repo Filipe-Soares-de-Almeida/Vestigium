@@ -34,7 +34,8 @@ tray-icon = "0.26"
 tempfile = "3"
 tauri = "2.12"
 tauri-build = "2.7"
-tauri-plugin-single-instance = "2.5"
+winresource = "0.1"
+tauri-plugin-single-instance ="2.5"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

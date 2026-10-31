@@ -1,5 +1,5 @@
 {
   "bundle": {
-    "externalBin": ["binaries/vestigium-agent"]
+    "externalBin": ["binaries/Vestigium"]
   }
 }

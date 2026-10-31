@@ -14,8 +14,8 @@ Push-Location $root
 try {
     Invoke-Step 'agent build' { cargo build --release -p vestigium-agent }
     New-Item -ItemType Directory -Force $binaries | Out-Null
-    Copy-Item (Join-Path $root 'target\release\vestigium-agent.exe') `
-        (Join-Path $binaries 'vestigium-agent-x86_64-pc-windows-msvc.exe') -Force
+    Copy-Item (Join-Path $root 'target\release\Vestigium.exe') `
+        (Join-Path $binaries 'Vestigium-x86_64-pc-windows-msvc.exe') -Force
 
     Set-Location (Join-Path $root 'apps\ui')
     Invoke-Step 'npm ci' { npm ci --no-audit --no-fund }

@@ -1,4 +1,4 @@
-//! Asks a running agent for its status: `status <path-to-vestigium-agent.exe>`.
+//! Asks a running agent for its status: `status <path-to-Vestigium.exe>`.
 
 use std::path::PathBuf;
 
@@ -7,7 +7,7 @@ use vestigium_ipc::{PROTOCOL_VERSION, PipeClient, Request, current_user_sid, pip
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent: PathBuf = std::env::args_os()
         .nth(1)
-        .ok_or("usage: status <path-to-vestigium-agent.exe>")?
+        .ok_or("usage: status <path-to-Vestigium.exe>")?
         .into();
     let agent = std::fs::canonicalize(&agent)?;
     let agent = PathBuf::from(agent.to_string_lossy().trim_start_matches(r"\\?\"));
