@@ -5,7 +5,7 @@ use vestigium_core::{
     Sample, SampleV1, summarize_minute,
 };
 use vestigium_store::{
-    Batcher, Ring, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
+    Batcher, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
 };
 
 fn sample(ts_ms: i64) -> Sample {
@@ -428,15 +428,4 @@ fn duplicate_minutes_are_merged() {
 
     assert_eq!(minutes.len(), 1);
     assert_eq!((minutes[0].ts_ms, minutes[0].samples), (60_000, 50));
-}
-
-#[test]
-fn ring_drops_the_oldest() {
-    let mut ring = Ring::with_capacity(3);
-    for n in 1..=5 {
-        ring.push(n);
-    }
-
-    assert_eq!(ring.len(), 3);
-    assert_eq!(ring.iter().copied().collect::<Vec<_>>(), vec![3, 4, 5]);
 }

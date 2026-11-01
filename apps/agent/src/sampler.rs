@@ -10,10 +10,10 @@ use vestigium_collect::{
     memory_info, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    GateState, ProbeTick, ProcessCounters, ProcessTop, RunGate, Sample, top_processes,
+    GateState, ProbeTick, ProcessCounters, ProcessTop, Ring, RunGate, Sample, top_processes,
 };
 use vestigium_ipc::AgentStatus;
-use vestigium_store::{Batcher, Ring, Segment, Store};
+use vestigium_store::{Batcher, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use crate::app::lock;

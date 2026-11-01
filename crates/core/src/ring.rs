@@ -25,6 +25,13 @@ impl<T> Ring<T> {
         self.items.push_back(item);
     }
 
+    /// Drops items from the oldest end while `old` holds.
+    pub fn drop_while(&mut self, old: impl Fn(&T) -> bool) {
+        while self.items.front().is_some_and(&old) {
+            self.items.pop_front();
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -34,7 +41,11 @@ impl<T> Ring<T> {
     }
 
     /// Items from oldest to newest.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         self.items.iter()
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
     }
 }

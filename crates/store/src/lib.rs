@@ -2,12 +2,10 @@
 
 mod batch;
 mod read;
-mod ring;
 mod schema;
 mod segment;
 
 pub use batch::Batcher;
-pub use ring::Ring;
 pub use schema::{SCHEMA_VERSION, Store};
 pub use segment::{Segment, Series, decode, encode};
 
