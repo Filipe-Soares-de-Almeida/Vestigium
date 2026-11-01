@@ -45,7 +45,9 @@
   {#if failure !== null}
     <p class="failure" role="status">{errorText(failure)}</p>
   {/if}
-  <button type="button" class="btn" onclick={open}>{t("ui.settings.privacy.open")}</button>
+  <button type="button" class="btn" disabled={info?.data_bytes === null} onclick={open}>
+    {t("ui.settings.privacy.open")}
+  </button>
 </Row>
 
 <style>

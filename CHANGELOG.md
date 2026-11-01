@@ -76,7 +76,8 @@ How to use this file:
   down is explained next to its field. Language: like Windows, Brazilian Portuguese or English;
   the tray changes at once and the window the next time it opens. Privacy and data: a reminder
   that nothing leaves the PC, the version, the space the history uses now and a button that opens
-  its folder. While Vestigium is not running, the settings can be read but not changed.
+  its folder once there is one. While Vestigium is not running, the settings can be read but not
+  changed.
 
 ### Changed
 
