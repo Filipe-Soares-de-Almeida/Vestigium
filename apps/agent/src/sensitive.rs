@@ -30,6 +30,10 @@ impl Sensitive {
     pub fn expired(&self, now_ms: i64) -> bool {
         self.until_ms.is_some_and(|until| now_ms >= until)
     }
+
+    pub fn until_ms(&self) -> Option<i64> {
+        self.until_ms
+    }
 }
 
 /// Sensitive mode as the tray and the sampler share it: the deadline and the probe period it sets.
@@ -63,6 +67,16 @@ impl SensitiveMode {
 
     pub fn is_on(&self) -> bool {
         lock(&self.state).is_on()
+    }
+
+    /// The probe period this mode drives, for the probe thread.
+    pub fn probe(&self) -> Arc<ProbeConfig> {
+        self.probe.clone()
+    }
+
+    /// When sensitive mode turns itself off, while it is on.
+    pub fn until_ms(&self) -> Option<i64> {
+        lock(&self.state).until_ms()
     }
 
     /// Turns sensitive mode off once its deadline has passed; true only on the check that did it.

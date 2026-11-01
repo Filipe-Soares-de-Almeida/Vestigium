@@ -15,11 +15,11 @@ use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
 fn main() {
     // SAFETY: a plain query with no arguments.
-    let catalog = Catalog::load(Lang::from_langid(unsafe { GetUserDefaultUILanguage() }));
-    match app::run(&catalog, app::Options::parse(std::env::args().skip(1))) {
+    let system = Lang::from_langid(unsafe { GetUserDefaultUILanguage() });
+    match app::run(system, app::Options::parse(std::env::args().skip(1))) {
         Ok(()) | Err(app::StartError::AlreadyRunning) => {}
         Err(app::StartError::Failed(reason)) => {
-            app::show_error(&catalog, &reason);
+            app::show_error(&Catalog::load(system), &reason);
             std::process::exit(1);
         }
     }

@@ -11,7 +11,7 @@ fn frame_round_trip() {
         paused: true,
         started_at_ms: 1_700_000_000_000,
         last_sample_ms: Some(1_700_000_005_000),
-        last_error: None,
+        ..AgentStatus::default()
     });
     let mut buf = Vec::new();
     write_frame(&mut buf, &status).unwrap();

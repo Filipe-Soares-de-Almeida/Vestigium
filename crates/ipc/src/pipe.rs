@@ -22,7 +22,7 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PWSTR};
 
 use crate::security::{SecurityDescriptor, current_user_sid, user_only_sddl};
-use crate::{IpcError, Request, Response, read_frame, write_frame};
+use crate::{ErrorCode, IpcError, Request, Response, read_frame, write_frame};
 
 const BUFFER_BYTES: u32 = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -104,6 +104,7 @@ impl PipeServer {
                     let _ = write_frame(
                         &mut pipe,
                         &Response::Error {
+                            code: ErrorCode::Protocol,
                             message: err.to_string(),
                         },
                     );

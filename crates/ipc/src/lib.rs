@@ -9,7 +9,9 @@ mod security;
 
 pub use frame::{MAX_FRAME, read_frame, write_frame};
 pub use pipe::{PipeClient, PipeServer, pipe_name};
-pub use protocol::{AgentStatus, PROTOCOL_VERSION, Request, Response};
+pub use protocol::{
+    AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
+};
 pub use security::{current_user_sid, user_only_sddl};
 
 /// Why a pipe operation failed.

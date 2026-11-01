@@ -6,12 +6,13 @@ use std::time::Duration;
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
 use vestigium_core::{
-    DEFAULT_PROBE_PERIOD, GateState, RecentState, RunGate, SENSITIVE_FOR, Timing,
+    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, RecentState, RunGate, SENSITIVE_FOR, Settings,
+    Timing,
 };
-use vestigium_i18n::Catalog;
+use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
-    AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
-    pipe_name,
+    AgentStatus, ErrorCode, IpcError, NowFrame, PROTOCOL_VERSION, PipeServer, Request, Response,
+    current_user_sid, pipe_name,
 };
 use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
@@ -19,8 +20,8 @@ use windows::core::HSTRING;
 
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
-use crate::tray::{Action, Tray};
-use crate::{paths, power, shutdown};
+use crate::tray::{Action, Level, Tray};
+use crate::{autostart, paths, power, shutdown};
 
 const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 /// How long Exit and logoff wait for the last batch to be written.
@@ -75,24 +76,101 @@ fn failed(err: impl std::fmt::Display) -> StartError {
     StartError::Failed(err.to_string())
 }
 
-/// Answers one request from the interface.
-pub fn handle(request: Request, status: &AgentStatus) -> Response {
+/// What the pipe answers from and acts on, shared with the tray and the sampler.
+pub struct Shared {
+    pub gate: Arc<RunGate>,
+    pub status: Arc<Mutex<AgentStatus>>,
+    pub sensitive: Arc<SensitiveMode>,
+    pub recent: Arc<Mutex<RecentState>>,
+    pub now: Arc<Mutex<NowFrame>>,
+    pub settings: Arc<Mutex<Settings>>,
+    /// This executable, as the Start with Windows entry names it.
+    pub exe: PathBuf,
+}
+
+/// The language the tray speaks: the stored choice, or Windows' own.
+pub fn lang_for(pref: LanguagePref, system: Lang) -> Lang {
+    match pref {
+        LanguagePref::System => system,
+        LanguagePref::En => Lang::En,
+        LanguagePref::PtBr => Lang::PtBr,
+    }
+}
+
+fn error(code: ErrorCode, message: impl std::fmt::Display) -> Response {
+    Response::Error {
+        code,
+        message: message.to_string(),
+    }
+}
+
+/// Answers one request from the interface; `store` is where settings are written.
+pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> Response {
     match request {
         Request::Hello { protocol } if protocol == PROTOCOL_VERSION => Response::Hello {
             protocol: PROTOCOL_VERSION,
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        Request::Hello { protocol } => Response::Error {
-            message: format!(
-                "protocol {protocol} is not supported; this agent speaks {PROTOCOL_VERSION}"
-            ),
+        Request::Hello { protocol } => error(
+            ErrorCode::Protocol,
+            format!("protocol {protocol} is not supported; this agent speaks {PROTOCOL_VERSION}"),
+        ),
+        Request::Status => Response::Status(AgentStatus {
+            sensitive_until_ms: shared.sensitive.until_ms(),
+            state: Level::of(&lock(&shared.recent)).state(),
+            ..lock(&shared.status).clone()
+        }),
+        Request::Now => Response::Now(lock(&shared.now).clone()),
+        Request::SetPaused { paused } => {
+            shared.gate.set(if paused {
+                GateState::Paused
+            } else {
+                GateState::Running
+            });
+            lock(&shared.status).paused = paused;
+            shutdown::wake();
+            Response::Done
+        }
+        Request::SetSensitive { on } => {
+            shared.sensitive.set(on, wall_ms());
+            shutdown::wake();
+            Response::Done
+        }
+        Request::Settings => Response::Settings {
+            settings: *lock(&shared.settings),
+            autostart: autostart::is_enabled(&shared.exe),
         },
-        Request::Status => Response::Status(status.clone()),
+        Request::SetSettings(settings) => {
+            if let Err(err) = settings.validate() {
+                return error(ErrorCode::InvalidSetting, err);
+            }
+            let Some(store) = store else {
+                return error(ErrorCode::Failed, "the history database is not open");
+            };
+            if let Err(err) = store.set_settings(&settings) {
+                return error(ErrorCode::Failed, err);
+            }
+            *lock(&shared.settings) = settings;
+            shutdown::wake();
+            Response::Done
+        }
+        Request::SetAutostart { on } => {
+            let changed = if on {
+                autostart::enable(&shared.exe)
+            } else {
+                autostart::disable()
+            };
+            shutdown::wake();
+            match changed {
+                Ok(()) => Response::Done,
+                Err(err) => error(ErrorCode::Failed, err),
+            }
+        }
     }
 }
 
 /// Starts the agent and runs it until Exit or the end of the session.
-pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
+pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     let server = match PipeServer::bind(&pipe_name(&current_user_sid().map_err(failed)?)) {
         Err(IpcError::AlreadyRunning) => return Err(StartError::AlreadyRunning),
         bound => bound.map_err(failed)?,
@@ -101,12 +179,23 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
         Some(dir) => dir,
         None => paths::data_dir().ok_or_else(|| failed("the LOCALAPPDATA folder is not set"))?,
     };
-    let store = Store::open(&data_dir.join("vestigium.db")).map_err(failed)?;
-    let gate = RunGate::new();
-    let status = Arc::new(Mutex::new(AgentStatus {
-        started_at_ms: wall_ms(),
-        ..AgentStatus::default()
-    }));
+    let db = data_dir.join("vestigium.db");
+    let store = Store::open(&db).map_err(failed)?;
+    let shared = Arc::new(Shared {
+        gate: RunGate::new(),
+        status: Arc::new(Mutex::new(AgentStatus {
+            started_at_ms: wall_ms(),
+            ..AgentStatus::default()
+        })),
+        sensitive: SensitiveMode::new(
+            ProbeConfig::new(DEFAULT_PROBE_PERIOD),
+            options.sensitive_for,
+        ),
+        recent: Arc::new(Mutex::new(RecentState::default())),
+        now: Arc::new(Mutex::new(NowFrame::default())),
+        settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
+        exe: std::env::current_exe().map_err(failed)?,
+    });
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();
@@ -114,32 +203,31 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     // Without a readable bookmark the backfill runs again; stored events are not duplicated.
     let bookmark = store.bookmark_xml().ok().flatten();
     let subscription = EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx)
-        .inspect_err(|err| lock(&status).last_error = Some(err.to_string()))
+        .inspect_err(|err| lock(&shared.status).last_error = Some(err.to_string()))
         .ok();
-    let probe = ProbeConfig::new(DEFAULT_PROBE_PERIOD);
-    let sensitive = SensitiveMode::new(probe.clone(), options.sensitive_for);
-    let recent = Arc::new(Mutex::new(RecentState::default()));
-    spawn_probe(probe, gate.clone(), probe_tx).map_err(failed)?;
+    spawn_probe(shared.sensitive.probe(), shared.gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
         run_sampler(
             store,
             Wiring {
                 flush: options.flush,
                 timing: Timing::default(),
-                gate: gate.clone(),
+                gate: shared.gate.clone(),
                 probe_rx,
                 power_rx,
                 events_rx,
                 subscription,
-                sensitive: sensitive.clone(),
-                status: status.clone(),
-                recent: recent.clone(),
+                sensitive: shared.sensitive.clone(),
+                status: shared.status.clone(),
+                recent: shared.recent.clone(),
+                now: shared.now.clone(),
+                settings: shared.settings.clone(),
             },
         )
         .map_err(failed)?,
     );
     let stop = {
-        let gate = gate.clone();
+        let gate = shared.gate.clone();
         move || {
             gate.set(GateState::Stopping);
             sampler.wait(STOP_TIMEOUT);
@@ -147,15 +235,20 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     };
 
     {
-        let status = status.clone();
+        let shared = shared.clone();
+        // Settings are written through a connection of the pipe's own.
+        let mut settings_store = Store::open(&db).ok();
         thread::Builder::new()
             .name("pipe".to_string())
-            .spawn(move || server.serve(|request| handle(request, &lock(&status))))
+            .spawn(move || {
+                server.serve(|request| handle(request, &shared, settings_store.as_mut()))
+            })
             .map_err(failed)?;
     }
 
-    let exe = std::env::current_exe().map_err(failed)?;
-    let tray = Tray::new(catalog, &exe, paths::ui_exe()).map_err(failed)?;
+    let lang = lang_for(lock(&shared.settings).language, system);
+    let tray =
+        Tray::new(&Catalog::load(lang), lang, &shared.exe, paths::ui_exe()).map_err(failed)?;
     let stop = Arc::new(stop);
     {
         let stop = stop.clone();
@@ -167,11 +260,15 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     }
     shutdown::pump(|| {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if tray.on_menu(&event.id, &gate, &status, &sensitive, &lock(&recent)) == Action::Exit {
+            if tray.on_menu(&event.id, &shared) == Action::Exit {
                 shutdown::quit();
             }
         }
-        tray.refresh(&gate, &sensitive, &lock(&recent));
+        let lang = lang_for(lock(&shared.settings).language, system);
+        if lang != tray.lang() {
+            tray.relabel(&Catalog::load(lang), lang);
+        }
+        tray.refresh(&shared);
     });
     stop();
     Ok(())
@@ -197,7 +294,8 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use vestigium_ipc::PROTOCOL_VERSION;
+    use vestigium_core::{HungWindow, Retention};
+    use vestigium_ipc::{PROTOCOL_VERSION, TrayState};
 
     use super::*;
 
@@ -232,13 +330,26 @@ mod tests {
         assert_eq!(options.flush, DEFAULT_FLUSH);
     }
 
+    fn shared() -> Shared {
+        Shared {
+            gate: RunGate::new(),
+            status: Arc::new(Mutex::new(AgentStatus::default())),
+            sensitive: SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR),
+            recent: Arc::new(Mutex::new(RecentState::default())),
+            now: Arc::new(Mutex::new(NowFrame::default())),
+            settings: Arc::new(Mutex::new(Settings::default())),
+            exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
+        }
+    }
+
     #[test]
     fn hello_with_the_same_protocol_is_answered() {
         let response = handle(
             Request::Hello {
                 protocol: PROTOCOL_VERSION,
             },
-            &AgentStatus::default(),
+            &shared(),
+            None,
         );
         assert!(
             matches!(response, Response::Hello { protocol, .. } if protocol == PROTOCOL_VERSION)
@@ -246,27 +357,106 @@ mod tests {
     }
 
     #[test]
-    fn hello_with_another_protocol_is_an_error() {
-        let response = handle(
-            Request::Hello {
-                protocol: PROTOCOL_VERSION + 1,
-            },
-            &AgentStatus::default(),
-        );
-        assert!(matches!(response, Response::Error { .. }));
+    fn protocol_one_is_refused() {
+        let response = handle(Request::Hello { protocol: 1 }, &shared(), None);
+        assert!(matches!(
+            response,
+            Response::Error {
+                code: ErrorCode::Protocol,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn status_reflects_the_agent() {
-        let status = AgentStatus {
-            paused: true,
-            started_at_ms: 42,
-            last_sample_ms: Some(43),
-            last_error: None,
+        let shared = shared();
+        lock(&shared.status).started_at_ms = 42;
+        shared.sensitive.set(true, 1_000);
+        *lock(&shared.recent) = RecentState {
+            occurrences: 1,
+            severe: 1,
+            episodes: 0,
         };
+
+        let Response::Status(status) = handle(Request::Status, &shared, None) else {
+            panic!("not a status");
+        };
+
+        assert_eq!(status.started_at_ms, 42);
+        assert_eq!(status.sensitive_until_ms, Some(1_000 + 30 * 60 * 1_000));
+        assert_eq!(status.state, TrayState::Problem);
+    }
+
+    #[test]
+    fn now_returns_the_latest_sample() {
+        let shared = shared();
+        let frame = NowFrame {
+            hung: vec![HungWindow {
+                pid: 7,
+                name: "editor.exe".to_string(),
+            }],
+            ..NowFrame::default()
+        };
+        *lock(&shared.now) = frame.clone();
+
+        assert_eq!(handle(Request::Now, &shared, None), Response::Now(frame));
+    }
+
+    #[test]
+    fn set_settings_validates() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let shared = shared();
+        let mut wrong = Settings::default();
+        wrong.retention.samples_hours = 6;
+
+        let refused = handle(Request::SetSettings(wrong), &shared, Some(&mut store));
+        assert!(matches!(
+            refused,
+            Response::Error {
+                code: ErrorCode::InvalidSetting,
+                ..
+            }
+        ));
+        assert_eq!(*lock(&shared.settings), Settings::default());
+
+        let right = Settings {
+            language: LanguagePref::PtBr,
+            retention: Retention {
+                records_days: 730,
+                ..Retention::default()
+            },
+            ..Settings::default()
+        };
+        let accepted = handle(Request::SetSettings(right), &shared, Some(&mut store));
+        assert_eq!(accepted, Response::Done);
+        assert_eq!(*lock(&shared.settings), right);
+        assert_eq!(store.settings().unwrap(), right);
+    }
+
+    #[test]
+    fn set_paused_moves_the_gate() {
+        let shared = shared();
+
         assert_eq!(
-            handle(Request::Status, &status),
-            Response::Status(status.clone())
+            handle(Request::SetPaused { paused: true }, &shared, None),
+            Response::Done
         );
+        assert_eq!(shared.gate.state(), GateState::Paused);
+        assert!(matches!(
+            handle(Request::Status, &shared, None),
+            Response::Status(AgentStatus { paused: true, .. })
+        ));
+
+        handle(Request::SetPaused { paused: false }, &shared, None);
+        assert_eq!(shared.gate.state(), GateState::Running);
+    }
+
+    #[test]
+    fn language_follows_the_stored_choice() {
+        assert_eq!(lang_for(LanguagePref::System, Lang::PtBr), Lang::PtBr);
+        assert_eq!(lang_for(LanguagePref::En, Lang::PtBr), Lang::En);
+        assert_eq!(lang_for(LanguagePref::PtBr, Lang::En), Lang::PtBr);
     }
 }

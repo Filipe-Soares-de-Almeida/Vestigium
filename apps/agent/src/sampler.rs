@@ -13,10 +13,10 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Blackbox, DiskInfo, EpisodeKind, Gap, GapReason, GateState, HungWindow, MachineInfo, Media,
-    Notable, Output, ProbeTick, ProcessCounters, ProcessTop, RecentState, Retention, RunGate,
-    Sample, Severity, Timing, WinEvent, top_processes,
+    Notable, OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RecentState,
+    RunGate, Sample, Settings, Severity, Timing, WinEvent, top_processes,
 };
-use vestigium_ipc::AgentStatus;
+use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
@@ -70,6 +70,10 @@ pub struct Wiring {
     pub status: Arc<Mutex<AgentStatus>>,
     /// What the tray shows about the last 24 h.
     pub recent: Arc<Mutex<RecentState>>,
+    /// The latest second watched, for the live screen.
+    pub now: Arc<Mutex<NowFrame>>,
+    /// Retention is read from here at every prune, so a change applies on the next one.
+    pub settings: Arc<Mutex<Settings>>,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -105,13 +109,14 @@ struct Sampler {
     sensitive: Arc<SensitiveMode>,
     status: Arc<Mutex<AgentStatus>>,
     recent: Arc<Mutex<RecentState>>,
+    now: Arc<Mutex<NowFrame>>,
+    settings: Arc<Mutex<Settings>>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
     gaps: Vec<Gap>,
     /// When watching stopped and why, while paused or suspended.
     away_since: Option<(i64, GapReason)>,
-    retention: Retention,
     pruned_hour: Option<i64>,
     snapshots: VecDeque<(f64, Vec<ProcessCounters>)>,
     /// GPU use per process at the latest sample, for the next ranking.
@@ -157,11 +162,12 @@ impl Sampler {
             sensitive: wiring.sensitive,
             status: wiring.status,
             recent: wiring.recent,
+            now: wiring.now,
+            settings: wiring.settings,
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
             away_since: None,
-            retention: store.settings().map(|s| s.retention).unwrap_or_default(),
             pruned_hour: None,
             snapshots: VecDeque::with_capacity(TOP_EVERY + 1),
             gpu_by_pid: HashMap::new(),
@@ -181,6 +187,7 @@ impl Sampler {
     /// Counts what the history already holds for the last 24 h, so the tray survives a restart.
     fn recall_last_day(&mut self, now: i64) {
         if let Ok(occurrences) = self.store.occurrences(now - DAY_MS, now) {
+            lock(&self.now).latest = occurrences.last().cloned();
             for o in occurrences {
                 let severe = o.severity == Severity::Severe;
                 self.blackbox
@@ -300,6 +307,7 @@ impl Sampler {
             };
             self.gpu_by_pid = pdh.gpu.map(|gpu| gpu.per_pid).unwrap_or_default();
             self.learn_machine(&sample);
+            lock(&self.now).sample = Some(sample.clone());
             self.blackbox.push_sample(sample.clone());
             self.batcher.push_sample(sample);
             lock(&self.status).last_sample_ms = Some(ts_ms);
@@ -329,6 +337,7 @@ impl Sampler {
                     &self.gpu_by_pid,
                 ),
             };
+            lock(&self.now).top = Some(top.clone());
             self.blackbox.push_top(top.clone());
             self.batcher.push_processes(top);
         }
@@ -341,7 +350,8 @@ impl Sampler {
         }
         if prune_due(self.pruned_hour, ts_ms) {
             self.pruned_hour = Some(ts_ms.div_euclid(HOUR_MS));
-            if let Err(err) = self.store.prune(ts_ms, &self.retention) {
+            let retention = lock(&self.settings).retention;
+            if let Err(err) = self.store.prune(ts_ms, &retention) {
                 self.report(&err);
             }
         }
@@ -363,6 +373,7 @@ impl Sampler {
             })
             .collect();
         self.blackbox.push_hangs(ts_ms, &hung, &running);
+        lock(&self.now).hung = hung;
     }
 
     /// Moves delivered events into the black box and the next batch, with their bookmark.
@@ -379,7 +390,16 @@ impl Sampler {
         for output in outputs {
             let stored = match output {
                 Output::Occurrence(occurrence) => {
-                    self.store.insert_occurrence(&occurrence).map(drop)
+                    self.store.insert_occurrence(&occurrence).map(|id| {
+                        lock(&self.now).latest = Some(OccurrenceSummary {
+                            id,
+                            kind: occurrence.kind,
+                            start_ms: occurrence.start_ms,
+                            end_ms: occurrence.end_ms,
+                            severity: occurrence.severity,
+                            cause: occurrence.cause(),
+                        });
+                    })
                 }
                 Output::Episode(episode) => self.store.insert_episode(&episode).map(drop),
                 Output::Gap(gap) => {
@@ -574,6 +594,8 @@ mod tests {
                 sensitive,
                 status: status.clone(),
                 recent: Arc::new(Mutex::new(RecentState::default())),
+                now: Arc::new(Mutex::new(NowFrame::default())),
+                settings: Arc::new(Mutex::new(Settings::default())),
             },
         )
         .unwrap();

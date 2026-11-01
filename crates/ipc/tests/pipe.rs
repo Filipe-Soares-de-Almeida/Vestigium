@@ -25,6 +25,7 @@ fn answer(request: Request) -> Response {
             paused: true,
             ..AgentStatus::default()
         }),
+        _ => Response::Done,
     }
 }
 

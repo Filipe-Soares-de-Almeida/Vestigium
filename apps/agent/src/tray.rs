@@ -1,17 +1,15 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 use vestigium_collect::wall_ms;
-use vestigium_core::{GateState, RecentState, RunGate};
-use vestigium_i18n::Catalog;
-use vestigium_ipc::AgentStatus;
+use vestigium_core::{GateState, RecentState};
+use vestigium_i18n::{Catalog, Lang};
+use vestigium_ipc::TrayState;
 
-use crate::app::lock;
-use crate::sensitive::SensitiveMode;
+use crate::app::{Shared, lock};
 use crate::{autostart, icon};
 
 /// What the message loop does after a menu click.
@@ -31,8 +29,10 @@ pub struct Tray {
     exit: MenuItem,
     exe: PathBuf,
     ui_exe: Option<PathBuf>,
-    text: Texts,
-    shown: Cell<Shown>,
+    lang: Cell<Lang>,
+    text: RefCell<Texts>,
+    /// What the icon and menu show; `None` until the first refresh and after a relabel.
+    shown: Cell<Option<Shown>>,
 }
 
 struct Texts {
@@ -44,6 +44,20 @@ struct Texts {
     problem: String,
     pause: String,
     resume: String,
+}
+
+impl Texts {
+    fn load(catalog: &Catalog) -> Texts {
+        Texts {
+            watching: catalog.get("tray.tooltip.watching").to_string(),
+            paused: catalog.get("tray.tooltip.paused").to_string(),
+            sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
+            attention: catalog.get("tray.tooltip.attention").to_string(),
+            problem: catalog.get("tray.tooltip.problem").to_string(),
+            pause: catalog.get("tray.pause").to_string(),
+            resume: catalog.get("tray.resume").to_string(),
+        }
+    }
 }
 
 /// The state the icon and menu currently show.
@@ -73,19 +87,24 @@ impl Level {
             Level::Normal
         }
     }
+
+    pub fn state(self) -> TrayState {
+        match self {
+            Level::Normal => TrayState::Normal,
+            Level::Attention(_) => TrayState::Attention,
+            Level::Problem(_) => TrayState::Problem,
+        }
+    }
 }
 
 impl Tray {
-    pub fn new(catalog: &Catalog, exe: &Path, ui_exe: Option<PathBuf>) -> Result<Tray, String> {
-        let text = Texts {
-            watching: catalog.get("tray.tooltip.watching").to_string(),
-            paused: catalog.get("tray.tooltip.paused").to_string(),
-            sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
-            attention: catalog.get("tray.tooltip.attention").to_string(),
-            problem: catalog.get("tray.tooltip.problem").to_string(),
-            pause: catalog.get("tray.pause").to_string(),
-            resume: catalog.get("tray.resume").to_string(),
-        };
+    pub fn new(
+        catalog: &Catalog,
+        lang: Lang,
+        exe: &Path,
+        ui_exe: Option<PathBuf>,
+    ) -> Result<Tray, String> {
+        let text = Texts::load(catalog);
         let open = MenuItem::new(catalog.get("tray.open"), ui_exe.is_some(), None);
         let pause = MenuItem::new(&text.pause, true, None);
         let sensitive = CheckMenuItem::new(catalog.get("tray.sensitive"), true, false, None);
@@ -122,74 +141,85 @@ impl Tray {
             exit,
             exe: exe.to_path_buf(),
             ui_exe,
-            text,
-            shown: Cell::new(Shown::default()),
+            lang: Cell::new(lang),
+            text: RefCell::new(text),
+            shown: Cell::new(None),
         })
     }
 
-    pub fn on_menu(
-        &self,
-        id: &MenuId,
-        gate: &RunGate,
-        status: &Mutex<AgentStatus>,
-        sensitive: &SensitiveMode,
-        recent: &RecentState,
-    ) -> Action {
+    /// The language the menu is written in.
+    pub fn lang(&self) -> Lang {
+        self.lang.get()
+    }
+
+    /// Rewrites the menu and the tooltip in another language.
+    pub fn relabel(&self, catalog: &Catalog, lang: Lang) {
+        self.open.set_text(catalog.get("tray.open"));
+        self.sensitive.set_text(catalog.get("tray.sensitive"));
+        self.autostart.set_text(catalog.get("tray.autostart"));
+        self.exit.set_text(catalog.get("tray.exit"));
+        *self.text.borrow_mut() = Texts::load(catalog);
+        self.lang.set(lang);
+        self.shown.set(None);
+    }
+
+    pub fn on_menu(&self, id: &MenuId, shared: &Shared) -> Action {
         if id == self.open.id() {
             if let Some(ui) = &self.ui_exe {
                 let _ = Command::new(ui).spawn();
             }
         } else if id == self.pause.id() {
-            let paused = gate.state() == GateState::Running;
-            gate.set(if paused {
+            let paused = shared.gate.state() == GateState::Running;
+            shared.gate.set(if paused {
                 GateState::Paused
             } else {
                 GateState::Running
             });
-            lock(status).paused = paused;
+            lock(&shared.status).paused = paused;
         } else if id == self.sensitive.id() {
-            sensitive.set(self.sensitive.is_checked(), wall_ms());
+            shared.sensitive.set(self.sensitive.is_checked(), wall_ms());
         } else if id == self.autostart.id() {
             let _ = if self.autostart.is_checked() {
                 autostart::enable(&self.exe)
             } else {
                 autostart::disable()
             };
-            self.autostart.set_checked(autostart::is_enabled(&self.exe));
         } else if id == self.exit.id() {
             return Action::Exit;
         }
-        self.refresh(gate, sensitive, recent);
+        self.refresh(shared);
         Action::Continue
     }
 
     /// Brings the tooltip and the menu in line with the watcher, when they differ.
-    pub fn refresh(&self, gate: &RunGate, sensitive: &SensitiveMode, recent: &RecentState) {
+    pub fn refresh(&self, shared: &Shared) {
+        self.autostart.set_checked(autostart::is_enabled(&self.exe));
         let now = Shown {
-            paused: gate.state() == GateState::Paused,
-            sensitive: sensitive.is_on(),
-            recent: Level::of(recent),
+            paused: shared.gate.state() == GateState::Paused,
+            sensitive: shared.sensitive.is_on(),
+            recent: Level::of(&lock(&shared.recent)),
         };
-        if now == self.shown.get() {
+        if Some(now) == self.shown.get() {
             return;
         }
-        self.shown.set(now);
+        self.shown.set(Some(now));
+        let text = self.text.borrow();
         let tooltip = if now.paused {
-            self.text.paused.clone()
+            text.paused.clone()
         } else if now.sensitive {
-            self.text.sensitive.clone()
+            text.sensitive.clone()
         } else {
             match now.recent {
-                Level::Normal => self.text.watching.clone(),
-                Level::Attention(n) => self.text.attention.replace("{count}", &n.to_string()),
-                Level::Problem(n) => self.text.problem.replace("{count}", &n.to_string()),
+                Level::Normal => text.watching.clone(),
+                Level::Attention(n) => text.attention.replace("{count}", &n.to_string()),
+                Level::Problem(n) => text.problem.replace("{count}", &n.to_string()),
             }
         };
         let _ = self.icon.set_tooltip(Some(&tooltip));
         self.pause.set_text(if now.paused {
-            &self.text.resume
+            &text.resume
         } else {
-            &self.text.pause
+            &text.pause
         });
         self.sensitive.set_checked(now.sensitive);
     }

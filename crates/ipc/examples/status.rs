@@ -1,4 +1,4 @@
-//! Asks a running agent for its status: `status <path-to-Vestigium.exe>`.
+//! Asks a running agent for its status, latest second and settings: `status <path-to-Vestigium.exe>`.
 
 use std::path::PathBuf;
 
@@ -18,6 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             protocol: PROTOCOL_VERSION
         })?
     );
-    println!("{:?}", client.call(&Request::Status)?);
+    for request in [Request::Status, Request::Now, Request::Settings] {
+        println!("{:?}", client.call(&request)?);
+    }
     Ok(())
 }
