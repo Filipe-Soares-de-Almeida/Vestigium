@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use vestigium_core::{ProcessCounters, top_processes};
 
 fn counters(pid: u32, name: &str) -> ProcessCounters {
@@ -28,7 +30,7 @@ fn top_processes_ranks_cpu_memory_and_io() {
     curr[1].private_bytes = 8 << 30;
     curr[2].write_bytes = 64 << 20;
 
-    let top = top_processes(&prev, &curr, 1_000, 8, 1);
+    let top = top_processes(&prev, &curr, 1_000, 8, 1, &HashMap::new());
 
     let mut pids: Vec<u32> = top.iter().map(|s| s.pid).collect();
     pids.sort_unstable();
@@ -42,7 +44,7 @@ fn cpu_pct_is_share_of_machine() {
     let mut curr = prev.clone();
     curr[0].cpu_time_100ns = 10_000_000;
 
-    let top = top_processes(&prev, &curr, 1_000, 8, 5);
+    let top = top_processes(&prev, &curr, 1_000, 8, 5, &HashMap::new());
 
     assert_eq!(top.len(), 1);
     assert!(
@@ -59,7 +61,7 @@ fn io_rates_are_per_second() {
     curr[0].read_bytes = 10_000;
     curr[0].write_bytes = 20_000;
 
-    let top = top_processes(&prev, &curr, 5_000, 8, 5);
+    let top = top_processes(&prev, &curr, 5_000, 8, 5, &HashMap::new());
 
     assert!((top[0].read_bps - 2_000.0).abs() < 1e-3);
     assert!((top[0].write_bps - 4_000.0).abs() < 1e-3);
@@ -75,7 +77,7 @@ fn pid_reuse_is_not_a_delta() {
     new.cpu_time_100ns = 1_000;
     new.write_bytes = 10;
 
-    let top = top_processes(&[old], &[new], 1_000, 8, 5);
+    let top = top_processes(&[old], &[new], 1_000, 8, 5, &HashMap::new());
 
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].cpu_pct, 0.0);
@@ -87,7 +89,7 @@ fn exited_process_is_dropped() {
     let prev = vec![counters(7, "gone.exe"), counters(8, "stays.exe")];
     let curr = vec![counters(8, "stays.exe")];
 
-    let top = top_processes(&prev, &curr, 1_000, 8, 5);
+    let top = top_processes(&prev, &curr, 1_000, 8, 5, &HashMap::new());
 
     assert!(top.iter().all(|s| s.pid != 7));
 }
@@ -99,7 +101,7 @@ fn idle_process_is_excluded() {
     idle.cpu_time_100ns = 70_000_000;
     idle.private_bytes = u64::MAX;
 
-    let top = top_processes(&prev, &[idle], 1_000, 8, 5);
+    let top = top_processes(&prev, &[idle], 1_000, 8, 5, &HashMap::new());
 
     assert!(top.is_empty());
 }
@@ -111,8 +113,28 @@ fn zero_elapsed_gives_zero_rates() {
     curr[0].cpu_time_100ns = 1_000;
     curr[0].read_bytes = 1_000;
 
-    let top = top_processes(&prev, &curr, 0, 8, 5);
+    let top = top_processes(&prev, &curr, 0, 8, 5, &HashMap::new());
 
     assert_eq!(top[0].cpu_pct, 0.0);
     assert_eq!(top[0].read_bps, 0.0);
+}
+
+#[test]
+fn gpu_ranks_as_a_fourth_metric() {
+    let prev = vec![counters(10, "busy.exe"), counters(20, "render.exe")];
+    let mut curr = prev.clone();
+    curr[0].cpu_time_100ns = 5_000_000;
+    let gpu = HashMap::from([(20, 64.0)]);
+
+    let top = top_processes(&prev, &curr, 1_000, 8, 1, &gpu);
+
+    let render = top
+        .iter()
+        .find(|s| s.pid == 20)
+        .expect("kept for its GPU use");
+    assert_eq!(render.gpu_pct, 64.0);
+    assert_eq!(
+        top.iter().find(|s| s.pid == 10).map(|s| s.gpu_pct),
+        Some(0.0)
+    );
 }

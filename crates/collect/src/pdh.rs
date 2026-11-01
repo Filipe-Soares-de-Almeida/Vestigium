@@ -9,11 +9,12 @@ use windows::Win32::System::Performance::{
 };
 use windows::core::{HSTRING, PCWSTR};
 
-use crate::CollectError;
+use crate::{CollectError, GpuReading, gpu_usage};
 
 const PERF_LIMIT_PATH: &str = r"\Processor Information(_Total)\% Performance Limit";
 const PROC_PERF_PATH: &str = r"\Processor Information(_Total)\% Processor Performance";
 const HARD_FAULTS_PATH: &str = r"\Memory\Pages Input/sec";
+const GPU_PATH: &str = r"\GPU Engine(*)\Utilization Percentage";
 const DISK_PATHS: [&str; 4] = [
     r"\PhysicalDisk(*)\% Idle Time",
     r"\PhysicalDisk(*)\Avg. Disk sec/Transfer",
@@ -29,6 +30,8 @@ pub struct PdhReading {
     pub proc_perf_pct: f32,
     pub hard_faults_per_s: f32,
     pub disks: Vec<DiskLoad>,
+    /// `None` when the machine has no GPU Engine counters or they could not be read.
+    pub gpu: Option<GpuReading>,
 }
 
 /// One PDH query holding every counter of the 1 Hz sample, added by English path.
@@ -39,6 +42,8 @@ pub struct PdhSampler {
     proc_perf: PDH_HCOUNTER,
     hard_faults: PDH_HCOUNTER,
     disk: [PDH_HCOUNTER; 4],
+    /// Absent on virtual machines and old drivers, which does not stop the other counters.
+    gpu: Option<PDH_HCOUNTER>,
     buf: Vec<u64>,
     primed: bool,
 }
@@ -58,12 +63,14 @@ impl PdhSampler {
         for (slot, path) in disk.iter_mut().zip(DISK_PATHS) {
             *slot = query.add(path)?;
         }
+        let gpu = query.add(GPU_PATH).ok();
         Ok(PdhSampler {
             query,
             perf_limit,
             proc_perf,
             hard_faults,
             disk,
+            gpu,
             buf: Vec::new(),
             primed: false,
         })
@@ -99,11 +106,19 @@ impl PdhSampler {
             })
             .collect();
 
+        let gpu = match self.gpu {
+            Some(counter) => self
+                .read_array(counter)
+                .ok()
+                .map(|values| gpu_usage(&values)),
+            None => None,
+        };
         Ok(Some(PdhReading {
             perf_limit_pct: self.read_single(self.perf_limit)? as f32,
             proc_perf_pct: self.read_single(self.proc_perf)? as f32,
             hard_faults_per_s: self.read_single(self.hard_faults)? as f32,
             disks,
+            gpu,
         }))
     }
 

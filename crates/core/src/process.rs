@@ -80,13 +80,14 @@ impl From<ProcessTopV1> for ProcessTop {
     }
 }
 
-/// Union of the `per_metric` heaviest processes by CPU, private memory and I/O, sorted by CPU.
+/// Union of the `per_metric` heaviest processes by CPU, private memory, I/O and GPU, sorted by CPU.
 pub fn top_processes(
     prev: &[ProcessCounters],
     curr: &[ProcessCounters],
     elapsed_ms: u64,
     logical_cpus: u32,
     per_metric: usize,
+    gpu: &HashMap<u32, f32>,
 ) -> Vec<ProcessSample> {
     let previous: HashMap<(u32, i64), &ProcessCounters> =
         prev.iter().map(|p| ((p.pid, p.create_time), p)).collect();
@@ -123,7 +124,7 @@ pub fn top_processes(
                 private_bytes: p.private_bytes,
                 read_bps: rate(read),
                 write_bps: rate(write),
-                gpu_pct: 0.0,
+                gpu_pct: gpu.get(&p.pid).copied().unwrap_or(0.0),
             }
         })
         .collect();
@@ -136,6 +137,7 @@ pub fn top_processes(
     mark_heaviest(&samples, &mut chosen, per_metric, |s| {
         f64::from(s.read_bps) + f64::from(s.write_bps)
     });
+    mark_heaviest(&samples, &mut chosen, per_metric, |s| f64::from(s.gpu_pct));
 
     let mut top: Vec<ProcessSample> = samples
         .into_iter()

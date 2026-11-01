@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
@@ -81,6 +81,8 @@ struct Sampler {
     samples: Ring<Sample>,
     tops: Ring<ProcessTop>,
     snapshots: VecDeque<(f64, Vec<ProcessCounters>)>,
+    /// GPU use per process at the latest sample, for the next ranking.
+    gpu_by_pid: HashMap<u32, f32>,
     logical_cpus: u32,
 }
 
@@ -123,6 +125,7 @@ impl Sampler {
             samples: Ring::with_capacity(RING_SAMPLES),
             tops: Ring::with_capacity(RING_TOPS),
             snapshots: VecDeque::with_capacity(TOP_EVERY + 1),
+            gpu_by_pid: HashMap::new(),
             logical_cpus: logical_cpus(),
         }
     }
@@ -221,12 +224,13 @@ impl Sampler {
                 commit_bytes: memory.commit_bytes,
                 commit_limit_bytes: memory.commit_limit_bytes,
                 hard_faults_per_s: pdh.hard_faults_per_s,
-                gpu_pct: None,
+                gpu_pct: pdh.gpu.as_ref().map(|gpu| gpu.system_pct),
                 probe_max_lag_ms,
                 sampler_lag_ms,
                 cores: cpu.cores,
                 disks: pdh.disks,
             };
+            self.gpu_by_pid = pdh.gpu.map(|gpu| gpu.per_pid).unwrap_or_default();
             self.samples.push(sample.clone());
             self.batcher.push_sample(sample);
             lock(&self.status).last_sample_ms = Some(ts_ms);
@@ -250,6 +254,7 @@ impl Sampler {
                     (now - then).max(0.0) as u64,
                     self.logical_cpus,
                     TOP_PER_METRIC,
+                    &self.gpu_by_pid,
                 ),
             };
             self.tops.push(top.clone());
