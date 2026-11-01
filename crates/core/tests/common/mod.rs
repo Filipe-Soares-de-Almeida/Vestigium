@@ -15,7 +15,7 @@ pub fn calm(ts_ms: i64) -> Sample {
         cpu_pct: 12.0,
         dpc_pct: 0.5,
         isr_pct: 0.1,
-        perf_limit_pct: 0.0,
+        perf_limit_pct: 100.0,
         proc_perf_pct: 99.0,
         mem_total_bytes: 16 * GIB,
         mem_avail_bytes: 8 * GIB,

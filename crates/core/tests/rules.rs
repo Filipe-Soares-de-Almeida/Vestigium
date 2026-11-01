@@ -261,7 +261,7 @@ fn throttling_matches() {
 #[test]
 fn throttling_stays_quiet() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 3.0);
+    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 97.0);
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| *c == Cause::Throttling).is_none());
 }

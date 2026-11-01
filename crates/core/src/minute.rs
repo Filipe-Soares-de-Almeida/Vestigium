@@ -23,7 +23,8 @@ pub struct MinuteSample {
     pub commit_max: u64,
     pub hard_faults_max: f32,
     pub gpu_max: Option<f32>,
-    pub perf_limit_max: f32,
+    /// Lowest performance ceiling; 100 means the processor was never held back.
+    pub perf_limit_min: f32,
     pub probe_max_lag_ms: f32,
     pub disks: Vec<DiskMinute>,
 }
@@ -63,7 +64,7 @@ impl MinuteSample {
             commit_max: 0,
             hard_faults_max: 0.0,
             gpu_max: None,
-            perf_limit_max: 0.0,
+            perf_limit_min: f32::MAX,
             probe_max_lag_ms: 0.0,
             disks: Vec::new(),
         }
@@ -99,7 +100,7 @@ impl MinuteSample {
         self.commit_max = self.commit_max.max(other.commit_max);
         self.hard_faults_max = self.hard_faults_max.max(other.hard_faults_max);
         self.gpu_max = max_known(self.gpu_max, other.gpu_max);
-        self.perf_limit_max = self.perf_limit_max.max(other.perf_limit_max);
+        self.perf_limit_min = self.perf_limit_min.min(other.perf_limit_min);
         self.probe_max_lag_ms = self.probe_max_lag_ms.max(other.probe_max_lag_ms);
     }
 }
@@ -135,7 +136,7 @@ impl MinuteRollup {
         minute.commit_max = minute.commit_max.max(sample.commit_bytes);
         minute.hard_faults_max = minute.hard_faults_max.max(sample.hard_faults_per_s);
         minute.gpu_max = max_known(minute.gpu_max, sample.gpu_pct);
-        minute.perf_limit_max = minute.perf_limit_max.max(sample.perf_limit_pct);
+        minute.perf_limit_min = minute.perf_limit_min.min(sample.perf_limit_pct);
         minute.probe_max_lag_ms = minute.probe_max_lag_ms.max(sample.probe_max_lag_ms);
         for disk in &sample.disks {
             let at = match minute.disks.iter().position(|d| d.name == disk.name) {

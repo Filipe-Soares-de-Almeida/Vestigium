@@ -107,3 +107,15 @@ fn merged_minutes_weigh_by_sample_count() {
     assert_eq!(first.mem_avail_min, 1 << 30);
     assert_eq!(first.disks[0].bytes_avg, 1_000.0);
 }
+
+#[test]
+fn minute_keeps_the_lowest_performance_ceiling() {
+    let mut held_back = sample(60_000, 20.0, 4 << 30);
+    held_back.perf_limit_pct = 62.0;
+    let mut free = sample(61_000, 20.0, 4 << 30);
+    free.perf_limit_pct = 100.0;
+
+    let minute = summarize_minute(&[free.clone(), held_back, free]).unwrap();
+
+    assert_eq!(minute.perf_limit_min, 62.0);
+}

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::rules::{avail_pct, process_value, worst_disk};
 use crate::{
     EventMeaning, GapReason, HangOutcome, HangSpan, Metric, Sample, Trigger, Window, classify,
-    threshold,
+    crosses_down, threshold,
 };
 
 /// One step of what happened; the UI words it in the reader's language.
@@ -192,7 +192,7 @@ fn reading(sample: &Sample, metric: Metric, mem_total: u64) -> Option<(f32, Opti
 /// When `metric` first went past its threshold, and the worst it reached.
 fn crossing(metric: Metric, window: &Window) -> Option<Fact> {
     let limit = threshold(metric);
-    let below = metric == Metric::MemAvailPct;
+    let below = crosses_down(metric);
     let past = |v: f32| if below { v < limit } else { v >= limit };
     let worse = |a: f32, b: f32| if below { a < b } else { a > b };
     let mut first: Option<(i64, Option<String>)> = None;

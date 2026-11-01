@@ -8,6 +8,7 @@ pub struct Sample {
     pub cpu_pct: f32,
     pub dpc_pct: f32,
     pub isr_pct: f32,
+    /// Performance ceiling as a share of nominal; 100 means not held back.
     pub perf_limit_pct: f32,
     pub proc_perf_pct: f32,
     pub mem_total_bytes: u64,

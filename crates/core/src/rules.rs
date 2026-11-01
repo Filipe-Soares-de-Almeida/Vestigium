@@ -30,7 +30,7 @@ pub enum Metric {
     IoBytesPerS,
 }
 
-/// Where a rule crosses for each metric; `MemAvailPct` crosses going down.
+/// Where a rule crosses for each metric; see `crosses_down` for the direction.
 pub fn threshold(metric: Metric) -> f32 {
     match metric {
         Metric::DiskLatencyMs => 200.0,
@@ -41,9 +41,14 @@ pub fn threshold(metric: Metric) -> f32 {
         Metric::CpuPct => 95.0,
         Metric::CoreDpcIsrPct => 20.0,
         Metric::GpuPct => 95.0,
-        Metric::PerfLimitPct => 5.0,
+        Metric::PerfLimitPct => 95.0,
         Metric::PrivateBytes | Metric::IoBytesPerS => 0.0,
     }
+}
+
+/// Metrics that cross by falling below their threshold: free memory and the performance ceiling.
+pub fn crosses_down(metric: Metric) -> bool {
+    matches!(metric, Metric::MemAvailPct | Metric::PerfLimitPct)
 }
 
 /// What a suspect blames.
@@ -399,8 +404,8 @@ fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     let limit = between(&window.samples, focus.start - 30_000, focus.start)
         .iter()
         .map(|s| (s.ts_ms, s.perf_limit_pct))
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-        .filter(|(_, v)| *v >= threshold(Metric::PerfLimitPct));
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(_, v)| *v < threshold(Metric::PerfLimitPct));
     let mut evidence = events_meaning(window, &[EventMeaning::CpuFirmwareLimit]);
     let reported = !evidence.is_empty();
     if let Some((ts_ms, value)) = limit {

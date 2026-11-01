@@ -40,7 +40,9 @@ pub use process::{
     ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, top_processes,
 };
 pub use ring::Ring;
-pub use rules::{Cause, Confidence, Evidence, Metric, NextStep, Suspect, suspects, threshold};
+pub use rules::{
+    Cause, Confidence, Evidence, Metric, NextStep, Suspect, crosses_down, suspects, threshold,
+};
 pub use sample::{CoreLoad, DiskLoad, Sample, SampleV1};
 pub use settings::{LanguagePref, Retention, SettingError, Settings, ThemePref};
 pub use stutter::{BURST_COUNT, BURST_WINDOW_MS, HICCUP_MS, StutterDetector};
