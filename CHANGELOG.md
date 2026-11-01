@@ -112,6 +112,8 @@ How to use this file:
 
 ### Fixed
 
+- On Windows 10 the window now shows its top edge like the other three; Windows leaves it out for
+  windows that draw their own title bar. It is hidden while the window is maximized.
 - Memory pressure is now recorded when more than 85% of memory stays in use for two minutes,
   instead of 90%: while a large program holds its memory, Windows pushes other programs out to
   disk and keeps use just under 90%, so real pressure went unrecorded.

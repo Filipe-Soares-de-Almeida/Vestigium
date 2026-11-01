@@ -9,6 +9,7 @@
   import Toast from "./components/Toast.svelte";
   import WindowControls from "./components/WindowControls.svelte";
   import { app } from "./lib/app.svelte";
+  import { markFrame } from "./lib/frame";
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
   import Now from "./screens/Now.svelte";
@@ -21,6 +22,7 @@
   let shown = "";
 
   onMount(() => app.start());
+  onMount(() => void markFrame());
 
   // Sets data-inactive on the root while another window is active; the title bar dims then.
   onMount(() => {
@@ -91,6 +93,10 @@
     grid-template-columns: 248px minmax(0, 1fr);
     grid-template-rows: 44px minmax(0, 1fr);
     height: 100vh;
+  }
+  /* Windows 10 draws the side and bottom edges of a frameless window but not the top one. */
+  :global(:root[data-frame="win10"]:not([data-maximized])) .win {
+    border-top: 1px solid var(--stroke);
   }
   .titlebar {
     grid-row: 1;

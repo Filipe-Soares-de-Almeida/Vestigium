@@ -10,6 +10,7 @@
   onMount(() => {
     const sync = async () => {
       maximized = await win.isMaximized();
+      document.documentElement.toggleAttribute("data-maximized", maximized);
     };
     void sync();
     const off = win.onResized(sync);
