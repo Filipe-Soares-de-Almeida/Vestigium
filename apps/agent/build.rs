@@ -1,8 +1,12 @@
+const ICON: &str = "../ui/src-tauri/icons/icon.ico";
+
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={ICON}");
     // Task Manager and the startup apps list show these fields, not the file name.
     let mut resource = winresource::WindowsResource::new();
     resource
-        .set_icon("../ui/src-tauri/icons/icon.ico")
+        .set_icon(ICON)
         .set("FileDescription", "Vestigium")
         .set("ProductName", "Vestigium")
         .set("InternalName", "Vestigium")

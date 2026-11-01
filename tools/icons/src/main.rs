@@ -1,9 +1,11 @@
 //! Writes the icon files of Vestigium from the brand mark.
 //!
 //! ```text
-//! vestigium-icons preview <dir>   the tray glyph in every state, taskbar and size, and a magnified sheet
+//! vestigium-icons app <dir>       icon.ico and the PNGs the app bundle names
+//! vestigium-icons preview <dir>   the tray glyph and the app icon at every size, and magnified sheets
 //! ```
 
+mod ico;
 mod png;
 
 use std::path::Path;
@@ -12,6 +14,17 @@ use std::{env, fs, io};
 
 use vestigium_brand::{Badge, Image, Scheme, TrayInk};
 
+/// The sizes inside icon.ico: 16 from the 16 px drawing, the rest from the 48 grid.
+const ICO_SIZES: [u32; 9] = [16, 20, 24, 32, 40, 48, 64, 96, 256];
+/// The PNGs the bundle configuration names, and the 512 px source image.
+const BUNDLE_PNGS: [(&str, u32); 4] = [
+    ("32x32.png", 32),
+    ("128x128.png", 128),
+    ("128x128@2x.png", 256),
+    ("icon.png", 512),
+];
+/// Window backgrounds in dark and light mode, for the app icon sheet only.
+const BASES: [[u8; 3]; 2] = [[0x12, 0x12, 0x12], [0xeb, 0xeb, 0xeb]];
 const TRAY_STATES: [(&str, Badge); 5] = [
     ("normal", Badge::None),
     ("attention", Badge::Attention),
@@ -30,9 +43,10 @@ const TASKBARS: [(&str, bool, [u8; 3]); 2] = [
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let result = match args.as_slice() {
+        [mode, dir] if mode == "app" => app(Path::new(dir)),
         [mode, dir] if mode == "preview" => preview(Path::new(dir)),
         _ => {
-            eprintln!("usage: vestigium-icons preview <dir>");
+            eprintln!("usage: vestigium-icons app|preview <dir>");
             return ExitCode::from(2);
         }
     };
@@ -48,7 +62,21 @@ fn main() -> ExitCode {
     }
 }
 
-/// Writes every tray state in the Red theme, and a sheet of them on both taskbars.
+/// Writes the app icon files: the ICO the executables embed and the bundle's PNGs.
+fn app(dir: &Path) -> io::Result<usize> {
+    fs::create_dir_all(dir)?;
+    let images: Vec<Image> = ICO_SIZES
+        .iter()
+        .map(|&size| vestigium_brand::app_icon(size))
+        .collect();
+    fs::write(dir.join("icon.ico"), ico::encode(&images))?;
+    for (name, size) in BUNDLE_PNGS {
+        write(&dir.join(name), &vestigium_brand::app_icon(size))?;
+    }
+    Ok(1 + BUNDLE_PNGS.len())
+}
+
+/// Writes every tray state in the Red theme and every app icon size, with a sheet of each.
 fn preview(dir: &Path) -> io::Result<usize> {
     fs::create_dir_all(dir)?;
     let mut written = 0;
@@ -70,7 +98,26 @@ fn preview(dir: &Path) -> io::Result<usize> {
         }
     }
     write(&dir.join("tray-sheet.png"), &sheet(&rows, 6))?;
-    Ok(written + 1)
+
+    let small: Vec<Image> = ICO_SIZES
+        .into_iter()
+        .filter(|&size| size <= 64)
+        .map(vestigium_brand::app_icon)
+        .collect();
+    for image in &small {
+        write(&dir.join(format!("app-{}.png", image.size)), image)?;
+    }
+    let rows: Vec<Vec<(Image, [u8; 3])>> = BASES
+        .iter()
+        .map(|&background| {
+            small
+                .iter()
+                .map(|image| (image.clone(), background))
+                .collect()
+        })
+        .collect();
+    write(&dir.join("app-sheet.png"), &sheet(&rows, 4))?;
+    Ok(written + small.len() + 2)
 }
 
 fn write(path: &Path, image: &Image) -> io::Result<()> {

@@ -18,6 +18,53 @@ const OUTLINE_16: [Point; 6] = [
 /// The facet line the 16 px silhouette cuts, from the notch to the tip.
 const CUT_16: (Point, Point) = ((8.0, 7.6), (8.0, 13.2));
 
+/// The V outline on the 48 grid.
+const OUTLINE: [Point; 6] = [
+    (7.0, 9.0),
+    (17.0, 9.0),
+    (24.0, 22.5),
+    (31.0, 9.0),
+    (41.0, 9.0),
+    (24.0, 40.0),
+];
+
+/// The six facets on the 48 grid, from the lit left one to the shadowed right one.
+const FACETS: [[Point; 3]; 6] = [
+    [(7.0, 9.0), (12.0, 9.0), (24.0, 40.0)],
+    [(12.0, 9.0), (17.0, 9.0), (24.0, 40.0)],
+    [(17.0, 9.0), (24.0, 22.5), (24.0, 40.0)],
+    [(31.0, 9.0), (24.0, 22.5), (24.0, 40.0)],
+    [(36.0, 9.0), (31.0, 9.0), (24.0, 40.0)],
+    [(41.0, 9.0), (36.0, 9.0), (24.0, 40.0)],
+];
+
+/// The edges between facets on the 48 grid.
+const EDGES: [(Point, Point); 5] = [
+    ((12.0, 9.0), (24.0, 40.0)),
+    ((17.0, 9.0), (24.0, 40.0)),
+    ((31.0, 9.0), (24.0, 40.0)),
+    ((36.0, 9.0), (24.0, 40.0)),
+    ((24.0, 22.5), (24.0, 40.0)),
+];
+
+/// The four facets of the 16 px drawing.
+const FACETS_16: [&[Point]; 4] = [
+    &[(2.2, 3.0), (3.9, 3.0), (8.0, 13.2)],
+    &[(3.9, 3.0), (5.6, 3.0), (8.0, 7.6), (8.0, 13.2)],
+    &[(10.4, 3.0), (12.1, 3.0), (8.0, 13.2), (8.0, 7.6)],
+    &[(12.1, 3.0), (13.8, 3.0), (8.0, 13.2)],
+];
+
+/// The fixed facet colours of the app icon, facet-1 to facet-6; the 16 px drawing takes 1, 2, 4 and 6.
+const FACET_COLOURS: [Rgb; 6] = [
+    [0xff, 0x53, 0x55],
+    [0xff, 0xa0, 0x9a],
+    [0xf5, 0x1c, 0x35],
+    [0xc5, 0x01, 0x24],
+    [0xe3, 0x0e, 0x2d],
+    [0x9b, 0x0e, 0x1e],
+];
+
 /// What the tray badge shows; each state has its own shape.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Badge {
@@ -134,6 +181,42 @@ pub fn tray(size: u32, badge: Badge, colours: TrayInk) -> Image {
     canvas.image()
 }
 
+/// The app icon, `size` pixels a side: the red Lapidado with its fixed facets, in every theme.
+pub fn app_icon(size: u32) -> Image {
+    if size <= 16 {
+        let mut canvas = Canvas::new(size, 16.0);
+        let colours = [0, 1, 3, 5].map(|facet| FACET_COLOURS[facet]);
+        for (points, colour) in FACETS_16.iter().zip(colours) {
+            let facet = Shape::Poly {
+                points: points.to_vec(),
+                grow: 0.15,
+            };
+            canvas.fill(&facet, colour, 1.0);
+        }
+        return canvas.image();
+    }
+    let mut canvas = Canvas::new(size, 48.0);
+    let lowered = Shape::Poly {
+        points: OUTLINE.map(|(x, y)| (x, y + 1.2)).to_vec(),
+        grow: 0.3,
+    };
+    canvas.shadow(&lowered, 1.2, 0.35);
+    for (points, colour) in FACETS.iter().zip(FACET_COLOURS) {
+        let facet = Shape::Poly {
+            points: points.to_vec(),
+            grow: 0.3,
+        };
+        canvas.fill(&facet, colour, 1.0);
+    }
+    let edges = EDGES.map(|(from, to)| Shape::Line {
+        from,
+        to,
+        half: 0.35,
+    });
+    canvas.fill(&Shape::Union(edges.into()), [0xff; 3], 0.22);
+    canvas.image()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +312,33 @@ mod tests {
         assert_eq!(image.pixel(25, 25)[3], 0xff);
         assert!(ring.iter().any(|&alpha| alpha > 0xe0));
         assert!(ring.iter().any(|&alpha| alpha < 0x20));
+    }
+
+    #[test]
+    fn the_app_icon_keeps_its_fixed_facets() {
+        let image = app_icon(256);
+        // The middle of the first and the last facet, on the 48 grid scaled to 256.
+        assert_eq!(image.pixel(76, 103), [0xff, 0x53, 0x55, 0xff]);
+        assert_eq!(image.pixel(179, 103), [0x9b, 0x0e, 0x1e, 0xff]);
+        assert_eq!(image.pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn the_app_icon_casts_a_soft_shadow_below_the_tip() {
+        let image = app_icon(256);
+        let below = image.pixel(128, 222);
+
+        assert_eq!(&below[..3], &[0, 0, 0]);
+        assert!((1..0x80).contains(&below[3]));
+    }
+
+    #[test]
+    fn the_16_px_app_icon_uses_the_four_facet_drawing() {
+        let image = app_icon(16);
+
+        assert_eq!(image.size, 16);
+        assert_eq!(image.pixel(5, 4), [0xff, 0xa0, 0x9a, 0xff]);
+        assert_eq!(image.pixel(8, 2)[3], 0);
     }
 
     #[test]

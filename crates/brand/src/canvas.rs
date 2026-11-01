@@ -57,6 +57,8 @@ pub enum Shape {
         h: f32,
         radius: f32,
     },
+    /// Everything any of its shapes covers, painted once.
+    Union(Vec<Shape>),
 }
 
 impl Shape {
@@ -97,6 +99,7 @@ impl Shape {
                 let (cx, cy) = (dx - (w / 2.0 - radius), dy - (h / 2.0 - radius));
                 cx <= 0.0 || cy <= 0.0 || cx.hypot(cy) <= *radius
             }
+            Shape::Union(shapes) => shapes.iter().any(|shape| shape.covers(x, y)),
         }
     }
 
@@ -113,6 +116,13 @@ impl Shape {
                 ..
             } => around([*centre], radius + half),
             Shape::Rect { x, y, w, h, .. } => [*x, *y, x + w, y + h],
+            Shape::Union(shapes) => around(
+                shapes.iter().flat_map(|shape| {
+                    let [l, t, r, b] = shape.bounds();
+                    [(l, t), (r, b)]
+                }),
+                0.0,
+            ),
         }
     }
 }
@@ -192,6 +202,12 @@ impl Canvas {
         }
     }
 
+    /// Paints the blurred shape in black at `opacity`; `sigma` is in drawing units.
+    pub fn shadow(&mut self, shape: &Shape, sigma: f32, opacity: f32) {
+        let blurred = blur(&self.coverage(shape), self.size as usize, sigma / self.unit);
+        self.paint(&blurred, [0, 0, 0], opacity);
+    }
+
     pub fn image(&self) -> Image {
         let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
         let rgba = self
@@ -251,6 +267,36 @@ impl Canvas {
         }
         coverage
     }
+}
+
+/// A Gaussian blur of a square mask, `sigma` in pixels; outside the mask counts as empty.
+fn blur(mask: &[f32], size: usize, sigma: f32) -> Vec<f32> {
+    let reach = (sigma * 3.0).ceil() as isize;
+    let weights: Vec<f32> = (-reach..=reach)
+        .map(|d| (-(d * d) as f32 / (2.0 * sigma * sigma)).exp())
+        .collect();
+    let total: f32 = weights.iter().sum();
+    let pass = |source: &[f32], step: (usize, usize)| {
+        let mut out = vec![0.0; size * size];
+        for row in 0..size {
+            for column in 0..size {
+                let mut sum = 0.0;
+                for (k, weight) in weights.iter().enumerate() {
+                    let offset = k as isize - reach;
+                    let (r, c) = (
+                        row as isize + offset * step.0 as isize,
+                        column as isize + offset * step.1 as isize,
+                    );
+                    if (0..size as isize).contains(&r) && (0..size as isize).contains(&c) {
+                        sum += weight * source[r as usize * size + c as usize];
+                    }
+                }
+                out[row * size + column] = sum / total;
+            }
+        }
+        out
+    };
+    pass(&pass(mask, (0, 1)), (1, 0))
 }
 
 #[cfg(test)]
@@ -328,5 +374,16 @@ mod tests {
         assert!(triangle.covers(1.0, 1.0));
         assert!(triangle.covers(2.0, -0.4));
         assert!(!triangle.covers(2.0, -0.6));
+    }
+
+    #[test]
+    fn blur_keeps_the_mass_away_from_the_edges() {
+        let mut mask = vec![0.0; 21 * 21];
+        mask[10 * 21 + 10] = 1.0;
+        let blurred = blur(&mask, 21, 1.5);
+
+        assert!((blurred.iter().sum::<f32>() - 1.0).abs() < 1e-4);
+        assert!(blurred[10 * 21 + 10] < 1.0);
+        assert!(blurred[10 * 21 + 12] > 0.0);
     }
 }

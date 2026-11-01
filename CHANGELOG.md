@@ -58,5 +58,7 @@ How to use this file:
   bars over a dimmed mark while watching is paused, and a dashed ring with a dot while sensitive
   mode is on. The ring and the dot take the accent of the chosen colour theme, and the icon is
   drawn at the taskbar's own size, so it stays sharp at 125%, 150% and 200% display scale.
+- The window, its taskbar button, the installer and the watcher in Task Manager now show the
+  Vestigium icon, a red V cut like a gemstone, the same in every colour theme.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
