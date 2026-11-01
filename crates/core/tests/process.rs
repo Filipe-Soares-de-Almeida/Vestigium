@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use vestigium_core::{ProcessCounters, top_processes};
+use vestigium_core::{ProcessCounters, last_seen, top_processes};
 
 fn counters(pid: u32, name: &str) -> ProcessCounters {
     ProcessCounters {
@@ -68,20 +68,66 @@ fn io_rates_are_per_second() {
 }
 
 #[test]
-fn pid_reuse_is_not_a_delta() {
+fn pid_reuse_counts_the_new_process_from_its_start() {
     let mut old = counters(30, "old.exe");
     old.cpu_time_100ns = 900_000_000;
     old.write_bytes = 1 << 30;
     let mut new = counters(30, "new.exe");
     new.create_time = old.create_time + 1;
-    new.cpu_time_100ns = 1_000;
+    new.cpu_time_100ns = 8_000_000;
     new.write_bytes = 10;
 
     let top = top_processes(&[old], &[new], 1_000, 8, 5, &HashMap::new());
 
     assert_eq!(top.len(), 1);
-    assert_eq!(top[0].cpu_pct, 0.0);
-    assert_eq!(top[0].write_bps, 0.0);
+    assert!(
+        (top[0].cpu_pct - 10.0).abs() < 1e-4,
+        "got {}",
+        top[0].cpu_pct
+    );
+    assert_eq!(top[0].write_bps, 10.0);
+}
+
+#[test]
+fn process_started_in_the_interval_counts_from_its_start() {
+    let prev = vec![counters(50, "shell.exe")];
+    let mut started = counters(51, "rustc.exe");
+    started.cpu_time_100ns = 20_000_000;
+    let curr = vec![prev[0].clone(), started];
+
+    let top = top_processes(&prev, &curr, 5_000, 8, 5, &HashMap::new());
+
+    let rustc = top.iter().find(|s| s.pid == 51).expect("rustc ranked");
+    assert!((rustc.cpu_pct - 5.0).abs() < 1e-4, "got {}", rustc.cpu_pct);
+}
+
+#[test]
+fn without_an_earlier_snapshot_nothing_counts() {
+    let mut started = counters(52, "rustc.exe");
+    started.cpu_time_100ns = 20_000_000;
+
+    let top = top_processes(&[], &[started], 5_000, 8, 5, &HashMap::new());
+
+    assert!(top.iter().all(|s| s.cpu_pct == 0.0));
+}
+
+#[test]
+fn last_seen_keeps_a_process_that_exited() {
+    let mut early = counters(60, "rustc.exe");
+    early.cpu_time_100ns = 5;
+    let mut later = early.clone();
+    later.cpu_time_100ns = 9;
+    let stays = counters(61, "shell.exe");
+    let first = vec![early, stays.clone()];
+    let second = vec![later, stays.clone()];
+    let third = vec![stays];
+
+    let mut seen = last_seen(&[&first, &second, &third]);
+    seen.sort_by_key(|p| p.pid);
+
+    assert_eq!(seen.len(), 2);
+    assert_eq!((seen[0].pid, seen[0].cpu_time_100ns), (60, 9));
+    assert_eq!(seen[1].pid, 61);
 }
 
 #[test]

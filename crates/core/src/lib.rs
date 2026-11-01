@@ -38,7 +38,8 @@ pub use minute::{DiskMinute, MINUTE_MS, MinuteRollup, MinuteSample, minute_of, s
 pub use occurrence::{Occurrence, OccurrenceKind, OccurrenceSummary};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
 pub use process::{
-    ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, top_processes,
+    ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, last_seen,
+    top_processes,
 };
 pub use reading::{BUSY_ABOVE, PcState, Reading, pc_state};
 pub use ring::Ring;

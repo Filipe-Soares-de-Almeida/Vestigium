@@ -121,5 +121,8 @@ How to use this file:
   the suspect.
 - A freeze caused by programs taking every processor is now blamed on the CPU even when the
   watcher's first reading after the freeze also covers the moment just before it.
+- The busiest-process rankings now count programs that start or exit between two rankings,
+  such as the short compiler processes of a build, instead of showing them idle or leaving them
+  out.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

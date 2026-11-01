@@ -80,6 +80,15 @@ impl From<ProcessTopV1> for ProcessTop {
     }
 }
 
+/// The latest counters of every process in `snapshots`, oldest first; one that exited keeps its last.
+pub fn last_seen(snapshots: &[&[ProcessCounters]]) -> Vec<ProcessCounters> {
+    let mut latest: HashMap<(u32, i64), &ProcessCounters> = HashMap::new();
+    for p in snapshots.iter().flat_map(|s| s.iter()) {
+        latest.insert((p.pid, p.create_time), p);
+    }
+    latest.into_values().cloned().collect()
+}
+
 /// Union of the `per_metric` heaviest processes by CPU, private memory, I/O and GPU, sorted by CPU.
 pub fn top_processes(
     prev: &[ProcessCounters],
@@ -104,6 +113,8 @@ pub fn top_processes(
                     p.read_bytes.saturating_sub(old.read_bytes),
                     p.write_bytes.saturating_sub(old.write_bytes),
                 ),
+                // Missing from a full earlier snapshot: it started inside the interval.
+                None if !prev.is_empty() => (p.cpu_time_100ns, p.read_bytes, p.write_bytes),
                 None => (0, 0, 0),
             };
             let rate = |delta: u64| {

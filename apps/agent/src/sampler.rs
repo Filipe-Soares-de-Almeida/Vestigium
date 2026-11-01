@@ -14,7 +14,8 @@ use vestigium_collect::{
 use vestigium_core::{
     Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
     OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RING_MS, Reading,
-    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, top_processes,
+    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, last_seen,
+    top_processes,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -336,14 +337,21 @@ impl Sampler {
         }
         if ticks.is_multiple_of(TOP_EVERY)
             && self.snapshots.len() > TOP_EVERY
-            && let (Some((then, old)), Some((now, new))) =
+            && let (Some((then, old)), Some((now, _))) =
                 (self.snapshots.front(), self.snapshots.back())
         {
+            // Processes that exited since `old` keep the CPU and I/O they used before going.
+            let since: Vec<&[ProcessCounters]> = self
+                .snapshots
+                .iter()
+                .skip(1)
+                .map(|(_, s)| s.as_slice())
+                .collect();
             let top = ProcessTop {
                 ts_ms,
                 entries: top_processes(
                     old,
-                    new,
+                    &last_seen(&since),
                     (now - then).max(0.0) as u64,
                     self.logical_cpus,
                     TOP_PER_METRIC,
