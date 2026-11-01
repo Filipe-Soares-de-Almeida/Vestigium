@@ -59,6 +59,15 @@ How to use this file:
   do the same from the keyboard. Then come the day's freezes and moments of pressure, each freeze
   a link to its report, and the number of freezes on each of the last 14 days. Before anything
   has been saved, the screen says when watching started and offers to show the PC now.
+- Each freeze, app that stopped responding, burst of stutters or problem Windows reported now opens
+  as a report: how long it lasted, the probable cause with the evidence beside it and any other
+  suspects, what to try (with boxes to tick, remembered for that report), the sequence of what
+  happened, and a chart of the minute before, the moment and the half minute after. Simple,
+  Detailed and Technical switch how much it shows at once and become the default; Technical adds
+  the busiest programs and the Windows events with their provider and ID. When the cause needs a
+  deeper capture than this version has, the report says so, and the program behind a busy disk is
+  named only as probable. "Copy report" puts the whole report on the clipboard as Markdown, in the
+  window's language, ready to paste into a forum or an issue.
 
 ### Changed
 
