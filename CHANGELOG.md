@@ -68,6 +68,15 @@ How to use this file:
   deeper capture than this version has, the report says so, and the program behind a busy disk is
   named only as probable. "Copy report" puts the whole report on the clipboard as Markdown, in the
   window's language, ready to paste into a forum or an issue.
+- A Settings screen, with its options in six categories listed on the left. Appearance: light or
+  dark (or like Windows) and the colour theme, picked from small previews and applied at once.
+  Reports: the default detail level. Watching: start with Windows, sensitive mode (saying when it
+  turns itself off) and pausing until you resume. Kept history: how long each kind of history is
+  kept, within what Vestigium accepts, with the disk space it is expected to take; a value it turns
+  down is explained next to its field. Language: like Windows, Brazilian Portuguese or English;
+  the tray changes at once and the window the next time it opens. Privacy and data: a reminder
+  that nothing leaves the PC, the version, the space the history uses now and a button that opens
+  its folder. While Vestigium is not running, the settings can be read but not changed.
 
 ### Changed
 

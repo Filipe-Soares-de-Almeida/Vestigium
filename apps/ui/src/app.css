@@ -1,5 +1,7 @@
-/* Tokens: Red (no data-scheme) on :root; the other colour themes by data-scheme; mode by data-theme. */
-:root {
+/* Tokens: Red (no data-scheme) on :root; the other colour themes by data-scheme; mode by data-theme.
+   data-swatch draws an element in one colour theme while another is current. */
+:root,
+[data-swatch="red"] {
   --base: #ebebeb;
   --layer: #f6f6f6;
   --card: #ffffff;
@@ -46,7 +48,8 @@
   --mark-3: var(--facet-4);
   --mark-4: var(--facet-6);
 }
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+[data-theme="dark"] [data-swatch="red"] {
   --base: #121212;
   --layer: #171717;
   --card: #1e1e1e;
@@ -72,14 +75,16 @@
   --shadow: 0 1px 2px #0008, 0 6px 18px #0006;
   color-scheme: dark;
 }
-:root[data-scheme="graphite"] {
+:root[data-scheme="graphite"],
+[data-swatch="graphite"] {
   --base: #e9e9e9; --layer: #f5f5f5; --card: #ffffff; --card2: #f1f1f1; --stroke: #dedede; --stroke2: #0000000f;
   --ink: #141414; --ink2: #4c4c4c; --ink3: #636363;
   --calm: #c2c2c2; --busy: #8c8c8c; --press: #555555; --freeze: #141414; --susp: #e1e1e1;
   --calm-t: #f0f0f0; --busy-t: #e8e8e8; --press-t: #dedede; --freeze-t: #d4d4d4;
   --accent: #141414; --on-accent: #ffffff; --accent-t: #e6e6e6; --ok: #4c4c4c;
 }
-:root[data-scheme="graphite"][data-theme="dark"] {
+:root[data-scheme="graphite"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="graphite"] {
   --base: #111111; --layer: #171717; --card: #1e1e1e; --card2: #252525; --stroke: #2f2f2f; --stroke2: #ffffff12;
   --ink: #f2f2f2; --ink2: #b5b5b5; --ink3: #9c9c9c;
   --calm: #5f5f5f; --busy: #8f8f8f; --press: #c4c4c4; --freeze: #ffffff; --susp: #333333;
@@ -87,28 +92,32 @@
   --accent: #f2f2f2; --on-accent: #111111; --accent-t: #303030; --ok: #bdbdbd;
   --shadow: 0 1px 2px #0007, 0 6px 18px #0005;
 }
-:root[data-scheme="slate"] {
+:root[data-scheme="slate"],
+[data-swatch="slate"] {
   --base: #ebeaf0; --layer: #f6f5f9; --card: #ffffff; --card2: #f1f0f6; --stroke: #dfdde8; --stroke2: #1211170f;
   --ink: #16151c; --ink2: #4f4c5e; --ink3: #646176;
   --calm: #c9c4e0; --busy: #958bc4; --press: #5b4f97; --freeze: #16151c; --susp: #e3e1ea;
   --calm-t: #f2f0f8; --busy-t: #e9e6f4; --press-t: #dfdbef; --freeze-t: #d4cfe8;
   --accent: #4f438c; --on-accent: #ffffff; --accent-t: #e5e1f3; --ok: #5b4f97;
 }
-:root[data-scheme="slate"][data-theme="dark"] {
+:root[data-scheme="slate"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="slate"] {
   --base: #121117; --layer: #17161d; --card: #1e1d26; --card2: #25242e; --stroke: #32303d; --stroke2: #ffffff10;
   --ink: #eeedf3; --ink2: #b2afc1; --ink3: #9895a9;
   --calm: #47426a; --busy: #6b609e; --press: #a79ce0; --freeze: #efeaff; --susp: #2c2a36;
   --calm-t: #221f33; --busy-t: #28243d; --press-t: #302b4a; --freeze-t: #393357;
   --accent: #b0a5f2; --on-accent: #121117; --accent-t: #2c2842; --ok: #a79ce0;
 }
-:root[data-scheme="indigo"] {
+:root[data-scheme="indigo"],
+[data-swatch="indigo"] {
   --base: #e8eaf3; --layer: #f4f5fb; --card: #ffffff; --card2: #eef0f9; --stroke: #dadeee; --stroke2: #1315200f;
   --ink: #131520; --ink2: #484d67; --ink3: #5c6281;
   --calm: #c1c7e4; --busy: #848fcf; --press: #484fac; --freeze: #131520; --susp: #dfe2ef;
   --calm-t: #eff1f9; --busy-t: #e4e8f6; --press-t: #d9ddf1; --freeze-t: #ccd2eb;
   --accent: #3d42a3; --on-accent: #ffffff; --accent-t: #dfe3f5; --ok: #484fac;
 }
-:root[data-scheme="indigo"][data-theme="dark"] {
+:root[data-scheme="indigo"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="indigo"] {
   --base: #10111a; --layer: #141621; --card: #1b1d2b; --card2: #222433; --stroke: #2d3144; --stroke2: #ffffff10;
   --ink: #ebedf6; --ink2: #abb0cb; --ink3: #9096b4;
   --calm: #3c4378; --busy: #5962af; --press: #94a1eb; --freeze: #e9edff; --susp: #272b3c;
