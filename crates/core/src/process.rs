@@ -29,6 +29,8 @@ pub struct ProcessSample {
     pub private_bytes: u64,
     pub read_bps: f32,
     pub write_bps: f32,
+    /// Busiest GPU engine this process uses, 0 to 100.
+    pub gpu_pct: f32,
 }
 
 /// The busiest processes at one moment.
@@ -37,6 +39,45 @@ pub struct ProcessTop {
     /// Unix epoch, milliseconds.
     pub ts_ms: i64,
     pub entries: Vec<ProcessSample>,
+}
+
+/// The first stored layout of `ProcessSample`, kept to read older history.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessSampleV1 {
+    pub pid: u32,
+    pub name: String,
+    pub cpu_pct: f32,
+    pub private_bytes: u64,
+    pub read_bps: f32,
+    pub write_bps: f32,
+}
+
+/// The first stored layout of `ProcessTop`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessTopV1 {
+    pub ts_ms: i64,
+    pub entries: Vec<ProcessSampleV1>,
+}
+
+impl From<ProcessTopV1> for ProcessTop {
+    fn from(old: ProcessTopV1) -> ProcessTop {
+        ProcessTop {
+            ts_ms: old.ts_ms,
+            entries: old
+                .entries
+                .into_iter()
+                .map(|p| ProcessSample {
+                    pid: p.pid,
+                    name: p.name,
+                    cpu_pct: p.cpu_pct,
+                    private_bytes: p.private_bytes,
+                    read_bps: p.read_bps,
+                    write_bps: p.write_bps,
+                    gpu_pct: 0.0,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Union of the `per_metric` heaviest processes by CPU, private memory and I/O, sorted by CPU.
@@ -82,6 +123,7 @@ pub fn top_processes(
                 private_bytes: p.private_bytes,
                 read_bps: rate(read),
                 write_bps: rate(write),
+                gpu_pct: 0.0,
             }
         })
         .collect();

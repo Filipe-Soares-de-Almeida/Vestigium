@@ -11,7 +11,7 @@ use vestigium_collect::{
 };
 use vestigium_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
 use vestigium_ipc::AgentStatus;
-use vestigium_store::{Batcher, Ring, Store};
+use vestigium_store::{Batcher, Ring, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use crate::app::{lock, now_ms};
@@ -56,7 +56,7 @@ pub fn run_sampler(
         .spawn(move || {
             let mut sampler = Sampler::new(store, flush, probe_rx, status);
             sampler.run(&gate);
-            sampler.flush();
+            sampler.flush_final();
             let _ = done_tx.send(());
         })?;
     Ok(SamplerHandle {
@@ -134,7 +134,7 @@ impl Sampler {
             match gate.state() {
                 GateState::Stopping => return,
                 GateState::Paused => {
-                    self.flush();
+                    self.flush_final();
                     sources.reset();
                     self.snapshots.clear();
                     if gate.wait_while_paused() == GateState::Stopping {
@@ -191,10 +191,12 @@ impl Sampler {
                 isr_pct: cpu.isr_pct,
                 perf_limit_pct: pdh.perf_limit_pct,
                 proc_perf_pct: pdh.proc_perf_pct,
+                mem_total_bytes: memory.total_bytes,
                 mem_avail_bytes: memory.avail_bytes,
                 commit_bytes: memory.commit_bytes,
                 commit_limit_bytes: memory.commit_limit_bytes,
                 hard_faults_per_s: pdh.hard_faults_per_s,
+                gpu_pct: None,
                 probe_max_lag_ms,
                 sampler_lag_ms,
                 cores: cpu.cores,
@@ -235,13 +237,23 @@ impl Sampler {
         Ok(())
     }
 
-    /// Writes whatever is buffered.
+    /// Writes whatever is buffered except the minute still open.
     fn flush(&mut self) {
         let segments = self.batcher.take();
+        self.write(&segments);
+    }
+
+    /// Writes everything buffered, the open minute included, before a pause or a stop.
+    fn flush_final(&mut self) {
+        let segments = self.batcher.take_final();
+        self.write(&segments);
+    }
+
+    fn write(&mut self, segments: &[Segment]) {
         if segments.is_empty() {
             return;
         }
-        if let Err(err) = self.store.append(&segments) {
+        if let Err(err) = self.store.append(segments) {
             self.report(&err);
         }
     }

@@ -1,6 +1,7 @@
 //! Local SQLite history of Vestigium.
 
 mod batch;
+mod read;
 mod ring;
 mod schema;
 mod segment;

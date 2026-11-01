@@ -10,12 +10,17 @@ const DEFLATE_LEVEL: u8 = 6;
 /// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory.
 const MAX_INFLATED: usize = 16 << 20;
 
-/// Which kind of item a segment holds.
+/// Which kind of item a segment holds; an item whose layout changes gets a new code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Series {
-    Samples = 1,
-    Processes = 2,
+    /// `SampleV1`, from before memory total and GPU were recorded.
+    SamplesV1 = 1,
+    /// `ProcessTopV1`, from before per-process GPU was recorded.
+    ProcessesV1 = 2,
+    Samples = 3,
+    Processes = 4,
+    Minutes = 5,
 }
 
 /// One batch of items of one series, stored as one row.

@@ -52,6 +52,7 @@ fn memory_info_is_consistent() {
     let memory = memory_info().unwrap();
 
     assert!(memory.avail_bytes > 0);
+    assert!(memory.avail_bytes <= memory.total_bytes);
     assert!(memory.commit_bytes > 0);
     assert!(memory.commit_bytes <= memory.commit_limit_bytes);
 }

@@ -6,6 +6,7 @@ use crate::CollectError;
 /// System memory, in bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryInfo {
+    pub total_bytes: u64,
     pub avail_bytes: u64,
     pub commit_bytes: u64,
     pub commit_limit_bytes: u64,
@@ -20,6 +21,7 @@ pub fn memory_info() -> Result<MemoryInfo, CollectError> {
     // SAFETY: fills `status`, whose length field is set.
     unsafe { GlobalMemoryStatusEx(&mut status)? };
     Ok(MemoryInfo {
+        total_bytes: status.ullTotalPhys,
         avail_bytes: status.ullAvailPhys,
         commit_bytes: status
             .ullTotalPageFile

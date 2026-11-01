@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use vestigium_core::{ProcessTop, Sample};
+use vestigium_core::{MinuteRollup, MinuteSample, ProcessTop, Sample, minute_of};
 
 use crate::{Segment, Series, encode};
 
@@ -10,6 +10,8 @@ pub struct Batcher {
     interval_ms: i64,
     samples: Vec<Sample>,
     processes: Vec<ProcessTop>,
+    minutes: Vec<MinuteSample>,
+    rollup: MinuteRollup,
 }
 
 impl Batcher {
@@ -18,10 +20,21 @@ impl Batcher {
             interval_ms: i64::try_from(interval.as_millis()).unwrap_or(i64::MAX),
             samples: Vec::new(),
             processes: Vec::new(),
+            minutes: Vec::new(),
+            rollup: MinuteRollup::default(),
         }
     }
 
+    /// Buffers a sample; the first one of a new wall-clock minute closes the previous minute.
     pub fn push_sample(&mut self, sample: Sample) {
+        if self
+            .rollup
+            .minute_ms()
+            .is_some_and(|minute| minute != minute_of(sample.ts_ms))
+        {
+            self.minutes.extend(self.rollup.finish());
+        }
+        self.rollup.push(&sample);
         self.samples.push(sample);
     }
 
@@ -34,6 +47,7 @@ impl Batcher {
         let oldest = [
             self.samples.first().map(|s| s.ts_ms),
             self.processes.first().map(|p| p.ts_ms),
+            self.minutes.first().map(|m| m.ts_ms),
         ]
         .into_iter()
         .flatten()
@@ -41,27 +55,39 @@ impl Batcher {
         oldest.is_some_and(|ts| now_ms.saturating_sub(ts) >= self.interval_ms)
     }
 
-    /// Empties the buffer into one segment per non-empty series.
+    /// Empties the buffer into one segment per non-empty series; the open minute stays.
     pub fn take(&mut self) -> Vec<Segment> {
-        let mut segments = Vec::with_capacity(2);
-        if let (Some(first), Some(last)) = (self.samples.first(), self.samples.last()) {
-            segments.push(Segment {
-                series: Series::Samples,
-                start_ms: first.ts_ms,
-                end_ms: last.ts_ms,
-                data: encode(&self.samples),
-            });
-        }
-        if let (Some(first), Some(last)) = (self.processes.first(), self.processes.last()) {
-            segments.push(Segment {
-                series: Series::Processes,
-                start_ms: first.ts_ms,
-                end_ms: last.ts_ms,
-                data: encode(&self.processes),
-            });
-        }
+        let mut segments = Vec::with_capacity(3);
+        push_segment(&mut segments, Series::Samples, &self.samples, |s| s.ts_ms);
+        push_segment(&mut segments, Series::Processes, &self.processes, |p| {
+            p.ts_ms
+        });
+        push_segment(&mut segments, Series::Minutes, &self.minutes, |m| m.ts_ms);
         self.samples.clear();
         self.processes.clear();
+        self.minutes.clear();
         segments
+    }
+
+    /// Like `take`, and also closes the open minute: for a pause, a suspend or a stop.
+    pub fn take_final(&mut self) -> Vec<Segment> {
+        self.minutes.extend(self.rollup.finish());
+        self.take()
+    }
+}
+
+fn push_segment<T: serde::Serialize>(
+    segments: &mut Vec<Segment>,
+    series: Series,
+    items: &[T],
+    ts_ms: impl Fn(&T) -> i64,
+) {
+    if let (Some(first), Some(last)) = (items.first(), items.last()) {
+        segments.push(Segment {
+            series,
+            start_ms: ts_ms(first),
+            end_ms: ts_ms(last),
+            data: encode(items),
+        });
     }
 }

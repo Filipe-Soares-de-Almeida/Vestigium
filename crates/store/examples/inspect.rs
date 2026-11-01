@@ -2,8 +2,15 @@
 
 use std::path::PathBuf;
 
-use vestigium_core::{ProcessTop, Sample};
-use vestigium_store::{Series, Store, decode};
+use vestigium_store::{Series, Store};
+
+const SERIES: [(Series, &str); 5] = [
+    (Series::SamplesV1, "samples v1"),
+    (Series::ProcessesV1, "processes v1"),
+    (Series::Samples, "samples"),
+    (Series::Processes, "processes"),
+    (Series::Minutes, "minutes"),
+];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path: PathBuf = std::env::args_os()
@@ -13,33 +20,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Store::open(&path)?;
     println!("schema version {}", store.schema_version()?);
 
-    let samples = store.segments(Series::Samples, i64::MIN, i64::MAX)?;
-    let count: usize = samples
-        .iter()
-        .map(|s| decode::<Sample>(&s.data).map(|v| v.len()))
-        .sum::<Result<_, _>>()?;
-    print_series(
-        "samples",
-        samples.len(),
-        count,
-        samples.last().map(|s| s.end_ms),
-    );
+    for (series, name) in SERIES {
+        let segments = store.segments(series, i64::MIN, i64::MAX)?;
+        let last = segments
+            .last()
+            .map_or_else(|| "-".to_string(), |s| s.end_ms.to_string());
+        println!("{name}: {} segments, last end_ms {last}", segments.len());
+    }
 
-    let tops = store.segments(Series::Processes, i64::MIN, i64::MAX)?;
-    let count: usize = tops
-        .iter()
-        .map(|s| decode::<ProcessTop>(&s.data).map(|v| v.len()))
-        .sum::<Result<_, _>>()?;
-    print_series(
-        "processes",
-        tops.len(),
-        count,
-        tops.last().map(|s| s.end_ms),
+    let (all, max) = (i64::MIN, i64::MAX);
+    println!(
+        "decoded: {} samples, {} process rankings, {} minutes",
+        store.samples(all, max)?.len(),
+        store.tops(all, max)?.len(),
+        store.minutes(all, max)?.len()
     );
     Ok(())
-}
-
-fn print_series(name: &str, segments: usize, items: usize, last_end_ms: Option<i64>) {
-    let last = last_end_ms.map_or_else(|| "-".to_string(), |ms| ms.to_string());
-    println!("{name}: {segments} segments, {items} items, last end_ms {last}");
 }
