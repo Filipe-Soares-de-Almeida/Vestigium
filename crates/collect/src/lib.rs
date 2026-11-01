@@ -2,6 +2,7 @@
 
 mod cpu;
 mod disk;
+mod events;
 mod gpu;
 mod memory;
 mod pdh;
@@ -11,6 +12,7 @@ mod timer;
 
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
+pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};

@@ -42,5 +42,8 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Test the event subscription against the real event log
+        run: cargo test -p vestigium-collect --test events --locked -- --ignored
+
       - name: Build release
         run: cargo build --workspace --release --locked
