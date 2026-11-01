@@ -2,6 +2,7 @@
 
 mod event;
 mod gate;
+mod hang;
 mod machine;
 mod minute;
 mod probe;
@@ -12,6 +13,7 @@ pub use event::{
     CURATED, Channel, CuratedEvent, EventMeaning, WinEvent, classify, query_xml, query_xml_for,
 };
 pub use gate::{GateState, RunGate};
+pub use hang::HungWindow;
 pub use machine::{DiskInfo, MachineInfo, Media};
 pub use minute::{DiskMinute, MINUTE_MS, MinuteRollup, MinuteSample, minute_of, summarize_minute};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
