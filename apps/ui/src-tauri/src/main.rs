@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod about;
 mod agent;
 mod commands;
 mod history;
@@ -29,6 +30,8 @@ fn main() {
             commands::set_autostart,
             commands::set_settings,
             commands::settings,
+            about::about,
+            about::open_data_folder,
         ])
         .build(tauri::generate_context!())
         .expect("the interface failed to start");

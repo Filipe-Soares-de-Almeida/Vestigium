@@ -12,6 +12,8 @@ const COMMANDS: &[&str] = &[
     "set_autostart",
     "set_settings",
     "settings",
+    "about",
+    "open_data_folder",
 ];
 
 fn main() {

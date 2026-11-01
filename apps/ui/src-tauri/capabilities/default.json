@@ -20,6 +20,8 @@
     "allow-set-sensitive",
     "allow-set-autostart",
     "allow-set-settings",
-    "allow-settings"
+    "allow-settings",
+    "allow-about",
+    "allow-open-data-folder"
   ]
 }
