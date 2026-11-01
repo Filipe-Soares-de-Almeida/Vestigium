@@ -4,16 +4,18 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostQuitMessage,
-    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_ENDSESSION, WM_QUERYENDSESSION,
-    WNDCLASSW, WS_OVERLAPPED,
+    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_ENDSESSION, WM_POWERBROADCAST,
+    WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::w;
+
+use crate::power;
 
 type Handler = Box<dyn Fn() + Send + Sync>;
 
 static ON_END_SESSION: OnceLock<Handler> = OnceLock::new();
 
-/// Creates the hidden top-level window that hears logoff and shutdown; `on_end` runs before the session ends.
+/// Creates the hidden top-level window that hears logoff, shutdown, suspend and resume; `on_end` runs before the session ends.
 pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::core::Result<HWND> {
     let _ = ON_END_SESSION.set(Box::new(on_end));
     // SAFETY: the module handle of this executable.
@@ -80,6 +82,10 @@ unsafe extern "system" fn session_proc(
                 on_end();
             }
             LRESULT(0)
+        }
+        WM_POWERBROADCAST => {
+            power::on_broadcast(wparam.0);
+            LRESULT(1)
         }
         // SAFETY: forwards everything else unchanged.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

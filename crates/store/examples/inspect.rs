@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use vestigium_core::Sample;
 use vestigium_store::{Series, Store};
 
 const SERIES: [(Series, &str); 5] = [
@@ -29,11 +30,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let (all, max) = (i64::MIN, i64::MAX);
+    let samples = store.samples(all, max)?;
     println!(
         "decoded: {} samples, {} process rankings, {} minutes",
-        store.samples(all, max)?.len(),
+        samples.len(),
         store.tops(all, max)?.len(),
         store.minutes(all, max)?.len()
     );
+    let worst = |lag: fn(&Sample) -> f32| {
+        samples
+            .iter()
+            .max_by(|a, b| lag(a).total_cmp(&lag(b)))
+            .map_or_else(
+                || "-".to_string(),
+                |s| format!("{:.1} ms at {}", lag(s), s.ts_ms),
+            )
+    };
+    println!("worst probe lag: {}", worst(|s| s.probe_max_lag_ms));
+    println!("worst sampler lag: {}", worst(|s| s.sampler_lag_ms));
     Ok(())
 }

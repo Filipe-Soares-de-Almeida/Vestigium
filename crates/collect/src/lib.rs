@@ -12,7 +12,7 @@ pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
 pub use probe::spawn_probe;
 pub use processes::ProcessSnapshotter;
-pub use timer::{HighResTimer, monotonic_ms};
+pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
 
 /// Why a data source failed.
 #[derive(Debug, thiserror::Error)]

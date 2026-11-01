@@ -7,14 +7,17 @@ use std::time::Duration;
 
 use vestigium_collect::{
     CollectError, CpuSampler, HighResTimer, PdhSampler, ProcessSnapshotter, logical_cpus,
-    memory_info, monotonic_ms,
+    memory_info, unbiased_ms, wall_ms,
 };
-use vestigium_core::{GateState, ProcessCounters, ProcessTop, RunGate, Sample, top_processes};
+use vestigium_core::{
+    GateState, ProbeTick, ProcessCounters, ProcessTop, RunGate, Sample, top_processes,
+};
 use vestigium_ipc::AgentStatus;
 use vestigium_store::{Batcher, Ring, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
-use crate::app::{lock, now_ms};
+use crate::app::lock;
+use crate::power::PowerEvent;
 
 const TICK_MS: f64 = 1000.0;
 /// Seconds between two stored process rankings.
@@ -47,14 +50,15 @@ pub fn run_sampler(
     store: Store,
     flush: Duration,
     gate: Arc<RunGate>,
-    probe_rx: Receiver<f32>,
+    probe_rx: Receiver<ProbeTick>,
+    power_rx: Receiver<PowerEvent>,
     status: Arc<Mutex<AgentStatus>>,
 ) -> io::Result<SamplerHandle> {
     let (done_tx, done_rx) = mpsc::channel();
     thread::Builder::new()
         .name("sampler".to_string())
         .spawn(move || {
-            let mut sampler = Sampler::new(store, flush, probe_rx, status);
+            let mut sampler = Sampler::new(store, flush, probe_rx, power_rx, status);
             sampler.run(&gate);
             sampler.flush_final();
             let _ = done_tx.send(());
@@ -67,7 +71,8 @@ pub fn run_sampler(
 struct Sampler {
     store: Store,
     batcher: Batcher,
-    probe_rx: Receiver<f32>,
+    probe_rx: Receiver<ProbeTick>,
+    power_rx: Receiver<PowerEvent>,
     status: Arc<Mutex<AgentStatus>>,
     samples: Ring<Sample>,
     tops: Ring<ProcessTop>,
@@ -99,13 +104,15 @@ impl Sampler {
     fn new(
         store: Store,
         flush: Duration,
-        probe_rx: Receiver<f32>,
+        probe_rx: Receiver<ProbeTick>,
+        power_rx: Receiver<PowerEvent>,
         status: Arc<Mutex<AgentStatus>>,
     ) -> Sampler {
         Sampler {
             store,
             batcher: Batcher::new(flush),
             probe_rx,
+            power_rx,
             status,
             samples: Ring::with_capacity(RING_SAMPLES),
             tops: Ring::with_capacity(RING_TOPS),
@@ -115,6 +122,7 @@ impl Sampler {
     }
 
     /// Ticks once a second until the gate says stop; pausing writes the batch and blocks.
+    /// Time runs on the unbiased clock, so a sleep of the whole system is not a late tick.
     fn run(&mut self, gate: &RunGate) {
         let opened = PdhSampler::open().and_then(|pdh| HighResTimer::new().map(|t| (pdh, t)));
         let (pdh, timer) = match opened {
@@ -127,7 +135,7 @@ impl Sampler {
             processes: ProcessSnapshotter::with_capacity(SNAPSHOT_BUFFER),
         };
         sources.prime();
-        let mut next_tick = monotonic_ms() + TICK_MS;
+        let mut next_tick = unbiased_ms() + TICK_MS;
         let mut ticks = 0usize;
         let mut trim_at = Some(TRIM_AFTER_TICKS);
         loop {
@@ -142,22 +150,27 @@ impl Sampler {
                     }
                     self.probe_rx.try_iter().for_each(drop);
                     sources.prime();
-                    next_tick = monotonic_ms() + TICK_MS;
+                    next_tick = unbiased_ms() + TICK_MS;
                     trim_at = Some(ticks + TRIM_AFTER_TICKS);
                     continue;
                 }
                 GateState::Running => {}
             }
 
-            let due_ms = (next_tick - monotonic_ms()).max(0.0);
+            let due_ms = (next_tick - unbiased_ms()).max(0.0);
             if let Err(err) = timer.wait(Duration::from_secs_f64(due_ms / 1000.0)) {
                 return self.report(&err);
             }
-            let woke = monotonic_ms();
+            let woke = unbiased_ms();
             let sampler_lag_ms = (woke - next_tick).max(0.0) as f32;
             // After a long stall, start a fresh schedule instead of catching up.
             next_tick = (next_tick + TICK_MS).max(woke + TICK_MS / 2.0);
             if gate.state() != GateState::Running {
+                continue;
+            }
+            if self.on_power(&mut sources) {
+                next_tick = unbiased_ms() + TICK_MS;
+                trim_at = Some(ticks + TRIM_AFTER_TICKS);
                 continue;
             }
 
@@ -179,8 +192,11 @@ impl Sampler {
         sampler_lag_ms: f32,
         ticks: usize,
     ) -> Result<(), CollectError> {
-        let ts_ms = now_ms();
-        let probe_max_lag_ms = self.probe_rx.try_iter().fold(0.0, f32::max);
+        let ts_ms = wall_ms();
+        let probe_max_lag_ms = self
+            .probe_rx
+            .try_iter()
+            .fold(0.0, |max: f32, tick| max.max(tick.lag_ms));
         let memory = memory_info()?;
         let (cpu, pdh) = (sources.cpu.sample()?, sources.pdh.sample()?);
         if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
@@ -237,6 +253,25 @@ impl Sampler {
         Ok(())
     }
 
+    /// Handles pending suspend and resume notices; true when a resume restarted the sources.
+    fn on_power(&mut self, sources: &mut Sources) -> bool {
+        let mut resumed = false;
+        while let Ok(event) = self.power_rx.try_recv() {
+            match event {
+                PowerEvent::Suspend => self.flush_final(),
+                PowerEvent::Resume => {
+                    // Probe ticks and rates measured across the suspension are dropped.
+                    self.probe_rx.try_iter().for_each(drop);
+                    sources.reset();
+                    sources.prime();
+                    self.snapshots.clear();
+                    resumed = true;
+                }
+            }
+        }
+        resumed
+    }
+
     /// Writes whatever is buffered except the minute still open.
     fn flush(&mut self) {
         let segments = self.batcher.take();
@@ -279,16 +314,34 @@ mod tests {
 
     use super::*;
 
-    fn start(
-        dir: &std::path::Path,
-        flush: Duration,
-    ) -> (Arc<RunGate>, SamplerHandle, Arc<Mutex<AgentStatus>>) {
+    struct Running {
+        gate: Arc<RunGate>,
+        handle: SamplerHandle,
+        status: Arc<Mutex<AgentStatus>>,
+        power_tx: mpsc::Sender<PowerEvent>,
+    }
+
+    fn start(dir: &std::path::Path, flush: Duration) -> Running {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let gate = RunGate::new();
         let (_probe_tx, probe_rx) = mpsc::channel();
+        let (power_tx, power_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(AgentStatus::default()));
-        let handle = run_sampler(store, flush, gate.clone(), probe_rx, status.clone()).unwrap();
-        (gate, handle, status)
+        let handle = run_sampler(
+            store,
+            flush,
+            gate.clone(),
+            probe_rx,
+            power_rx,
+            status.clone(),
+        )
+        .unwrap();
+        Running {
+            gate,
+            handle,
+            status,
+            power_tx,
+        }
     }
 
     fn samples(dir: &std::path::Path) -> (usize, usize, Option<i64>) {
@@ -323,7 +376,12 @@ mod tests {
     #[test]
     fn sampler_writes_a_batch_once_it_is_due() {
         let dir = tempfile::tempdir().unwrap();
-        let (gate, handle, status) = start(dir.path(), Duration::from_secs(1));
+        let Running {
+            gate,
+            handle,
+            status,
+            ..
+        } = start(dir.path(), Duration::from_secs(1));
 
         let written = wait_until(PATIENCE, || samples(dir.path()).0 >= 1);
         gate.set(GateState::Stopping);
@@ -336,7 +394,12 @@ mod tests {
     #[test]
     fn sampler_writes_what_it_holds_when_stopped() {
         let dir = tempfile::tempdir().unwrap();
-        let (gate, handle, status) = start(dir.path(), NEVER_DUE);
+        let Running {
+            gate,
+            handle,
+            status,
+            ..
+        } = start(dir.path(), NEVER_DUE);
         assert!(wait_until(PATIENCE, || sampled(&status)), "no sample taken");
         assert_eq!(samples(dir.path()).0, 0, "nothing is due within the hour");
 
@@ -350,9 +413,45 @@ mod tests {
     }
 
     #[test]
+    fn sampler_flushes_on_suspend_and_resets_on_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), NEVER_DUE);
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
+
+        running.power_tx.send(PowerEvent::Suspend).unwrap();
+        assert!(
+            wait_until(PATIENCE, || samples(dir.path()).0 == 1),
+            "suspending did not write the buffered batch"
+        );
+        let resumed_at = wall_ms();
+        running.power_tx.send(PowerEvent::Resume).unwrap();
+        let sampled_again = wait_until(PATIENCE, || {
+            lock(&running.status)
+                .last_sample_ms
+                .is_some_and(|ms| ms > resumed_at)
+        });
+        running.gate.set(GateState::Stopping);
+        assert!(
+            running.handle.wait(Duration::from_secs(3)),
+            "sampler did not stop"
+        );
+
+        assert!(sampled_again, "no sample after resuming");
+        assert_eq!(lock(&running.status).last_error, None);
+    }
+
+    #[test]
     fn paused_sampler_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let (gate, handle, status) = start(dir.path(), NEVER_DUE);
+        let Running {
+            gate,
+            handle,
+            status,
+            ..
+        } = start(dir.path(), NEVER_DUE);
         assert!(wait_until(PATIENCE, || sampled(&status)), "no sample taken");
 
         gate.set(GateState::Paused);

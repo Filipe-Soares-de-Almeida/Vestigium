@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
@@ -7,6 +7,7 @@ use windows::Win32::System::Threading::{
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, INFINITE, SetWaitableTimer,
     TIMER_ALL_ACCESS, WaitForSingleObject,
 };
+use windows::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTimePrecise;
 use windows::core::PCWSTR;
 
 use crate::CollectError;
@@ -69,4 +70,18 @@ pub fn monotonic_ms() -> f64 {
     // SAFETY: writes the current counter into `ticks`; it cannot fail on Windows XP or later.
     let _ = unsafe { QueryPerformanceCounter(&mut ticks) };
     ticks as f64 * 1000.0 / frequency
+}
+
+/// Milliseconds of interrupt time, leaving out the time the system spent asleep or hibernating.
+pub fn unbiased_ms() -> f64 {
+    // SAFETY: a plain read of the interrupt-time counter.
+    let ticks_100ns = unsafe { QueryUnbiasedInterruptTimePrecise() };
+    ticks_100ns as f64 / 10_000.0
+}
+
+/// The wall clock, Unix epoch milliseconds.
+pub fn wall_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }

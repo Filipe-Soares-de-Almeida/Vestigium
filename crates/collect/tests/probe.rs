@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vestigium_collect::{HighResTimer, monotonic_ms, spawn_probe};
-use vestigium_core::{GateState, RunGate};
+use vestigium_collect::{HighResTimer, monotonic_ms, spawn_probe, unbiased_ms, wall_ms};
+use vestigium_core::{GateState, ProbeTick, RunGate};
 
 #[test]
 fn timer_waits_at_least_the_period() {
@@ -29,18 +29,38 @@ fn monotonic_ms_advances() {
 }
 
 #[test]
-fn probe_reports_ticks() {
+fn unbiased_clock_advances() {
+    let before = unbiased_ms();
+    thread::sleep(Duration::from_millis(50));
+    let after = unbiased_ms();
+
+    let advanced = after - before;
+    assert!(
+        (40.0..2_000.0).contains(&advanced),
+        "advanced {advanced} ms"
+    );
+}
+
+#[test]
+fn probe_sends_every_tick() {
     let gate = RunGate::new();
     let (tx, rx) = mpsc::channel();
-    let probe = spawn_probe(Duration::from_millis(50), gate.clone(), tx).unwrap();
+    let started = wall_ms();
+    let probe = spawn_probe(Duration::from_millis(100), gate.clone(), tx).unwrap();
 
     thread::sleep(Duration::from_millis(1_000));
     gate.set(GateState::Stopping);
     probe.join().unwrap();
 
-    let lags: Vec<f32> = rx.try_iter().collect();
-    assert!(lags.len() >= 10, "only {} ticks", lags.len());
-    assert!(lags.iter().all(|&lag| lag >= 0.0));
+    let ticks: Vec<ProbeTick> = rx.try_iter().collect();
+    assert!(ticks.len() >= 6, "only {} ticks", ticks.len());
+    assert!(ticks.iter().all(|t| t.lag_ms >= 0.0));
+    assert!(ticks.windows(2).all(|w| w[0].wall_ms <= w[1].wall_ms));
+    assert!(
+        ticks
+            .iter()
+            .all(|t| t.wall_ms >= started && t.wall_ms <= wall_ms())
+    );
 }
 
 #[test]

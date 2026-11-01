@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     probe.join().map_err(|_| "probe thread panicked")?;
     let cpu_ms = process_cpu_ms() - cpu_before;
 
-    let mut lags: Vec<f32> = rx.try_iter().collect();
+    let mut lags: Vec<f32> = rx.try_iter().map(|tick| tick.lag_ms).collect();
     lags.sort_by(f32::total_cmp);
     let pct = |p: f64| lags[((lags.len() - 1) as f64 * p).round() as usize];
     println!(

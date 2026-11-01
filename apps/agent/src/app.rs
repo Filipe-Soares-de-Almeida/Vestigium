@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::spawn_probe;
+use vestigium_collect::{spawn_probe, wall_ms};
 use vestigium_core::{GateState, RunGate};
 use vestigium_i18n::Catalog;
 use vestigium_ipc::{
@@ -17,7 +17,7 @@ use windows::core::HSTRING;
 
 use crate::sampler::run_sampler;
 use crate::tray::{Action, Tray};
-use crate::{paths, shutdown};
+use crate::{paths, power, shutdown};
 
 const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 const PROBE_PERIOD: Duration = Duration::from_millis(100);
@@ -93,15 +93,23 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     let store = Store::open(&data_dir.join("vestigium.db")).map_err(failed)?;
     let gate = RunGate::new();
     let status = Arc::new(Mutex::new(AgentStatus {
-        started_at_ms: now_ms(),
+        started_at_ms: wall_ms(),
         ..AgentStatus::default()
     }));
 
     let (probe_tx, probe_rx) = mpsc::channel();
+    let (power_tx, power_rx) = mpsc::channel();
     spawn_probe(PROBE_PERIOD, gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
-        run_sampler(store, options.flush, gate.clone(), probe_rx, status.clone())
-            .map_err(failed)?,
+        run_sampler(
+            store,
+            options.flush,
+            gate.clone(),
+            probe_rx,
+            power_rx,
+            status.clone(),
+        )
+        .map_err(failed)?,
     );
     let stop = {
         let gate = gate.clone();
@@ -124,7 +132,11 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     let stop = Arc::new(stop);
     {
         let stop = stop.clone();
-        shutdown::watch_session_end(move || stop()).map_err(failed)?;
+        let window = shutdown::watch_session_end(move || stop()).map_err(failed)?;
+        power::watch(window, move |event| {
+            let _ = power_tx.send(event);
+        })
+        .map_err(failed)?;
     }
     shutdown::pump(|| {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
@@ -149,12 +161,6 @@ pub fn show_error(catalog: &Catalog, reason: &str) {
             MB_OK | MB_ICONERROR,
         )
     };
-}
-
-pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
 }
 
 pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
