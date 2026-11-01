@@ -6,8 +6,8 @@ use std::time::Duration;
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
 use vestigium_core::{
-    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, RecentState, RunGate, SENSITIVE_FOR, Settings,
-    Timing,
+    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, RING_MS, Reading, RecentState, Ring, RunGate,
+    SENSITIVE_FOR, Settings, Timing,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -28,6 +28,8 @@ const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 /// How far back the first run reads the curated Windows events.
 const EVENT_BACKFILL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// Ten minutes of readings at 1 Hz, with room for late ticks.
+const READINGS_KEPT: usize = 660;
 
 /// Command-line options, for tests and measurements.
 #[derive(Clone, Debug, PartialEq)]
@@ -83,6 +85,8 @@ pub struct Shared {
     pub sensitive: Arc<SensitiveMode>,
     pub recent: Arc<Mutex<RecentState>>,
     pub now: Arc<Mutex<NowFrame>>,
+    /// The last ten minutes, one reading a second.
+    pub readings: Arc<Mutex<Ring<Reading>>>,
     pub settings: Arc<Mutex<Settings>>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
@@ -121,6 +125,17 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             ..lock(&shared.status).clone()
         }),
         Request::Now => Response::Now(lock(&shared.now).clone()),
+        Request::Recent => {
+            let since_ms = wall_ms() - RING_MS;
+            let readings = lock(&shared.readings);
+            Response::Recent {
+                readings: readings
+                    .iter()
+                    .filter(|r| r.ts_ms >= since_ms)
+                    .copied()
+                    .collect(),
+            }
+        }
         Request::SetPaused { paused } => {
             shared.gate.set(if paused {
                 GateState::Paused
@@ -193,6 +208,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         ),
         recent: Arc::new(Mutex::new(RecentState::default())),
         now: Arc::new(Mutex::new(NowFrame::default())),
+        readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
         exe: std::env::current_exe().map_err(failed)?,
     });
@@ -221,6 +237,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 status: shared.status.clone(),
                 recent: shared.recent.clone(),
                 now: shared.now.clone(),
+                readings: shared.readings.clone(),
                 settings: shared.settings.clone(),
             },
         )
@@ -337,6 +354,7 @@ mod tests {
             sensitive: SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR),
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: Arc::new(Mutex::new(NowFrame::default())),
+            readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
             settings: Arc::new(Mutex::new(Settings::default())),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
@@ -401,6 +419,30 @@ mod tests {
         *lock(&shared.now) = frame.clone();
 
         assert_eq!(handle(Request::Now, &shared, None), Response::Now(frame));
+    }
+
+    #[test]
+    fn recent_returns_the_ring_in_order() {
+        let shared = shared();
+        let now = wall_ms();
+        for ago_ms in [700_000, 590_000, 30_000, 1_000] {
+            lock(&shared.readings).push(Reading {
+                ts_ms: now - ago_ms,
+                cpu_pct: 5.0,
+                mem_used_pct: Some(30.0),
+                disk_active_pct: 1.0,
+                disk_latency_ms: 0.5,
+                gpu_pct: None,
+                probe_lag_ms: 1.0,
+            });
+        }
+
+        let Response::Recent { readings } = handle(Request::Recent, &shared, None) else {
+            panic!("not the recent readings");
+        };
+
+        let times: Vec<i64> = readings.iter().map(|r| r.ts_ms).collect();
+        assert_eq!(times, [now - 590_000, now - 30_000, now - 1_000]);
     }
 
     #[test]

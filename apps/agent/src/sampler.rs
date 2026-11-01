@@ -13,8 +13,8 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
-    OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RecentState, RunGate,
-    Sample, Settings, Severity, Timing, WinEvent, top_processes,
+    OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RING_MS, Reading,
+    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, top_processes,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -72,6 +72,8 @@ pub struct Wiring {
     pub recent: Arc<Mutex<RecentState>>,
     /// The latest second watched, for the live screen.
     pub now: Arc<Mutex<NowFrame>>,
+    /// The last ten minutes, one reading a second, for the live screen.
+    pub readings: Arc<Mutex<Ring<Reading>>>,
     /// Retention is read from here at every prune, so a change applies on the next one.
     pub settings: Arc<Mutex<Settings>>,
 }
@@ -110,6 +112,7 @@ struct Sampler {
     status: Arc<Mutex<AgentStatus>>,
     recent: Arc<Mutex<RecentState>>,
     now: Arc<Mutex<NowFrame>>,
+    readings: Arc<Mutex<Ring<Reading>>>,
     settings: Arc<Mutex<Settings>>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
@@ -163,6 +166,7 @@ impl Sampler {
             status: wiring.status,
             recent: wiring.recent,
             now: wiring.now,
+            readings: wiring.readings,
             settings: wiring.settings,
             events: Vec::new(),
             bookmark_xml: None,
@@ -308,6 +312,11 @@ impl Sampler {
             self.gpu_by_pid = pdh.gpu.map(|gpu| gpu.per_pid).unwrap_or_default();
             self.learn_machine(&sample);
             lock(&self.now).sample = Some(sample.clone());
+            {
+                let mut readings = lock(&self.readings);
+                readings.drop_while(|r| r.ts_ms < ts_ms - RING_MS);
+                readings.push(Reading::of_sample(&sample));
+            }
             self.blackbox.push_sample(sample.clone());
             self.batcher.push_sample(sample);
             lock(&self.status).last_sample_ms = Some(ts_ms);
@@ -588,6 +597,7 @@ mod tests {
                 status: status.clone(),
                 recent: Arc::new(Mutex::new(RecentState::default())),
                 now: Arc::new(Mutex::new(NowFrame::default())),
+                readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
                 settings: Arc::new(Mutex::new(Settings::default())),
             },
         )

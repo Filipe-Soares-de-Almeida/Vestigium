@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use vestigium_core::{HungWindow, OccurrenceSummary, ProcessTop, Sample, Settings};
+use vestigium_core::{HungWindow, OccurrenceSummary, ProcessTop, Reading, Sample, Settings};
 
 /// Version of the messages below; both ends refuse a different one.
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -13,6 +13,8 @@ pub enum Request {
     Status,
     /// The latest second watched, for the live screen.
     Now,
+    /// The last ten minutes, so the live screen opens with them drawn.
+    Recent,
     SetPaused {
         paused: bool,
     },
@@ -35,6 +37,10 @@ pub enum Response {
     },
     Status(AgentStatus),
     Now(NowFrame),
+    /// One reading a second, oldest first.
+    Recent {
+        readings: Vec<Reading>,
+    },
     Settings {
         settings: Settings,
         autostart: bool,

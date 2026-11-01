@@ -1,4 +1,4 @@
-use vestigium_core::{LanguagePref, Settings};
+use vestigium_core::{LanguagePref, Reading, Settings};
 use vestigium_ipc::{
     AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
 };
@@ -22,6 +22,7 @@ fn every_request_roundtrips_as_json() {
         },
         Request::Status,
         Request::Now,
+        Request::Recent,
         Request::SetPaused { paused: true },
         Request::SetSensitive { on: true },
         Request::Settings,
@@ -46,6 +47,17 @@ fn every_response_roundtrips_as_json() {
             ..AgentStatus::default()
         }),
         Response::Now(NowFrame::default()),
+        Response::Recent {
+            readings: vec![Reading {
+                ts_ms: 1_000,
+                cpu_pct: 12.5,
+                mem_used_pct: Some(40.0),
+                disk_active_pct: 3.0,
+                disk_latency_ms: 0.8,
+                gpu_pct: None,
+                probe_lag_ms: 1.2,
+            }],
+        },
         Response::Settings {
             settings: Settings::default(),
             autostart: true,
