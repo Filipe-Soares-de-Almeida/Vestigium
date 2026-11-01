@@ -119,5 +119,7 @@ How to use this file:
   raises a hint to turn on sensitive mode or names a driver as a suspect. Both now need a quarter
   of one processor's time spent on interrupts, instead of a tenth for the hint and a fifth for
   the suspect.
+- A freeze caused by programs taking every processor is now blamed on the CPU even when the
+  watcher's first reading after the freeze also covers the moment just before it.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

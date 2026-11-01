@@ -316,12 +316,17 @@ fn cpu(focus: Focus, window: &Window) -> Option<Suspect> {
     let mut saturated_ms = 0;
     let mut peak: Option<(i64, f32)> = None;
     for (i, s) in window.samples.iter().enumerate() {
-        if s.ts_ms < from || s.ts_ms > to || !saturated(s) {
+        if s.ts_ms < from || s.ts_ms > to {
             continue;
         }
         // A late sample covers everything since the one before it, as the CPU counters do.
-        let previous = i.checked_sub(1).map(|p| window.samples[p].ts_ms);
-        saturated_ms += previous.map_or(1_000, |p| s.ts_ms - p);
+        let since = i
+            .checked_sub(1)
+            .map_or(s.ts_ms - 1_000, |p| window.samples[p].ts_ms);
+        if !saturated(s) && !busy_through_freeze(s, since, focus) {
+            continue;
+        }
+        saturated_ms += s.ts_ms - since;
         if peak.is_none_or(|(_, v)| s.cpu_pct > v) {
             peak = Some((s.ts_ms, s.cpu_pct));
         }
@@ -349,6 +354,20 @@ fn cpu(focus: Focus, window: &Window) -> Option<Suspect> {
         evidence,
         next_steps: Vec::new(),
     })
+}
+
+/// Whether every core of a sample spanning the freeze was busy for 95% of the frozen time,
+/// so the part of its span before the freeze does not hide a saturated CPU.
+fn busy_through_freeze(sample: &Sample, since_ms: i64, focus: Focus) -> bool {
+    let frozen_ms = sample.ts_ms.min(focus.end) - since_ms.max(focus.start);
+    let span_ms = sample.ts_ms - since_ms;
+    let needed_ms = threshold(Metric::CpuPct) / 100.0 * frozen_ms as f32;
+    frozen_ms > 0
+        && !sample.cores.is_empty()
+        && sample
+            .cores
+            .iter()
+            .all(|c| c.cpu_pct / 100.0 * span_ms as f32 >= needed_ms)
 }
 
 fn dpc_isr(focus: Focus, window: &Window) -> Option<Suspect> {

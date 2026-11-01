@@ -2,8 +2,8 @@ mod common;
 
 use common::{T, event, process, quiet_window, tweak};
 use vestigium_core::{
-    Cause, Confidence, EventMeaning, Evidence, HangOutcome, NextStep, ProcessTop, Suspect, Trigger,
-    Window, suspects,
+    Cause, Confidence, EventMeaning, Evidence, HangOutcome, NextStep, ProcessTop, Sample, Suspect,
+    Trigger, Window, suspects,
 };
 
 type Case = (Vec<Trigger>, Window);
@@ -208,6 +208,24 @@ fn cpu_sees_the_sample_after_a_freeze() {
     });
     let found = suspects(&[freeze(8)], &window);
     assert!(find(&found, |c| matches!(c, Cause::Cpu { .. })).is_some());
+}
+
+#[test]
+fn cpu_sees_a_freeze_its_late_sample_dilutes() {
+    let (_, mut window) = quiet_case();
+    window
+        .samples
+        .retain(|s| !(T..T + 3_000).contains(&s.ts_ms));
+    let all_cores =
+        |pct: f32| move |s: &mut Sample| s.cores.iter_mut().for_each(|c| c.cpu_pct = pct);
+
+    tweak(&mut window, 3, 3, all_cores(80.0));
+    let found = suspects(&[freeze(3)], &window);
+    assert!(find(&found, |c| matches!(c, Cause::Cpu { .. })).is_some());
+
+    tweak(&mut window, 3, 3, all_cores(30.0));
+    let found = suspects(&[freeze(3)], &window);
+    assert!(find(&found, |c| matches!(c, Cause::Cpu { .. })).is_none());
 }
 
 #[test]
