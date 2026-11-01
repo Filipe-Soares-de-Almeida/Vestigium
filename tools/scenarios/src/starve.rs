@@ -13,6 +13,8 @@ use crate::cpu::spin_until;
 
 /// Time to let go of the mouse before the freeze starts.
 const COUNTDOWN: Duration = Duration::from_secs(3);
+/// Time alive after the freeze, so the watcher's next process snapshots still find this process.
+const LINGER: Duration = Duration::from_secs(2);
 
 /// One real-time busy thread per logical processor, which stops every normal thread, the stall probe included.
 pub fn starve(seconds: u64) -> Result<(), String> {
@@ -42,6 +44,9 @@ pub fn starve(seconds: u64) -> Result<(), String> {
     };
     // SAFETY: restores this process's own priority class.
     let _ = unsafe { SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS) };
+    if result.is_ok() {
+        thread::sleep(LINGER);
+    }
     result
 }
 
