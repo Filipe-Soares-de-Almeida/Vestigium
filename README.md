@@ -6,11 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-blue.svg"></a>
-  <img alt="Platform: Windows 10 22H2 and 11, x64" src="https://img.shields.io/badge/platform-Windows%2010%2022H2%20%7C%2011%20x64-0078d6.svg">
-  <img alt="Agent: Rust" src="https://img.shields.io/badge/agent-Rust-b7410e.svg">
-  <img alt="App: Tauri 2 + Svelte 5" src="https://img.shields.io/badge/app-Tauri%202%20%2B%20Svelte%205-24c8db.svg">
-  <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-003b57.svg">
+  <a href="https://github.com/Filipe-Soares-de-Almeida/Vestigium/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Filipe-Soares-de-Almeida/Vestigium/actions/workflows/ci.yml/badge.svg?branch=dev"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d6.svg">
+  <img alt="Built with Rust and Tauri" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-b7410e.svg">
 </p>
 
 ---
@@ -64,6 +63,13 @@ opens. It watches the one PC it is installed on.
 
 ---
 
-## Licence
+## Tested on
 
-Vestigium is released under the [MIT licence](LICENSE).
+| System | Status |
+|---|---|
+| Windows 10 22H2, x64 | Tested |
+| Windows 11, x64 | Not yet tested |
+
+## License
+
+Vestigium is released under the [MIT License](LICENSE).
