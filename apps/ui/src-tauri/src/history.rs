@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(cpu.iter().flatten().fold(0.0, |a: f32, &b| a.max(b)), 100.0);
         let at = ((spike_ms - DAY_START_MS) / 36_000) as usize;
         assert_eq!(cpu[at], Some(100.0));
-        assert_eq!(timeline.columns.state[at], PcState::Pressure);
+        assert_eq!(timeline.columns.state[at], PcState::Busy);
     }
 
     #[test]

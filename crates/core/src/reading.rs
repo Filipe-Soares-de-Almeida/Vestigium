@@ -5,8 +5,6 @@ use crate::{MinuteSample, Sample};
 
 /// Combined load above which the PC counts as busy.
 pub const BUSY_ABOVE: f32 = 38.0;
-/// Combined load above which the PC counts as under pressure.
-pub const PRESSURE_ABOVE: f32 = 88.0;
 /// Share of GPU use that counts towards the load.
 const GPU_WEIGHT: f32 = 0.55;
 /// Memory in use counts only above this percentage.
@@ -85,15 +83,14 @@ impl Reading {
     }
 }
 
-/// State of a span: suspended without a reading, under pressure inside a pressure episode.
+/// State of a span: suspended without a reading, under pressure only inside a pressure episode.
 pub fn pc_state(reading: Option<&Reading>, in_episode: bool) -> PcState {
     let Some(reading) = reading else {
         return PcState::Suspended;
     };
-    let load = reading.load();
-    if in_episode || load > PRESSURE_ABOVE {
+    if in_episode {
         PcState::Pressure
-    } else if load > BUSY_ABOVE {
+    } else if reading.load() > BUSY_ABOVE {
         PcState::Busy
     } else {
         PcState::Calm

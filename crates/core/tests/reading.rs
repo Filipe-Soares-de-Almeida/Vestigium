@@ -1,6 +1,5 @@
 use vestigium_core::{
-    BUSY_ABOVE, DiskLoad, DiskMinute, EpisodeKind, MinuteSample, PRESSURE_ABOVE, PcState, Reading,
-    Sample, pc_state,
+    BUSY_ABOVE, DiskLoad, DiskMinute, EpisodeKind, MinuteSample, PcState, Reading, Sample, pc_state,
 };
 
 fn sample(ts_ms: i64) -> Sample {
@@ -144,12 +143,15 @@ fn minute_state_follows_the_load_rule() {
     assert_eq!(state(reading(5.0, 30.0, 5.0, 100.0)), PcState::Busy);
     assert_eq!(state(reading(5.0, 73.0, 5.0, 0.0)), PcState::Calm);
     assert_eq!(state(reading(5.0, 74.0, 5.0, 0.0)), PcState::Busy);
-    assert_eq!(
-        state(reading(PRESSURE_ABOVE, 30.0, 5.0, 0.0)),
-        PcState::Busy
-    );
-    assert_eq!(state(reading(89.0, 30.0, 5.0, 0.0)), PcState::Pressure);
-    assert_eq!(state(reading(5.0, 30.0, 95.0, 0.0)), PcState::Pressure);
+}
+
+#[test]
+fn full_load_without_an_episode_is_busy() {
+    let state = |r: Reading| pc_state(Some(&r), false);
+
+    assert_eq!(state(reading(100.0, 30.0, 5.0, 0.0)), PcState::Busy);
+    assert_eq!(state(reading(5.0, 30.0, 100.0, 0.0)), PcState::Busy);
+    assert_eq!(state(reading(5.0, 95.0, 5.0, 100.0)), PcState::Busy);
 }
 
 #[test]

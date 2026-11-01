@@ -40,7 +40,7 @@ pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_
 pub use process::{
     ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, top_processes,
 };
-pub use reading::{BUSY_ABOVE, PRESSURE_ABOVE, PcState, Reading, pc_state};
+pub use reading::{BUSY_ABOVE, PcState, Reading, pc_state};
 pub use ring::Ring;
 pub use rules::{
     Cause, Confidence, Evidence, Metric, NextStep, Suspect, crosses_down, suspects, threshold,
