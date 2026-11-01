@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Fact, Severity, Suspect, Trigger, Window};
+use crate::{Cause, Fact, Severity, Suspect, Trigger, Window};
 
 /// What kind of stall an occurrence was, named after its gravest trigger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,4 +47,24 @@ pub struct Occurrence {
     pub sensitive: bool,
     /// Watching stopped before the window after it was complete.
     pub truncated: bool,
+}
+
+impl Occurrence {
+    /// The cause of the most likely suspect.
+    pub fn cause(&self) -> Cause {
+        self.suspects
+            .first()
+            .map_or(Cause::Unclear, |s| s.cause.clone())
+    }
+}
+
+/// What a list of occurrences shows: no window, only the top suspect's cause.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OccurrenceSummary {
+    pub id: i64,
+    pub kind: OccurrenceKind,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub severity: Severity,
+    pub cause: Cause,
 }

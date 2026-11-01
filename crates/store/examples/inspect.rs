@@ -1,4 +1,4 @@
-//! Prints what a history database holds: `inspect <path-to-db>`.
+//! Prints what a history database holds, records included: `inspect <path-to-db>`.
 
 use std::path::PathBuf;
 
@@ -48,5 +48,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("worst probe lag: {}", worst(|s| s.probe_max_lag_ms));
     println!("worst sampler lag: {}", worst(|s| s.sampler_lag_ms));
+
+    let occurrences = store.occurrences(all, max)?;
+    println!("occurrences: {}", occurrences.len());
+    for o in &occurrences {
+        println!(
+            "  #{} {:?} {:?} at {} for {} ms, top suspect {:?}",
+            o.id,
+            o.kind,
+            o.severity,
+            o.start_ms,
+            o.end_ms - o.start_ms,
+            o.cause
+        );
+    }
+    let episodes = store.episodes(all, max)?;
+    println!("episodes: {}", episodes.len());
+    for e in &episodes {
+        println!(
+            "  {:?} at {} for {} ms, peak {:.1}, culprit {:?}{}",
+            e.kind,
+            e.start_ms,
+            e.end_ms - e.start_ms,
+            e.peak,
+            e.culprit.as_ref().map(|c| &c.name),
+            if e.truncated { ", truncated" } else { "" }
+        );
+    }
+    let events = store.events(all, max)?;
+    println!("events: {}", events.len());
+    for e in events.iter().rev().take(10) {
+        println!("  {:?} {} {} at {}", e.meaning, e.provider, e.id, e.ts_ms);
+    }
+    let gaps = store.gaps(all, max)?;
+    println!("gaps: {}", gaps.len());
+    for g in &gaps {
+        println!(
+            "  {:?} from {} for {} ms",
+            g.reason,
+            g.start_ms,
+            g.end_ms - g.start_ms
+        );
+    }
+    println!("bookmark stored: {}", store.bookmark_xml()?.is_some());
     Ok(())
 }

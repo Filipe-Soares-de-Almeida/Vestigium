@@ -1,29 +1,104 @@
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OpenFlags, params};
+use vestigium_core::{Gap, WinEvent};
 
+use crate::records::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
 /// Migration `n` moves the schema from version `n` to `n + 1`.
-const MIGRATIONS: &[&str] = &["CREATE TABLE segment (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE segment (
         id       INTEGER PRIMARY KEY,
         series   INTEGER NOT NULL,
         start_ms INTEGER NOT NULL,
         end_ms   INTEGER NOT NULL,
         data     BLOB    NOT NULL
     );
-    CREATE INDEX segment_start ON segment (start_ms);"];
+    CREATE INDEX segment_start ON segment (start_ms);",
+    "CREATE TABLE occurrence (
+        id       INTEGER PRIMARY KEY,
+        version  INTEGER NOT NULL,
+        kind     INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms   INTEGER NOT NULL CHECK (end_ms >= start_ms),
+        severity INTEGER NOT NULL,
+        cause    BLOB    NOT NULL,
+        data     BLOB    NOT NULL
+    );
+    CREATE INDEX occurrence_start ON occurrence (start_ms);
+    CREATE TABLE episode (
+        id       INTEGER PRIMARY KEY,
+        version  INTEGER NOT NULL,
+        kind     INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms   INTEGER NOT NULL CHECK (end_ms >= start_ms),
+        data     BLOB    NOT NULL
+    );
+    CREATE INDEX episode_start ON episode (start_ms);
+    CREATE TABLE event (
+        id        INTEGER PRIMARY KEY,
+        ts_ms     INTEGER NOT NULL,
+        channel   INTEGER NOT NULL,
+        provider  TEXT    NOT NULL,
+        event_id  INTEGER NOT NULL,
+        record_id INTEGER NOT NULL,
+        level     INTEGER NOT NULL,
+        meaning   INTEGER NOT NULL,
+        data_xml  TEXT    NOT NULL,
+        UNIQUE (channel, record_id)
+    );
+    CREATE INDEX event_ts ON event (ts_ms);
+    CREATE TABLE event_bookmark (
+        id  INTEGER PRIMARY KEY CHECK (id = 1),
+        xml TEXT NOT NULL
+    );
+    CREATE TABLE gap (
+        id       INTEGER PRIMARY KEY,
+        start_ms INTEGER NOT NULL,
+        end_ms   INTEGER NOT NULL CHECK (end_ms >= start_ms),
+        reason   INTEGER NOT NULL
+    );
+    CREATE INDEX gap_start ON gap (start_ms);
+    CREATE TABLE setting (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    CREATE TABLE machine (
+        id   INTEGER PRIMARY KEY CHECK (id = 1),
+        data TEXT NOT NULL
+    );",
+];
+
+/// What the agent writes in one transaction, every batch.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Batch {
+    pub segments: Vec<Segment>,
+    pub events: Vec<WinEvent>,
+    /// Where the event subscription resumes; written with the events it covers.
+    pub bookmark_xml: Option<String>,
+    pub gaps: Vec<Gap>,
+}
+
+impl Batch {
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+            && self.events.is_empty()
+            && self.bookmark_xml.is_none()
+            && self.gaps.is_empty()
+    }
+}
 
 const _: () = assert!(MIGRATIONS.len() == SCHEMA_VERSION as usize);
 
 /// The history database.
 #[derive(Debug)]
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Store {
@@ -48,6 +123,26 @@ impl Store {
         Ok(Store { conn })
     }
 
+    /// Opens an existing database without writing to it, as the UI does while the agent runs.
+    pub fn open_read_only(path: &Path) -> Result<Store, StoreError> {
+        if !path.is_file() {
+            return Err(StoreError::NotFound);
+        }
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)?;
+        conn.busy_timeout(std::time::Duration::from_millis(2000))?;
+        let found = user_version(&conn)?;
+        if found != SCHEMA_VERSION {
+            return Err(StoreError::SchemaMismatch {
+                found,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        Ok(Store { conn })
+    }
+
     pub fn schema_version(&self) -> Result<u32, StoreError> {
         user_version(&self.conn)
     }
@@ -68,18 +163,55 @@ impl Store {
 
     /// Writes all segments in one transaction.
     pub fn append(&mut self, segments: &[Segment]) -> Result<(), StoreError> {
+        self.append_batch(&Batch {
+            segments: segments.to_vec(),
+            ..Batch::default()
+        })
+    }
+
+    /// Writes a batch in one transaction; an event already stored is skipped.
+    pub fn append_batch(&mut self, batch: &Batch) -> Result<(), StoreError> {
         let tx = self.conn.transaction()?;
         {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO segment (series, start_ms, end_ms, data) VALUES (?1, ?2, ?3, ?4)",
             )?;
-            for segment in segments {
+            for segment in &batch.segments {
                 insert.execute(params![
                     segment.series as u8,
                     segment.start_ms,
                     segment.end_ms,
                     segment.data
                 ])?;
+            }
+            let mut insert = tx.prepare_cached(
+                "INSERT OR IGNORE INTO event
+                 (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for event in &batch.events {
+                insert.execute(params![
+                    event.ts_ms,
+                    channel_code(event.channel),
+                    event.provider,
+                    event.id,
+                    i64::try_from(event.record_id).unwrap_or(i64::MAX),
+                    event.level,
+                    meaning_code(event.meaning),
+                    event.data_xml
+                ])?;
+            }
+            if let Some(xml) = &batch.bookmark_xml {
+                tx.execute(
+                    "INSERT INTO event_bookmark (id, xml) VALUES (1, ?1)
+                     ON CONFLICT (id) DO UPDATE SET xml = excluded.xml",
+                    params![xml],
+                )?;
+            }
+            let mut insert = tx
+                .prepare_cached("INSERT INTO gap (start_ms, end_ms, reason) VALUES (?1, ?2, ?3)")?;
+            for gap in &batch.gaps {
+                insert.execute(params![gap.start_ms, gap.end_ms, gap_code(gap.reason)])?;
             }
         }
         tx.commit()?;

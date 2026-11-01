@@ -11,6 +11,7 @@ publish.workspace = true
 vestigium-core = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 postcard = { workspace = true }
 miniz_oxide = { workspace = true }
 thiserror = { workspace = true }
