@@ -53,3 +53,23 @@ pub enum Trigger {
         event: WinEvent,
     },
 }
+
+impl Trigger {
+    pub fn start_ms(&self) -> i64 {
+        match self {
+            Trigger::Freeze { start_ms, .. }
+            | Trigger::Stutter { start_ms, .. }
+            | Trigger::AppHang { start_ms, .. } => *start_ms,
+            Trigger::Reported { event } => event.ts_ms,
+        }
+    }
+
+    pub fn end_ms(&self) -> i64 {
+        match self {
+            Trigger::Freeze { end_ms, .. }
+            | Trigger::Stutter { end_ms, .. }
+            | Trigger::AppHang { end_ms, .. } => *end_ms,
+            Trigger::Reported { event } => event.ts_ms,
+        }
+    }
+}
