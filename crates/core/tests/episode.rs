@@ -47,7 +47,24 @@ fn memory_high(ts_ms: i64) -> Sample {
 
 fn dpc_storm(ts_ms: i64) -> Sample {
     let mut sample = calm(ts_ms);
-    sample.cores[1].dpc_pct = 12.0;
+    sample.cores[1].dpc_pct = 20.0;
+    sample.cores[1].isr_pct = 5.0;
+    sample
+}
+
+/// 86% of memory in use.
+fn memory_trimmed(ts_ms: i64) -> Sample {
+    Sample {
+        mem_avail_bytes: 16 * GIB * 14 / 100,
+        ..calm(ts_ms)
+    }
+}
+
+/// 22% DPC plus interrupt time on core 0.
+fn dpc_busy_core0(ts_ms: i64) -> Sample {
+    let mut sample = calm(ts_ms);
+    sample.cores[0].dpc_pct = 14.0;
+    sample.cores[0].isr_pct = 8.0;
     sample
 }
 
@@ -88,6 +105,22 @@ fn memory_episode_needs_two_minutes() {
     assert_eq!(episodes.len(), 1);
     assert_eq!(episodes[0].kind, EpisodeKind::MemoryHigh);
     assert_eq!((episodes[0].start_ms, episodes[0].end_ms), (0, 121_000));
+}
+
+#[test]
+fn memory_held_above_85_percent_is_high() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 150, memory_trimmed, false);
+    let episodes = feed(&mut detector, 151, 170, calm, false);
+    assert_eq!(episodes.len(), 1);
+    assert_eq!(episodes[0].kind, EpisodeKind::MemoryHigh);
+}
+
+#[test]
+fn ordinary_dpc_load_is_no_hint() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 60, dpc_busy_core0, false);
+    assert!(feed(&mut detector, 61, 80, calm, false).is_empty());
 }
 
 #[test]

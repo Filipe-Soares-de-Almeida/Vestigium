@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ProcessTop, Sample};
+use crate::{Metric, ProcessTop, Sample, threshold};
 
 /// Below the threshold this long ends an episode; a shorter dip does not split it.
 pub const QUIET_MS: i64 = 10_000;
@@ -140,7 +140,7 @@ impl EpisodeDetector {
         let mut above: Vec<(EpisodeKind, f32, Weigh, i64)> = Vec::new();
         if sample.mem_total_bytes > 0 {
             let used = 1.0 - sample.mem_avail_bytes as f64 / sample.mem_total_bytes as f64;
-            if used > 0.90 {
+            if used > 0.85 {
                 above.push((
                     EpisodeKind::MemoryHigh,
                     (used * 100.0) as f32,
@@ -174,7 +174,7 @@ impl EpisodeDetector {
         } else {
             for (core, load) in sample.cores.iter().enumerate() {
                 let busy = load.dpc_pct + load.isr_pct;
-                if busy >= 10.0 {
+                if busy >= threshold(Metric::CoreDpcIsrPct) {
                     above.push((
                         EpisodeKind::DpcIsrHint { core: core as u16 },
                         busy,

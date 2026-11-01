@@ -110,4 +110,14 @@ How to use this file:
   from an earlier version still running, and says so until that watcher is exited from the tray
   and Vestigium is opened again.
 
+### Fixed
+
+- Memory pressure is now recorded when more than 85% of memory stays in use for two minutes,
+  instead of 90%: while a large program holds its memory, Windows pushes other programs out to
+  disk and keeps use just under 90%, so real pressure went unrecorded.
+- Ordinary interrupt work on the first processor, from disk or graphics activity, no longer
+  raises a hint to turn on sensitive mode or names a driver as a suspect. Both now need a quarter
+  of one processor's time spent on interrupts, instead of a tenth for the hint and a fifth for
+  the suspect.
+
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

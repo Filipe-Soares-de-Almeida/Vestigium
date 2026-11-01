@@ -223,7 +223,7 @@ fn dpc_isr_matches() {
 
 #[test]
 fn dpc_isr_stays_quiet() {
-    let found = run(&dpc_case(15.0));
+    let found = run(&dpc_case(22.0));
     assert!(find(&found, |c| matches!(c, Cause::Driver { .. })).is_none());
 }
 

@@ -39,7 +39,7 @@ pub fn threshold(metric: Metric) -> f32 {
         Metric::MemAvailPct => 5.0,
         Metric::HardFaultsPerS => 1_000.0,
         Metric::CpuPct => 95.0,
-        Metric::CoreDpcIsrPct => 20.0,
+        Metric::CoreDpcIsrPct => 25.0,
         Metric::GpuPct => 95.0,
         Metric::PerfLimitPct => 95.0,
         Metric::PrivateBytes | Metric::IoBytesPerS => 0.0,
