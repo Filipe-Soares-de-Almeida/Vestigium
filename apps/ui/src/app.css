@@ -38,6 +38,7 @@
   --f: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --fd: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
+  --shadow-float: 0 8px 28px #00000029;
 }
 :root:not([data-scheme]) {
   --mark-1: var(--facet-1);

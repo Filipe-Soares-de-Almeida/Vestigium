@@ -51,6 +51,14 @@ How to use this file:
 - The window draws its own title bar in the Windows 11 style, with minimize, maximize and close
   buttons. Drag it by the title bar, double-click the bar to maximize, and resize it from any
   edge; Snap (Windows key and the arrow keys) works as with any other window.
+- The Today screen shows when the PC struggled. A sentence sums up the day at the chosen detail
+  level. Below it, a timeline of the PC's states since midnight (calm, busy, under pressure,
+  asleep or not watched) marks each freeze: point at a stretch to see when it ran and what the
+  processor, memory, disk and graphics were doing that minute, click a state's name or a stretch
+  to show only that state, and click a freeze to open its report; the arrow keys, Enter and Esc
+  do the same from the keyboard. Then come the day's freezes and moments of pressure, each freeze
+  a link to its report, and the number of freezes on each of the last 14 days. Before anything
+  has been saved, the screen says when watching started and offers to show the PC now.
 
 ### Changed
 
