@@ -6,6 +6,8 @@
   "tray.resume": "Retomar a observação",
   "tray.sensitive": "Modo sensível (30 min)",
   "tray.tooltip.sensitive": "Vestigium — observando de perto (modo sensível)",
+  "tray.tooltip.attention": "Vestigium — observando · lentidões nas últimas 24 h: {count}",
+  "tray.tooltip.problem": "Vestigium — observando · travamentos graves nas últimas 24 h: {count}",
   "tray.autostart": "Iniciar com o Windows",
   "tray.exit": "Sair",
   "error.startup.title": "O Vestigium não conseguiu iniciar",

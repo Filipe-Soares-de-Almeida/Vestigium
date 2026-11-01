@@ -4,8 +4,10 @@ use std::thread;
 use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::{ProbeConfig, spawn_probe, wall_ms};
-use vestigium_core::{DEFAULT_PROBE_PERIOD, GateState, RunGate, SENSITIVE_FOR};
+use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
+use vestigium_core::{
+    DEFAULT_PROBE_PERIOD, GateState, RecentState, RunGate, SENSITIVE_FOR, Timing,
+};
 use vestigium_i18n::Catalog;
 use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
@@ -15,7 +17,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
-use crate::sampler::run_sampler;
+use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Tray};
 use crate::{paths, power, shutdown};
@@ -23,6 +25,8 @@ use crate::{paths, power, shutdown};
 const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+/// How far back the first run reads the curated Windows events.
+const EVENT_BACKFILL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Command-line options, for tests and measurements.
 #[derive(Clone, Debug, PartialEq)]
@@ -106,18 +110,31 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();
+    let (events_tx, events_rx) = mpsc::channel();
+    // Without a readable bookmark the backfill runs again; stored events are not duplicated.
+    let bookmark = store.bookmark_xml().ok().flatten();
+    let subscription = EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx)
+        .inspect_err(|err| lock(&status).last_error = Some(err.to_string()))
+        .ok();
     let probe = ProbeConfig::new(DEFAULT_PROBE_PERIOD);
     let sensitive = SensitiveMode::new(probe.clone(), options.sensitive_for);
+    let recent = Arc::new(Mutex::new(RecentState::default()));
     spawn_probe(probe, gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
         run_sampler(
             store,
-            options.flush,
-            gate.clone(),
-            probe_rx,
-            power_rx,
-            sensitive.clone(),
-            status.clone(),
+            Wiring {
+                flush: options.flush,
+                timing: Timing::default(),
+                gate: gate.clone(),
+                probe_rx,
+                power_rx,
+                events_rx,
+                subscription,
+                sensitive: sensitive.clone(),
+                status: status.clone(),
+                recent: recent.clone(),
+            },
         )
         .map_err(failed)?,
     );
@@ -150,11 +167,11 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     }
     shutdown::pump(|| {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if tray.on_menu(&event.id, &gate, &status, &sensitive) == Action::Exit {
+            if tray.on_menu(&event.id, &gate, &status, &sensitive, &lock(&recent)) == Action::Exit {
                 shutdown::quit();
             }
         }
-        tray.refresh(&gate, &sensitive);
+        tray.refresh(&gate, &sensitive, &lock(&recent));
     });
     stop();
     Ok(())

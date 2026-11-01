@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 use vestigium_collect::wall_ms;
-use vestigium_core::{GateState, RunGate};
+use vestigium_core::{GateState, RecentState, RunGate};
 use vestigium_i18n::Catalog;
 use vestigium_ipc::AgentStatus;
 
@@ -39,6 +39,9 @@ struct Texts {
     watching: String,
     paused: String,
     sensitive: String,
+    /// Templates with a `{count}` of the last 24 h.
+    attention: String,
+    problem: String,
     pause: String,
     resume: String,
 }
@@ -48,6 +51,28 @@ struct Texts {
 struct Shown {
     paused: bool,
     sensitive: bool,
+    recent: Level,
+}
+
+/// What the last 24 h held: nothing, slowdowns, or a severe freeze.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Level {
+    #[default]
+    Normal,
+    Attention(u32),
+    Problem(u32),
+}
+
+impl Level {
+    pub fn of(recent: &RecentState) -> Level {
+        if recent.severe > 0 {
+            Level::Problem(recent.severe)
+        } else if recent.occurrences + recent.episodes > 0 {
+            Level::Attention(recent.occurrences + recent.episodes)
+        } else {
+            Level::Normal
+        }
+    }
 }
 
 impl Tray {
@@ -56,6 +81,8 @@ impl Tray {
             watching: catalog.get("tray.tooltip.watching").to_string(),
             paused: catalog.get("tray.tooltip.paused").to_string(),
             sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
+            attention: catalog.get("tray.tooltip.attention").to_string(),
+            problem: catalog.get("tray.tooltip.problem").to_string(),
             pause: catalog.get("tray.pause").to_string(),
             resume: catalog.get("tray.resume").to_string(),
         };
@@ -106,6 +133,7 @@ impl Tray {
         gate: &RunGate,
         status: &Mutex<AgentStatus>,
         sensitive: &SensitiveMode,
+        recent: &RecentState,
     ) -> Action {
         if id == self.open.id() {
             if let Some(ui) = &self.ui_exe {
@@ -131,33 +159,60 @@ impl Tray {
         } else if id == self.exit.id() {
             return Action::Exit;
         }
-        self.refresh(gate, sensitive);
+        self.refresh(gate, sensitive, recent);
         Action::Continue
     }
 
     /// Brings the tooltip and the menu in line with the watcher, when they differ.
-    pub fn refresh(&self, gate: &RunGate, sensitive: &SensitiveMode) {
+    pub fn refresh(&self, gate: &RunGate, sensitive: &SensitiveMode, recent: &RecentState) {
         let now = Shown {
             paused: gate.state() == GateState::Paused,
             sensitive: sensitive.is_on(),
+            recent: Level::of(recent),
         };
         if now == self.shown.get() {
             return;
         }
         self.shown.set(now);
         let tooltip = if now.paused {
-            &self.text.paused
+            self.text.paused.clone()
         } else if now.sensitive {
-            &self.text.sensitive
+            self.text.sensitive.clone()
         } else {
-            &self.text.watching
+            match now.recent {
+                Level::Normal => self.text.watching.clone(),
+                Level::Attention(n) => self.text.attention.replace("{count}", &n.to_string()),
+                Level::Problem(n) => self.text.problem.replace("{count}", &n.to_string()),
+            }
         };
-        let _ = self.icon.set_tooltip(Some(tooltip));
+        let _ = self.icon.set_tooltip(Some(&tooltip));
         self.pause.set_text(if now.paused {
             &self.text.resume
         } else {
             &self.text.pause
         });
         self.sensitive.set_checked(now.sensitive);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vestigium_core::RecentState;
+
+    use super::Level;
+
+    #[test]
+    fn level_follows_the_last_day() {
+        let quiet = RecentState::default();
+        let slow = RecentState {
+            occurrences: 2,
+            severe: 0,
+            episodes: 1,
+        };
+        let severe = RecentState { severe: 1, ..slow };
+
+        assert_eq!(Level::of(&quiet), Level::Normal);
+        assert_eq!(Level::of(&slow), Level::Attention(3));
+        assert_eq!(Level::of(&severe), Level::Problem(1));
     }
 }

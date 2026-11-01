@@ -6,6 +6,8 @@
   "tray.resume": "Resume watching",
   "tray.sensitive": "Sensitive mode (30 min)",
   "tray.tooltip.sensitive": "Vestigium — watching closely (sensitive mode)",
+  "tray.tooltip.attention": "Vestigium — watching · slowdowns in the last 24 h: {count}",
+  "tray.tooltip.problem": "Vestigium — watching · severe freezes in the last 24 h: {count}",
   "tray.autostart": "Start with Windows",
   "tray.exit": "Exit",
   "error.startup.title": "Vestigium could not start",

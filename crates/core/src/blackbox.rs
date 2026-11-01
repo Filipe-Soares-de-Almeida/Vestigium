@@ -114,6 +114,15 @@ impl Blackbox {
         }
     }
 
+    /// Updates the machine facts later windows carry, such as once the disks are known.
+    pub fn set_machine(&mut self, machine: MachineInfo) {
+        self.machine = machine;
+    }
+
+    pub fn machine(&self) -> &MachineInfo {
+        &self.machine
+    }
+
     pub fn push_probe(&mut self, tick: ProbeTick) {
         if let Some(trigger) = freeze(&tick) {
             if tick.lag_ms >= ECHOING_FREEZE_MS as f32 {

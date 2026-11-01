@@ -35,6 +35,12 @@ How to use this file:
 - Sensitive mode, in the tray menu, watches for stalls about sixty times a second instead of ten,
   to catch the short hitches that break games, audio and video. It turns itself off after
   30 minutes, and the tray tooltip says while it is on.
+- The watcher now notices freezes of the whole system, apps that stop responding, and long
+  stretches of memory, disk or CPU pressure. For each one it keeps the minute before and the half
+  minute after, with the Windows events of that time (storage resets, display driver resets,
+  hardware errors, unexpected shutdowns), and names the likely cause with the values behind it.
+  Time the PC spent asleep or with watching paused never counts as a freeze. The tray tooltip says
+  how many slowdowns the last 24 hours held.
 
 ### Changed
 
