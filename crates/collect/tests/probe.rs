@@ -2,7 +2,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vestigium_collect::{HighResTimer, monotonic_ms, spawn_probe, unbiased_ms, wall_ms};
+use vestigium_collect::{
+    HighResTimer, ProbeConfig, monotonic_ms, spawn_probe, unbiased_ms, wall_ms,
+};
 use vestigium_core::{GateState, ProbeTick, RunGate};
 
 #[test]
@@ -46,7 +48,12 @@ fn probe_sends_every_tick() {
     let gate = RunGate::new();
     let (tx, rx) = mpsc::channel();
     let started = wall_ms();
-    let probe = spawn_probe(Duration::from_millis(100), gate.clone(), tx).unwrap();
+    let probe = spawn_probe(
+        ProbeConfig::new(Duration::from_millis(100)),
+        gate.clone(),
+        tx,
+    )
+    .unwrap();
 
     thread::sleep(Duration::from_millis(1_000));
     gate.set(GateState::Stopping);
@@ -67,7 +74,12 @@ fn probe_sends_every_tick() {
 fn paused_probe_sends_nothing() {
     let gate = RunGate::new();
     let (tx, rx) = mpsc::channel();
-    let _probe = spawn_probe(Duration::from_millis(20), gate.clone(), tx).unwrap();
+    let _probe = spawn_probe(
+        ProbeConfig::new(Duration::from_millis(20)),
+        gate.clone(),
+        tx,
+    )
+    .unwrap();
 
     gate.set(GateState::Paused);
     thread::sleep(Duration::from_millis(200));
@@ -82,7 +94,12 @@ fn paused_probe_sends_nothing() {
 fn stopping_ends_the_probe_thread() {
     let gate = RunGate::new();
     let (tx, _rx) = mpsc::channel();
-    let probe = spawn_probe(Duration::from_millis(50), gate.clone(), tx).unwrap();
+    let probe = spawn_probe(
+        ProbeConfig::new(Duration::from_millis(50)),
+        gate.clone(),
+        tx,
+    )
+    .unwrap();
     thread::sleep(Duration::from_millis(100));
 
     let asked = Instant::now();
@@ -90,4 +107,24 @@ fn stopping_ends_the_probe_thread() {
     probe.join().unwrap();
 
     assert!(asked.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn probe_follows_period_change() {
+    let gate = RunGate::new();
+    let (tx, rx) = mpsc::channel();
+    let config = ProbeConfig::new(Duration::from_millis(100));
+    let probe = spawn_probe(config.clone(), gate.clone(), tx).unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+    let slow = rx.try_iter().count();
+    config.set(Duration::from_millis(16));
+    thread::sleep(Duration::from_millis(1_000));
+    let fast = rx.try_iter().count();
+    gate.set(GateState::Stopping);
+    probe.join().unwrap();
+
+    assert_eq!(config.period(), Duration::from_millis(16));
+    assert!(slow <= 8, "{slow} ticks in 500 ms at 100 ms");
+    assert!(fast >= 25, "only {fast} ticks in 1 s at 16 ms");
 }

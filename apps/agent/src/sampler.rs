@@ -18,6 +18,8 @@ use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetS
 
 use crate::app::lock;
 use crate::power::PowerEvent;
+use crate::sensitive::SensitiveMode;
+use crate::shutdown;
 
 const TICK_MS: f64 = 1000.0;
 /// Seconds between two stored process rankings.
@@ -52,13 +54,14 @@ pub fn run_sampler(
     gate: Arc<RunGate>,
     probe_rx: Receiver<ProbeTick>,
     power_rx: Receiver<PowerEvent>,
+    sensitive: Arc<SensitiveMode>,
     status: Arc<Mutex<AgentStatus>>,
 ) -> io::Result<SamplerHandle> {
     let (done_tx, done_rx) = mpsc::channel();
     thread::Builder::new()
         .name("sampler".to_string())
         .spawn(move || {
-            let mut sampler = Sampler::new(store, flush, probe_rx, power_rx, status);
+            let mut sampler = Sampler::new(store, flush, probe_rx, power_rx, sensitive, status);
             sampler.run(&gate);
             sampler.flush_final();
             let _ = done_tx.send(());
@@ -73,6 +76,7 @@ struct Sampler {
     batcher: Batcher,
     probe_rx: Receiver<ProbeTick>,
     power_rx: Receiver<PowerEvent>,
+    sensitive: Arc<SensitiveMode>,
     status: Arc<Mutex<AgentStatus>>,
     samples: Ring<Sample>,
     tops: Ring<ProcessTop>,
@@ -106,6 +110,7 @@ impl Sampler {
         flush: Duration,
         probe_rx: Receiver<ProbeTick>,
         power_rx: Receiver<PowerEvent>,
+        sensitive: Arc<SensitiveMode>,
         status: Arc<Mutex<AgentStatus>>,
     ) -> Sampler {
         Sampler {
@@ -113,6 +118,7 @@ impl Sampler {
             batcher: Batcher::new(flush),
             probe_rx,
             power_rx,
+            sensitive,
             status,
             samples: Ring::with_capacity(RING_SAMPLES),
             tops: Ring::with_capacity(RING_TOPS),
@@ -172,6 +178,9 @@ impl Sampler {
                 next_tick = unbiased_ms() + TICK_MS;
                 trim_at = Some(ticks + TRIM_AFTER_TICKS);
                 continue;
+            }
+            if self.sensitive.expire(wall_ms()) {
+                shutdown::wake();
             }
 
             ticks += 1;
@@ -309,7 +318,8 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Instant;
 
-    use vestigium_core::Sample;
+    use vestigium_collect::ProbeConfig;
+    use vestigium_core::{DEFAULT_PROBE_PERIOD, SENSITIVE_FOR, Sample};
     use vestigium_store::{Series, decode};
 
     use super::*;
@@ -327,12 +337,14 @@ mod tests {
         let (_probe_tx, probe_rx) = mpsc::channel();
         let (power_tx, power_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(AgentStatus::default()));
+        let sensitive = SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR);
         let handle = run_sampler(
             store,
             flush,
             gate.clone(),
             probe_rx,
             power_rx,
+            sensitive,
             status.clone(),
         )
         .unwrap();

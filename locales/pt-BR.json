@@ -4,6 +4,8 @@
   "tray.open": "Abrir o Vestigium",
   "tray.pause": "Pausar a observação",
   "tray.resume": "Retomar a observação",
+  "tray.sensitive": "Modo sensível (30 min)",
+  "tray.tooltip.sensitive": "Vestigium — observando de perto (modo sensível)",
   "tray.autostart": "Iniciar com o Windows",
   "tray.exit": "Sair",
   "error.startup.title": "O Vestigium não conseguiu iniciar",

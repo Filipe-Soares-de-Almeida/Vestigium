@@ -4,6 +4,8 @@
   "tray.open": "Open Vestigium",
   "tray.pause": "Pause watching",
   "tray.resume": "Resume watching",
+  "tray.sensitive": "Sensitive mode (30 min)",
+  "tray.tooltip.sensitive": "Vestigium — watching closely (sensitive mode)",
   "tray.autostart": "Start with Windows",
   "tray.exit": "Exit",
   "error.startup.title": "Vestigium could not start",

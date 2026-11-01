@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::{spawn_probe, wall_ms};
-use vestigium_core::{GateState, RunGate};
+use vestigium_collect::{ProbeConfig, spawn_probe, wall_ms};
+use vestigium_core::{DEFAULT_PROBE_PERIOD, GateState, RunGate, SENSITIVE_FOR};
 use vestigium_i18n::Catalog;
 use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeServer, Request, Response, current_user_sid,
@@ -16,11 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
 use crate::sampler::run_sampler;
+use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Tray};
 use crate::{paths, power, shutdown};
 
 const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
-const PROBE_PERIOD: Duration = Duration::from_millis(100);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -29,6 +29,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct Options {
     pub data_dir: Option<PathBuf>,
     pub flush: Duration,
+    pub sensitive_for: Duration,
 }
 
 impl Options {
@@ -36,6 +37,7 @@ impl Options {
         let mut options = Options {
             data_dir: None,
             flush: DEFAULT_FLUSH,
+            sensitive_for: SENSITIVE_FOR,
         };
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -44,6 +46,11 @@ impl Options {
                 "--flush-secs" => {
                     if let Some(secs) = args.next().and_then(|s| s.parse().ok()) {
                         options.flush = Duration::from_secs(secs);
+                    }
+                }
+                "--sensitive-secs" => {
+                    if let Some(secs) = args.next().and_then(|s| s.parse().ok()) {
+                        options.sensitive_for = Duration::from_secs(secs);
                     }
                 }
                 _ => {}
@@ -99,7 +106,9 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();
-    spawn_probe(PROBE_PERIOD, gate.clone(), probe_tx).map_err(failed)?;
+    let probe = ProbeConfig::new(DEFAULT_PROBE_PERIOD);
+    let sensitive = SensitiveMode::new(probe.clone(), options.sensitive_for);
+    spawn_probe(probe, gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
         run_sampler(
             store,
@@ -107,6 +116,7 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
             gate.clone(),
             probe_rx,
             power_rx,
+            sensitive.clone(),
             status.clone(),
         )
         .map_err(failed)?,
@@ -140,10 +150,11 @@ pub fn run(catalog: &Catalog, options: Options) -> Result<(), StartError> {
     }
     shutdown::pump(|| {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if tray.on_menu(&event.id, &gate, &status) == Action::Exit {
+            if tray.on_menu(&event.id, &gate, &status, &sensitive) == Action::Exit {
                 shutdown::quit();
             }
         }
+        tray.refresh(&gate, &sensitive);
     });
     stop();
     Ok(())
@@ -182,6 +193,7 @@ mod tests {
         let options = Options::parse(args(&[]));
         assert_eq!(options.flush, Duration::from_secs(60));
         assert_eq!(options.data_dir, None);
+        assert_eq!(options.sensitive_for, SENSITIVE_FOR);
     }
 
     #[test]
@@ -189,6 +201,12 @@ mod tests {
         let options = Options::parse(args(&["--flush-secs", "60", "--data-dir", r"D:\tmp\wmpc"]));
         assert_eq!(options.flush, Duration::from_secs(60));
         assert_eq!(options.data_dir, Some(PathBuf::from(r"D:\tmp\wmpc")));
+    }
+
+    #[test]
+    fn options_read_the_sensitive_mode_length() {
+        let options = Options::parse(args(&["--sensitive-secs", "45"]));
+        assert_eq!(options.sensitive_for, Duration::from_secs(45));
     }
 
     #[test]

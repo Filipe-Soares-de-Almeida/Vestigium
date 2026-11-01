@@ -1,11 +1,12 @@
+use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostQuitMessage,
-    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_ENDSESSION, WM_POWERBROADCAST,
-    WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_ENDSESSION,
+    WM_POWERBROADCAST, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::w;
 
@@ -14,6 +15,10 @@ use crate::power;
 type Handler = Box<dyn Fn() + Send + Sync>;
 
 static ON_END_SESSION: OnceLock<Handler> = OnceLock::new();
+/// The hidden window, as an address so any thread can post to it.
+static SESSION_WINDOW: OnceLock<usize> = OnceLock::new();
+/// Posted to make the message loop run once, so the tray shows a change made elsewhere.
+const WM_APP_WAKE: u32 = WM_APP + 1;
 
 /// Creates the hidden top-level window that hears logoff, shutdown, suspend and resume; `on_end` runs before the session ends.
 pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::core::Result<HWND> {
@@ -29,7 +34,7 @@ pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::
     // SAFETY: registers a class whose strings are static.
     unsafe { RegisterClassW(&class) };
     // SAFETY: a never-shown top-level window; message-only windows miss WM_QUERYENDSESSION.
-    unsafe {
+    let window = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
             w!("VestigiumAgentSession"),
@@ -43,7 +48,24 @@ pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::
             None,
             Some(instance.into()),
             None,
-        )
+        )?
+    };
+    let _ = SESSION_WINDOW.set(window.0 as usize);
+    Ok(window)
+}
+
+/// Makes the message loop run once, from any thread; does nothing before the window exists.
+pub fn wake() {
+    if let Some(&window) = SESSION_WINDOW.get() {
+        // SAFETY: posts a message carrying no pointers to this process's own window.
+        let _ = unsafe {
+            PostMessageW(
+                Some(HWND(window as *mut c_void)),
+                WM_APP_WAKE,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        };
     }
 }
 

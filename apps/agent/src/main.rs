@@ -6,6 +6,7 @@ mod icon;
 mod paths;
 mod power;
 mod sampler;
+mod sensitive;
 mod shutdown;
 mod tray;
 

@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use vestigium_collect::spawn_probe;
+use vestigium_collect::{ProbeConfig, spawn_probe};
 use vestigium_core::{GateState, RunGate};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
@@ -16,7 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gate = RunGate::new();
     let (tx, rx) = mpsc::channel();
     let cpu_before = process_cpu_ms();
-    let probe = spawn_probe(Duration::from_millis(period_ms), gate.clone(), tx)?;
+    let probe = spawn_probe(
+        ProbeConfig::new(Duration::from_millis(period_ms)),
+        gate.clone(),
+        tx,
+    )?;
     thread::sleep(Duration::from_secs(seconds));
     gate.set(GateState::Stopping);
     probe.join().map_err(|_| "probe thread panicked")?;

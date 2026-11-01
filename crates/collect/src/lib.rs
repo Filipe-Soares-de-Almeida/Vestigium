@@ -10,7 +10,7 @@ mod timer;
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
-pub use probe::spawn_probe;
+pub use probe::{ProbeConfig, spawn_probe};
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
 

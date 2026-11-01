@@ -32,6 +32,9 @@ How to use this file:
   saves what it has before Windows signs you out or shuts down.
 - A first application window, opened from the tray icon. Only one window opens at a time, and
   closing it ends the program completely: nothing keeps running in the background.
+- Sensitive mode, in the tray menu, watches for stalls about sixty times a second instead of ten,
+  to catch the short hitches that break games, audio and video. It turns itself off after
+  30 minutes, and the tray tooltip says while it is on.
 
 ### Changed
 
