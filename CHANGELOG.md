@@ -106,5 +106,8 @@ How to use this file:
   drawn at the taskbar's own size, so it stays sharp at 125%, 150% and 200% display scale.
 - The window, its taskbar button, the installer and the watcher in Task Manager now show the
   Vestigium icon, a red V cut like a gemstone, the same in every colour theme.
+- Update the window and the background watcher together: this window does not talk to a watcher
+  from an earlier version still running, and says so until that watcher is exited from the tray
+  and Vestigium is opened again.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

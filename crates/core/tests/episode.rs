@@ -203,3 +203,34 @@ fn close_all_ends_the_pressure() {
     detector.close_all();
     assert!(detector.open_pressure().is_empty());
 }
+
+#[test]
+fn open_pressure_follows_the_timeline_rule() {
+    let everything = |ts_ms: i64| {
+        let mut sample = memory_high(ts_ms);
+        for core in &mut sample.cores {
+            core.cpu_pct = 99.0;
+            core.dpc_pct = 12.0;
+        }
+        sample.disks[0].active_pct = 100.0;
+        sample.disks[0].latency_ms = 150.0;
+        sample
+    };
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 130, everything, false);
+    let open = detector.open_pressure();
+
+    let ended = feed(&mut detector, 131, 145, calm, false);
+    assert!(
+        ended.iter().any(|e| e.kind.is_hint()),
+        "the hints were found too"
+    );
+    let stored: Vec<EpisodeKind> = ended
+        .into_iter()
+        .map(|e| e.kind)
+        .filter(|kind| !kind.is_hint())
+        .collect();
+    assert_eq!(open.len(), 3);
+    assert_eq!(stored.len(), open.len());
+    assert!(stored.iter().all(|kind| open.contains(kind)));
+}

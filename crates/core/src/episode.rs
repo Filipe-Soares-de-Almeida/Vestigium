@@ -240,7 +240,7 @@ impl EpisodeDetector {
     pub fn open_pressure(&self) -> Vec<EpisodeKind> {
         self.runs
             .iter()
-            .filter(|run| !is_hint(&run.kind) && run.qualifies())
+            .filter(|run| !run.kind.is_hint() && run.qualifies())
             .map(|run| run.kind.clone())
             .collect()
     }

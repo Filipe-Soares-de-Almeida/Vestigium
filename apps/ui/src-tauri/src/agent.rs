@@ -172,12 +172,18 @@ impl Link {
         let exe = self.agent_exe.as_deref().ok_or(UiError::AgentStopped)?;
         let sid = current_user_sid()?;
         let mut client = PipeClient::connect(&pipe_name(&sid), exe)?;
-        match client.call(&Request::Hello {
+        same_protocol(client.call(&Request::Hello {
             protocol: PROTOCOL_VERSION,
-        })? {
-            Response::Hello { protocol, .. } if protocol == PROTOCOL_VERSION => Ok(client),
-            _ => Err(UiError::Mismatch),
-        }
+        })?)?;
+        Ok(client)
+    }
+}
+
+/// Accepts only a Hello in this window's protocol; any other answer is another version.
+fn same_protocol(answer: Response) -> Result<(), UiError> {
+    match answer {
+        Response::Hello { protocol, .. } if protocol == PROTOCOL_VERSION => Ok(()),
+        _ => Err(UiError::Mismatch),
     }
 }
 
@@ -211,6 +217,25 @@ mod tests {
             UiError::from(IpcError::ServerMismatch { found }),
             UiError::Mismatch
         ));
+    }
+
+    #[test]
+    fn an_older_watcher_is_another_version() {
+        let refusal = Response::Error {
+            code: ErrorCode::Protocol,
+            message: format!("protocol {PROTOCOL_VERSION} is not supported; this agent speaks 2"),
+        };
+        assert!(matches!(same_protocol(refusal), Err(UiError::Mismatch)));
+        let older = Response::Hello {
+            protocol: 2,
+            agent_version: "0.0.0".into(),
+        };
+        assert!(matches!(same_protocol(older), Err(UiError::Mismatch)));
+        let same = Response::Hello {
+            protocol: PROTOCOL_VERSION,
+            agent_version: "0.0.0".into(),
+        };
+        assert!(same_protocol(same).is_ok());
     }
 
     #[test]
