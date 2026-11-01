@@ -4184,6 +4184,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vestigium-scenarios"
+version = "0.0.0"
+dependencies = [
+ "vestigium-collect",
+ "windows",
+]
+
+[[package]]
 name = "vestigium-store"
 version = "0.0.0"
 dependencies = [

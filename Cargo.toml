@@ -9,6 +9,7 @@ members = [
     "crates/ipc",
     "crates/store",
     "tools/budget",
+    "tools/scenarios",
 ]
 
 [workspace.package]
