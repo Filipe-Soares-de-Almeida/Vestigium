@@ -48,6 +48,9 @@ How to use this file:
   following Windows until you choose otherwise. When watching is paused, a banner offers to resume
   it; when the watcher is not running, the window still shows what was saved and offers to start
   it.
+- The window draws its own title bar in the Windows 11 style, with minimize, maximize and close
+  buttons. Drag it by the title bar, double-click the bar to maximize, and resize it from any
+  edge; Snap (Windows key and the arrow keys) works as with any other window.
 
 ### Changed
 

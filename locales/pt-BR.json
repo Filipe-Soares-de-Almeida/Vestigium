@@ -71,6 +71,11 @@
   "ui.shell.unreachable.body": "Se ele for de outra versão, saia dele pela bandeja e abra o Vestigium de novo.",
   "ui.shell.toast.resumed": "Observação retomada",
   "ui.shell.toast.started": "O Vestigium está observando",
+  "ui.shell.window.label": "Janela",
+  "ui.shell.window.minimize": "Minimizar",
+  "ui.shell.window.maximize": "Maximizar",
+  "ui.shell.window.restore": "Restaurar",
+  "ui.shell.window.close": "Fechar",
 
   "ui.today.title": "Hoje",
   "ui.today.first_use": "O Vestigium começou a observar. Quando o PC travar, o travamento aparece aqui, com o minuto anterior guardado. Pode fechar esta janela: a observação continua na bandeja.",

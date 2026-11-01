@@ -7,6 +7,7 @@
   import Mark from "./components/Mark.svelte";
   import NavPane from "./components/NavPane.svelte";
   import Toast from "./components/Toast.svelte";
+  import WindowControls from "./components/WindowControls.svelte";
   import { app } from "./lib/app.svelte";
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
@@ -20,6 +21,21 @@
   let shown = "";
 
   onMount(() => app.start());
+
+  // Sets data-inactive on the root while another window is active; the title bar dims then.
+  onMount(() => {
+    const mark = () => {
+      if (document.hasFocus()) delete document.documentElement.dataset.inactive;
+      else document.documentElement.dataset.inactive = "";
+    };
+    mark();
+    addEventListener("focus", mark);
+    addEventListener("blur", mark);
+    return () => {
+      removeEventListener("focus", mark);
+      removeEventListener("blur", mark);
+    };
+  });
 
   // A new screen starts at the top, with focus on the content so the keyboard continues there.
   $effect(() => {
@@ -36,7 +52,7 @@
 </script>
 
 <div class="win">
-  <header class="titlebar">
+  <header class="titlebar" data-tauri-drag-region="deep">
     <Mark />
     <span>{t("ui.shell.title")}</span>
   </header>
@@ -65,6 +81,7 @@
       {/if}
     </main>
   </div>
+  <WindowControls />
 </div>
 <Toast />
 
@@ -76,6 +93,7 @@
     height: 100vh;
   }
   .titlebar {
+    grid-row: 1;
     grid-column: 1 / -1;
     display: flex;
     align-items: center;
@@ -85,6 +103,9 @@
     color: var(--ink2);
     font: 400 12.5px/1.35 var(--f);
     user-select: none;
+  }
+  :global(:root[data-inactive]) .titlebar {
+    color: var(--ink3);
   }
   .content {
     container: content / inline-size;

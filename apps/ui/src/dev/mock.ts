@@ -1,6 +1,6 @@
 // Stand-in for the window's Rust side in a plain browser (npm run dev); ./fixtures/*.ts add `handlers`.
-// URL: ?link=running|stopped|mismatch&paused=1&sensitive=1&history=empty&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=
-import { mockIPC } from "@tauri-apps/api/mocks";
+// URL: ?link=running|stopped|mismatch&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AgentLink, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
 
@@ -24,6 +24,7 @@ const state = {
     detail_level: "Simple",
   } as Settings,
   autostart: true,
+  maximized: query.get("maximized") === "1",
 };
 
 const startedAt = Date.now();
@@ -91,6 +92,12 @@ const base: Record<string, Handler> = {
   occurrence: () => null,
   live_start: () => needsWatcher(),
   live_stop: () => null,
+  "plugin:window|is_maximized": () => state.maximized,
+  "plugin:window|toggle_maximize": () => void (state.maximized = !state.maximized),
+  "plugin:window|minimize": () => null,
+  "plugin:window|close": () => null,
+  "plugin:window|start_dragging": () => null,
+  "plugin:window|internal_toggle_maximize": () => void (state.maximized = !state.maximized),
 };
 
 const fixtures = import.meta.glob<{ handlers: Record<string, Handler> }>("./fixtures/*.ts", {
@@ -101,12 +108,16 @@ const handlers: Record<string, Handler> = Object.assign(
   ...Object.values(fixtures).map((fixture) => fixture.handlers),
 );
 
-mockIPC((command, payload) => {
-  console.debug(`[mock] ${command}`);
-  const kind = failures.get(command);
-  if (kind) return refuse(kind);
-  const handler = handlers[command];
-  if (!handler) return refuse("failed");
-  const answer = () => handler((payload ?? {}) as Record<string, unknown>);
-  return delayMs ? new Promise((resolve) => setTimeout(resolve, delayMs)).then(answer) : answer();
-});
+mockWindows("main");
+mockIPC(
+  (command, payload) => {
+    console.debug(`[mock] ${command}`);
+    const kind = failures.get(command);
+    if (kind) return refuse(kind);
+    const handler = handlers[command];
+    if (!handler) return refuse("failed");
+    const answer = () => handler((payload ?? {}) as Record<string, unknown>);
+    return delayMs ? new Promise((resolve) => setTimeout(resolve, delayMs)).then(answer) : answer();
+  },
+  { shouldMockEvents: true },
+);

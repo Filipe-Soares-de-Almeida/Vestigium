@@ -16,7 +16,9 @@
         "label": "main",
         "title": "Vestigium",
         "width": 1100,
-        "height": 720
+        "height": 720,
+        "decorations": false,
+        "shadow": true
       }
     ],
     "security": {

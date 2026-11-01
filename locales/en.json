@@ -71,6 +71,11 @@
   "ui.shell.unreachable.body": "If it is a different version, exit it from the tray and open Vestigium again.",
   "ui.shell.toast.resumed": "Watching resumed",
   "ui.shell.toast.started": "Vestigium is watching",
+  "ui.shell.window.label": "Window",
+  "ui.shell.window.minimize": "Minimize",
+  "ui.shell.window.maximize": "Maximize",
+  "ui.shell.window.restore": "Restore",
+  "ui.shell.window.close": "Close",
 
   "ui.today.title": "Today",
   "ui.today.first_use": "Vestigium has started watching. When the PC freezes, the freeze shows up here, with the minute before it kept. You can close this window: watching goes on from the tray.",
