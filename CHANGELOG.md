@@ -41,6 +41,13 @@ How to use this file:
   hardware errors, unexpected shutdowns), and names the likely cause with the values behind it.
   Time the PC spent asleep or with watching paused never counts as a freeze. The tray tooltip says
   how many slowdowns the last 24 hours held.
+- The window now has its own layout: a title bar with the Vestigium mark, a navigation pane with
+  Today and Now (Health and Dumps are marked as coming soon), and Settings at the bottom next to
+  whether Vestigium is watching, paused or not running. It shows in English or Brazilian
+  Portuguese, light or dark, and in one of four colour themes (Red, Graphite, Slate, Indigo),
+  following Windows until you choose otherwise. When watching is paused, a banner offers to resume
+  it; when the watcher is not running, the window still shows what was saved and offers to start
+  it.
 
 ### Changed
 

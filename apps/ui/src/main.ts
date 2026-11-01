@@ -1,8 +1,17 @@
-import { mount } from "svelte";
-import App from "./App.svelte";
-import { lang } from "./i18n";
+import "./app.css";
 
-document.documentElement.lang = lang;
+import { isTauri } from "@tauri-apps/api/core";
+import { mount } from "svelte";
+
+import App from "./App.svelte";
+import { restorePrefs } from "./lib/prefs";
+
+// Outside the Tauri window (npm run dev in a browser), a stand-in answers the commands.
+if (import.meta.env.DEV && !isTauri()) {
+  await import("./dev/mock");
+}
+
+restorePrefs();
 
 const target = document.getElementById("app");
 if (target) {
