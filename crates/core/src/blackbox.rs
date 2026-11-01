@@ -256,6 +256,11 @@ impl Blackbox {
         std::mem::take(&mut self.ready)
     }
 
+    /// The CPU, disk and memory pressure episodes under way; hints are left out.
+    pub fn open_pressure(&self) -> Vec<EpisodeKind> {
+        self.episodes.open_pressure()
+    }
+
     /// Counts what happened in the 24 h before `now_ms`.
     pub fn recent(&self, now_ms: i64) -> RecentState {
         let mut state = RecentState::default();

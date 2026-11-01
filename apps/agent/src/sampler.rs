@@ -311,13 +311,17 @@ impl Sampler {
             };
             self.gpu_by_pid = pdh.gpu.map(|gpu| gpu.per_pid).unwrap_or_default();
             self.learn_machine(&sample);
-            lock(&self.now).sample = Some(sample.clone());
             {
                 let mut readings = lock(&self.readings);
                 readings.drop_while(|r| r.ts_ms < ts_ms - RING_MS);
                 readings.push(Reading::of_sample(&sample));
             }
             self.blackbox.push_sample(sample.clone());
+            {
+                let mut now = lock(&self.now);
+                now.sample = Some(sample.clone());
+                now.pressure = self.blackbox.open_pressure();
+            }
             self.batcher.push_sample(sample);
             lock(&self.status).last_sample_ms = Some(ts_ms);
         }
@@ -489,6 +493,7 @@ impl Sampler {
         self.take_events();
         let outputs = self.blackbox.drain(now);
         self.keep(outputs, now);
+        lock(&self.now).pressure.clear();
         self.flush_final();
         if self.away_since.is_none() {
             self.away_since = Some((now, reason));

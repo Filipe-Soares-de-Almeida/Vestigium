@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
-use vestigium_core::{HungWindow, OccurrenceSummary, ProcessTop, Reading, Sample, Settings};
+use vestigium_core::{
+    EpisodeKind, HungWindow, OccurrenceSummary, ProcessTop, Reading, Sample, Settings,
+};
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -36,7 +38,7 @@ pub enum Response {
         agent_version: String,
     },
     Status(AgentStatus),
-    Now(NowFrame),
+    Now(Box<NowFrame>),
     /// One reading a second, oldest first.
     Recent {
         readings: Vec<Reading>,
@@ -96,4 +98,6 @@ pub struct NowFrame {
     pub hung: Vec<HungWindow>,
     /// The most recent occurrence stored.
     pub latest: Option<OccurrenceSummary>,
+    /// CPU, disk and memory pressure episodes under way; hints are left out.
+    pub pressure: Vec<EpisodeKind>,
 }

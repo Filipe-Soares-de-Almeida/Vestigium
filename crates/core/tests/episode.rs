@@ -165,3 +165,41 @@ fn close_all_marks_truncated() {
     assert!(episodes[0].truncated);
     assert!(feed(&mut detector, 131, 150, calm, false).is_empty());
 }
+
+#[test]
+fn pressure_is_open_once_the_episode_counts() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 100, memory_high, false);
+    assert!(
+        detector.open_pressure().is_empty(),
+        "two minutes are not up yet"
+    );
+
+    feed(&mut detector, 101, 130, memory_high, false);
+    assert_eq!(detector.open_pressure(), [EpisodeKind::MemoryHigh]);
+
+    feed(&mut detector, 131, 135, calm, false);
+    assert_eq!(
+        detector.open_pressure(),
+        [EpisodeKind::MemoryHigh],
+        "a short dip keeps it open"
+    );
+
+    feed(&mut detector, 136, 145, calm, false);
+    assert!(detector.open_pressure().is_empty());
+}
+
+#[test]
+fn hints_are_not_pressure() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 10, dpc_storm, false);
+    assert!(detector.open_pressure().is_empty());
+}
+
+#[test]
+fn close_all_ends_the_pressure() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 130, memory_high, false);
+    detector.close_all();
+    assert!(detector.open_pressure().is_empty());
+}

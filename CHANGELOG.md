@@ -78,6 +78,9 @@ How to use this file:
   that nothing leaves the PC, the version, the space the history uses now and a button that opens
   its folder once there is one. While Vestigium is not running, the settings can be read but not
   changed.
+- The watcher tells the window while a stretch of CPU, disk or memory pressure is under way, so
+  the live view can show the PC as under pressure for as long as it lasts, and not after one busy
+  second.
 
 ### Changed
 

@@ -352,6 +352,8 @@ export interface NowFrame {
   top: ProcessTop | null;
   hung: HungWindow[];
   latest: OccurrenceSummary | null;
+  /** CPU, disk and memory pressure episodes under way; hints are left out. */
+  pressure: EpisodeKind[];
 }
 
 export type LiveMessage =

@@ -236,6 +236,15 @@ impl EpisodeDetector {
         self.finish(runs, true)
     }
 
+    /// The pressure episodes, not hints, that have lasted long enough to count and not ended.
+    pub fn open_pressure(&self) -> Vec<EpisodeKind> {
+        self.runs
+            .iter()
+            .filter(|run| !is_hint(&run.kind) && run.qualifies())
+            .map(|run| run.kind.clone())
+            .collect()
+    }
+
     fn finish(&mut self, runs: Vec<Run>, truncated: bool) -> Vec<Episode> {
         let mut episodes = Vec::new();
         for run in runs.into_iter().filter(Run::qualifies) {

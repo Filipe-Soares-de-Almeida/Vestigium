@@ -55,8 +55,8 @@ pub fn run_live(
         let reading = frame.sample.as_ref().map(Reading::of_sample);
         let message = LiveMessage::Now {
             reading,
-            state: reading.map(|r| pc_state(Some(&r), false)),
-            frame: Box::new(frame),
+            state: reading.map(|r| pc_state(Some(&r), !frame.pressure.is_empty())),
+            frame,
         };
         if !send(message) {
             return;
@@ -72,14 +72,37 @@ pub fn run_live(
 mod tests {
     use std::sync::mpsc;
 
+    use vestigium_core::{EpisodeKind, Sample};
+
     use super::*;
+
+    fn quiet_second() -> Sample {
+        Sample {
+            ts_ms: 1_000,
+            cpu_pct: 20.0,
+            dpc_pct: 0.2,
+            isr_pct: 0.1,
+            perf_limit_pct: 100.0,
+            proc_perf_pct: 100.0,
+            mem_total_bytes: 16 << 30,
+            mem_avail_bytes: 8 << 30,
+            commit_bytes: 8 << 30,
+            commit_limit_bytes: 32 << 30,
+            hard_faults_per_s: 0.0,
+            gpu_pct: None,
+            probe_max_lag_ms: 1.0,
+            sampler_lag_ms: 1.0,
+            cores: Vec::new(),
+            disks: Vec::new(),
+        }
+    }
 
     fn agent(request: &Request) -> Result<Response, UiError> {
         Ok(match request {
             Request::Recent => Response::Recent {
                 readings: Vec::new(),
             },
-            Request::Now => Response::Now(NowFrame::default()),
+            Request::Now => Response::Now(Box::default()),
             _ => Response::Done,
         })
     }
@@ -121,6 +144,48 @@ mod tests {
         );
 
         assert_eq!(sent, 2);
+    }
+
+    #[test]
+    fn live_is_under_pressure_only_inside_an_episode() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+        let mut open = false;
+
+        run_live(
+            |request| {
+                Ok(match request {
+                    Request::Now => {
+                        open = !open;
+                        Response::Now(Box::new(NowFrame {
+                            sample: Some(quiet_second()),
+                            pressure: if open {
+                                vec![EpisodeKind::CpuSaturated]
+                            } else {
+                                Vec::new()
+                            },
+                            ..NowFrame::default()
+                        }))
+                    }
+                    other => agent(other)?,
+                })
+            },
+            |message| {
+                sent.push(message);
+                sent.len() < 3
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        let states: Vec<Option<PcState>> = sent
+            .iter()
+            .filter_map(|m| match m {
+                LiveMessage::Now { state, .. } => Some(*state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(states, [Some(PcState::Pressure), Some(PcState::Calm)]);
     }
 
     #[test]

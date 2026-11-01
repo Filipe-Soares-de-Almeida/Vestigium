@@ -124,7 +124,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             state: Level::of(&lock(&shared.recent)).state(),
             ..lock(&shared.status).clone()
         }),
-        Request::Now => Response::Now(lock(&shared.now).clone()),
+        Request::Now => Response::Now(Box::new(lock(&shared.now).clone())),
         Request::Recent => {
             let since_ms = wall_ms() - RING_MS;
             let readings = lock(&shared.readings);
@@ -311,7 +311,7 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use vestigium_core::{HungWindow, Retention};
+    use vestigium_core::{EpisodeKind, HungWindow, Retention};
     use vestigium_ipc::{PROTOCOL_VERSION, TrayState};
 
     use super::*;
@@ -375,15 +375,17 @@ mod tests {
     }
 
     #[test]
-    fn protocol_one_is_refused() {
-        let response = handle(Request::Hello { protocol: 1 }, &shared(), None);
-        assert!(matches!(
-            response,
-            Response::Error {
-                code: ErrorCode::Protocol,
-                ..
-            }
-        ));
+    fn older_protocols_are_refused() {
+        for protocol in [1, 2] {
+            let response = handle(Request::Hello { protocol }, &shared(), None);
+            assert!(matches!(
+                response,
+                Response::Error {
+                    code: ErrorCode::Protocol,
+                    ..
+                }
+            ));
+        }
     }
 
     #[test]
@@ -414,11 +416,15 @@ mod tests {
                 pid: 7,
                 name: "editor.exe".to_string(),
             }],
+            pressure: vec![EpisodeKind::CpuSaturated],
             ..NowFrame::default()
         };
         *lock(&shared.now) = frame.clone();
 
-        assert_eq!(handle(Request::Now, &shared, None), Response::Now(frame));
+        assert_eq!(
+            handle(Request::Now, &shared, None),
+            Response::Now(Box::new(frame))
+        );
     }
 
     #[test]

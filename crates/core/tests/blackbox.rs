@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use common::{GIB, T, calm, event, machine};
 use vestigium_core::{
-    Blackbox, Cause, EventMeaning, Gap, GapReason, HungWindow, Occurrence, OccurrenceKind, Output,
-    ProbeTick, Severity, Timing, Trigger,
+    Blackbox, Cause, EpisodeKind, EventMeaning, Gap, GapReason, HungWindow, Occurrence,
+    OccurrenceKind, Output, ProbeTick, Severity, Timing, Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -242,4 +242,18 @@ fn recent_state_counts_the_last_day() {
     let state = bb.recent(T + 3_600_000);
     assert_eq!((state.occurrences, state.severe), (2, 1));
     assert_eq!(bb.recent(T + 200_000 + 86_400_000).occurrences, 0);
+}
+
+#[test]
+fn pressure_lasts_until_drained() {
+    let mut bb = blackbox();
+    for s in 0..=130 {
+        let mut sample = calm(T + s * 1_000);
+        sample.mem_avail_bytes = GIB / 2;
+        bb.push_sample(sample);
+    }
+    assert_eq!(bb.open_pressure(), [EpisodeKind::MemoryHigh]);
+
+    bb.drain(T + 131_000);
+    assert!(bb.open_pressure().is_empty());
 }
