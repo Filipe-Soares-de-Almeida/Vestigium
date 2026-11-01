@@ -39,12 +39,33 @@ pub enum ThemePref {
     Dark,
 }
 
+/// Palette of the window; light or dark is `ThemePref`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColorTheme {
+    #[default]
+    Red,
+    Graphite,
+    Slate,
+    Indigo,
+}
+
+/// How much a report says: plain language first, raw values last.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetailLevel {
+    #[default]
+    Simple,
+    Detailed,
+    Technical,
+}
+
 /// What a person can change; starting with Windows lives in the registry, not here.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     pub retention: Retention,
     pub language: LanguagePref,
     pub theme: ThemePref,
+    pub color_theme: ColorTheme,
+    pub detail_level: DetailLevel,
 }
 
 /// A retention value outside what the watcher accepts.

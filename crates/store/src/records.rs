@@ -1,8 +1,8 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
-    Cause, Channel, Episode, EpisodeKind, EventMeaning, Gap, GapReason, LanguagePref, MachineInfo,
-    Occurrence, OccurrenceKind, OccurrenceSummary, Retention, Settings, Severity, ThemePref,
-    WinEvent,
+    Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, GapReason,
+    LanguagePref, MachineInfo, Occurrence, OccurrenceKind, OccurrenceSummary, Retention, Settings,
+    Severity, ThemePref, WinEvent,
 };
 
 use crate::{Store, StoreError, decode, encode};
@@ -75,6 +75,8 @@ fn episode_code(kind: &EpisodeKind) -> i64 {
 const SETTING_RETENTION: &str = "retention";
 const SETTING_LANGUAGE: &str = "language";
 const SETTING_THEME: &str = "theme";
+const SETTING_COLOR_THEME: &str = "color_theme";
+const SETTING_DETAIL_LEVEL: &str = "detail_level";
 
 impl Store {
     /// Stores a finished occurrence on its own, right away; returns its id.
@@ -130,6 +132,14 @@ impl Store {
             ),
             (SETTING_LANGUAGE, serde_json::to_string(&settings.language)?),
             (SETTING_THEME, serde_json::to_string(&settings.theme)?),
+            (
+                SETTING_COLOR_THEME,
+                serde_json::to_string(&settings.color_theme)?,
+            ),
+            (
+                SETTING_DETAIL_LEVEL,
+                serde_json::to_string(&settings.detail_level)?,
+            ),
         ] {
             tx.execute(
                 "INSERT INTO setting (key, value) VALUES (?1, ?2)
@@ -282,6 +292,16 @@ impl Store {
                 SETTING_THEME => {
                     if let Ok(theme) = serde_json::from_str::<ThemePref>(&value) {
                         settings.theme = theme;
+                    }
+                }
+                SETTING_COLOR_THEME => {
+                    if let Ok(color_theme) = serde_json::from_str::<ColorTheme>(&value) {
+                        settings.color_theme = color_theme;
+                    }
+                }
+                SETTING_DETAIL_LEVEL => {
+                    if let Ok(detail_level) = serde_json::from_str::<DetailLevel>(&value) {
+                        settings.detail_level = detail_level;
                     }
                 }
                 _ => {}

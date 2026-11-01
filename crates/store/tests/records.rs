@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use vestigium_core::{
-    Cause, Channel, Confidence, CoreLoad, Episode, EpisodeKind, EventMeaning, Gap, GapReason,
-    MachineInfo, Occurrence, OccurrenceKind, Retention, Sample, Settings, Severity, Suspect,
-    Trigger, WinEvent, Window,
+    Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
+    EventMeaning, Gap, GapReason, MachineInfo, Occurrence, OccurrenceKind, Retention, Sample,
+    Settings, Severity, Suspect, Trigger, WinEvent, Window,
 };
 use vestigium_store::{Batch, SCHEMA_VERSION, Segment, Series, Store, StoreError, encode};
 
@@ -344,6 +344,24 @@ fn settings_default_when_absent() {
 
     assert_eq!(store.settings().unwrap(), changed);
     assert_eq!(store.machine().unwrap(), Some(machine()));
+}
+
+#[test]
+fn settings_default_color_theme_and_detail_level() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let defaults = store.settings().unwrap();
+    assert_eq!(defaults.color_theme, ColorTheme::Red);
+    assert_eq!(defaults.detail_level, DetailLevel::Simple);
+
+    let changed = Settings {
+        color_theme: ColorTheme::Slate,
+        detail_level: DetailLevel::Technical,
+        ..Settings::default()
+    };
+    store.set_settings(&changed).unwrap();
+
+    assert_eq!(store.settings().unwrap(), changed);
 }
 
 #[test]
