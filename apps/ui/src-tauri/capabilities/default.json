@@ -3,5 +3,19 @@
   "identifier": "default",
   "description": "What the main window may call.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-timeline",
+    "allow-marks",
+    "allow-occurrence",
+    "allow-live-start",
+    "allow-live-stop",
+    "allow-agent-status",
+    "allow-start-agent",
+    "allow-set-paused",
+    "allow-set-sensitive",
+    "allow-set-autostart",
+    "allow-set-settings",
+    "allow-settings"
+  ]
 }

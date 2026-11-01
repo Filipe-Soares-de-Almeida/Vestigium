@@ -17,6 +17,15 @@ tauri-build = { workspace = true }
 [dependencies]
 tauri = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
+vestigium-core = { workspace = true }
+vestigium-ipc = { workspace = true }
+vestigium-store = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

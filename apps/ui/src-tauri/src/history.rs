@@ -1,0 +1,554 @@
+use std::path::PathBuf;
+
+use serde::Serialize;
+use vestigium_core::{
+    Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, WinEvent, pc_state,
+};
+use vestigium_store::{Store, StoreError};
+
+/// Ranges up to this long are drawn from per-second samples, longer ones from minutes.
+pub const SECONDS_UP_TO_MS: i64 = 6 * 3_600_000;
+const SECOND_MS: i64 = 1_000;
+/// Most points a chart gets, whatever the caller asks for.
+const MAX_POINTS: u32 = 10_000;
+
+/// Whether the watcher has written any history yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryState {
+    Ready,
+    Empty,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resolution {
+    Seconds,
+    Minutes,
+}
+
+/// A chart's series, one entry per point; `None` where nothing was watched.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Columns {
+    /// Start of each point, Unix epoch seconds.
+    pub t: Vec<f64>,
+    pub cpu: Vec<Option<f32>>,
+    pub mem_used_pct: Vec<Option<f32>>,
+    pub disk_active_max: Vec<Option<f32>>,
+    pub disk_latency_max: Vec<Option<f32>>,
+    pub gpu: Vec<Option<f32>>,
+    pub probe_lag: Vec<Option<f32>>,
+    pub state: Vec<PcState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TimelineDto {
+    pub history: HistoryState,
+    pub resolution: Resolution,
+    /// Width of each point, in milliseconds.
+    pub step_ms: i64,
+    #[serde(flatten)]
+    pub columns: Columns,
+}
+
+/// What the timeline marks: stalls, pressure, Windows events and holes in watching.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MarksDto {
+    pub history: HistoryState,
+    pub occurrences: Vec<OccurrenceSummary>,
+    pub episodes: Vec<Episode>,
+    pub events: Vec<WinEvent>,
+    pub gaps: Vec<Gap>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OccurrenceDto {
+    pub id: i64,
+    #[serde(flatten)]
+    pub occurrence: Occurrence,
+    /// The window second by second.
+    pub chart: Columns,
+}
+
+/// The watcher's database, read-only, opened when first needed and again after it goes away.
+pub struct History {
+    path: Option<PathBuf>,
+    store: Option<Store>,
+}
+
+impl History {
+    pub fn new(path: Option<PathBuf>) -> History {
+        History { path, store: None }
+    }
+
+    /// `%LOCALAPPDATA%\Vestigium\data\vestigium.db`, where the watcher writes.
+    pub fn default_path() -> Option<PathBuf> {
+        let local = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
+        Some(PathBuf::from(local).join(r"Vestigium\data\vestigium.db"))
+    }
+
+    /// Points of `[from_ms, to_ms)`, peaks kept, at most `max_points` of them.
+    pub fn timeline(
+        &mut self,
+        from_ms: i64,
+        to_ms: i64,
+        max_points: u32,
+    ) -> Result<TimelineDto, StoreError> {
+        let resolution = if to_ms - from_ms <= SECONDS_UP_TO_MS {
+            Resolution::Seconds
+        } else {
+            Resolution::Minutes
+        };
+        let native_ms = match resolution {
+            Resolution::Seconds => SECOND_MS,
+            Resolution::Minutes => MINUTE_MS,
+        };
+        let start_ms = from_ms - from_ms.rem_euclid(native_ms);
+        let step_ms = step(to_ms - start_ms, native_ms, max_points);
+        let found = self.read(|store| {
+            let last_ms = to_ms.saturating_sub(1);
+            let readings: Vec<Reading> = match resolution {
+                Resolution::Seconds => store
+                    .samples(start_ms, last_ms)?
+                    .iter()
+                    .map(Reading::of_sample)
+                    .collect(),
+                Resolution::Minutes => store
+                    .minutes(start_ms, last_ms)?
+                    .iter()
+                    .map(Reading::of_minute)
+                    .collect(),
+            };
+            let pressure: Vec<(i64, i64)> = store
+                .episodes(start_ms, last_ms)?
+                .iter()
+                .filter(|e| !e.kind.is_hint())
+                .map(|e| (e.start_ms, e.end_ms))
+                .collect();
+            Ok((readings, pressure))
+        })?;
+        let Some((readings, pressure)) = found else {
+            return Ok(TimelineDto {
+                history: HistoryState::Empty,
+                resolution,
+                step_ms,
+                columns: Columns::default(),
+            });
+        };
+        let buckets = bucket(&readings, start_ms, to_ms, step_ms);
+        Ok(TimelineDto {
+            history: HistoryState::Ready,
+            resolution,
+            step_ms,
+            columns: columns(&buckets, start_ms, step_ms, &pressure),
+        })
+    }
+
+    pub fn marks(&mut self, from_ms: i64, to_ms: i64) -> Result<MarksDto, StoreError> {
+        let found = self.read(|store| {
+            Ok(MarksDto {
+                history: HistoryState::Ready,
+                occurrences: store.occurrences(from_ms, to_ms)?,
+                episodes: store.episodes(from_ms, to_ms)?,
+                events: store.events(from_ms, to_ms)?,
+                gaps: store.gaps(from_ms, to_ms)?,
+            })
+        })?;
+        Ok(found.unwrap_or(MarksDto {
+            history: HistoryState::Empty,
+            occurrences: Vec::new(),
+            episodes: Vec::new(),
+            events: Vec::new(),
+            gaps: Vec::new(),
+        }))
+    }
+
+    pub fn occurrence(&mut self, id: i64) -> Result<Option<OccurrenceDto>, StoreError> {
+        let found = self.read(|store| store.occurrence(id))?;
+        Ok(found.flatten().map(|occurrence| {
+            let window = &occurrence.window;
+            let readings: Vec<Reading> = window.samples.iter().map(Reading::of_sample).collect();
+            let start_ms = window.from_ms - window.from_ms.rem_euclid(SECOND_MS);
+            let buckets = bucket(&readings, start_ms, window.to_ms + 1, SECOND_MS);
+            OccurrenceDto {
+                id,
+                chart: columns(&buckets, start_ms, SECOND_MS, &[]),
+                occurrence,
+            }
+        }))
+    }
+
+    pub fn settings(&mut self) -> Result<Option<vestigium_core::Settings>, StoreError> {
+        self.read(|store| store.settings())
+    }
+
+    /// Runs `query` on the open database; `None` while there is no database yet.
+    fn read<T>(
+        &mut self,
+        query: impl FnOnce(&Store) -> Result<T, StoreError>,
+    ) -> Result<Option<T>, StoreError> {
+        let Some(path) = self.path.as_deref().filter(|p| p.is_file()) else {
+            self.store = None;
+            return Ok(None);
+        };
+        if self.store.is_none() {
+            match Store::open_read_only(path) {
+                Ok(store) => self.store = Some(store),
+                Err(StoreError::NotFound) => return Ok(None),
+                Err(err) => return Err(err),
+            }
+        }
+        let Some(store) = self.store.as_ref() else {
+            return Ok(None);
+        };
+        query(store).map(Some).inspect_err(|_| self.store = None)
+    }
+}
+
+/// Smallest whole multiple of `native_ms` that fits `span_ms` in `max_points` points.
+fn step(span_ms: i64, native_ms: i64, max_points: u32) -> i64 {
+    let points = i64::from(max_points.clamp(1, MAX_POINTS));
+    let wanted = (span_ms.max(1) + points - 1) / points;
+    ((wanted + native_ms - 1) / native_ms).max(1) * native_ms
+}
+
+/// Peaks of `readings` in buckets of `step_ms` from `start_ms` to `end_ms`, empty buckets `None`.
+fn bucket(readings: &[Reading], start_ms: i64, end_ms: i64, step_ms: i64) -> Vec<Option<Reading>> {
+    let count = usize::try_from((end_ms - start_ms + step_ms - 1) / step_ms).unwrap_or(0);
+    let mut buckets: Vec<Option<Reading>> = vec![None; count];
+    for reading in readings {
+        let Ok(at) = usize::try_from((reading.ts_ms - start_ms).div_euclid(step_ms)) else {
+            continue;
+        };
+        match buckets.get_mut(at) {
+            Some(Some(peak)) => peak.peak(reading),
+            Some(empty) => {
+                *empty = Some(Reading {
+                    ts_ms: start_ms + at as i64 * step_ms,
+                    ..*reading
+                })
+            }
+            None => {}
+        }
+    }
+    buckets
+}
+
+/// Columns for `buckets`; a bucket overlapping a span in `pressure` is under pressure.
+fn columns(
+    buckets: &[Option<Reading>],
+    start_ms: i64,
+    step_ms: i64,
+    pressure: &[(i64, i64)],
+) -> Columns {
+    let mut columns = Columns::default();
+    for (at, reading) in buckets.iter().enumerate() {
+        let from_ms = start_ms + at as i64 * step_ms;
+        let to_ms = from_ms + step_ms;
+        let in_episode = pressure.iter().any(|&(s, e)| s < to_ms && e >= from_ms);
+        columns.t.push(from_ms as f64 / 1_000.0);
+        columns.cpu.push(reading.map(|r| r.cpu_pct));
+        columns
+            .mem_used_pct
+            .push(reading.and_then(|r| r.mem_used_pct));
+        columns
+            .disk_active_max
+            .push(reading.map(|r| r.disk_active_pct));
+        columns
+            .disk_latency_max
+            .push(reading.map(|r| r.disk_latency_ms));
+        columns.gpu.push(reading.and_then(|r| r.gpu_pct));
+        columns.probe_lag.push(reading.map(|r| r.probe_lag_ms));
+        columns.state.push(pc_state(reading.as_ref(), in_episode));
+    }
+    columns
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use vestigium_core::{
+        Cause, Confidence, CoreLoad, DiskLoad, EpisodeKind, Evidence, MachineInfo, Metric,
+        MinuteSample, OccurrenceKind, Sample, Severity, Suspect, Trigger, Window,
+    };
+    use vestigium_store::{Segment, Series, encode};
+
+    use super::*;
+
+    const HOUR_MS: i64 = 3_600_000;
+    /// A fixed day, so tests never depend on the clock.
+    const DAY_START_MS: i64 = 1_790_000_000_000 - 1_790_000_000_000 % (24 * HOUR_MS);
+
+    fn sample(ts_ms: i64, cpu_pct: f32) -> Sample {
+        Sample {
+            ts_ms,
+            cpu_pct,
+            dpc_pct: 0.2,
+            isr_pct: 0.1,
+            perf_limit_pct: 100.0,
+            proc_perf_pct: 100.0,
+            mem_total_bytes: 16 << 30,
+            mem_avail_bytes: 8 << 30,
+            commit_bytes: 8 << 30,
+            commit_limit_bytes: 32 << 30,
+            hard_faults_per_s: 0.0,
+            gpu_pct: Some(2.0),
+            probe_max_lag_ms: 1.0,
+            sampler_lag_ms: 1.0,
+            cores: vec![
+                CoreLoad {
+                    cpu_pct,
+                    dpc_pct: 0.2,
+                    isr_pct: 0.1,
+                };
+                2
+            ],
+            disks: vec![DiskLoad {
+                name: "0 C:".to_string(),
+                active_pct: 4.0,
+                latency_ms: 1.0,
+                queue_len: 0.0,
+                bytes_per_s: 0.0,
+            }],
+        }
+    }
+
+    fn minute(ts_ms: i64, cpu_max: f32) -> MinuteSample {
+        vestigium_core::summarize_minute(&[sample(ts_ms, cpu_max)]).unwrap()
+    }
+
+    /// Writes `samples` the way the watcher does: one segment per minute.
+    fn write_samples(store: &mut Store, samples: &[Sample]) {
+        let segments: Vec<Segment> = samples
+            .chunk_by(|a, b| a.ts_ms / MINUTE_MS == b.ts_ms / MINUTE_MS)
+            .map(|chunk| Segment {
+                series: Series::Samples,
+                start_ms: chunk[0].ts_ms,
+                end_ms: chunk[chunk.len() - 1].ts_ms,
+                data: encode(chunk),
+            })
+            .collect();
+        store.append(&segments).unwrap();
+    }
+
+    fn history(dir: &Path) -> (Store, History) {
+        let path = dir.join("vestigium.db");
+        (Store::open(&path).unwrap(), History::new(Some(path)))
+    }
+
+    #[test]
+    fn downsample_keeps_peaks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let spike_ms = DAY_START_MS + 4 * HOUR_MS + 1_234_000;
+        let samples: Vec<Sample> = (0..6 * 3_600)
+            .map(|s| DAY_START_MS + s * SECOND_MS)
+            .map(|ts| sample(ts, if ts == spike_ms { 100.0 } else { 5.0 }))
+            .collect();
+        write_samples(&mut store, &samples);
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + 6 * HOUR_MS, 600)
+            .unwrap();
+
+        assert_eq!(timeline.resolution, Resolution::Seconds);
+        assert_eq!(timeline.step_ms, 36_000);
+        assert_eq!(timeline.columns.t.len(), 600);
+        let cpu = &timeline.columns.cpu;
+        assert_eq!(cpu.iter().flatten().fold(0.0, |a: f32, &b| a.max(b)), 100.0);
+        let at = ((spike_ms - DAY_START_MS) / 36_000) as usize;
+        assert_eq!(cpu[at], Some(100.0));
+        assert_eq!(timeline.columns.state[at], PcState::Pressure);
+    }
+
+    #[test]
+    fn gaps_become_nulls() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let samples: Vec<Sample> = (0..60)
+            .chain(120..180)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &samples);
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + 180_000, 1_000)
+            .unwrap();
+
+        assert_eq!(timeline.step_ms, SECOND_MS);
+        let cpu = &timeline.columns.cpu;
+        assert_eq!(cpu.len(), 180);
+        assert_eq!(cpu[59], Some(10.0));
+        assert!(cpu[60..120].iter().all(Option::is_none));
+        assert!(
+            timeline.columns.mem_used_pct[60..120]
+                .iter()
+                .all(Option::is_none)
+        );
+        assert_eq!(timeline.columns.state[90], PcState::Suspended);
+        assert_eq!(cpu[120], Some(10.0));
+        assert_eq!(timeline.columns.state[120], PcState::Calm);
+    }
+
+    #[test]
+    fn long_ranges_use_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let minutes: Vec<MinuteSample> = (0..24 * 60)
+            .map(|m| {
+                minute(
+                    DAY_START_MS + m * MINUTE_MS,
+                    if m == 600 { 70.0 } else { 3.0 },
+                )
+            })
+            .collect();
+        store
+            .append(&[Segment {
+                series: Series::Minutes,
+                start_ms: DAY_START_MS,
+                end_ms: DAY_START_MS + 24 * HOUR_MS - MINUTE_MS,
+                data: encode(&minutes),
+            }])
+            .unwrap();
+        store
+            .insert_episode(&Episode {
+                kind: EpisodeKind::MemoryHigh,
+                start_ms: DAY_START_MS + 2 * HOUR_MS,
+                end_ms: DAY_START_MS + 2 * HOUR_MS + 90_000,
+                peak: 96.0,
+                culprit: None,
+                truncated: false,
+            })
+            .unwrap();
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + 24 * HOUR_MS, 2_000)
+            .unwrap();
+
+        assert_eq!(timeline.resolution, Resolution::Minutes);
+        assert_eq!(timeline.step_ms, MINUTE_MS);
+        assert_eq!(timeline.columns.t.len(), 24 * 60);
+        assert_eq!(
+            timeline.columns.t[1],
+            (DAY_START_MS + MINUTE_MS) as f64 / 1_000.0
+        );
+        assert_eq!(timeline.columns.cpu[600], Some(70.0));
+        assert_eq!(timeline.columns.state[600], PcState::Busy);
+        assert_eq!(timeline.columns.state[120], PcState::Pressure);
+        assert_eq!(timeline.columns.state[121], PcState::Pressure);
+        assert_eq!(timeline.columns.state[123], PcState::Calm);
+    }
+
+    #[test]
+    fn empty_db_is_an_empty_timeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut history = History::new(Some(dir.path().join("vestigium.db")));
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + HOUR_MS, 500)
+            .unwrap();
+        let marks = history.marks(DAY_START_MS, DAY_START_MS + HOUR_MS).unwrap();
+
+        assert_eq!(timeline.history, HistoryState::Empty);
+        assert!(timeline.columns.t.is_empty());
+        assert_eq!(marks.history, HistoryState::Empty);
+        assert!(marks.occurrences.is_empty());
+        assert_eq!(history.occurrence(1).unwrap(), None);
+        assert!(!dir.path().join("vestigium.db").exists());
+    }
+
+    #[test]
+    fn history_appears_once_the_watcher_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vestigium.db");
+        let mut history = History::new(Some(path.clone()));
+        assert_eq!(history.marks(0, 1).unwrap().history, HistoryState::Empty);
+
+        let mut store = Store::open(&path).unwrap();
+        write_samples(&mut store, &[sample(DAY_START_MS, 1.0)]);
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + 60_000, 60)
+            .unwrap();
+        assert_eq!(timeline.history, HistoryState::Ready);
+        assert_eq!(timeline.columns.cpu[0], Some(1.0));
+    }
+
+    #[test]
+    fn occurrence_dto_keeps_evidence_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + HOUR_MS;
+        let evidence = Evidence::Metric {
+            ts_ms: start_ms + 500,
+            metric: Metric::DiskLatencyMs,
+            value: 1_840.5,
+            threshold: 200.0,
+            subject: Some("1 D:".to_string()),
+        };
+        let occurrence = Occurrence {
+            kind: OccurrenceKind::Freeze,
+            start_ms,
+            end_ms: start_ms + 6_000,
+            severity: Severity::Severe,
+            triggers: vec![Trigger::Freeze {
+                start_ms,
+                end_ms: start_ms + 6_000,
+                lag_ms: 6_000.0,
+            }],
+            window: Window {
+                from_ms: start_ms - 60_000,
+                to_ms: start_ms + 36_000,
+                samples: vec![
+                    sample(start_ms - 2_000, 30.0),
+                    sample(start_ms + 7_000, 95.0),
+                ],
+                tops: Vec::new(),
+                events: Vec::new(),
+                hangs: Vec::new(),
+                gaps: Vec::new(),
+                machine: MachineInfo {
+                    logical_cpus: 2,
+                    mem_total_bytes: 16 << 30,
+                    disks: Vec::new(),
+                },
+            },
+            suspects: vec![Suspect {
+                cause: Cause::Storage {
+                    disk: Some("1 D:".to_string()),
+                },
+                confidence: Confidence::High,
+                evidence: vec![evidence.clone()],
+                next_steps: Vec::new(),
+            }],
+            facts: Vec::new(),
+            sensitive: false,
+            truncated: false,
+        };
+        let id = store.insert_occurrence(&occurrence).unwrap();
+
+        let dto = history.occurrence(id).unwrap().unwrap();
+
+        assert_eq!(dto.id, id);
+        assert_eq!(dto.occurrence.suspects[0].evidence, vec![evidence]);
+        assert_eq!(dto.chart.t.len(), 97);
+        assert_eq!(dto.chart.cpu[58], Some(30.0));
+        assert_eq!(dto.chart.cpu[59], None);
+        assert_eq!(dto.chart.cpu[67], Some(95.0));
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(
+            json["suspects"][0]["evidence"][0]["Metric"]["value"],
+            serde_json::json!(1_840.5)
+        );
+        assert_eq!(json["id"], serde_json::json!(id));
+    }
+
+    #[test]
+    fn step_fits_the_points_in_whole_units() {
+        assert_eq!(step(HOUR_MS, SECOND_MS, 1_000), 4_000);
+        assert_eq!(step(HOUR_MS, SECOND_MS, 0), HOUR_MS);
+        assert_eq!(step(60_000, SECOND_MS, 1_000_000), SECOND_MS);
+        assert_eq!(step(24 * HOUR_MS, MINUTE_MS, 600), 3 * MINUTE_MS);
+    }
+}

@@ -1,5 +1,10 @@
 #![windows_subsystem = "windows"]
 
+mod agent;
+mod commands;
+mod history;
+mod live;
+
 use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
@@ -10,6 +15,21 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .manage(commands::AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::timeline,
+            commands::marks,
+            commands::occurrence,
+            commands::live_start,
+            commands::live_stop,
+            commands::agent_status,
+            commands::start_agent,
+            commands::set_paused,
+            commands::set_sensitive,
+            commands::set_autostart,
+            commands::set_settings,
+            commands::settings,
+        ])
         .build(tauri::generate_context!())
         .expect("the interface failed to start");
     app.run(|handle, event| {
