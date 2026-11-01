@@ -15,6 +15,7 @@ path = "src/main.rs"
 winresource = { workspace = true }
 
 [dependencies]
+vestigium-brand = { workspace = true }
 vestigium-collect = { workspace = true }
 vestigium-core = { workspace = true }
 vestigium-i18n = { workspace = true }
@@ -32,6 +33,7 @@ features = [
     "Win32_System_Power",
     "Win32_System_Registry",
     "Win32_System_Threading",
+    "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ]
 

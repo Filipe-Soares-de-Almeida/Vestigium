@@ -3,12 +3,14 @@ resolver = "3"
 members = [
     "apps/agent",
     "apps/ui/src-tauri",
+    "crates/brand",
     "crates/collect",
     "crates/core",
     "crates/i18n",
     "crates/ipc",
     "crates/store",
     "tools/budget",
+    "tools/icons",
     "tools/scenarios",
 ]
 
@@ -20,6 +22,7 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+vestigium-brand = { path = "crates/brand" }
 vestigium-collect = { path = "crates/collect" }
 vestigium-core = { path = "crates/core" }
 vestigium-i18n = { path = "crates/i18n" }

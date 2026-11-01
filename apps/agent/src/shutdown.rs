@@ -1,12 +1,14 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_ENDSESSION,
-    WM_POWERBROADCAST, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
+    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DISPLAYCHANGE,
+    WM_ENDSESSION, WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WNDCLASSW,
+    WS_OVERLAPPED,
 };
 use windows::core::w;
 
@@ -19,6 +21,8 @@ static ON_END_SESSION: OnceLock<Handler> = OnceLock::new();
 static SESSION_WINDOW: OnceLock<usize> = OnceLock::new();
 /// Posted to make the message loop run once, so the tray shows a change made elsewhere.
 const WM_APP_WAKE: u32 = WM_APP + 1;
+/// Set when Windows reports a changed setting or display: theme, scale or monitors.
+static DISPLAY_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Creates the hidden top-level window that hears logoff, shutdown, suspend and resume; `on_end` runs before the session ends.
 pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::core::Result<HWND> {
@@ -83,6 +87,11 @@ pub fn pump(mut after_each: impl FnMut()) {
     }
 }
 
+/// True once after each setting or display change Windows reported.
+pub fn display_changed() -> bool {
+    DISPLAY_CHANGED.swap(false, Ordering::Relaxed)
+}
+
 /// Ends `pump` on this thread.
 pub fn quit() {
     // SAFETY: posts WM_QUIT to the calling thread's queue.
@@ -108,6 +117,12 @@ unsafe extern "system" fn session_proc(
         WM_POWERBROADCAST => {
             power::on_broadcast(wparam.0);
             LRESULT(1)
+        }
+        WM_SETTINGCHANGE | WM_DISPLAYCHANGE => {
+            DISPLAY_CHANGED.store(true, Ordering::Relaxed);
+            wake();
+            // SAFETY: the default handling still runs, unchanged.
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         // SAFETY: forwards everything else unchanged.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

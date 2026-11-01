@@ -4,13 +4,15 @@ use std::process::Command;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
+use vestigium_brand::Badge;
 use vestigium_collect::wall_ms;
-use vestigium_core::{GateState, RecentState};
+use vestigium_core::{ColorTheme, GateState, RecentState};
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::TrayState;
 
 use crate::app::{Shared, lock};
-use crate::{autostart, icon};
+use crate::icon::Taskbar;
+use crate::{autostart, icon, shutdown};
 
 /// What the message loop does after a menu click.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +33,8 @@ pub struct Tray {
     ui_exe: Option<PathBuf>,
     lang: Cell<Lang>,
     text: RefCell<Texts>,
+    /// Read again only when Windows reports a changed setting or display.
+    taskbar: Cell<Taskbar>,
     /// What the icon and menu show; `None` until the first refresh and after a relabel.
     shown: Cell<Option<Shown>>,
 }
@@ -61,11 +65,35 @@ impl Texts {
 }
 
 /// The state the icon and menu currently show.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Shown {
     paused: bool,
     sensitive: bool,
     recent: Level,
+    theme: ColorTheme,
+    taskbar: Taskbar,
+}
+
+impl Shown {
+    /// One badge, in the order the tooltip follows: paused, sensitive mode, then the last 24 h.
+    fn badge(self) -> Badge {
+        if self.paused {
+            Badge::Paused
+        } else if self.sensitive {
+            Badge::Sensitive
+        } else {
+            match self.recent {
+                Level::Normal => Badge::None,
+                Level::Attention(_) => Badge::Attention,
+                Level::Problem(_) => Badge::Problem,
+            }
+        }
+    }
+
+    /// What the drawn icon depends on.
+    fn look(self) -> (Badge, ColorTheme, Taskbar) {
+        (self.badge(), self.theme, self.taskbar)
+    }
 }
 
 /// What the last 24 h held: nothing, slowdowns, or a severe freeze.
@@ -126,10 +154,11 @@ impl Tray {
             &exit,
         ])
         .map_err(|err| err.to_string())?;
+        let taskbar = Taskbar::read();
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip(&text.watching)
-            .with_icon(icon::placeholder())
+            .with_icon(icon::tray(Badge::None, ColorTheme::default(), taskbar))
             .build()
             .map_err(|err| err.to_string())?;
         Ok(Tray {
@@ -143,6 +172,7 @@ impl Tray {
             ui_exe,
             lang: Cell::new(lang),
             text: RefCell::new(text),
+            taskbar: Cell::new(taskbar),
             shown: Cell::new(None),
         })
     }
@@ -191,18 +221,28 @@ impl Tray {
         Action::Continue
     }
 
-    /// Brings the tooltip and the menu in line with the watcher, when they differ.
+    /// Brings the icon, the tooltip and the menu in line with the watcher, when they differ.
     pub fn refresh(&self, shared: &Shared) {
         self.autostart.set_checked(autostart::is_enabled(&self.exe));
+        if shutdown::display_changed() {
+            self.taskbar.set(Taskbar::read());
+        }
         let now = Shown {
             paused: shared.gate.state() == GateState::Paused,
             sensitive: shared.sensitive.is_on(),
             recent: Level::of(&lock(&shared.recent)),
+            theme: lock(&shared.settings).color_theme,
+            taskbar: self.taskbar.get(),
         };
-        if Some(now) == self.shown.get() {
+        let before = self.shown.replace(Some(now));
+        if before == Some(now) {
             return;
         }
-        self.shown.set(Some(now));
+        if before.map(Shown::look) != Some(now.look()) {
+            let _ = self
+                .icon
+                .set_icon(Some(icon::tray(now.badge(), now.theme, now.taskbar)));
+        }
         let text = self.text.borrow();
         let tooltip = if now.paused {
             text.paused.clone()
@@ -227,9 +267,47 @@ impl Tray {
 
 #[cfg(test)]
 mod tests {
-    use vestigium_core::RecentState;
+    use vestigium_brand::Badge;
+    use vestigium_core::{ColorTheme, RecentState};
 
-    use super::Level;
+    use super::{Level, Shown};
+    use crate::icon::Taskbar;
+
+    fn shown(paused: bool, sensitive: bool, recent: Level) -> Shown {
+        Shown {
+            paused,
+            sensitive,
+            recent,
+            theme: ColorTheme::Red,
+            taskbar: Taskbar {
+                dark: true,
+                size: 16,
+            },
+        }
+    }
+
+    #[test]
+    fn the_badge_follows_the_tooltip_order() {
+        let problem = Level::Problem(1);
+
+        assert_eq!(shown(true, true, problem).badge(), Badge::Paused);
+        assert_eq!(shown(false, true, problem).badge(), Badge::Sensitive);
+        assert_eq!(shown(false, false, problem).badge(), Badge::Problem);
+        assert_eq!(
+            shown(false, false, Level::Attention(2)).badge(),
+            Badge::Attention
+        );
+        assert_eq!(shown(false, false, Level::Normal).badge(), Badge::None);
+    }
+
+    #[test]
+    fn a_new_count_keeps_the_drawn_icon() {
+        let before = shown(false, false, Level::Attention(2));
+        let after = shown(false, false, Level::Attention(3));
+
+        assert_ne!(before, after);
+        assert_eq!(before.look(), after.look());
+    }
 
     #[test]
     fn level_follows_the_last_day() {

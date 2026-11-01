@@ -52,5 +52,11 @@ How to use this file:
 - The background watcher saves its history once a minute, compressed, and hands memory it only
   needed at startup back to Windows: about 30 MB of disk writes a day and 5 MB of memory in use,
   measured on a typical desktop.
+- The tray icon is now the Vestigium mark, a faceted V, in the taskbar's own white or black, and
+  it follows Windows when the taskbar turns dark or light. A badge in its corner tells the state by
+  its shape: a ring when the last 24 hours held slowdowns, a solid dot after a severe freeze, two
+  bars over a dimmed mark while watching is paused, and a dashed ring with a dot while sensitive
+  mode is on. The ring and the dot take the accent of the chosen colour theme, and the icon is
+  drawn at the taskbar's own size, so it stays sharp at 125%, 150% and 200% display scale.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
