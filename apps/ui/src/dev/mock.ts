@@ -1,5 +1,5 @@
 // Stand-in for the window's Rust side in a plain browser (npm run dev); ./fixtures/*.ts add `handlers`.
-// URL: ?link=running|stopped|mismatch&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=
+// URL: ?link=running|stopped|mismatch&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AgentLink, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
@@ -21,7 +21,7 @@ const state = {
     language: query.get("language") ?? "System",
     theme: query.get("theme") ?? "System",
     color_theme: query.get("color") ?? "Red",
-    detail_level: "Simple",
+    detail_level: query.get("detail") ?? "Simple",
   } as Settings,
   autostart: true,
   maximized: query.get("maximized") === "1",

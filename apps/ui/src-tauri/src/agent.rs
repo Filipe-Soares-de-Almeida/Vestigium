@@ -253,14 +253,18 @@ mod tests {
             Duration::from_millis(1_000),
         );
 
-        let crate::live::LiveMessage::Recent { readings } = &sent[0] else {
+        let crate::live::LiveMessage::Recent { points } = &sent[0] else {
             panic!("the stream did not open with the recent minutes");
         };
-        assert!(!readings.is_empty());
-        assert!(readings.windows(2).all(|w| w[0].ts_ms < w[1].ts_ms));
+        assert!(!points.is_empty());
+        assert!(
+            points
+                .windows(2)
+                .all(|w| w[0].reading.ts_ms < w[1].reading.ts_ms)
+        );
         assert!(matches!(
             sent[2],
-            crate::live::LiveMessage::Now { state: Some(_), .. }
+            crate::live::LiveMessage::Now { point: Some(_), .. }
         ));
         assert!(matches!(
             link.call(&Request::Settings),

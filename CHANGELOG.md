@@ -81,6 +81,12 @@ How to use this file:
 - The watcher tells the window while a stretch of CPU, disk or memory pressure is under way, so
   the live view can show the PC as under pressure for as long as it lasts, and not after one busy
   second.
+- The Now screen answers what is weighing on the PC at this moment. A sentence at the chosen
+  detail level says whether it is calm, busy or under pressure and which program weighs most. A
+  chart shows the last ten minutes of processor, memory, disk and graphics card, readable with the
+  mouse or the arrow keys. Beside it are the five programs using the most, any window that stopped
+  responding (it already counts as an occurrence in Today), and a link to the last freeze. The live
+  numbers run only while the screen is on view, and stop when the window is hidden or minimized.
 
 ### Changed
 

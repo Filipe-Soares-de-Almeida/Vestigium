@@ -2,7 +2,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use serde::Serialize;
-use vestigium_core::{PcState, Reading, pc_state};
+use vestigium_core::{EpisodeKind, PcState, Reading, pc_state};
 use vestigium_ipc::{NowFrame, Request, Response};
 
 use crate::agent::UiError;
@@ -15,15 +15,86 @@ pub const LIVE_PERIOD: Duration = Duration::from_secs(1);
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LiveMessage {
     /// The last ten minutes, sent once before the first second.
-    Recent { readings: Vec<Reading> },
-    /// The latest second; `reading` and `state` are `None` until the first sample.
+    Recent { points: Vec<LivePoint> },
+    /// The latest second; `point` is `None` until the first sample.
     Now {
-        reading: Option<Reading>,
-        state: Option<PcState>,
+        point: Option<LivePoint>,
         frame: Box<NowFrame>,
     },
     /// The watcher stopped answering; nothing follows.
     Stopped,
+}
+
+/// One second of the live chart: the reading, the state of the PC and of each lane.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct LivePoint {
+    pub reading: Reading,
+    pub state: PcState,
+    pub lanes: Lanes,
+}
+
+/// The state each lane would give the PC on its own; a lane with no reading is suspended.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Lanes {
+    pub cpu: PcState,
+    pub memory: PcState,
+    pub disk: PcState,
+    pub gpu: PcState,
+}
+
+impl LivePoint {
+    /// `pressure` lists the episodes open at that second; the recent minutes carry none.
+    pub fn of(reading: Reading, pressure: &[EpisodeKind]) -> LivePoint {
+        let none = Reading {
+            cpu_pct: 0.0,
+            mem_used_pct: None,
+            disk_active_pct: 0.0,
+            gpu_pct: None,
+            ..reading
+        };
+        let open = |kind: fn(&EpisodeKind) -> bool| pressure.iter().any(kind);
+        let alone = |only: Reading, open: bool| pc_state(Some(&only), open);
+        LivePoint {
+            reading,
+            state: pc_state(Some(&reading), !pressure.is_empty()),
+            lanes: Lanes {
+                cpu: alone(
+                    Reading {
+                        cpu_pct: reading.cpu_pct,
+                        ..none
+                    },
+                    open(|k| matches!(k, EpisodeKind::CpuSaturated)),
+                ),
+                memory: match reading.mem_used_pct {
+                    Some(_) => alone(
+                        Reading {
+                            mem_used_pct: reading.mem_used_pct,
+                            ..none
+                        },
+                        open(|k| matches!(k, EpisodeKind::MemoryHigh)),
+                    ),
+                    None => PcState::Suspended,
+                },
+                disk: alone(
+                    Reading {
+                        disk_active_pct: reading.disk_active_pct,
+                        ..none
+                    },
+                    open(|k| matches!(k, EpisodeKind::DiskBusy { .. })),
+                ),
+                gpu: match reading.gpu_pct {
+                    Some(_) => alone(
+                        Reading {
+                            gpu_pct: reading.gpu_pct,
+                            ..none
+                        },
+                        false,
+                    ),
+                    None => PcState::Suspended,
+                },
+            },
+        }
+    }
 }
 
 /// Streams the recent minutes, then one second per `period`, until `stop` is dropped or
@@ -41,7 +112,11 @@ pub fn run_live(
             return;
         }
     };
-    if !send(LiveMessage::Recent { readings }) {
+    let points = readings
+        .into_iter()
+        .map(|r| LivePoint::of(r, &[]))
+        .collect();
+    if !send(LiveMessage::Recent { points }) {
         return;
     }
     loop {
@@ -52,12 +127,11 @@ pub fn run_live(
                 return;
             }
         };
-        let reading = frame.sample.as_ref().map(Reading::of_sample);
-        let message = LiveMessage::Now {
-            reading,
-            state: reading.map(|r| pc_state(Some(&r), !frame.pressure.is_empty())),
-            frame,
-        };
+        let point = frame
+            .sample
+            .as_ref()
+            .map(|sample| LivePoint::of(Reading::of_sample(sample), &frame.pressure));
+        let message = LiveMessage::Now { point, frame };
         if !send(message) {
             return;
         }
@@ -124,7 +198,7 @@ mod tests {
 
         assert_eq!(sent.len(), 3);
         assert!(matches!(sent[0], LiveMessage::Recent { .. }));
-        assert!(matches!(sent[2], LiveMessage::Now { state: None, .. }));
+        assert!(matches!(sent[2], LiveMessage::Now { point: None, .. }));
     }
 
     #[test]
@@ -181,11 +255,60 @@ mod tests {
         let states: Vec<Option<PcState>> = sent
             .iter()
             .filter_map(|m| match m {
-                LiveMessage::Now { state, .. } => Some(*state),
+                LiveMessage::Now { point, .. } => Some(point.map(|p| p.state)),
                 _ => None,
             })
             .collect();
         assert_eq!(states, [Some(PcState::Pressure), Some(PcState::Calm)]);
+    }
+
+    fn reading(cpu: f32, memory: Option<f32>, disk: f32, gpu: Option<f32>) -> Reading {
+        Reading {
+            ts_ms: 1_000,
+            cpu_pct: cpu,
+            mem_used_pct: memory,
+            disk_active_pct: disk,
+            disk_latency_ms: 1.0,
+            gpu_pct: gpu,
+            probe_lag_ms: 1.0,
+        }
+    }
+
+    #[test]
+    fn each_lane_is_judged_on_its_own() {
+        let point = LivePoint::of(reading(60.0, Some(50.0), 5.0, Some(10.0)), &[]);
+
+        assert_eq!(point.state, PcState::Busy);
+        assert_eq!(
+            point.lanes,
+            Lanes {
+                cpu: PcState::Busy,
+                memory: PcState::Calm,
+                disk: PcState::Calm,
+                gpu: PcState::Calm,
+            }
+        );
+    }
+
+    #[test]
+    fn only_the_lane_of_an_open_episode_is_under_pressure() {
+        let disk = EpisodeKind::DiskBusy {
+            disk: "0 C:".to_string(),
+        };
+        let point = LivePoint::of(reading(20.0, Some(50.0), 70.0, Some(10.0)), &[disk]);
+
+        assert_eq!(point.state, PcState::Pressure);
+        assert_eq!(point.lanes.disk, PcState::Pressure);
+        assert_eq!(point.lanes.cpu, PcState::Calm);
+    }
+
+    #[test]
+    fn a_lane_without_a_reading_is_suspended() {
+        let point = LivePoint::of(reading(5.0, None, 1.0, None), &[]);
+
+        assert_eq!(point.lanes.memory, PcState::Suspended);
+        assert_eq!(point.lanes.gpu, PcState::Suspended);
+        assert_eq!(point.state, PcState::Calm);
     }
 
     #[test]

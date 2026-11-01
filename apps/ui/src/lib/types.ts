@@ -356,9 +356,24 @@ export interface NowFrame {
   pressure: EpisodeKind[];
 }
 
+/** The state each lane would give the PC on its own; a lane with no reading is suspended. */
+export interface Lanes {
+  cpu: PcState;
+  memory: PcState;
+  disk: PcState;
+  gpu: PcState;
+}
+
+/** One second of the live chart. */
+export interface LivePoint {
+  reading: Reading;
+  state: PcState;
+  lanes: Lanes;
+}
+
 export type LiveMessage =
-  | { kind: "recent"; readings: Reading[] }
-  | { kind: "now"; reading: Reading | null; state: PcState | null; frame: NowFrame }
+  | { kind: "recent"; points: LivePoint[] }
+  | { kind: "now"; point: LivePoint | null; frame: NowFrame }
   | { kind: "stopped" };
 
 export type UiErrorKind =
