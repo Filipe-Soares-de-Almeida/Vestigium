@@ -12,9 +12,9 @@ use vestigium_collect::{
     unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    Blackbox, DiskInfo, EpisodeKind, Gap, GapReason, GateState, HungWindow, MachineInfo, Media,
-    Notable, OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RecentState,
-    RunGate, Sample, Settings, Severity, Timing, WinEvent, top_processes,
+    Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
+    OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RecentState, RunGate,
+    Sample, Settings, Severity, Timing, WinEvent, top_processes,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -195,7 +195,7 @@ impl Sampler {
             }
         }
         if let Ok(episodes) = self.store.episodes(now - DAY_MS, now) {
-            for e in episodes.iter().filter(|e| !is_hint(&e.kind)) {
+            for e in episodes.iter().filter(|e| !e.kind.is_hint()) {
                 self.blackbox.remember(e.end_ms, Notable::Episode);
             }
         }
@@ -528,13 +528,6 @@ impl Sampler {
     fn report(&self, err: &dyn std::fmt::Display) {
         lock(&self.status).last_error = Some(err.to_string());
     }
-}
-
-fn is_hint(kind: &EpisodeKind) -> bool {
-    matches!(
-        kind,
-        EpisodeKind::DpcIsrHint { .. } | EpisodeKind::DiskLatencyHint { .. }
-    )
 }
 
 /// Hands back the pages only startup touched (PDH name tables, DLL setup); the rest fault back in.

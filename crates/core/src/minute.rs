@@ -174,7 +174,7 @@ impl MinuteRollup {
 }
 
 /// The larger of two optional readings, ignoring a missing one.
-fn max_known(a: Option<f32>, b: Option<f32>) -> Option<f32> {
+pub(crate) fn max_known(a: Option<f32>, b: Option<f32>) -> Option<f32> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (a, None) => a,

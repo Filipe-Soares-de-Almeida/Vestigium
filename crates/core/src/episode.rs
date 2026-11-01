@@ -19,6 +19,16 @@ pub enum EpisodeKind {
     DiskLatencyHint { disk: String },
 }
 
+impl EpisodeKind {
+    /// A short sign that sensitive mode would see more, not a stretch of pressure.
+    pub fn is_hint(&self) -> bool {
+        matches!(
+            self,
+            EpisodeKind::DpcIsrHint { .. } | EpisodeKind::DiskLatencyHint { .. }
+        )
+    }
+}
+
 /// The process that weighed most during an episode; `value` is bytes, bytes/s or percent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Culprit {
