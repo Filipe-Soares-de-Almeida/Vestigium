@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::process::per_program;
 use crate::{
     DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, Sample, Trigger, WinEvent, Window,
     classify,
@@ -339,9 +340,23 @@ fn cpu(focus: Focus, window: &Window) -> Option<Suspect> {
         evidence.push(metric(ts_ms, Metric::CpuPct, value, None));
     }
     let tops = tops_or_all(window, from, to);
-    let heaviest: Vec<Evidence> = ranked(&tops, Metric::CpuPct, Summary::Mean)
+    let per_process = ranked(&tops, Metric::CpuPct, Summary::Mean)
+        .into_iter()
+        .filter_map(|e| match e {
+            Evidence::Process {
+                pid, name, value, ..
+            } => Some((pid, name, value)),
+            _ => None,
+        });
+    let heaviest: Vec<Evidence> = per_program(per_process)
         .into_iter()
         .take(3)
+        .map(|(pid, name, value)| Evidence::Process {
+            pid,
+            name,
+            metric: Metric::CpuPct,
+            value,
+        })
         .collect();
     let processes = heaviest
         .iter()

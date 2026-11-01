@@ -80,6 +80,26 @@ impl From<ProcessTopV1> for ProcessTop {
     }
 }
 
+/// Sums `(pid, name, value)` per program name, keeping the pid of its heaviest process; heaviest first.
+pub(crate) fn per_program(
+    items: impl IntoIterator<Item = (u32, String, f64)>,
+) -> Vec<(u32, String, f64)> {
+    let mut programs: HashMap<String, (u32, f64, f64)> = HashMap::new();
+    for (pid, name, value) in items {
+        let (top_pid, top_value, total) = programs.entry(name).or_insert((pid, value, 0.0));
+        if value > *top_value || (value == *top_value && pid < *top_pid) {
+            (*top_pid, *top_value) = (pid, value);
+        }
+        *total += value;
+    }
+    let mut summed: Vec<(u32, String, f64)> = programs
+        .into_iter()
+        .map(|(name, (pid, _, total))| (pid, name, total))
+        .collect();
+    summed.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)));
+    summed
+}
+
 /// The latest counters of every process in `snapshots`, oldest first; one that exited keeps its last.
 pub fn last_seen(snapshots: &[&[ProcessCounters]]) -> Vec<ProcessCounters> {
     let mut latest: HashMap<(u32, i64), &ProcessCounters> = HashMap::new();

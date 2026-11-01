@@ -124,5 +124,7 @@ How to use this file:
 - The busiest-process rankings now count programs that start or exit between two rankings,
   such as the short compiler processes of a build, instead of showing them idle or leaving them
   out.
+- A CPU slowdown now names the program behind it with all its processes added up, so a build
+  is blamed on the compiler rather than on a browser that used less CPU in total.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main

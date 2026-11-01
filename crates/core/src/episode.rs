@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::process::per_program;
 use crate::{Metric, ProcessTop, Sample, threshold};
 
 /// Below the threshold this long ends an episode; a shorter dip does not split it.
@@ -96,10 +97,18 @@ impl Run {
     fn into_episode(self, truncated: bool) -> Episode {
         let tops = f64::from(self.tops.max(1));
         let weigh = self.weigh;
-        let culprit = self
+        let mut load: Vec<(u32, String, f64)> = self
             .load
             .into_iter()
-            .map(|(pid, (name, value))| Culprit {
+            .map(|(pid, (name, value))| (pid, name, value))
+            .collect();
+        // CPU counts every process of a program together, as a build runs many short ones.
+        if weigh == Weigh::MeanCpu {
+            load = per_program(load);
+        }
+        let culprit = load
+            .into_iter()
+            .map(|(pid, name, value)| Culprit {
                 pid,
                 name,
                 value: if weigh == Weigh::MaxPrivate {

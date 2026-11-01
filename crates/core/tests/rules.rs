@@ -211,6 +211,27 @@ fn cpu_sees_the_sample_after_a_freeze() {
 }
 
 #[test]
+fn cpu_names_programs_not_processes() {
+    let (triggers, mut window) = cpu_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T - 5_000,
+        entries: vec![
+            process(31, "rustc.exe", 60.0, 1, 0.0),
+            process(32, "rustc.exe", 60.0, 1, 0.0),
+        ],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+
+    let found = suspects(&triggers, &window);
+    let cpu = find(&found, |c| matches!(c, Cause::Cpu { .. })).expect("cpu");
+    let Cause::Cpu { processes } = &cpu.cause else {
+        unreachable!()
+    };
+    assert_eq!(processes[0], "rustc.exe");
+    assert_eq!(processes.iter().filter(|p| *p == "rustc.exe").count(), 1);
+}
+
+#[test]
 fn cpu_sees_a_freeze_its_late_sample_dilutes() {
     let (_, mut window) = quiet_case();
     window

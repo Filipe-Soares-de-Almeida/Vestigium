@@ -68,6 +68,20 @@ fn dpc_busy_core0(ts_ms: i64) -> Sample {
     sample
 }
 
+fn cpu_saturated(ts_ms: i64) -> Sample {
+    let mut sample = calm(ts_ms);
+    sample.cpu_pct = 100.0;
+    sample.cores.iter_mut().for_each(|c| c.cpu_pct = 100.0);
+    sample
+}
+
+fn busy(pid: u32, name: &str, cpu_pct: f32) -> ProcessSample {
+    ProcessSample {
+        cpu_pct,
+        ..process(pid, name, GIB)
+    }
+}
+
 fn process(pid: u32, name: &str, private_bytes: u64) -> ProcessSample {
     ProcessSample {
         pid,
@@ -162,6 +176,32 @@ fn culprit_is_the_largest_private_memory() {
     let culprit = episodes[0].culprit.as_ref().expect("a culprit");
     assert_eq!((culprit.pid, culprit.name.as_str()), (4, "browser.exe"));
     assert_eq!(culprit.value, (6 * GIB) as f64);
+}
+
+#[test]
+fn cpu_culprit_sums_every_process_of_a_program() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 30, cpu_saturated, false);
+    detector.push_top(&ProcessTop {
+        ts_ms: 30_000,
+        entries: vec![
+            busy(7, "watcher.exe", 12.0),
+            busy(20, "rustc.exe", 9.0),
+            busy(21, "rustc.exe", 8.0),
+        ],
+    });
+    feed(&mut detector, 31, 61, cpu_saturated, false);
+    detector.push_top(&ProcessTop {
+        ts_ms: 61_000,
+        entries: vec![busy(7, "watcher.exe", 12.0), busy(22, "rustc.exe", 10.0)],
+    });
+    feed(&mut detector, 62, 70, cpu_saturated, false);
+    let episodes = feed(&mut detector, 71, 90, calm, false);
+
+    assert_eq!(episodes[0].kind, EpisodeKind::CpuSaturated);
+    let culprit = episodes[0].culprit.as_ref().expect("a culprit");
+    assert_eq!((culprit.pid, culprit.name.as_str()), (22, "rustc.exe"));
+    assert!((culprit.value - 13.5).abs() < 1e-4, "got {}", culprit.value);
 }
 
 #[test]
