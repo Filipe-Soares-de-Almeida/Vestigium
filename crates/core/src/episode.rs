@@ -7,6 +7,8 @@ use crate::{Metric, ProcessTop, Sample, threshold};
 
 /// Below the threshold this long ends an episode; a shorter dip does not split it.
 pub const QUIET_MS: i64 = 10_000;
+/// Share of memory in use above which memory counts as high.
+pub(crate) const MEMORY_HIGH_PCT: f32 = 85.0;
 /// At most one hint of each kind in this span.
 pub const HINT_EVERY_MS: i64 = 10 * 60_000;
 
@@ -149,7 +151,7 @@ impl EpisodeDetector {
         let mut above: Vec<(EpisodeKind, f32, Weigh, i64)> = Vec::new();
         if sample.mem_total_bytes > 0 {
             let used = 1.0 - sample.mem_avail_bytes as f64 / sample.mem_total_bytes as f64;
-            if used > 0.85 {
+            if used * 100.0 > f64::from(MEMORY_HIGH_PCT) {
                 above.push((
                     EpisodeKind::MemoryHigh,
                     (used * 100.0) as f32,

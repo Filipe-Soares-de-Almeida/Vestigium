@@ -2,8 +2,8 @@ mod common;
 
 use common::{T, event, process, quiet_window, tweak};
 use vestigium_core::{
-    Cause, Confidence, EventMeaning, Evidence, HangOutcome, NextStep, ProcessTop, Sample, Suspect,
-    Trigger, Window, suspects,
+    Cause, Confidence, EventMeaning, Evidence, HangOutcome, Metric, NextStep, ProcessTop, Sample,
+    Suspect, Trigger, Window, suspects,
 };
 
 type Case = (Vec<Trigger>, Window);
@@ -175,6 +175,31 @@ fn memory_stays_quiet() {
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = 2 * common::GIB);
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| matches!(c, Cause::Memory { .. })).is_none());
+}
+
+#[test]
+fn hard_faults_with_memory_to_spare_are_not_memory() {
+    let (triggers, mut window) = quiet_case();
+    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    let found = suspects(&triggers, &window);
+    assert!(find(&found, |c| matches!(c, Cause::Memory { .. })).is_none());
+}
+
+#[test]
+fn hard_faults_with_memory_high_are_memory() {
+    let (triggers, mut window) = quiet_case();
+    let total = window.machine.mem_total_bytes;
+    tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = total / 10);
+    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    let found = suspects(&triggers, &window);
+    let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
+    assert!(memory.evidence.iter().any(|e| matches!(
+        e,
+        Evidence::Metric {
+            metric: Metric::HardFaultsPerS,
+            ..
+        }
+    )));
 }
 
 #[test]

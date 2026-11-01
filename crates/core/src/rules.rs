@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::episode::MEMORY_HIGH_PCT;
 use crate::process::per_program;
 use crate::{
     DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, Sample, Trigger, WinEvent, Window,
@@ -279,8 +280,10 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
         .filter_map(|s| avail_pct(s, total).map(|pct| (s.ts_ms, pct)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, pct)| *pct < threshold(Metric::MemAvailPct));
+    // With memory to spare, hard faults are files and programs being read in, not pages pushed out.
     let faults = samples
         .iter()
+        .filter(|s| avail_pct(s, total).is_some_and(|pct| pct < 100.0 - MEMORY_HIGH_PCT))
         .map(|s| (s.ts_ms, s.hard_faults_per_s))
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, v)| *v >= threshold(Metric::HardFaultsPerS));

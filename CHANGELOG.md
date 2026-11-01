@@ -126,5 +126,7 @@ How to use this file:
   out.
 - A CPU slowdown now names the program behind it with all its processes added up, so a build
   is blamed on the compiler rather than on a browser that used less CPU in total.
+- Starting programs or reading files no longer makes memory a suspect of a freeze on a PC with
+  memory to spare: hard faults now count only while more than 85% of memory is in use.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
