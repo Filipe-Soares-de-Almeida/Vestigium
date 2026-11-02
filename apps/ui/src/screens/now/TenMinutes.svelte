@@ -195,12 +195,6 @@
     height: 8px;
     border-radius: 50%;
     background: var(--ok);
-    animation: beat 2s ease-in-out infinite;
-  }
-  @keyframes beat {
-    50% {
-      opacity: 0.35;
-    }
   }
   .caption {
     margin: -4px 0 12px;
