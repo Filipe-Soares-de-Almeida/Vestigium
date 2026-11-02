@@ -26,7 +26,7 @@ fn finding(kind: FindingKind, days: u32) -> Finding {
 fn scan(ts_ms: i64, boot_ms: u32) -> ScanResult {
     ScanResult {
         ts_ms,
-        boot: BootReport {
+        boot: Some(BootReport {
             boots: vec![BootTime {
                 ts_ms,
                 boot_ms,
@@ -34,7 +34,7 @@ fn scan(ts_ms: i64, boot_ms: u32) -> ScanResult {
                 post_boot_ms: boot_ms / 2,
             }],
             delays: Vec::new(),
-        },
+        }),
     }
 }
 

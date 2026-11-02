@@ -4,8 +4,8 @@ use std::path::{Component, Path, Prefix};
 
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-/// Checks that `path` is `<drive>:\...\Vestigium\data\captures\<digits>.<extension>`, with no `.` or `..`.
-pub fn check_shape(path: &Path, extension: &str) -> Result<(), String> {
+/// Checks that `path` is `<drive>:\...\Vestigium\data\<folder>\<digits>.<extension>`, with no `.` or `..`.
+pub fn check_shape(path: &Path, folder: &str, extension: &str) -> Result<(), String> {
     let mut parts = path.components();
     match parts.next() {
         Some(Component::Prefix(p)) if matches!(p.kind(), Prefix::Disk(_)) => {}
@@ -26,20 +26,20 @@ pub fn check_shape(path: &Path, extension: &str) -> Result<(), String> {
         .strip_suffix(&format!(".{extension}"))
         .ok_or_else(|| format!("{file} is not a .{extension} file"))?;
     if stem.is_empty() || !stem.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("{file} is not a numbered capture"));
+        return Err(format!("{file} is not a numbered result"));
     }
-    if !names.ends_with(&["vestigium".into(), "data".into(), "captures".into()]) {
+    if !names.ends_with(&["vestigium".into(), "data".into(), folder.to_lowercase()]) {
         return Err(format!(
-            "{} is outside a Vestigium captures folder",
+            "{} is outside a Vestigium {folder} folder",
             path.display()
         ));
     }
     Ok(())
 }
 
-/// Creates the capture file: right shape, every folder on the way real (no junction or link), and new.
-pub fn create(path: &Path, extension: &str) -> Result<File, String> {
-    check_shape(path, extension)?;
+/// Creates the result file: right shape, every folder on the way real (no junction or link), and new.
+pub fn create(path: &Path, folder: &str, extension: &str) -> Result<File, String> {
+    check_shape(path, folder, extension)?;
     for folder in path.ancestors().skip(1) {
         if folder.parent().is_none() {
             break;
@@ -65,9 +65,12 @@ mod tests {
 
     #[test]
     fn accepts_a_numbered_capture_in_the_captures_folder() {
-        assert_eq!(check_shape(Path::new(GOOD), "capture"), Ok(()));
+        assert_eq!(check_shape(Path::new(GOOD), "captures", "capture"), Ok(()));
         let upper = GOOD.to_uppercase();
-        assert_eq!(check_shape(Path::new(&upper), "capture"), Ok(()));
+        assert_eq!(
+            check_shape(Path::new(&upper), "captures", "capture"),
+            Ok(())
+        );
     }
 
     #[test]
@@ -83,7 +86,27 @@ mod tests {
             r"\\server\share\Vestigium\data\captures\1.capture",
             r"\\?\C:\Users\someone\AppData\Local\Vestigium\data\captures\1.capture",
         ] {
-            assert!(check_shape(Path::new(bad), "capture").is_err(), "{bad}");
+            assert!(
+                check_shape(Path::new(bad), "captures", "capture").is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_scan_output_outside_scans() {
+        let good = r"C:\Users\someone\AppData\Local\Vestigium\data\scans\1793580000000.scan";
+        assert_eq!(check_shape(Path::new(good), "scans", "scan"), Ok(()));
+        for bad in [
+            r"C:\Users\someone\AppData\Local\Vestigium\data\captures\1.scan",
+            r"C:\Users\someone\AppData\Local\Vestigium\data\scans\1.capture",
+            r"C:\Users\someone\AppData\Local\Vestigium\data\scans\..\1.scan",
+            r"C:\Windows\Temp\scans\1.scan",
+        ] {
+            assert!(
+                check_shape(Path::new(bad), "scans", "scan").is_err(),
+                "{bad}"
+            );
         }
     }
 
@@ -93,7 +116,7 @@ mod tests {
         let folder = dir.path().join("Vestigium").join("data").join("captures");
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("42.capture");
-        assert!(create(&path, "capture").is_ok());
-        assert!(create(&path, "capture").is_err());
+        assert!(create(&path, "captures", "capture").is_ok());
+        assert!(create(&path, "captures", "capture").is_err());
     }
 }

@@ -4,3 +4,4 @@ pub mod capture;
 pub mod job;
 mod output;
 mod pinned;
+pub mod scan;

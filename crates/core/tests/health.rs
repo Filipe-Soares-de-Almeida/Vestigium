@@ -685,3 +685,56 @@ fn reconcile_opens_updates_and_closes() {
         Vec::new()
     );
 }
+
+#[test]
+fn boot_events_fold_into_a_report() {
+    let mut report = BootReport::default();
+    let boot = "<EventData><Data Name='BootTime'>89066</Data>\
+                <Data Name='MainPathBootTime'>57066</Data>\
+                <Data Name='BootPostBootTime'>32000</Data></EventData>";
+    let defender = "<EventData><Data Name='Name'>MsMpEng.exe</Data>\
+                    <Data Name='FriendlyName'>Built-in Antimalware Service</Data>\
+                    <Data Name='TotalTime'>14309</Data>\
+                    <Data Name='DegradationTime'>5809</Data></EventData>";
+    let app = "<EventData><Data Name='Name'>tray.exe</Data>\
+               <Data Name='FriendlyName'></Data>\
+               <Data Name='TotalTime'>9000</Data>\
+               <Data Name='DegradationTime'>4000</Data></EventData>";
+    let phase = "<EventData><Data Name='Name'>PreShellInit</Data>\
+                 <Data Name='TotalTime'>39496</Data>\
+                 <Data Name='DegradationTime'>21117</Data></EventData>";
+
+    assert!(report.add(100, 1, boot));
+    assert!(report.add(101, 2, defender));
+    assert!(report.add(101, 3, app));
+    assert!(report.add(108, 4, phase));
+    assert!(
+        !report.add(200, 5, boot),
+        "shutdown events are not boot steps"
+    );
+    assert!(!report.add(101, 6, "<EventData></EventData>"));
+    assert!(!report.add(100, 7, "garbage"));
+
+    assert_eq!(
+        report.boots,
+        vec![BootTime {
+            ts_ms: 1,
+            boot_ms: 89_066,
+            main_path_ms: 57_066,
+            post_boot_ms: 32_000,
+        }]
+    );
+    let kinds: Vec<_> = report
+        .delays
+        .iter()
+        .map(|d| (d.kind, d.name.as_str(), d.security, d.degradation_ms))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            (DelayKind::App, "Built-in Antimalware Service", true, 5_809),
+            (DelayKind::App, "tray.exe", false, 4_000),
+            (DelayKind::Phase, "PreShellInit", false, 21_117),
+        ]
+    );
+}

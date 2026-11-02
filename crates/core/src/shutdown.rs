@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::xml::data_named;
+
 /// The SYSTEM_POWER_STATE of a shutdown, as Kernel-Power 41 writes it in SleepInProgress.
 pub const SHUTTING_DOWN: u8 = 6;
 
@@ -62,16 +64,6 @@ pub fn unexpected_shutdown_ms(data_xml: &str) -> Option<i64> {
     valid.then(|| {
         let days = days_from_civil(year, month, day);
         ((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + ms
-    })
-}
-
-/// The text of `<Data Name='name'>`, written with either quote style.
-fn data_named<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
-    ['\'', '"'].into_iter().find_map(|quote| {
-        let open = format!("<Data Name={quote}{name}{quote}>");
-        let start = xml.find(&open)? + open.len();
-        let len = xml[start..].find("</Data>")?;
-        Some(xml[start..start + len].trim())
     })
 }
 

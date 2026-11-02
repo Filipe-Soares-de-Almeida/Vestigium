@@ -1,3 +1,4 @@
+mod boot;
 mod reliability;
 mod rules;
 mod smart;
@@ -122,7 +123,8 @@ pub const SCAN_VERSION: u8 = 1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScanResult {
     pub ts_ms: i64,
-    pub boot: BootReport,
+    /// `None` when the boot log could not be read.
+    pub boot: Option<BootReport>,
 }
 
 /// One physical disk's health, read without elevation.

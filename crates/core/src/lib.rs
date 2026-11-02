@@ -23,6 +23,7 @@ mod shutdown;
 mod stutter;
 mod trigger;
 mod window;
+mod xml;
 
 pub use blackbox::{
     Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, RING_MS,

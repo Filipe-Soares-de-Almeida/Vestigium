@@ -20,7 +20,7 @@ use crate::CollectError;
 /// Largest event data kept, in bytes.
 const MAX_DATA: usize = 4096;
 /// Milliseconds from the FILETIME epoch (1601) to the Unix epoch.
-const FILETIME_TO_UNIX_MS: i64 = 11_644_473_600_000;
+pub(crate) const FILETIME_TO_UNIX_MS: i64 = 11_644_473_600_000;
 
 /// What an event means when it is worth keeping; `classify` for the curated events.
 pub type Classifier = fn(Channel, &str, u16) -> Option<EventMeaning>;
@@ -207,7 +207,7 @@ fn deliver(context: &Context, event: EVT_HANDLE) -> Option<Delivered> {
 }
 
 /// Renders `fragment` into a u64 buffer, so variants inside it are aligned; returns it and the value count.
-fn render(
+pub(crate) fn render(
     context: Option<EVT_HANDLE>,
     fragment: EVT_HANDLE,
     flags: EVT_RENDER_FLAGS,
@@ -238,7 +238,7 @@ fn render(
 }
 
 /// Renders `fragment` as text, such as an event's XML or a bookmark.
-fn render_text(fragment: EVT_HANDLE, flags: EVT_RENDER_FLAGS) -> Option<String> {
+pub(crate) fn render_text(fragment: EVT_HANDLE, flags: EVT_RENDER_FLAGS) -> Option<String> {
     let (buf, _) = render(None, fragment, flags)?;
     let units: Vec<u16> = buf
         .iter()
@@ -263,7 +263,7 @@ fn text_of(variant: &EVT_VARIANT) -> Option<String> {
 }
 
 /// The `<EventData>` or `<UserData>` element of an event's XML, cut to `MAX_DATA` bytes.
-fn event_data(xml: &str) -> String {
+pub(crate) fn event_data(xml: &str) -> String {
     let element = ["EventData", "UserData"].into_iter().find_map(|name| {
         let start = xml.find(&format!("<{name}"))?;
         let close = format!("</{name}>");

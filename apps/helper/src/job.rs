@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 /// Exit code for a job the helper does not run.
 pub const REFUSED: u8 = 2;
+/// Exit code for a job that ran but could not write its result.
+pub const WRITE_FAILED: u8 = 3;
 pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=60;
 
 /// The closed list of jobs.
@@ -13,11 +15,21 @@ pub enum Job {
         out: PathBuf,
         etl: Option<PathBuf>,
     },
+    /// Reads the boot diagnostics, which need elevation, into `out`.
+    HealthScan { out: PathBuf },
 }
 
 /// The job these arguments name, or why they name none.
 pub fn parse(args: &[String]) -> Result<Job, String> {
     let (name, rest) = args.split_first().ok_or("no job")?;
+    if name == "health-scan" {
+        return match rest {
+            [flag, out] if flag == "--out" => Ok(Job::HealthScan {
+                out: PathBuf::from(out),
+            }),
+            _ => Err("health-scan takes --out <file> and nothing else".to_string()),
+        };
+    }
     if name != "deep-capture" {
         return Err(format!("unknown job {name}"));
     }
@@ -90,6 +102,25 @@ mod tests {
             ]))
             .is_err()
         );
+    }
+
+    #[test]
+    fn health_scan_takes_only_its_output() {
+        assert_eq!(
+            parse(&args(&["health-scan", "--out", r"C:\a.scan"])),
+            Ok(Job::HealthScan {
+                out: PathBuf::from(r"C:\a.scan")
+            })
+        );
+        for bad in [
+            &["health-scan"][..],
+            &["health-scan", "--out"],
+            &["health-scan", "--minutes", "5"],
+            &["health-scan", "--out", "a", "--out", "b"],
+            &["health-scan", "--out", "a", "--run", "cmd.exe"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

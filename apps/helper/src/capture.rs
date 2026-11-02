@@ -19,9 +19,6 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 
 use crate::{job, output, pinned};
 
-/// Exit code when the capture ran but its file could not be written.
-const WRITE_FAILED: u8 = 3;
-
 /// Converts raw QPC values of this run to wall-clock milliseconds and microseconds.
 #[derive(Clone, Copy, Debug)]
 struct Clock {
@@ -94,24 +91,24 @@ impl EventSink for Kernel {
 
 /// Runs the deep capture for `minutes` and writes it to `out`; `etl` also keeps the raw kernel trace.
 pub fn run(minutes: u64, out: &Path, etl: Option<&Path>) -> ExitCode {
-    if etl.is_some_and(|etl| output::check_shape(etl, "etl").is_err()) {
+    if etl.is_some_and(|etl| output::check_shape(etl, "captures", "etl").is_err()) {
         return ExitCode::from(job::REFUSED);
     }
-    let Ok(mut file) = output::create(out, "capture") else {
+    let Ok(mut file) = output::create(out, "captures", "capture") else {
         return ExitCode::from(job::REFUSED);
     };
     let capture = capture(Duration::from_secs(minutes * 60), etl);
     let mut bytes = vec![CAPTURE_VERSION];
     match postcard::to_allocvec(&capture) {
         Ok(body) => bytes.extend(body),
-        Err(_) => return ExitCode::from(WRITE_FAILED),
+        Err(_) => return ExitCode::from(job::WRITE_FAILED),
     }
     if file
         .write_all(&bytes)
         .and_then(|()| file.sync_all())
         .is_err()
     {
-        return ExitCode::from(WRITE_FAILED);
+        return ExitCode::from(job::WRITE_FAILED);
     }
     ExitCode::SUCCESS
 }
