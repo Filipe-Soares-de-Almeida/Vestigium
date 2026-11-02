@@ -574,5 +574,10 @@
   "ui.settings.privacy.version": "Versão",
   "ui.settings.privacy.used": "Usando agora",
   "ui.settings.privacy.nothing": "nada guardado ainda",
-  "ui.settings.privacy.open": "Abrir a pasta dos dados"
+  "ui.settings.privacy.open": "Abrir a pasta dos dados",
+  "ui.settings.privacy.clear": "Apagar o histórico",
+  "ui.settings.privacy.clear_ask": "Apagar tudo o que o Vestigium guardou neste PC: a linha do tempo, os travamentos e seus laudos, e os eventos do Windows que ele leu. As configurações ficam. Não dá para desfazer.",
+  "ui.settings.privacy.clear_confirm": "Apagar tudo",
+  "ui.settings.privacy.clear_cancel": "Cancelar",
+  "ui.settings.privacy.cleared": "Histórico apagado"
 }

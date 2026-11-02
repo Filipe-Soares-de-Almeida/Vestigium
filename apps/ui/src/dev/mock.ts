@@ -74,6 +74,7 @@ const base: Record<string, Handler> = {
   set_sensitive: (args) => needsWatcher() ?? void (state.sensitive = args.on as boolean),
   set_autostart: (args) => needsWatcher() ?? void (state.autostart = args.on as boolean),
   set_settings: (args) => needsWatcher() ?? void (state.settings = args.settings as Settings),
+  clear_history: () => needsWatcher() ?? void (state.history = "empty"),
   timeline: (args) =>
     ({
       history: state.history,

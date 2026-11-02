@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { tick } from "svelte";
+
+  import { clearHistory } from "../../lib/api";
+  import { app } from "../../lib/app.svelte";
   import { errorText } from "../../lib/errors";
   import { t } from "../../lib/i18n.svelte";
   import { toast } from "../../lib/toast.svelte";
@@ -7,6 +11,10 @@
 
   let info = $state<About | null>(null);
   let failure = $state<unknown>(null);
+  let confirming = $state(false);
+  let clearing = $state(false);
+  let confirmButton = $state<HTMLButtonElement>();
+  let clearButton = $state<HTMLButtonElement>();
 
   $effect(() => {
     about().then(
@@ -14,6 +22,32 @@
       (error) => (failure = error),
     );
   });
+
+  async function ask(): Promise<void> {
+    confirming = true;
+    await tick();
+    confirmButton?.focus();
+  }
+
+  async function cancel(): Promise<void> {
+    confirming = false;
+    await tick();
+    clearButton?.focus();
+  }
+
+  async function clear(): Promise<void> {
+    clearing = true;
+    try {
+      await clearHistory();
+      toast.show(t("ui.settings.privacy.cleared"));
+      info = await about();
+      await cancel();
+    } catch (error) {
+      toast.show(errorText(error));
+    } finally {
+      clearing = false;
+    }
+  }
 
   async function open(): Promise<void> {
     try {
@@ -45,9 +79,35 @@
   {#if failure !== null}
     <p class="failure" role="status">{errorText(failure)}</p>
   {/if}
-  <button type="button" class="btn" disabled={info?.data_bytes === null} onclick={open}>
-    {t("ui.settings.privacy.open")}
-  </button>
+  <div class="buttons">
+    <button type="button" class="btn" disabled={info?.data_bytes === null} onclick={open}>
+      {t("ui.settings.privacy.open")}
+    </button>
+    {#if !confirming}
+      <button
+        type="button"
+        class="btn"
+        disabled={!app.editable || info?.data_bytes === null}
+        bind:this={clearButton}
+        onclick={ask}
+      >
+        {t("ui.settings.privacy.clear")}
+      </button>
+    {/if}
+  </div>
+  {#if confirming}
+    <div class="confirm">
+      <p>{t("ui.settings.privacy.clear_ask")}</p>
+      <div class="buttons">
+        <button type="button" class="btn accent" disabled={clearing} bind:this={confirmButton} onclick={clear}>
+          {t("ui.settings.privacy.clear_confirm")}
+        </button>
+        <button type="button" class="btn" disabled={clearing} onclick={cancel}>
+          {t("ui.settings.privacy.clear_cancel")}
+        </button>
+      </div>
+    </div>
+  {/if}
 </Row>
 
 <style>
@@ -75,6 +135,21 @@
     margin: 0;
     color: var(--ink);
     font-weight: 600;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .confirm {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--stroke2);
+  }
+  .confirm p {
+    max-width: 62ch;
+    margin-bottom: 12px;
+    color: var(--ink);
   }
   .failure {
     margin-bottom: 12px;

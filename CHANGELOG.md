@@ -89,6 +89,10 @@ How to use this file:
   mouse or the arrow keys. Beside it are the five programs using the most, any window that stopped
   responding (it already counts as an occurrence in Today), and a link to the last freeze. The live
   numbers run only while the screen is on view, and stop when the window is hidden or minimized.
+- Settings › Privacy and data can delete the history: after a confirmation, everything Vestigium
+  kept on the PC (the timeline, the freezes and their reports, the Windows events it read) is
+  deleted and the space is given back. Settings stay. The window and the background watcher must
+  be updated together for this.
 
 ### Changed
 

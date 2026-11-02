@@ -54,6 +54,11 @@ export function setAutostart(on: boolean): Promise<void> {
   return invoke("set_autostart", { on });
 }
 
+/** Deletes everything the watcher has kept; settings stay. */
+export function clearHistory(): Promise<void> {
+  return invoke("clear_history");
+}
+
 export function settings(): Promise<SettingsDto> {
   return invoke("settings");
 }

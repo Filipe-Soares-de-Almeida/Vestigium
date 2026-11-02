@@ -574,5 +574,10 @@
   "ui.settings.privacy.version": "Version",
   "ui.settings.privacy.used": "Using now",
   "ui.settings.privacy.nothing": "nothing saved yet",
-  "ui.settings.privacy.open": "Open the data folder"
+  "ui.settings.privacy.open": "Open the data folder",
+  "ui.settings.privacy.clear": "Delete the history",
+  "ui.settings.privacy.clear_ask": "Delete everything Vestigium has kept on this PC: the timeline, the freezes and their reports, and the Windows events it read. Settings stay. This cannot be undone.",
+  "ui.settings.privacy.clear_confirm": "Delete everything",
+  "ui.settings.privacy.clear_cancel": "Cancel",
+  "ui.settings.privacy.cleared": "History deleted"
 }
