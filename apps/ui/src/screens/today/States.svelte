@@ -15,6 +15,9 @@
   const MIN_SPAN_MS = 6 * HOUR_MS;
   const MINUTE_MS = 60_000;
   const MARK_NEAR_MS = 3 * MINUTE_MS;
+  const MIN_VIEW_MS = 20 * MINUTE_MS;
+  /** Tick spacings for a zoomed view; the first that leaves 52 px between labels wins. */
+  const STEPS = [5, 10, 15, 30, 60, 120, 180, 360].map((minutes) => minutes * MINUTE_MS);
 
   type Detail = { mark: OccurrenceSummary } | { run: Run; at: number };
 
@@ -26,10 +29,16 @@
   let card = $state<HTMLElement>();
   let plot = $state<HTMLElement>();
   let tip = $state<HTMLElement>();
+  /** The stretch of the day on screen; null shows the whole day. */
+  let view = $state<{ from: number; to: number } | null>(null);
+  let drag: { x: number; from: number; moved: boolean } | null = null;
+  let dragged = false;
 
   const span = $derived(Math.max(day.now - day.start, MIN_SPAN_MS));
   const w = $derived(width || 700);
-  const x = (ms: number) => ((ms - day.start) / span) * w;
+  const vFrom = $derived(view?.from ?? day.start);
+  const vSpan = $derived(view ? view.to - view.from : span);
+  const x = (ms: number) => ((ms - vFrom) / vSpan) * w;
   const rowOf = (state: PcState) => STATES.indexOf(state);
 
   const detail = $derived<Detail | null>(
@@ -38,14 +47,17 @@
 
   /** Hours every 3 h, or every 6 h and more when the labels would touch. */
   const ticks = $derived.by(() => {
-    const every = 3 * HOUR_MS * Math.max(1, Math.ceil(52 / ((3 * HOUR_MS * w) / span)));
+    const every = view
+      ? (STEPS.find((step) => (step * w) / vSpan >= 52) ?? 6 * HOUR_MS)
+      : 3 * HOUR_MS * Math.max(1, Math.ceil(52 / ((3 * HOUR_MS * w) / span)));
     const hour = new Intl.DateTimeFormat(lang(), { hour: "numeric" });
     const out: { x: number; label: string; anchor: string }[] = [];
-    for (let at = day.start; at <= day.start + span; at += every) {
+    const first = day.start + Math.ceil((vFrom - day.start) / every) * every;
+    for (let at = first; at <= vFrom + vSpan; at += every) {
       const px = x(at);
       out.push({
         x: px,
-        label: t("ui.today.states.hour", { hour: hour.format(at) }),
+        label: every >= HOUR_MS ? t("ui.today.states.hour", { hour: hour.format(at) }) : formatTime(at),
         anchor: px < 1 ? "start" : px > w - 20 ? "end" : "middle",
       });
     }
@@ -115,12 +127,11 @@
 
   function setFilter(state: PcState | null): void {
     filter = state === null || filter === state ? null : state;
-    if (hovered && filter && hovered.state !== filter) hovered = null;
   }
 
   function runAt(at: number): Run | null {
-    const run = day.runs.find((r) => at >= r.from && at < r.to) ?? null;
-    return run && (!filter || run.state === filter) ? run : null;
+    const runs = day.runs.filter((r) => at >= r.from && at < r.to);
+    return runs.find((r) => r.state === filter) ?? runs[0] ?? null;
   }
 
   function closest(marks: OccurrenceSummary[], at: (o: OccurrenceSummary) => number): OccurrenceSummary | null {
@@ -129,7 +140,7 @@
 
   /** A mark within a few pixels wins; otherwise the stretch drawn in the row under the pointer. */
   function hitTest(px: number, py: number): void {
-    const at = day.start + (px / w) * span;
+    const at = vFrom + (px / w) * vSpan;
     const marks = day.occurrences.filter(
       (o) => Math.abs(x(o.start_ms) - px) < 7 && py >= TOP - 18 && py <= TOP + 3 * ROW,
     );
@@ -140,14 +151,55 @@
     const row = Math.floor((py - TOP) / ROW);
     const inRow = py - TOP - row * ROW;
     if (row < 0 || row >= STATES.length || inRow < 3 || inRow > ROW - 3) return;
-    const slack = (4 / w) * span;
+    const slack = (4 / w) * vSpan;
     const run =
       day.runs.find((r) => r.state === STATES[row] && at >= r.from - slack && at < r.to + slack) ?? null;
-    hovered = run && (!filter || run.state === filter) ? run : null;
+    hovered = run;
+  }
+
+  /** Zooms by `factor` around the time under `px`, staying inside the day. */
+  function zoom(factor: number, px: number): void {
+    const at = vFrom + (px / w) * vSpan;
+    const next = Math.max(MIN_VIEW_MS, vSpan * factor);
+    if (next >= span) {
+      view = null;
+      return;
+    }
+    const from = Math.min(day.start + span - next, Math.max(day.start, at - (px / w) * next));
+    view = { from, to: from + next };
+  }
+
+  /** Moves a zoomed view so it starts at `from`, staying inside the day. */
+  function panTo(from: number): void {
+    if (!view) return;
+    const start = Math.min(day.start + span - vSpan, Math.max(day.start, from));
+    view = { from: start, to: start + vSpan };
+  }
+
+  function onpointerdown(event: PointerEvent): void {
+    if (!view || event.button !== 0 || !plot) return;
+    event.preventDefault();
+    plot.focus({ preventScroll: true });
+    drag = { x: event.clientX, from: view.from, moved: false };
+    plot.setPointerCapture(event.pointerId);
+  }
+
+  function onpointerup(): void {
+    dragged = drag?.moved ?? false;
+    drag = null;
   }
 
   function onpointermove(event: PointerEvent): void {
     if (!plot) return;
+    if (drag) {
+      const dx = event.clientX - drag.x;
+      if (Math.abs(dx) > 3) drag.moved = true;
+      if (drag.moved) {
+        panTo(drag.from - (dx / w) * vSpan);
+        clear();
+        return;
+      }
+    }
     const box = plot.getBoundingClientRect();
     hitTest(Math.max(0, Math.min(box.width, event.clientX - box.left)), event.clientY - box.top);
   }
@@ -158,6 +210,10 @@
   }
 
   function activate(): void {
+    if (dragged) {
+      dragged = false;
+      return;
+    }
     if (near) go(href.occurrence(near.id));
     else if (hovered) setFilter(hovered.state);
   }
@@ -170,6 +226,7 @@
       (o) => Math.abs(o.start_ms - here),
     );
     hovered = near ? null : runAt(here);
+    if (view && (here < view.from || here >= view.to)) panTo(here - vSpan / 2);
   }
 
   function onkeydown(event: KeyboardEvent): void {
@@ -179,6 +236,9 @@
     else if (event.key === "Home") moveTo(day.start);
     else if (event.key === "End") moveTo(day.now - 1);
     else if (event.key === "Enter") activate();
+    else if (event.key === "+" || event.key === "=") zoom(0.8, cursor === null ? w / 2 : x(cursor));
+    else if (event.key === "-" || event.key === "_") zoom(1.25, cursor === null ? w / 2 : x(cursor));
+    else if (event.key === "0") view = null;
     else if (event.key === "Escape") {
       clear();
       cursor = null;
@@ -186,6 +246,29 @@
     } else return;
     event.preventDefault();
   }
+
+  // Ctrl and the wheel zoom around the pointer; Shift or a sideways wheel moves a zoomed view.
+  $effect(() => {
+    const el = plot;
+    if (!el) return;
+    const onwheel = (event: WheelEvent) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        zoom(event.deltaY < 0 ? 0.8 : 1.25, event.clientX - el.getBoundingClientRect().left);
+      } else if (view && (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY))) {
+        event.preventDefault();
+        panTo(vFrom + ((event.shiftKey ? event.deltaY : event.deltaX) / w) * vSpan);
+      }
+    };
+    el.addEventListener("wheel", onwheel, { passive: false });
+    return () => el.removeEventListener("wheel", onwheel);
+  });
+
+  // A new day starts with the whole day on screen.
+  $effect(() => {
+    void day.start;
+    view = null;
+  });
 
   // The tooltip sits above the plot unless that would leave the scrolling area, and inside the card.
   $effect(() => {
@@ -206,7 +289,15 @@
   <div class="head">
     <h2 id="states-title">{t("ui.today.states.title")}</h2>
     <span class="date">
-      {date} · {t("ui.today.states.range", { from: formatTime(day.start), to: formatTime(day.now) })}
+      {date} · {t("ui.today.states.range", {
+        from: formatTime(view ? view.from : day.start),
+        to: formatTime(view ? Math.min(view.to, day.now) : day.now),
+      })}
+      {#if view}
+        <button type="button" class="clear" data-focus="whole-day" onclick={() => (view = null)}>
+          {t("ui.today.states.zoom.reset")}
+        </button>
+      {/if}
     </span>
   </div>
   <div class="wrap">
@@ -232,12 +323,15 @@
     <div
       class="plot"
       class:hit={detail !== null}
+      class:pan={view !== null}
       role="application"
       tabindex="0"
       aria-label={t("ui.today.states.plot")}
       bind:this={plot}
       bind:clientWidth={width}
+      {onpointerdown}
       {onpointermove}
+      {onpointerup}
       onpointerleave={clear}
       onclick={activate}
       {onkeydown}
@@ -301,7 +395,7 @@
             <div class="sub">
               {kindName(o)} · {formatDuration(o.end_ms - o.start_ms)} · {causeName(o.cause)}
             </div>
-            <div class="hint">{t("ui.today.states.hint.open")}</div>
+            <div class="hint">{t("ui.today.states.hint.open")} · {t("ui.today.states.hint.zoom")}</div>
           {:else}
             {@const run = detail.run}
             <div class="th">
@@ -330,6 +424,7 @@
               {filter === run.state
                 ? t("ui.today.states.hint.show_all")
                 : t("ui.today.states.hint.only", { state: stateLower(run.state) })}
+              · {t("ui.today.states.hint.zoom")}
             </div>
           {/if}
         </div>
@@ -425,13 +520,23 @@
   .plot.hit {
     cursor: pointer;
   }
+  .plot.pan {
+    cursor: grab;
+  }
+  .plot.pan:active {
+    cursor: grabbing;
+  }
+  /* Keyboard focus shows as the highlighted stretch and its tooltip, not as a ring. */
   .plot:focus-visible {
-    outline-offset: 6px;
+    outline: none;
   }
   svg {
     display: block;
     width: 100%;
     overflow: visible;
+  }
+  .plot.pan svg {
+    overflow: hidden;
   }
   .guide {
     stroke: var(--stroke);

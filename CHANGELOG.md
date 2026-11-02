@@ -56,9 +56,11 @@ How to use this file:
   asleep or not watched) marks each freeze: point at a stretch to see when it ran and what the
   processor, memory, disk and graphics were doing that minute, click a state's name or a stretch
   to show only that state, and click a freeze to open its report; the arrow keys, Enter and Esc
-  do the same from the keyboard. Then come the day's freezes and moments of pressure, each freeze
-  a link to its report, and the number of freezes on each of the last 14 days. Before anything
-  has been saved, the screen says when watching started and offers to show the PC now.
+  do the same from the keyboard. Ctrl and the mouse wheel, or + and −, zoom into a stretch of the
+  day, which can then be dragged sideways; "Whole day" or 0 zooms back out. Then come the day's
+  freezes and moments of pressure, each freeze a link to its report, and the number of freezes on
+  each of the last 14 days. Before anything has been saved, the screen says when watching started
+  and offers to show the PC now.
 - Each freeze, app that stopped responding, burst of stutters or problem Windows reported now opens
   as a report: how long it lasted, the probable cause with the evidence beside it and any other
   suspects, what to try (with boxes to tick, remembered for that report), the sequence of what
@@ -113,6 +115,10 @@ How to use this file:
 
 ### Fixed
 
+- The PC states chart on Today no longer draws a white frame around itself when it has focus; the
+  highlighted stretch and its tooltip show where the keyboard is.
+- With a state picked on the PC states chart, clicking a stretch of another state now switches to
+  that state, and dragging a zoomed chart no longer selects the text around it.
 - The "Live" dot on the Now screen now dims and brightens with each new reading, once a second,
   instead of pulsing on its own. The pulse kept the window redrawing all the time, so while Now was
   open it used about a third of one processor; it now uses about 2% of one.
