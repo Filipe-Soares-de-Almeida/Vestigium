@@ -89,6 +89,8 @@ fn every_response_roundtrips_as_json() {
         Response::Imported {
             captures: vec![3, 4],
             scans: vec![5],
+            dumps: vec![6],
+            deleted: 1,
         },
         Response::Done,
         Response::Error {

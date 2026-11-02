@@ -21,7 +21,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
-use crate::import::{import_captures, import_scans};
+use crate::import::{import_captures, import_dumps, import_scans};
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -102,6 +102,8 @@ pub struct Shared {
     pub captures_dir: PathBuf,
     /// Where the helper leaves finished health scans.
     pub scans_dir: PathBuf,
+    /// Where the helper leaves dump reads and deletion results.
+    pub dumps_dir: PathBuf,
     /// Set after a scan was stored; the sampler runs a health pass on its next tick.
     pub health_due: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
@@ -213,7 +215,13 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             if !scans.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
             }
-            Response::Imported { captures, scans }
+            let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
+            Response::Imported {
+                captures,
+                scans,
+                dumps,
+                deleted,
+            }
         }
         Request::SetAutostart { on } => {
             let changed = if on {
@@ -261,11 +269,12 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         hiccups: Arc::new(Mutex::new(VecDeque::new())),
         captures_dir: data_dir.join("captures"),
         scans_dir: data_dir.join("scans"),
+        dumps_dir: data_dir.join("dumps"),
         health_due: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
 
-    for dir in [&shared.captures_dir, &shared.scans_dir] {
+    for dir in [&shared.captures_dir, &shared.scans_dir, &shared.dumps_dir] {
         if let Err(err) = fs::create_dir_all(dir) {
             lock(&shared.status).last_error = Some(err.to_string());
         }
@@ -321,6 +330,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         if let Some(store) = settings_store.as_mut() {
             import_captures(&shared.captures_dir, &[], store);
             import_scans(&shared.scans_dir, store);
+            import_dumps(&shared.dumps_dir, store);
         }
         thread::Builder::new()
             .name("pipe".to_string())
@@ -428,6 +438,7 @@ mod tests {
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             captures_dir: PathBuf::from("captures"),
             scans_dir: PathBuf::from("scans"),
+            dumps_dir: PathBuf::from("dumps"),
             health_due: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
@@ -625,8 +636,10 @@ mod tests {
         let mut shared = shared();
         shared.captures_dir = dir.path().join("captures");
         shared.scans_dir = dir.path().join("scans");
+        shared.dumps_dir = dir.path().join("dumps");
         fs::create_dir(&shared.captures_dir).unwrap();
         fs::create_dir(&shared.scans_dir).unwrap();
+        fs::create_dir(&shared.dumps_dir).unwrap();
 
         assert!(matches!(
             handle(Request::ImportResults, &shared, None),
@@ -639,7 +652,9 @@ mod tests {
             handle(Request::ImportResults, &shared, Some(&mut store)),
             Response::Imported {
                 captures: Vec::new(),
-                scans: Vec::new()
+                scans: Vec::new(),
+                dumps: Vec::new(),
+                deleted: 0
             }
         );
         assert!(!shared.health_due.load(Ordering::Acquire));
@@ -655,7 +670,9 @@ mod tests {
             handle(Request::ImportResults, &shared, Some(&mut store)),
             Response::Imported {
                 captures: Vec::new(),
-                scans: vec![1]
+                scans: vec![1],
+                dumps: Vec::new(),
+                deleted: 0
             }
         );
         assert!(

@@ -65,6 +65,39 @@ pub fn scan_file(db: &Path, started_ms: i64) -> Option<PathBuf> {
     )
 }
 
+/// `<data>\dumps\<start ms>.<extension>`, beside the watcher's database.
+pub fn dumps_file(db: &Path, started_ms: i64, extension: &str) -> Option<PathBuf> {
+    Some(
+        db.parent()?
+            .join("dumps")
+            .join(format!("{started_ms}.{extension}")),
+    )
+}
+
+pub fn dump_scan_args(out: &Path) -> String {
+    format!("dump-scan --out \"{}\"", out.display())
+}
+
+pub fn delete_dumps_args(list: &Path) -> String {
+    format!("delete-dumps --list \"{}\"", list.display())
+}
+
+/// What the window gets back when the helper that read the dumps exits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DumpScanFinished {
+    /// The dumps the watcher stored or refreshed; empty while the watcher is stopped.
+    pub dumps: Vec<i64>,
+    pub exit_code: Option<u32>,
+}
+
+/// What the window gets back when the helper that deleted dumps exits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DeleteFinished {
+    /// How many dumps the watcher marked as deleted.
+    pub deleted: u32,
+    pub exit_code: Option<u32>,
+}
+
 pub fn scan_args(out: &Path) -> String {
     format!("health-scan --out \"{}\"", out.display())
 }
@@ -155,6 +188,25 @@ mod tests {
         assert_eq!(
             scan_args(&out),
             r#"health-scan --out "C:\Users\some one\AppData\Local\Vestigium\data\scans\7.scan""#
+        );
+    }
+
+    #[test]
+    fn dump_files_and_args_sit_beside_the_database() {
+        let db = Path::new(r"C:\Users\some one\AppData\Local\Vestigium\data\vestigium.db");
+        let out = dumps_file(db, 7, "dumps").unwrap();
+        assert_eq!(
+            out,
+            PathBuf::from(r"C:\Users\some one\AppData\Local\Vestigium\data\dumps\7.dumps")
+        );
+        assert_eq!(
+            dump_scan_args(&out),
+            r#"dump-scan --out "C:\Users\some one\AppData\Local\Vestigium\data\dumps\7.dumps""#
+        );
+        let list = dumps_file(db, 8, "delete").unwrap();
+        assert_eq!(
+            delete_dumps_args(&list),
+            r#"delete-dumps --list "C:\Users\some one\AppData\Local\Vestigium\data\dumps\8.delete""#
         );
     }
 

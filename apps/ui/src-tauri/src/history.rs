@@ -3,13 +3,16 @@ use std::path::PathBuf;
 use serde::Serialize;
 use vestigium_core::health::{BootReport, Finding};
 use vestigium_core::{
-    DeepCapture, Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, Suspect,
-    WinEvent, capture_findings, capture_suspects, pc_state, steady_only,
+    DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap, MINUTE_MS, Occurrence,
+    OccurrenceSummary, PcState, Reading, Suspect, WinEvent, bug_check_event, capture_findings,
+    capture_suspects, dump_culprit, pc_state, steady_only,
 };
-use vestigium_store::{CaptureSummary, FindingRecord, Store, StoreError};
+use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError};
 
 /// How far back the health page lists the findings that closed.
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
+/// How far back the dumps page lists the blue screens Windows reported.
+const REPORTS_SHOWN_MS: i64 = 365 * 24 * 3_600_000;
 
 /// Ranges up to this long are drawn from per-second samples, longer ones from minutes.
 pub const SECONDS_UP_TO_MS: i64 = 6 * 3_600_000;
@@ -109,6 +112,111 @@ pub struct HealthDto {
     pub last_scan_ms: Option<i64>,
     /// What the last full scan read from the boot log; `None` without a scan or when it could not.
     pub boot: Option<BootReport>,
+}
+
+/// A 64-bit address or parameter as text: a JavaScript number loses its low bits.
+fn hex(value: u64) -> String {
+    format!("0x{value:016x}")
+}
+
+/// What went wrong, with addresses as text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub enum FaultDto {
+    BugCheck { code: u32, params: [String; 4] },
+    Exception { code: u32, address: String },
+}
+
+impl From<Fault> for FaultDto {
+    fn from(fault: Fault) -> FaultDto {
+        match fault {
+            Fault::BugCheck { code, params } => FaultDto::BugCheck {
+                code,
+                params: params.map(hex),
+            },
+            Fault::Exception { code, address } => FaultDto::Exception {
+                code,
+                address: hex(address),
+            },
+        }
+    }
+}
+
+/// One dump as the dumps page lists it, with who it points at.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DumpDto {
+    pub id: i64,
+    pub path: String,
+    pub kind: DumpKind,
+    pub crash_ms: i64,
+    pub file_ms: i64,
+    pub size_bytes: u64,
+    pub found_ms: i64,
+    /// `None` until the helper read it.
+    pub analyzed_ms: Option<i64>,
+    /// `None` while the file is still there.
+    pub deleted_ms: Option<i64>,
+    pub fault: Option<FaultDto>,
+    pub fault_module: Option<String>,
+    pub stack_modules: Vec<String>,
+    pub process: Option<String>,
+    pub module_count: Option<u32>,
+    pub culprit: Option<DumpCulprit>,
+}
+
+impl From<DumpRow> for DumpDto {
+    fn from(row: DumpRow) -> DumpDto {
+        let analysis = row.record.analysis;
+        DumpDto {
+            id: row.id,
+            path: row.record.path,
+            kind: row.record.kind,
+            crash_ms: row.record.crash_ms,
+            file_ms: row.record.file_ms,
+            size_bytes: row.record.size_bytes,
+            found_ms: row.found_ms,
+            analyzed_ms: row.analyzed_ms,
+            deleted_ms: row.deleted_ms,
+            culprit: analysis.as_ref().and_then(dump_culprit),
+            fault: analysis.as_ref().map(|a| a.fault.into()),
+            module_count: analysis.as_ref().map(|a| a.module_count),
+            fault_module: analysis.as_ref().and_then(|a| a.fault_module.clone()),
+            process: analysis.as_ref().and_then(|a| a.process.clone()),
+            stack_modules: analysis.map(|a| a.stack_modules).unwrap_or_default(),
+        }
+    }
+}
+
+/// A blue screen Windows reported on the next boot, read from its event without the dump.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BugCheckDto {
+    pub ts_ms: i64,
+    pub code: u32,
+    pub params: [String; 4],
+    /// Where Windows saved the dump; empty when it saved none.
+    pub dump_path: String,
+}
+
+/// What Windows is set to write when it stops with a blue screen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CrashControlDto {
+    /// 0 none, 1 complete, 2 kernel, 3 small, 7 automatic.
+    pub dump_type: u32,
+    pub dump_file: String,
+    pub minidump_dir: String,
+    pub overwrite: bool,
+}
+
+/// What the dumps page shows.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct DumpsDto {
+    /// Newest crash first, deleted ones included.
+    pub dumps: Vec<DumpDto>,
+    /// Bytes the dumps still on disk take.
+    pub space_bytes: u64,
+    /// Blue screens of the last year, newest first.
+    pub reports: Vec<BugCheckDto>,
+    /// `None` when the setting cannot be read.
+    pub crash: Option<CrashControlDto>,
 }
 
 /// A stored deep capture with what it names.
@@ -303,6 +411,52 @@ impl History {
             last_scan_ms: scan.as_ref().map(|s| s.ts_ms),
             boot: scan.and_then(|s| s.boot),
         })
+    }
+
+    /// The dumps Windows kept, what each says, the space they take and the blue screens Windows
+    /// reported in the last year.
+    pub fn dumps(&mut self, now_ms: i64) -> Result<DumpsDto, StoreError> {
+        let read = self.read(|store| {
+            Ok((
+                store.dumps(i64::MIN, i64::MAX)?,
+                store.dump_space()?,
+                store.events(now_ms - REPORTS_SHOWN_MS, now_ms)?,
+            ))
+        })?;
+        let Some((rows, space_bytes, events)) = read else {
+            return Ok(DumpsDto::default());
+        };
+        let mut reports: Vec<BugCheckDto> = events
+            .iter()
+            .filter(|e| e.meaning == EventMeaning::BugCheck)
+            .filter_map(|e| {
+                bug_check_event(&e.data_xml).map(|r| BugCheckDto {
+                    ts_ms: e.ts_ms,
+                    code: r.code,
+                    params: r.params.map(hex),
+                    dump_path: r.dump_path,
+                })
+            })
+            .collect();
+        reports.reverse();
+        Ok(DumpsDto {
+            dumps: rows.into_iter().map(DumpDto::from).collect(),
+            space_bytes,
+            reports,
+            crash: None,
+        })
+    }
+
+    /// The paths of the dumps with these ids that are still on disk.
+    pub fn dump_paths(&mut self, ids: &[i64]) -> Result<Vec<String>, StoreError> {
+        let rows = self
+            .read(|store| store.present_dumps())?
+            .unwrap_or_default();
+        Ok(rows
+            .into_iter()
+            .filter(|row| ids.contains(&row.id))
+            .map(|row| row.record.path)
+            .collect())
     }
 
     pub fn settings(&mut self) -> Result<Option<vestigium_core::Settings>, StoreError> {

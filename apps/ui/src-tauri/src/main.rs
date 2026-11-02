@@ -39,6 +39,9 @@ fn main() {
             commands::capture,
             commands::health,
             commands::start_scan,
+            commands::dumps,
+            commands::start_dump_scan,
+            commands::delete_dumps,
             about::about,
             about::open_data_folder,
         ])

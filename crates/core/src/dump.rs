@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Confidence;
 use crate::capture::{is_intermediary, is_kernel_core};
+use crate::xml::data_named;
 
 /// Layout of the `DumpRecord` BLOB written today.
 pub const DUMP_VERSION: u8 = 1;
@@ -269,6 +270,28 @@ pub fn listing_changes(
         .map(|(id, _)| *id)
         .collect();
     (fresh, gone)
+}
+
+/// What a WER-SystemErrorReporting 1001 says about a blue screen, without opening the dump.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BugCheckReport {
+    pub code: u32,
+    pub params: [u64; 4],
+    /// Where Windows saved the dump; empty when it saved none.
+    pub dump_path: String,
+}
+
+/// The blue screen a 1001's `<EventData>` describes.
+pub fn bug_check_event(data_xml: &str) -> Option<BugCheckReport> {
+    let (code, params) = bug_check_report(data_named(data_xml, "param1")?)?;
+    Some(BugCheckReport {
+        code,
+        params,
+        dump_path: data_named(data_xml, "param2")
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    })
 }
 
 /// The kind of a kernel dump from where Windows keeps it.

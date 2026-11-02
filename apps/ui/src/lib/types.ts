@@ -666,3 +666,73 @@ export interface ScanFinished {
   scans: number[];
   exit_code: number | null;
 }
+
+/** Where a dump came from, which says how much it can tell. */
+export type DumpKind = "KernelMini" | "KernelMemory" | "LiveKernel" | "App";
+
+/** What went wrong; 64-bit values come as hexadecimal text. */
+export type FaultDto =
+  | { BugCheck: { code: number; params: string[] } }
+  | { Exception: { code: number; address: string } };
+
+export type DumpCulprit =
+  | { Module: { name: string; confidence: Confidence; intermediary: boolean } }
+  | "Hardware"
+  | { App: { name: string } };
+
+/** One dump Windows kept; `analyzed_ms` is null until the helper read it. */
+export interface DumpDto {
+  id: number;
+  path: string;
+  kind: DumpKind;
+  crash_ms: number;
+  file_ms: number;
+  size_bytes: number;
+  found_ms: number;
+  analyzed_ms: number | null;
+  /** Null while the file is still there. */
+  deleted_ms: number | null;
+  fault: FaultDto | null;
+  fault_module: string | null;
+  stack_modules: string[];
+  process: string | null;
+  module_count: number | null;
+  culprit: DumpCulprit | null;
+}
+
+/** A blue screen Windows reported on the next boot, read from its event. */
+export interface BugCheckDto {
+  ts_ms: number;
+  code: number;
+  params: string[];
+  /** Empty when Windows saved no dump. */
+  dump_path: string;
+}
+
+/** What Windows is set to write on a blue screen: 0 none, 1 complete, 2 kernel, 3 small, 7 automatic. */
+export interface CrashControlDto {
+  dump_type: number;
+  dump_file: string;
+  minidump_dir: string;
+  overwrite: boolean;
+}
+
+/** The dumps page: dumps newest first, the space those on disk take, Windows' reports, the setting. */
+export interface DumpsDto {
+  dumps: DumpDto[];
+  space_bytes: number;
+  reports: BugCheckDto[];
+  crash: CrashControlDto | null;
+}
+
+/** What reading the dumps returned once the helper exited. */
+export interface DumpScanFinished {
+  dumps: number[];
+  exit_code: number | null;
+}
+
+/** What deleting dumps returned once the helper exited. */
+export interface DeleteFinished {
+  deleted: number;
+  exit_code: number | null;
+}

@@ -1,6 +1,6 @@
 use vestigium_core::{
-    Analysis, Confidence, DumpCulprit, DumpKind, DumpRecord, Fault, bug_check_report, dump_culprit,
-    dump_of_fall, fault_address, kernel_dump_kind, listing_changes,
+    Analysis, Confidence, DumpCulprit, DumpKind, DumpRecord, Fault, bug_check_event,
+    bug_check_report, dump_culprit, dump_of_fall, fault_address, kernel_dump_kind, listing_changes,
 };
 
 const MINUTE: i64 = 60_000;
@@ -246,4 +246,14 @@ fn an_overwritten_memory_dump_replaces_the_old_file() {
 
     assert_eq!(fresh, vec![now]);
     assert_eq!(gone, vec![7]);
+}
+
+#[test]
+fn a_bug_check_event_names_its_dump() {
+    let data = r"<EventData><Data Name='param1'>0x00000050 (0xffffa0001234beef, 0x0000000000000000, 0xfffff80012345678, 0x0000000000000002)</Data><Data Name='param2'>C:\Windows\MEMORY.DMP</Data><Data Name='param3'>00000000-0000-0000-0000-000000000000</Data></EventData>";
+    let report = bug_check_event(data).unwrap();
+    assert_eq!(report.code, 0x50);
+    assert_eq!(report.params[2], 0xFFFF_F800_1234_5678);
+    assert_eq!(report.dump_path, r"C:\Windows\MEMORY.DMP");
+    assert_eq!(bug_check_event("<EventData></EventData>"), None);
 }

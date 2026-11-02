@@ -10,10 +10,13 @@ use vestigium_store::CaptureSummary;
 
 use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
-    CAPTURE_MINUTES, CaptureFinished, CaptureRun, ScanFinished, capture_file, helper_args,
-    launch_elevated, scan_args, scan_file, sibling_helper,
+    CAPTURE_MINUTES, CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, ScanFinished,
+    capture_file, delete_dumps_args, dump_scan_args, dumps_file, helper_args, launch_elevated,
+    scan_args, scan_file, sibling_helper,
 };
-use crate::history::{CaptureDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto};
+use crate::history::{
+    CaptureDto, CrashControlDto, DumpsDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto,
+};
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
 
 /// What every command works with: the database, the pipe and the live stream.
@@ -253,6 +256,81 @@ pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiEr
         Ok(ScanFinished { scans, exit_code })
     })
     .await
+}
+
+/// The dumps Windows kept, what each says and the space they take.
+#[tauri::command]
+pub async fn dumps(state: State<'_, AppState>) -> Result<DumpsDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || {
+        let mut dto = lock(&history).dumps(now_ms())?;
+        dto.crash = vestigium_collect::crash_control().map(|c| CrashControlDto {
+            dump_type: c.dump_type,
+            dump_file: c.dump_file.to_string_lossy().into_owned(),
+            minidump_dir: c.minidump_dir.to_string_lossy().into_owned(),
+            overwrite: c.overwrite,
+        });
+        Ok(dto)
+    })
+    .await
+}
+
+/// Reads every dump in the elevated helper and waits for it; Windows asks for permission first.
+#[tauri::command]
+pub async fn start_dump_scan(state: State<'_, AppState>) -> Result<DumpScanFinished, UiError> {
+    let link = state.link.clone();
+    blocking(move || {
+        let (helper, out) = helper_and_file("dumps")?;
+        let exit_code = launch_elevated(&helper, &dump_scan_args(&out))?.wait();
+        let dumps = match link.call(&Request::ImportResults) {
+            Ok(Response::Imported { dumps, .. }) => dumps,
+            _ => Vec::new(),
+        };
+        Ok(DumpScanFinished { dumps, exit_code })
+    })
+    .await
+}
+
+/// Deletes the dumps with these ids in the elevated helper, which checks each path again.
+#[tauri::command]
+pub async fn delete_dumps(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<DeleteFinished, UiError> {
+    let (history, link) = (state.history.clone(), state.link.clone());
+    blocking(move || {
+        let paths = lock(&history).dump_paths(&ids)?;
+        if paths.is_empty() {
+            return Ok(DeleteFinished {
+                deleted: 0,
+                exit_code: None,
+            });
+        }
+        let (helper, list) = helper_and_file("delete")?;
+        std::fs::write(&list, paths.join("\r\n"))
+            .map_err(|err| UiError::Failed(err.to_string()))?;
+        let exit_code = launch_elevated(&helper, &delete_dumps_args(&list))?.wait();
+        let deleted = match link.call(&Request::ImportResults) {
+            Ok(Response::Imported { deleted, .. }) => deleted,
+            _ => 0,
+        };
+        Ok(DeleteFinished { deleted, exit_code })
+    })
+    .await
+}
+
+/// The helper beside the window and a new `<now>.<extension>` in the dumps folder.
+fn helper_and_file(extension: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), UiError> {
+    let db = History::default_path()
+        .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
+    let helper = sibling_helper()
+        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let file = dumps_file(&db, now_ms(), extension)
+        .ok_or_else(|| UiError::Failed("no data folder".into()))?;
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
+    }
+    Ok((helper, file))
 }
 
 #[tauri::command]

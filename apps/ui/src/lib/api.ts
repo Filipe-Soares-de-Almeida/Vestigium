@@ -5,6 +5,9 @@ import type {
   CaptureDto,
   CaptureRun,
   CaptureSummary,
+  DeleteFinished,
+  DumpScanFinished,
+  DumpsDto,
   HealthDto,
   LiveMessage,
   MarksDto,
@@ -103,4 +106,19 @@ export function health(): Promise<HealthDto> {
 /** Runs a full scan in the elevated helper and waits for it; Windows asks for permission first. */
 export function startScan(): Promise<ScanFinished> {
   return invoke("start_scan");
+}
+
+/** The dumps Windows kept, what each says, the space they take and Windows' blue screen reports. */
+export function dumps(): Promise<DumpsDto> {
+  return invoke("dumps");
+}
+
+/** Reads every dump in the elevated helper and waits for it; Windows asks for permission first. */
+export function startDumpScan(): Promise<DumpScanFinished> {
+  return invoke("start_dump_scan");
+}
+
+/** Deletes these dumps in the elevated helper, which checks each path again. */
+export function deleteDumps(ids: number[]): Promise<DeleteFinished> {
+  return invoke("delete_dumps", { ids });
 }
