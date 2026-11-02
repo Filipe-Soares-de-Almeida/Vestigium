@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -7,8 +9,8 @@ use std::time::Duration;
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
 use vestigium_core::{
-    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PressureSpan, RING_MS, Reading, RecentState,
-    Ring, RunGate, SENSITIVE_FOR, Settings, Timing,
+    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PressureSpan, ProbeHiccup, RING_MS, Reading,
+    RecentState, Ring, RunGate, SENSITIVE_FOR, Settings, Timing,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -19,6 +21,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
+use crate::import::import_captures;
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -93,6 +96,10 @@ pub struct Shared {
     pub settings: Arc<Mutex<Settings>>,
     /// Set when the history was cleared; the sampler drops what it still holds in memory.
     pub cleared: Arc<AtomicBool>,
+    /// Late probe wakes of the last fifteen minutes, kept while sensitive mode is on.
+    pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
+    /// Where the helper leaves finished deep captures.
+    pub captures_dir: PathBuf,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
 }
@@ -192,6 +199,15 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             shutdown::wake();
             Response::Done
         }
+        Request::ImportCaptures => {
+            let Some(store) = store else {
+                return error(ErrorCode::Failed, "the history database is not open");
+            };
+            let hiccups: Vec<ProbeHiccup> = lock(&shared.hiccups).iter().copied().collect();
+            Response::Imported {
+                ids: import_captures(&shared.captures_dir, &hiccups, store),
+            }
+        }
         Request::SetAutostart { on } => {
             let changed = if on {
                 autostart::enable(&shared.exe)
@@ -235,8 +251,14 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
         cleared: Arc::new(AtomicBool::new(false)),
+        hiccups: Arc::new(Mutex::new(VecDeque::new())),
+        captures_dir: data_dir.join("captures"),
         exe: std::env::current_exe().map_err(failed)?,
     });
+
+    if let Err(err) = fs::create_dir_all(&shared.captures_dir) {
+        lock(&shared.status).last_error = Some(err.to_string());
+    }
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();
@@ -282,6 +304,9 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         let shared = shared.clone();
         // Settings are written through a connection of the pipe's own.
         let mut settings_store = Store::open(&db).ok();
+        if let Some(store) = settings_store.as_mut() {
+            import_captures(&shared.captures_dir, &[], store);
+        }
         thread::Builder::new()
             .name("pipe".to_string())
             .spawn(move || {
@@ -385,6 +410,8 @@ mod tests {
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
             cleared: Arc::new(AtomicBool::new(false)),
+            hiccups: Arc::new(Mutex::new(VecDeque::new())),
+            captures_dir: PathBuf::from("captures"),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
     }
@@ -405,7 +432,7 @@ mod tests {
 
     #[test]
     fn older_protocols_are_refused() {
-        for protocol in [1, 2, 3, 4] {
+        for protocol in [1, 2, 3, 4, 5] {
             let response = handle(Request::Hello { protocol }, &shared(), None);
             assert!(matches!(
                 response,
@@ -571,6 +598,27 @@ mod tests {
         assert!(shared.cleared.load(Ordering::Acquire));
         assert_eq!(lock(&shared.readings).iter().count(), 0);
         assert_eq!(*lock(&shared.recent), RecentState::default());
+    }
+
+    #[test]
+    fn import_captures_needs_the_store_and_answers_with_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let mut shared = shared();
+        shared.captures_dir = dir.path().join("captures");
+        fs::create_dir(&shared.captures_dir).unwrap();
+
+        assert!(matches!(
+            handle(Request::ImportCaptures, &shared, None),
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert_eq!(
+            handle(Request::ImportCaptures, &shared, Some(&mut store)),
+            Response::Imported { ids: Vec::new() }
+        );
     }
 
     #[test]

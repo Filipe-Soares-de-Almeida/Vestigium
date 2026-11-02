@@ -4,7 +4,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,6 +30,8 @@ pub enum Request {
     },
     /// Deletes everything watched so far; settings stay.
     ClearHistory,
+    /// Stores the deep captures the helper left in the data folder.
+    ImportCaptures,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,6 +53,10 @@ pub enum Response {
     Settings {
         settings: Settings,
         autostart: bool,
+    },
+    /// The ids of the deep captures stored by an import, in the order they were read.
+    Imported {
+        ids: Vec<i64>,
     },
     /// The command was carried out.
     Done,
@@ -92,6 +98,9 @@ pub struct AgentStatus {
     pub started_at_ms: i64,
     pub last_sample_ms: Option<i64>,
     pub last_error: Option<String>,
+    /// Sensitive mode saw hitches worth a deep capture.
+    #[serde(default)]
+    pub suggest_capture: bool,
 }
 
 /// The latest second watched.

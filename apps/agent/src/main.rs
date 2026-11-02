@@ -3,6 +3,7 @@
 mod app;
 mod autostart;
 mod icon;
+mod import;
 mod paths;
 mod power;
 mod sampler;

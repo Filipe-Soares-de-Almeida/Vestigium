@@ -29,6 +29,7 @@ fn every_request_roundtrips_as_json() {
         Request::SetSettings(settings),
         Request::SetAutostart { on: false },
         Request::ClearHistory,
+        Request::ImportCaptures,
     ];
     for request in requests {
         assert_eq!(roundtrip(&request), request);
@@ -45,6 +46,7 @@ fn every_response_roundtrips_as_json() {
         Response::Status(AgentStatus {
             sensitive_until_ms: Some(42),
             state: TrayState::Attention,
+            suggest_capture: true,
             ..AgentStatus::default()
         }),
         Response::Now(Box::default()),
@@ -84,6 +86,7 @@ fn every_response_roundtrips_as_json() {
             settings: Settings::default(),
             autostart: true,
         },
+        Response::Imported { ids: vec![3, 4] },
         Response::Done,
         Response::Error {
             code: ErrorCode::InvalidSetting,
@@ -128,4 +131,13 @@ fn recent_carries_the_pressure_spans() {
         json["pressure"],
         serde_json::json!([{ "kind": "CpuSaturated", "start_ms": 1_000, "end_ms": null }])
     );
+}
+
+#[test]
+fn status_without_suggest_capture_still_decodes() {
+    let json = r#"{"type":"status","paused":false,"sensitive_until_ms":null,"state":"normal","started_at_ms":1,"last_sample_ms":null,"last_error":null}"#;
+    let Response::Status(status) = serde_json::from_str(json).unwrap() else {
+        panic!("not a status");
+    };
+    assert!(!status.suggest_capture);
 }
