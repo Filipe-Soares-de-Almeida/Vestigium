@@ -17,6 +17,8 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    // The window and its executable embed these icons, so a new icon rebuilds them.
+    println!("cargo:rerun-if-changed=icons");
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
