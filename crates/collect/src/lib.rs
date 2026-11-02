@@ -8,6 +8,7 @@ mod gpu;
 mod hung;
 mod memory;
 mod pdh;
+mod presentmon;
 mod probe;
 mod processes;
 mod timer;
@@ -23,6 +24,9 @@ pub use gpu::{GpuReading, gpu_usage};
 pub use hung::hung_pids;
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
+pub use presentmon::{
+    CsvColumns, FrameRow, PRESENTMON_SESSION, PresentMonOutcome, presentmon_args, run_presentmon,
+};
 pub use probe::{ProbeConfig, spawn_probe};
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
