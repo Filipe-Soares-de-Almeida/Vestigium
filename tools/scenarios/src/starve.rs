@@ -5,8 +5,9 @@ use vestigium_collect::logical_cpus;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentThread, GetPriorityClass, NORMAL_PRIORITY_CLASS, OpenProcessToken,
-    REALTIME_PRIORITY_CLASS, SetPriorityClass, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+    GetCurrentProcess, GetCurrentThread, GetPriorityClass, HIGH_PRIORITY_CLASS,
+    NORMAL_PRIORITY_CLASS, OpenProcessToken, REALTIME_PRIORITY_CLASS, SetPriorityClass,
+    SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
 };
 
 use crate::cpu::spin_until;
@@ -50,8 +51,49 @@ pub fn starve(seconds: u64) -> Result<(), String> {
     result
 }
 
+/// `bursts` busy stalls of `burst_ms` each, `every_ms` apart: hitches the probe sees, short of a freeze.
+pub fn stutter(bursts: u64, every_ms: u64, burst_ms: u64) -> Result<(), String> {
+    // Without elevation the workers share priority 15 with the probe, which then waits its turn.
+    let class = if is_elevated()? {
+        REALTIME_PRIORITY_CLASS
+    } else {
+        HIGH_PRIORITY_CLASS
+    };
+    println!(
+        "{bursts} stalls of {burst_ms} ms, one every {every_ms} ms, starting in {} s.",
+        COUNTDOWN.as_secs()
+    );
+    thread::sleep(COUNTDOWN);
+    // SAFETY: changes the priority class of this process only.
+    unsafe { SetPriorityClass(GetCurrentProcess(), class) }.map_err(|e| e.to_string())?;
+    let mut result = Ok(());
+    for _ in 0..bursts {
+        if crate::stopped() {
+            break;
+        }
+        let started = Instant::now();
+        result = stall(Instant::now() + Duration::from_millis(burst_ms));
+        if result.is_err() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(every_ms).saturating_sub(started.elapsed()));
+    }
+    // SAFETY: restores this process's own priority class.
+    let _ = unsafe { SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS) };
+    if result.is_ok() {
+        println!("Done: {bursts} stalls.");
+        thread::sleep(LINGER);
+    }
+    result
+}
+
 fn run(seconds: u64) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(seconds);
+    stall(Instant::now() + Duration::from_secs(seconds))?;
+    println!("Back after {seconds} s.");
+    Ok(())
+}
+
+fn stall(deadline: Instant) -> Result<(), String> {
     let workers: Vec<_> = (0..logical_cpus().max(1))
         .map(|_| {
             thread::spawn(move || {
@@ -67,7 +109,6 @@ fn run(seconds: u64) -> Result<(), String> {
             .join()
             .map_err(|_| "a worker thread panicked".to_string())?;
     }
-    println!("Back after {seconds} s.");
     Ok(())
 }
 

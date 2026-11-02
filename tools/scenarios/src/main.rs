@@ -45,6 +45,11 @@ enum Scenario {
     Starve {
         seconds: u64,
     },
+    Stutter {
+        bursts: u64,
+        every_ms: u64,
+        burst_ms: u64,
+    },
     FrameHitch {
         seconds: u64,
         every_secs: u64,
@@ -73,6 +78,9 @@ impl Scenario {
             }
             Scenario::Starve { .. } => {
                 "a freeze occurrence of 1-5 s, with CPU as the top suspect and vestigium-scenarios.exe first"
+            }
+            Scenario::Stutter { .. } => {
+                "in sensitive mode, a stutter occurrence with CPU as the top suspect and vestigium-scenarios.exe first"
             }
             Scenario::FrameHitch { .. } => {
                 "in a deep capture, vestigium-scenarios.exe with one hitched frame at each stall"
@@ -106,6 +114,11 @@ impl Scenario {
             }
             Scenario::HangWindow { seconds } => hang::hang(seconds),
             Scenario::Starve { seconds } => starve::starve(seconds),
+            Scenario::Stutter {
+                bursts,
+                every_ms,
+                burst_ms,
+            } => starve::stutter(bursts, every_ms, burst_ms),
             Scenario::FrameHitch {
                 seconds,
                 every_secs,
@@ -164,6 +177,7 @@ fn usage() -> String {
   io-burst         --file <path on the system disk> [--seconds 20] [--create-gb N]
   hang-window      [--seconds 12]
   starve           [--seconds 3]   (elevated terminal; never more than 5 s)
+  stutter          [--bursts 6] [--every-ms 1500] [--burst-ms 40]
   frame-hitch      [--seconds 60] [--every 3] [--hitch-ms 120]"
         .to_string()
 }
@@ -196,6 +210,11 @@ fn parse(args: &[String]) -> Result<Scenario, String> {
         },
         "starve" => Scenario::Starve {
             seconds: options.number("--seconds", 3)?.clamp(1, 5),
+        },
+        "stutter" => Scenario::Stutter {
+            bursts: options.number("--bursts", 6)?.clamp(1, 60),
+            every_ms: options.number("--every-ms", 1500)?.clamp(200, 10_000),
+            burst_ms: options.number("--burst-ms", 40)?.clamp(8, 240),
         },
         "frame-hitch" => Scenario::FrameHitch {
             seconds: options.number("--seconds", 60)?.clamp(5, 600),
