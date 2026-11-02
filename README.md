@@ -27,7 +27,12 @@ Portuguese, for anyone chasing a freeze that is gone by the time Task Manager
 opens. It watches the one PC it is installed on.
 
 > [!WARNING]
-> Vestigium is in early development. There is no build to install yet.
+> Vestigium is in early development and there is no build to install yet.
+> What works today, built from source: the background watcher, which records
+> freezes, stutters in sensitive mode, apps that stop responding and stretches
+> of CPU, memory or disk pressure; and the window, with the day's timeline, a
+> report for each freeze with its likely cause and the evidence, the live view
+> of the last ten minutes, and the settings.
 
 ## Highlights
 
@@ -41,7 +46,7 @@ opens. It watches the one PC it is installed on.
   covers what led up to a stop of a fraction of a second or a full minute, and
   a sensitive mode also catches the short hitches that break games, audio and
   video. A daily timeline marks each freeze and each long stretch of pressure,
-  such as memory above 90% for twelve minutes and the process that held it.
+  such as memory above 85% for twelve minutes and the process that held it.
 - **Crash dumps, read for you.** It lists the blue-screen and app crash dumps
   Windows keeps, explains each one in plain language — the stop code and the
   driver or module most likely at fault — and deletes the ones you no longer
