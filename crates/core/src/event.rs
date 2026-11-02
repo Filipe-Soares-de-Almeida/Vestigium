@@ -43,6 +43,8 @@ pub enum EventMeaning {
     AppHang,
     AppCrash,
     ServiceCrash,
+    /// Windows could not set up the crash dump, so a blue screen leaves no dump behind.
+    NoCrashDump,
 }
 
 /// One kind of event worth keeping: always a provider and an id, since ids repeat across providers.
@@ -136,6 +138,12 @@ pub const CURATED: &[CuratedEvent] = &[
         &["Service Control Manager"],
         &[7031, 7034],
         EventMeaning::ServiceCrash,
+    ),
+    curated(
+        Channel::System,
+        &["volmgr"],
+        &[46],
+        EventMeaning::NoCrashDump,
     ),
 ];
 

@@ -345,6 +345,7 @@
   "ui.occurrence.event.AppHang": "Windows logged a program that stopped responding",
   "ui.occurrence.event.AppCrash": "A program closed with an error",
   "ui.occurrence.event.ServiceCrash": "A Windows service stopped unexpectedly",
+  "ui.occurrence.event.NoCrashDump": "Windows could not prepare a crash dump, so a blue screen would leave none",
   "ui.occurrence.todo.title": "What to do",
   "ui.occurrence.todo.none": "Nothing to try for this cause yet. If it happens again, open Now to see what is weighing on the PC.",
   "ui.occurrence.step.UpdateStorageDriver": "Look for an update to the disk controller driver (SATA or NVMe) on the website of your PC or motherboard maker.",

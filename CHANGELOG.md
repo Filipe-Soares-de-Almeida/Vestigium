@@ -98,6 +98,8 @@ How to use this file:
   is kept in a history. Nothing leaves the PC.
 - A capture can last any whole number of minutes from 1 to 60: a fourth choice, Custom, opens a
   field for the length, for stutters too rare to show up in ten minutes.
+- The watcher also keeps the Windows warning that a crash dump could not be prepared, which
+  explains a blue screen that left no dump behind; it shows among the events of an occurrence.
 
 ### Changed
 

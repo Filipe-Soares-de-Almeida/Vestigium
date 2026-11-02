@@ -345,6 +345,7 @@
   "ui.occurrence.event.AppHang": "O Windows registrou um programa que parou de responder",
   "ui.occurrence.event.AppCrash": "Um programa fechou com erro",
   "ui.occurrence.event.ServiceCrash": "Um serviço do Windows parou inesperadamente",
+  "ui.occurrence.event.NoCrashDump": "O Windows não conseguiu preparar o dump de erro, então uma tela azul não deixaria nenhum",
   "ui.occurrence.todo.title": "O que fazer",
   "ui.occurrence.todo.none": "Nada a tentar para esta causa por enquanto. Se acontecer de novo, abra a tela Agora para ver o que está pesando no PC.",
   "ui.occurrence.step.UpdateStorageDriver": "Procure atualização do driver do controlador de disco (SATA ou NVMe) no site do fabricante do PC ou da placa-mãe.",

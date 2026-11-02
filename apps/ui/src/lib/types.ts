@@ -121,7 +121,8 @@ export type EventMeaning =
   | "LowVirtualMemory"
   | "AppHang"
   | "AppCrash"
-  | "ServiceCrash";
+  | "ServiceCrash"
+  | "NoCrashDump";
 
 export type NextStep =
   | "UpdateStorageDriver"

@@ -20,7 +20,7 @@ const SEVERITIES: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::
 const CHANNELS: [Channel; 2] = [Channel::System, Channel::Application];
 const REASONS: [GapReason; 3] = [GapReason::Paused, GapReason::Suspended, GapReason::Stopped];
 /// Stored meaning codes are positions in this list plus one; new meanings go at the end.
-const MEANINGS: [EventMeaning; 14] = [
+const MEANINGS: [EventMeaning; 15] = [
     EventMeaning::StorageReset,
     EventMeaning::DiskRetry,
     EventMeaning::DiskBadBlock,
@@ -35,6 +35,7 @@ const MEANINGS: [EventMeaning; 14] = [
     EventMeaning::AppHang,
     EventMeaning::AppCrash,
     EventMeaning::ServiceCrash,
+    EventMeaning::NoCrashDump,
 ];
 
 fn code<T: PartialEq>(list: &[T], value: &T) -> i64 {

@@ -18,6 +18,7 @@ mod ring;
 mod rules;
 mod sample;
 mod settings;
+mod shutdown;
 mod stutter;
 mod trigger;
 mod window;
@@ -60,6 +61,7 @@ pub use sample::{CoreLoad, DiskLoad, Sample, SampleV1};
 pub use settings::{
     ColorTheme, DetailLevel, LanguagePref, Retention, SettingError, Settings, ThemePref,
 };
+pub use shutdown::{PowerLossDetail, SHUTTING_DOWN, power_loss_detail, unexpected_shutdown_ms};
 pub use stutter::{BURST_COUNT, BURST_WINDOW_MS, HICCUP_MS, StutterDetector};
 pub use trigger::{HangOutcome, Severity, Trigger, severity};
 pub use window::{Gap, GapReason, HangSpan, Window};

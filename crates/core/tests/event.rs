@@ -54,6 +54,11 @@ fn classify_needs_provider_and_id() {
         classify(Channel::System, "disk", 153),
         Some(EventMeaning::DiskRetry)
     );
+    assert_eq!(
+        classify(Channel::System, "volmgr", 46),
+        Some(EventMeaning::NoCrashDump)
+    );
+    assert_eq!(classify(Channel::System, "disk", 46), None);
 }
 
 #[test]
