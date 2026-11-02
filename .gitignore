@@ -16,7 +16,7 @@ PRODUCT.md
 DESIGN.md
 
 # Real captures from a machine: dumps, traces, recorded databases
-captures/
+/captures/
 *.dmp
 *.etl
 *.db
