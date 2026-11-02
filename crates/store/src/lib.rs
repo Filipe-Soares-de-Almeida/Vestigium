@@ -1,6 +1,7 @@
 //! Local SQLite history of Vestigium.
 
 mod batch;
+mod captures;
 mod prune;
 mod read;
 mod records;
@@ -8,6 +9,7 @@ mod schema;
 mod segment;
 
 pub use batch::Batcher;
+pub use captures::CaptureSummary;
 pub use prune::PruneReport;
 pub use schema::{Batch, SCHEMA_VERSION, Store};
 pub use segment::{Segment, Series, decode, encode};

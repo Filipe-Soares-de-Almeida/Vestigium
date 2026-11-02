@@ -15,6 +15,7 @@ pub struct PruneReport {
     pub episodes: usize,
     pub events: usize,
     pub gaps: usize,
+    pub captures: usize,
 }
 
 impl Store {
@@ -56,6 +57,10 @@ impl Store {
                 params![records_cutoff],
             )?,
             gaps: tx.execute("DELETE FROM gap WHERE end_ms < ?1", params![records_cutoff])?,
+            captures: tx.execute(
+                "DELETE FROM capture WHERE end_ms < ?1",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
@@ -65,7 +70,14 @@ impl Store {
     /// event bookmark stay, so cleared events are not read again.
     pub fn clear_history(&mut self) -> Result<(), StoreError> {
         let tx = self.conn.transaction()?;
-        for table in ["segment", "occurrence", "episode", "event", "gap"] {
+        for table in [
+            "segment",
+            "occurrence",
+            "episode",
+            "event",
+            "gap",
+            "capture",
+        ] {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }
         tx.commit()?;
