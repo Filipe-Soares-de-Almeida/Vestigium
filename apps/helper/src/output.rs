@@ -37,6 +37,25 @@ pub fn check_shape(path: &Path, folder: &str, extension: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Checks that `path` names an existing file of the right shape, with no junction or link on the way.
+pub fn check_existing(path: &Path, folder: &str, extension: &str) -> Result<(), String> {
+    check_shape(path, folder, extension)?;
+    for step in path.ancestors() {
+        if step.parent().is_none() {
+            break;
+        }
+        let meta = std::fs::symlink_metadata(step).map_err(|e| e.to_string())?;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(format!("{} is a link", step.display()));
+        }
+    }
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+        Ok(())
+    } else {
+        Err(format!("{} is not a file", path.display()))
+    }
+}
+
 /// Creates the result file: right shape, every folder on the way real (no junction or link), and new.
 pub fn create(path: &Path, folder: &str, extension: &str) -> Result<File, String> {
     check_shape(path, folder, extension)?;

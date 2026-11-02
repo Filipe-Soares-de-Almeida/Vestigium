@@ -19,6 +19,8 @@ pub enum Job {
     HealthScan { out: PathBuf },
     /// Reads what every crash dump Windows kept says, into `out`.
     DumpScan { out: PathBuf },
+    /// Deletes the dumps a list file names, each checked again.
+    DeleteDumps { list: PathBuf },
 }
 
 /// The job these arguments name, or why they name none.
@@ -37,6 +39,14 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
         } else {
             Job::DumpScan { out }
         });
+    }
+    if name == "delete-dumps" {
+        return match rest {
+            [flag, list] if flag == "--list" => Ok(Job::DeleteDumps {
+                list: PathBuf::from(list),
+            }),
+            _ => Err("delete-dumps takes --list <file> and nothing else".to_string()),
+        };
     }
     if name != "deep-capture" {
         return Err(format!("unknown job {name}"));
@@ -75,7 +85,9 @@ mod tests {
 
     #[test]
     fn refuses_unknown_job() {
+        assert!(parse(&args(&["wipe-disk", "--out", "x"])).is_err());
         assert!(parse(&args(&["delete-dumps", "--minutes", "5"])).is_err());
+        assert!(parse(&args(&["delete-dumps", "--list", "a", "--list", "b"])).is_err());
         assert!(parse(&args(&[])).is_err());
     }
 

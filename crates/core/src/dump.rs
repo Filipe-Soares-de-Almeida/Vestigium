@@ -7,6 +7,8 @@ use crate::capture::{is_intermediary, is_kernel_core};
 pub const DUMP_VERSION: u8 = 1;
 /// Layout of the `DumpScan` file the helper writes today.
 pub const DUMP_SCAN_VERSION: u8 = 1;
+/// Layout of the `DumpDeletion` file the helper writes today.
+pub const DUMP_DELETION_VERSION: u8 = 1;
 /// Farthest a dump's crash time may be from a fall for the two to be the same event.
 pub const DUMP_FALL_REACH_MS: i64 = 5 * 60_000;
 
@@ -64,6 +66,17 @@ pub struct DumpRecord {
 pub struct DumpScan {
     pub ts_ms: i64,
     pub dumps: Vec<DumpRecord>,
+}
+
+/// What one elevated deletion did with each path the window asked for.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DumpDeletion {
+    pub ts_ms: i64,
+    pub deleted: Vec<String>,
+    /// Paths outside the dump folders, or not `.dmp` files.
+    pub refused: Vec<String>,
+    /// Paths allowed whose file could not be deleted.
+    pub failed: Vec<String>,
 }
 
 /// Who the dump points at.
