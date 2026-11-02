@@ -136,7 +136,16 @@ export type NextStep =
   | "EnableSensitiveMode"
   | "DeepCapture"
   | "ReportToAppVendor"
-  | "UpdateDriver";
+  | "UpdateDriver"
+  | "BackUpNow"
+  | "ReplaceDisk"
+  | "FreeDiskSpace"
+  | "LetWindowsManagePageFile"
+  | "CheckHardwareStability"
+  | "KeepOneAntivirus"
+  | "ReviewStartupApps"
+  | "WaitForShutdown"
+  | "MoveWindowsToSsd";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -508,5 +517,136 @@ export interface CaptureRun {
 /** Sent as the `capture-finished` event when the helper exits. */
 export interface CaptureFinished {
   ids: number[];
+  exit_code: number | null;
+}
+
+/** How much a health finding asks for attention. */
+export type Concern = "Attention" | "Critical";
+
+export type FindingKind =
+  | "DiskSmart"
+  | "LowSpace"
+  | "PageFile"
+  | "MemoryOften"
+  | "DisplayResets"
+  | "HardwareErrors"
+  | "StorageErrors"
+  | "Throttling"
+  | "WindowsOnHdd"
+  | "TwoAntivirus"
+  | "SlowBoot"
+  | "DirtyRestarts"
+  | "ShutdownUnfinished"
+  | "FailuresRising"
+  | "NoCrashDump";
+
+/** What a finding is about: a disk such as "0 C:", a volume such as "C:\", or the whole PC. */
+export type Subject = "Pc" | { Disk: string } | { Volume: string };
+
+export type Measure =
+  | { Count: number }
+  | { Percent: number }
+  | { Days: number }
+  | { Seconds: number }
+  | { Bytes: number }
+  | { Media: Media };
+
+/** The range a healthy PC stays in. */
+export type Reference = { AtMost: Measure } | { AtLeast: Measure } | { Is: Measure };
+
+export interface SmartAttribute {
+  id: number;
+  current: number;
+  worst: number;
+  raw: number;
+}
+
+export interface NvmeHealth {
+  critical_warning: number;
+  temperature_c: number;
+  available_spare_pct: number;
+  spare_threshold_pct: number;
+  percentage_used: number;
+  media_errors: number;
+}
+
+export interface PageFile {
+  path: string;
+  size_bytes: number;
+  peak_bytes: number;
+}
+
+export interface SecurityProduct {
+  name: string;
+  on: boolean;
+}
+
+export type DelayKind = "App" | "Driver" | "Service" | "Phase" | "Device";
+
+/** One boot Windows measured. */
+export interface BootTime {
+  ts_ms: number;
+  boot_ms: number;
+  main_path_ms: number;
+  post_boot_ms: number;
+}
+
+/** A step that slowed a boot; `security` steps are never offered for removal. */
+export interface BootDelay {
+  ts_ms: number;
+  kind: DelayKind;
+  name: string;
+  total_ms: number;
+  degradation_ms: number;
+  security: boolean;
+}
+
+export interface BootReport {
+  boots: BootTime[];
+  delays: BootDelay[];
+}
+
+export type HealthFact =
+  | { Attribute: SmartAttribute }
+  | "PredictFailure"
+  | { Nvme: NvmeHealth }
+  | { Event: { ts_ms: number; provider: string; id: number; meaning: EventMeaning } }
+  | { Space: { free_bytes: number; total_bytes: number } }
+  | { PageFile: PageFile }
+  | "NoPageFile"
+  | { CommitPeak: { pct: number } }
+  | { MemoryHighDays: { days: number } }
+  | { Product: SecurityProduct }
+  | { Boot: BootTime }
+  | { Delay: BootDelay }
+  | { Failures: { last_week: number; weekly_before: number } }
+  | { SystemDisk: { disk: string; media: Media } };
+
+/** One health finding; `closed_ms` is null while it still holds. */
+export interface FindingDto {
+  id: number;
+  opened_ms: number;
+  updated_ms: number;
+  closed_ms: number | null;
+  kind: FindingKind;
+  subject: Subject;
+  concern: Concern;
+  value: Measure;
+  reference: Reference;
+  evidence: HealthFact[];
+  next_steps: NextStep[];
+}
+
+/** The health page: open findings (critical first), those closed in 30 days, the last scan. */
+export interface HealthDto {
+  open: FindingDto[];
+  closed: FindingDto[];
+  last_scan_ms: number | null;
+  boot: BootReport | null;
+}
+
+/** What a full scan returned once its helper exited. */
+export interface ScanFinished {
+  scans: number[];
   exit_code: number | null;
 }

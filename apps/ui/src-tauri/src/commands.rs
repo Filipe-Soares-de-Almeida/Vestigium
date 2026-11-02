@@ -10,10 +10,10 @@ use vestigium_store::CaptureSummary;
 
 use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
-    CAPTURE_MINUTES, CaptureFinished, CaptureRun, capture_file, helper_args, launch_elevated,
-    sibling_helper,
+    CAPTURE_MINUTES, CaptureFinished, CaptureRun, ScanFinished, capture_file, helper_args,
+    launch_elevated, scan_args, scan_file, sibling_helper,
 };
-use crate::history::{CaptureDto, History, MarksDto, OccurrenceDto, TimelineDto};
+use crate::history::{CaptureDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto};
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
 
 /// What every command works with: the database, the pipe and the live stream.
@@ -220,6 +220,37 @@ pub async fn import_captures(state: State<'_, AppState>) -> Result<Vec<i64>, UiE
     blocking(move || match link.call(&Request::ImportResults)? {
         Response::Imported { captures, .. } => Ok(captures),
         other => Err(refused(other)),
+    })
+    .await
+}
+
+/// The health page: open findings, the ones that closed lately and the last full scan.
+#[tauri::command]
+pub async fn health(state: State<'_, AppState>) -> Result<HealthDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || Ok(lock(&history).health(now_ms())?)).await
+}
+
+/// Runs a full scan in the elevated helper and waits for it; Windows asks for permission first.
+#[tauri::command]
+pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiError> {
+    let link = state.link.clone();
+    blocking(move || {
+        let db = History::default_path()
+            .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
+        let helper = sibling_helper()
+            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+        let out =
+            scan_file(&db, now_ms()).ok_or_else(|| UiError::Failed("no data folder".into()))?;
+        if let Some(folder) = out.parent() {
+            std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
+        }
+        let exit_code = launch_elevated(&helper, &scan_args(&out))?.wait();
+        let scans = match link.call(&Request::ImportResults) {
+            Ok(Response::Imported { scans, .. }) => scans,
+            _ => Vec::new(),
+        };
+        Ok(ScanFinished { scans, exit_code })
     })
     .await
 }

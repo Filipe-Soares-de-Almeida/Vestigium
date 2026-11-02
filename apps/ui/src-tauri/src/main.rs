@@ -37,6 +37,8 @@ fn main() {
             commands::import_captures,
             commands::captures,
             commands::capture,
+            commands::health,
+            commands::start_scan,
             about::about,
             about::open_data_folder,
         ])

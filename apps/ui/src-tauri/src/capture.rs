@@ -30,6 +30,14 @@ pub struct CaptureFinished {
     pub exit_code: Option<u32>,
 }
 
+/// What the window gets back when a full scan's helper exits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ScanFinished {
+    /// The scans the watcher stored; empty while the watcher is stopped.
+    pub scans: Vec<i64>,
+    pub exit_code: Option<u32>,
+}
+
 /// The helper next to this window: the installed name, then the development build's.
 pub fn sibling_helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -46,6 +54,19 @@ pub fn capture_file(db: &Path, started_ms: i64) -> Option<PathBuf> {
             .join("captures")
             .join(format!("{started_ms}.capture")),
     )
+}
+
+/// `<data>\scans\<start ms>.scan`, beside the watcher's database.
+pub fn scan_file(db: &Path, started_ms: i64) -> Option<PathBuf> {
+    Some(
+        db.parent()?
+            .join("scans")
+            .join(format!("{started_ms}.scan")),
+    )
+}
+
+pub fn scan_args(out: &Path) -> String {
+    format!("health-scan --out \"{}\"", out.display())
 }
 
 pub fn helper_args(minutes: u64, out: &Path) -> String {
@@ -120,6 +141,20 @@ mod tests {
             PathBuf::from(
                 r"C:\Users\someone\AppData\Local\Vestigium\data\captures\1793580000000.capture"
             )
+        );
+    }
+
+    #[test]
+    fn scan_file_and_args_sit_beside_the_database() {
+        let db = Path::new(r"C:\Users\some one\AppData\Local\Vestigium\data\vestigium.db");
+        let out = scan_file(db, 7).unwrap();
+        assert_eq!(
+            out,
+            PathBuf::from(r"C:\Users\some one\AppData\Local\Vestigium\data\scans\7.scan")
+        );
+        assert_eq!(
+            scan_args(&out),
+            r#"health-scan --out "C:\Users\some one\AppData\Local\Vestigium\data\scans\7.scan""#
         );
     }
 

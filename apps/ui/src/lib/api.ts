@@ -5,9 +5,11 @@ import type {
   CaptureDto,
   CaptureRun,
   CaptureSummary,
+  HealthDto,
   LiveMessage,
   MarksDto,
   OccurrenceDto,
+  ScanFinished,
   Settings,
   SettingsDto,
   TimelineDto,
@@ -91,4 +93,14 @@ export function captures(fromMs: number, toMs: number): Promise<CaptureSummary[]
 
 export function capture(id: number): Promise<CaptureDto | null> {
   return invoke("capture", { id });
+}
+
+/** Open health findings, those closed lately and the last full scan, read from the history. */
+export function health(): Promise<HealthDto> {
+  return invoke("health");
+}
+
+/** Runs a full scan in the elevated helper and waits for it; Windows asks for permission first. */
+export function startScan(): Promise<ScanFinished> {
+  return invoke("start_scan");
 }

@@ -1,11 +1,15 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
+use vestigium_core::health::{BootReport, Finding};
 use vestigium_core::{
     DeepCapture, Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, Suspect,
     WinEvent, capture_findings, capture_suspects, pc_state, steady_only,
 };
-use vestigium_store::{CaptureSummary, Store, StoreError};
+use vestigium_store::{CaptureSummary, FindingRecord, Store, StoreError};
+
+/// How far back the health page lists the findings that closed.
+const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
 
 /// Ranges up to this long are drawn from per-second samples, longer ones from minutes.
 pub const SECONDS_UP_TO_MS: i64 = 6 * 3_600_000;
@@ -71,6 +75,40 @@ pub struct OccurrenceDto {
     pub chart: Columns,
     /// What a deep capture that covered this window adds.
     pub capture: Option<CaptureNote>,
+}
+
+/// One finding as the health page lists it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FindingDto {
+    pub id: i64,
+    pub opened_ms: i64,
+    pub updated_ms: i64,
+    /// `None` while it still holds.
+    pub closed_ms: Option<i64>,
+    #[serde(flatten)]
+    pub finding: Finding,
+}
+
+impl From<FindingRecord> for FindingDto {
+    fn from(record: FindingRecord) -> FindingDto {
+        FindingDto {
+            id: record.id,
+            opened_ms: record.opened_ms,
+            updated_ms: record.updated_ms,
+            closed_ms: record.closed_ms,
+            finding: record.finding,
+        }
+    }
+}
+
+/// What the health page shows.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct HealthDto {
+    pub open: Vec<FindingDto>,
+    pub closed: Vec<FindingDto>,
+    pub last_scan_ms: Option<i64>,
+    /// What the last full scan read from the boot log; `None` without a scan or when it could not.
+    pub boot: Option<BootReport>,
 }
 
 /// A stored deep capture with what it names.
@@ -239,6 +277,32 @@ impl History {
                 capture,
             }
         }))
+    }
+
+    /// The open findings, the critical first, the ones that closed in the last 30 days, newest
+    /// first, and what the last full scan read.
+    pub fn health(&mut self, now_ms: i64) -> Result<HealthDto, StoreError> {
+        let read = self.read(|store| {
+            Ok((
+                store.findings(now_ms - CLOSED_SHOWN_MS, now_ms)?,
+                store.last_scan()?,
+            ))
+        })?;
+        let Some((records, scan)) = read else {
+            return Ok(HealthDto::default());
+        };
+        let (mut open, mut closed): (Vec<_>, Vec<_>) = records
+            .into_iter()
+            .map(FindingDto::from)
+            .partition(|f| f.closed_ms.is_none());
+        open.sort_by_key(|f| (std::cmp::Reverse(f.finding.concern), f.opened_ms));
+        closed.sort_by_key(|f| std::cmp::Reverse(f.closed_ms));
+        Ok(HealthDto {
+            open,
+            closed,
+            last_scan_ms: scan.as_ref().map(|s| s.ts_ms),
+            boot: scan.and_then(|s| s.boot),
+        })
     }
 
     pub fn settings(&mut self) -> Result<Option<vestigium_core::Settings>, StoreError> {
