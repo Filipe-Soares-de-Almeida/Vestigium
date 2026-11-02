@@ -13,7 +13,12 @@ vestigium-core = { workspace = true }
 
 [dependencies.windows]
 workspace = true
-features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"]
+features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_System_Performance",
+]
 
 [lints]
 workspace = true

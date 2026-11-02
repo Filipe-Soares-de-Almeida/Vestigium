@@ -1,7 +1,9 @@
 //! Measures a running process against the Vestigium budgets.
 //!
-//! `vestigium-budget watch --name <exe> --minutes <m>` and `vestigium-budget tree --pid <pid>`.
+//! `vestigium-budget watch --name <exe> --minutes <m>`, `vestigium-budget tree --pid <pid>` and
+//! `vestigium-budget disk --instance <"1 D:"> --minutes <m>`.
 
+mod disk;
 mod net;
 mod report;
 mod tree;
@@ -38,6 +40,13 @@ fn main() -> ExitCode {
             Some(pid) => tree(pid),
             None => Err(usage()),
         },
+        Some("disk") => match (
+            value("--instance"),
+            value("--minutes").and_then(|m| m.parse().ok()),
+        ) {
+            (Some(instance), Some(minutes)) => disk::watch(&instance, minutes),
+            _ => Err(usage()),
+        },
         _ => Err(usage()),
     };
     match result {
@@ -51,7 +60,9 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> String {
-    "usage: vestigium-budget watch --name <exe> --minutes <m> | tree --pid <pid>".to_string()
+    "usage: vestigium-budget watch --name <exe> --minutes <m> | tree --pid <pid> \
+     | disk --instance <\"1 D:\"> --minutes <m>"
+        .to_string()
 }
 
 /// Samples the process once a second; true when it stayed within every budget.
