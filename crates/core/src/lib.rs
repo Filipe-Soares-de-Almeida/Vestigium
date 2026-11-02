@@ -8,6 +8,7 @@ mod facts;
 mod freeze;
 mod gate;
 mod hang;
+pub mod health;
 mod machine;
 mod minute;
 mod occurrence;

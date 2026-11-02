@@ -164,6 +164,15 @@ pub enum NextStep {
     DeepCapture,
     ReportToAppVendor,
     UpdateDriver,
+    BackUpNow,
+    ReplaceDisk,
+    FreeDiskSpace,
+    LetWindowsManagePageFile,
+    CheckHardwareStability,
+    KeepOneAntivirus,
+    ReviewStartupApps,
+    WaitForShutdown,
+    MoveWindowsToSsd,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
