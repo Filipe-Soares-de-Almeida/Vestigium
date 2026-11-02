@@ -117,6 +117,11 @@ impl Blackbox {
         }
     }
 
+    /// A black box for the same machine and timing that remembers nothing, for a cleared history.
+    pub fn emptied(&self) -> Blackbox {
+        Blackbox::new(self.machine.clone(), self.timing)
+    }
+
     /// Updates the machine facts later windows carry, such as once the disks are known.
     pub fn set_machine(&mut self, machine: MachineInfo) {
         self.machine = machine;

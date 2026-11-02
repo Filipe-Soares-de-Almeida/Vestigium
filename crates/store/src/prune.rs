@@ -61,6 +61,22 @@ impl Store {
         Ok(report)
     }
 
+    /// Deletes everything watched and gives the space back; settings, machine facts and the
+    /// event bookmark stay, so cleared events are not read again.
+    pub fn clear_history(&mut self) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        for table in ["segment", "occurrence", "episode", "event", "gap"] {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        tx.commit()?;
+        // A busy database keeps its size until the next vacuum; the rows are gone either way.
+        let _ = self.conn.execute_batch("VACUUM");
+        let _ = self
+            .conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        Ok(())
+    }
+
     /// When the last stored sample was taken, to record the gap the agent was stopped for.
     pub fn last_sample_end_ms(&self) -> Result<Option<i64>, StoreError> {
         Ok(self.conn.query_row(

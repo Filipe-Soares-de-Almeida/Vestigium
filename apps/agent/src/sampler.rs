@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::mem;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -79,6 +80,8 @@ pub struct Wiring {
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     /// Retention is read from here at every prune, so a change applies on the next one.
     pub settings: Arc<Mutex<Settings>>,
+    /// Set by the pipe after it cleared the history.
+    pub cleared: Arc<AtomicBool>,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -118,6 +121,7 @@ struct Sampler {
     readings: Arc<Mutex<Ring<Reading>>>,
     pressure: Arc<Mutex<Vec<PressureSpan>>>,
     settings: Arc<Mutex<Settings>>,
+    cleared: Arc<AtomicBool>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
@@ -173,6 +177,7 @@ impl Sampler {
             readings: wiring.readings,
             pressure: wiring.pressure,
             settings: wiring.settings,
+            cleared: wiring.cleared,
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
@@ -287,6 +292,9 @@ impl Sampler {
         ticks: usize,
     ) -> Result<(), CollectError> {
         let ts_ms = wall_ms();
+        if self.cleared.swap(false, Ordering::AcqRel) {
+            self.forget(ts_ms);
+        }
         self.blackbox.set_sensitive(self.sensitive.is_on());
         let mut probe_max_lag_ms: f32 = 0.0;
         for tick in self.probe_rx.try_iter() {
@@ -445,6 +453,18 @@ impl Sampler {
     }
 
     /// Hands the tray the counts of the last 24 h, and wakes it when they changed.
+    /// Drops what was watched before the history was cleared; the event bookmark stays.
+    fn forget(&mut self, now: i64) {
+        let _ = self.batcher.take_final();
+        self.events.clear();
+        self.gaps.clear();
+        self.blackbox = self.blackbox.emptied();
+        lock(&self.readings).clear();
+        lock(&self.pressure).clear();
+        lock(&self.now).latest = None;
+        self.publish_recent(now);
+    }
+
     fn publish_recent(&self, now: i64) {
         let recent = self.blackbox.recent(now);
         let mut shown = lock(&self.recent);
@@ -625,6 +645,7 @@ mod tests {
                 readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
                 pressure: Arc::new(Mutex::new(Vec::new())),
                 settings: Arc::new(Mutex::new(Settings::default())),
+                cleared: Arc::new(AtomicBool::new(false)),
             },
         )
         .unwrap();

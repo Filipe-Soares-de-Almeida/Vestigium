@@ -22,6 +22,7 @@
     "allow-set-settings",
     "allow-settings",
     "allow-about",
-    "allow-open-data-folder"
+    "allow-open-data-folder",
+    "allow-clear-history"
   ]
 }

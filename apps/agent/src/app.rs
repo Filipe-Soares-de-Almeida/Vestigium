@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -90,6 +91,8 @@ pub struct Shared {
     /// The pressure episodes of the last ten minutes, ended or under way.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     pub settings: Arc<Mutex<Settings>>,
+    /// Set when the history was cleared; the sampler drops what it still holds in memory.
+    pub cleared: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
 }
@@ -174,6 +177,21 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             shutdown::wake();
             Response::Done
         }
+        Request::ClearHistory => {
+            let Some(store) = store else {
+                return error(ErrorCode::Failed, "the history database is not open");
+            };
+            shared.cleared.store(true, Ordering::Release);
+            if let Err(err) = store.clear_history() {
+                return error(ErrorCode::Failed, err);
+            }
+            lock(&shared.readings).clear();
+            lock(&shared.pressure).clear();
+            lock(&shared.now).latest = None;
+            *lock(&shared.recent) = RecentState::default();
+            shutdown::wake();
+            Response::Done
+        }
         Request::SetAutostart { on } => {
             let changed = if on {
                 autostart::enable(&shared.exe)
@@ -216,6 +234,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
+        cleared: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
 
@@ -246,6 +265,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 readings: shared.readings.clone(),
                 pressure: shared.pressure.clone(),
                 settings: shared.settings.clone(),
+                cleared: shared.cleared.clone(),
             },
         )
         .map_err(failed)?,
@@ -364,6 +384,7 @@ mod tests {
             readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
+            cleared: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
     }
@@ -384,7 +405,7 @@ mod tests {
 
     #[test]
     fn older_protocols_are_refused() {
-        for protocol in [1, 2, 3] {
+        for protocol in [1, 2, 3, 4] {
             let response = handle(Request::Hello { protocol }, &shared(), None);
             assert!(matches!(
                 response,
@@ -515,6 +536,41 @@ mod tests {
         assert_eq!(accepted, Response::Done);
         assert_eq!(*lock(&shared.settings), right);
         assert_eq!(store.settings().unwrap(), right);
+    }
+
+    #[test]
+    fn clear_history_empties_the_store_and_what_the_screens_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let shared = shared();
+        lock(&shared.readings).push(Reading {
+            ts_ms: wall_ms(),
+            cpu_pct: 5.0,
+            mem_used_pct: Some(30.0),
+            disk_active_pct: 1.0,
+            disk_latency_ms: 0.5,
+            gpu_pct: None,
+            probe_lag_ms: 1.0,
+        });
+        *lock(&shared.recent) = RecentState {
+            occurrences: 2,
+            ..RecentState::default()
+        };
+
+        assert!(matches!(
+            handle(Request::ClearHistory, &shared, None),
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert_eq!(
+            handle(Request::ClearHistory, &shared, Some(&mut store)),
+            Response::Done
+        );
+        assert!(shared.cleared.load(Ordering::Acquire));
+        assert_eq!(lock(&shared.readings).iter().count(), 0);
+        assert_eq!(*lock(&shared.recent), RecentState::default());
     }
 
     #[test]

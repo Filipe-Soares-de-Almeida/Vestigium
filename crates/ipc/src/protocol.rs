@@ -4,7 +4,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -28,6 +28,8 @@ pub enum Request {
     SetAutostart {
         on: bool,
     },
+    /// Deletes everything watched so far; settings stay.
+    ClearHistory,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -109,6 +109,11 @@ pub async fn set_sensitive(state: State<'_, AppState>, on: bool) -> Result<(), U
 }
 
 #[tauri::command]
+pub async fn clear_history(state: State<'_, AppState>) -> Result<(), UiError> {
+    send(&state, Request::ClearHistory).await
+}
+
+#[tauri::command]
 pub async fn set_autostart(state: State<'_, AppState>, on: bool) -> Result<(), UiError> {
     send(&state, Request::SetAutostart { on }).await
 }

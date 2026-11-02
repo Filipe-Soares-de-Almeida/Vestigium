@@ -28,6 +28,7 @@ fn every_request_roundtrips_as_json() {
         Request::Settings,
         Request::SetSettings(settings),
         Request::SetAutostart { on: false },
+        Request::ClearHistory,
     ];
     for request in requests {
         assert_eq!(roundtrip(&request), request);

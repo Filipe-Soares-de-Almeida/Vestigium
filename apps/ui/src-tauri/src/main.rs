@@ -28,6 +28,7 @@ fn main() {
             commands::set_paused,
             commands::set_sensitive,
             commands::set_autostart,
+            commands::clear_history,
             commands::set_settings,
             commands::settings,
             about::about,

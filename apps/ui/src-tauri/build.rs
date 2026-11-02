@@ -14,6 +14,7 @@ const COMMANDS: &[&str] = &[
     "settings",
     "about",
     "open_data_folder",
+    "clear_history",
 ];
 
 fn main() {

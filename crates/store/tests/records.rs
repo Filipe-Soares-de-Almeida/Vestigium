@@ -2,8 +2,8 @@ use std::path::Path;
 
 use vestigium_core::{
     Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
-    EventMeaning, Gap, GapReason, MachineInfo, Occurrence, OccurrenceKind, Retention, Sample,
-    Settings, Severity, Suspect, Trigger, WinEvent, Window,
+    EventMeaning, Gap, GapReason, LanguagePref, MachineInfo, Occurrence, OccurrenceKind, Retention,
+    Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
 };
 use vestigium_store::{Batch, SCHEMA_VERSION, Segment, Series, Store, StoreError, encode};
 
@@ -282,6 +282,55 @@ fn prune_keeps_what_is_inside_retention() {
     assert_eq!(store.episodes(all, max).unwrap().len(), 1);
     assert_eq!(store.events(all, max).unwrap().len(), 1);
     assert_eq!(store.gaps(all, max).unwrap().len(), 1);
+}
+
+#[test]
+fn clear_history_keeps_settings_and_the_bookmark() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let settings = Settings {
+        language: LanguagePref::PtBr,
+        ..Settings::default()
+    };
+    store.set_settings(&settings).unwrap();
+    store
+        .append_batch(&Batch {
+            segments: vec![
+                segment(Series::Samples, 1_000, 2_000),
+                segment(Series::Minutes, 0, 60_000),
+            ],
+            events: vec![event(1_500, 7)],
+            bookmark_xml: Some("<BookmarkList/>".to_string()),
+            gaps: vec![gap(4_000, 5_000)],
+        })
+        .unwrap();
+    store.insert_occurrence(&occurrence(1_000, 2_000)).unwrap();
+    store.insert_episode(&episode(1_000, 2_000)).unwrap();
+
+    store.clear_history().unwrap();
+
+    let (all, max) = (i64::MIN, i64::MAX);
+    assert!(
+        store
+            .segments(Series::Samples, all, max)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .segments(Series::Minutes, all, max)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.occurrences(all, max).unwrap().is_empty());
+    assert!(store.episodes(all, max).unwrap().is_empty());
+    assert!(store.events(all, max).unwrap().is_empty());
+    assert!(store.gaps(all, max).unwrap().is_empty());
+    assert_eq!(store.settings().unwrap(), settings);
+    assert_eq!(
+        store.bookmark_xml().unwrap().as_deref(),
+        Some("<BookmarkList/>")
+    );
 }
 
 #[test]
