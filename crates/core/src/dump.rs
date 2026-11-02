@@ -220,6 +220,35 @@ pub fn bug_check_report(text: &str) -> Option<(u32, [u64; 4])> {
     values.next().is_none().then_some((code, params))
 }
 
+/// What one listing changes: the dumps to add or refresh, and the ids of stored dumps whose file
+/// is gone. Only paths under `covered` (folders listed, files looked up) can be found gone.
+pub fn listing_changes(
+    stored: &[(i64, &DumpRecord)],
+    listed: &[DumpRecord],
+    covered: &[String],
+) -> (Vec<DumpRecord>, Vec<i64>) {
+    let same = |a: &DumpRecord, b: &DumpRecord| {
+        a.path.eq_ignore_ascii_case(&b.path) && a.file_ms == b.file_ms
+    };
+    let fresh = listed
+        .iter()
+        .filter(|l| {
+            !stored
+                .iter()
+                .any(|(_, s)| same(s, l) && s.size_bytes == l.size_bytes)
+        })
+        .cloned()
+        .collect();
+    let lower = |p: &str| p.to_ascii_lowercase();
+    let seen_by_listing = |path: &str| covered.iter().any(|c| lower(path).starts_with(&lower(c)));
+    let gone = stored
+        .iter()
+        .filter(|(_, s)| seen_by_listing(&s.path) && !listed.iter().any(|l| same(s, l)))
+        .map(|(id, _)| *id)
+        .collect();
+    (fresh, gone)
+}
+
 /// The kind of a kernel dump from where Windows keeps it.
 pub fn kernel_dump_kind(path: &str) -> DumpKind {
     let lower = path.to_ascii_lowercase();

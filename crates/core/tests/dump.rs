@@ -1,6 +1,6 @@
 use vestigium_core::{
     Analysis, Confidence, DumpCulprit, DumpKind, DumpRecord, Fault, bug_check_report, dump_culprit,
-    dump_of_fall, fault_address, kernel_dump_kind,
+    dump_of_fall, fault_address, kernel_dump_kind, listing_changes,
 };
 
 const MINUTE: i64 = 60_000;
@@ -200,4 +200,50 @@ fn the_folder_says_the_kind_of_a_kernel_dump() {
         kernel_dump_kind(r"C:\Windows\MEMORY.DMP"),
         DumpKind::KernelMemory
     );
+}
+
+fn listed(path: &str, file_ms: i64, size_bytes: u64) -> DumpRecord {
+    DumpRecord {
+        path: path.to_string(),
+        file_ms,
+        kind: DumpKind::App,
+        crash_ms: file_ms,
+        size_bytes,
+        analysis: None,
+    }
+}
+
+#[test]
+fn inventory_marks_a_vanished_dump() {
+    let kept = listed(r"C:\Users\Someone\CrashDumps\Game.exe.1.dmp", 10, 4096);
+    let removed = listed(r"C:\Users\Someone\CrashDumps\Tool.exe.2.dmp", 20, 4096);
+    let unlistable = listed(r"C:\Windows\Minidump\1.dmp", 30, 2_000_000);
+    let stored = [(1, &kept), (2, &removed), (3, &unlistable)];
+    let new = listed(r"C:\Users\Someone\CrashDumps\Game.exe.3.dmp", 40, 8192);
+    let covered = [r"C:\Users\Someone\CrashDumps\".to_string()];
+
+    let (fresh, gone) = listing_changes(&stored, &[kept.clone(), new.clone()], &covered);
+
+    assert_eq!(fresh, vec![new]);
+    assert_eq!(
+        gone,
+        vec![2],
+        "a folder the watcher cannot list never loses a dump"
+    );
+}
+
+#[test]
+fn an_overwritten_memory_dump_replaces_the_old_file() {
+    let old = listed(r"C:\Windows\MEMORY.DMP", 10, 700);
+    let stored = [(7, &old)];
+    let now = listed(r"C:\Windows\MEMORY.DMP", 99, 800);
+
+    let (fresh, gone) = listing_changes(
+        &stored,
+        std::slice::from_ref(&now),
+        &[r"C:\Windows\MEMORY.DMP".into()],
+    );
+
+    assert_eq!(fresh, vec![now]);
+    assert_eq!(gone, vec![7]);
 }

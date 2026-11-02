@@ -26,6 +26,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetS
 use vestigium_core::health::Concern;
 
 use crate::app::lock;
+use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
@@ -172,6 +173,8 @@ struct Sampler {
     started_ms: i64,
     /// Windows logged a hardware error since the start.
     hardware_error: bool,
+    /// A crash was reported, so the dumps are listed again on the next tick.
+    dumps_due: bool,
 }
 
 /// The data sources a tick reads, opened once on the sampler thread.
@@ -239,6 +242,7 @@ impl Sampler {
             held_gap: None,
             started_ms: now,
             hardware_error: false,
+            dumps_due: false,
             store,
         };
         sampler.recall_last_day(now);
@@ -483,6 +487,9 @@ impl Sampler {
 
         self.take_events();
         self.settle_fall(ts_ms, false);
+        if mem::take(&mut self.dumps_due) {
+            self.check_dumps(ts_ms);
+        }
         let outputs = self.blackbox.poll(ts_ms);
         self.keep(outputs, ts_ms);
         self.publish_suggestion();
@@ -508,8 +515,16 @@ impl Sampler {
         Ok(())
     }
 
-    /// Runs a health pass: a minute after start, then every full hour with the prune.
+    /// Lists the dumps Windows kept, without opening any.
+    fn check_dumps(&mut self, ts_ms: i64) {
+        if let Err(err) = take_inventory(&mut self.store, &DumpPlaces::of_this_pc(), ts_ms) {
+            self.report(&err);
+        }
+    }
+
+    /// Runs a health pass and lists the dumps: a minute after start, then every full hour.
     fn check_health(&mut self, ts_ms: i64) {
+        self.check_dumps(ts_ms);
         let busy_disks = self
             .disk_active_ms
             .iter()
@@ -560,6 +575,12 @@ impl Sampler {
             let event = &delivered.event;
             if event.meaning == EventMeaning::HardwareError && event.ts_ms >= self.started_ms {
                 self.hardware_error = true;
+            }
+            if matches!(
+                event.meaning,
+                EventMeaning::BugCheck | EventMeaning::AppCrash
+            ) {
+                self.dumps_due = true;
             }
             if let Some(fall) = self.fall.as_mut() {
                 fall.offer(event, now);
