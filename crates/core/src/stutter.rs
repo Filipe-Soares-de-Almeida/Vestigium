@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::{FREEZE_MS, ProbeTick, Trigger};
 
 /// Probe delays short of a freeze that a person still feels as a hitch.
-pub const HICCUP_MS: Range<f32> = 50.0..FREEZE_MS;
+pub const HICCUP_MS: Range<f32> = 8.0..FREEZE_MS;
 /// Hiccups within `BURST_WINDOW_MS` that make a stutter.
 pub const BURST_COUNT: usize = 3;
 pub const BURST_WINDOW_MS: i64 = 10_000;

@@ -46,6 +46,8 @@ struct Texts {
     /// Templates with a `{count}` of the last 24 h.
     attention: String,
     problem: String,
+    /// The extra tooltip line that points to the deep capture.
+    suggest_capture: String,
     pause: String,
     resume: String,
 }
@@ -58,9 +60,29 @@ impl Texts {
             sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
             attention: catalog.get("tray.tooltip.attention").to_string(),
             problem: catalog.get("tray.tooltip.problem").to_string(),
+            suggest_capture: catalog.get("tray.tooltip.suggest_capture").to_string(),
             pause: catalog.get("tray.pause").to_string(),
             resume: catalog.get("tray.resume").to_string(),
         }
+    }
+
+    fn tooltip(&self, now: Shown) -> String {
+        let mut tooltip = if now.paused {
+            self.paused.clone()
+        } else if now.sensitive {
+            self.sensitive.clone()
+        } else {
+            match now.recent {
+                Level::Normal => self.watching.clone(),
+                Level::Attention(n) => self.attention.replace("{count}", &n.to_string()),
+                Level::Problem(n) => self.problem.replace("{count}", &n.to_string()),
+            }
+        };
+        if now.suggest_capture {
+            tooltip.push('\n');
+            tooltip.push_str(&self.suggest_capture);
+        }
+        tooltip
     }
 }
 
@@ -69,6 +91,7 @@ impl Texts {
 struct Shown {
     paused: bool,
     sensitive: bool,
+    suggest_capture: bool,
     recent: Level,
     theme: ColorTheme,
     taskbar: Taskbar,
@@ -230,6 +253,7 @@ impl Tray {
         let now = Shown {
             paused: shared.gate.state() == GateState::Paused,
             sensitive: shared.sensitive.is_on(),
+            suggest_capture: lock(&shared.status).suggest_capture,
             recent: Level::of(&lock(&shared.recent)),
             theme: lock(&shared.settings).color_theme,
             taskbar: self.taskbar.get(),
@@ -244,18 +268,7 @@ impl Tray {
                 .set_icon(Some(icon::tray(now.badge(), now.theme, now.taskbar)));
         }
         let text = self.text.borrow();
-        let tooltip = if now.paused {
-            text.paused.clone()
-        } else if now.sensitive {
-            text.sensitive.clone()
-        } else {
-            match now.recent {
-                Level::Normal => text.watching.clone(),
-                Level::Attention(n) => text.attention.replace("{count}", &n.to_string()),
-                Level::Problem(n) => text.problem.replace("{count}", &n.to_string()),
-            }
-        };
-        let _ = self.icon.set_tooltip(Some(&tooltip));
+        let _ = self.icon.set_tooltip(Some(&text.tooltip(now)));
         self.pause.set_text(if now.paused {
             &text.resume
         } else {
@@ -270,13 +283,14 @@ mod tests {
     use vestigium_brand::Badge;
     use vestigium_core::{ColorTheme, RecentState};
 
-    use super::{Level, Shown};
+    use super::{Level, Shown, Texts};
     use crate::icon::Taskbar;
 
     fn shown(paused: bool, sensitive: bool, recent: Level) -> Shown {
         Shown {
             paused,
             sensitive,
+            suggest_capture: false,
             recent,
             theme: ColorTheme::Red,
             taskbar: Taskbar {
@@ -298,6 +312,28 @@ mod tests {
             Badge::Attention
         );
         assert_eq!(shown(false, false, Level::Normal).badge(), Badge::None);
+    }
+
+    #[test]
+    fn the_tooltip_adds_a_line_when_a_capture_is_suggested() {
+        let text = Texts {
+            watching: "watching".to_string(),
+            paused: "paused".to_string(),
+            sensitive: "closely".to_string(),
+            attention: "slow {count}".to_string(),
+            problem: "severe {count}".to_string(),
+            suggest_capture: "look into it".to_string(),
+            pause: String::new(),
+            resume: String::new(),
+        };
+        let quiet = shown(false, true, Level::Normal);
+        let suggesting = Shown {
+            suggest_capture: true,
+            ..quiet
+        };
+
+        assert_eq!(text.tooltip(quiet), "closely");
+        assert_eq!(text.tooltip(suggesting), "closely\nlook into it");
     }
 
     #[test]

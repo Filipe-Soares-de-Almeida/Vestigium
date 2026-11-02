@@ -75,3 +75,27 @@ fn freeze_sized_lag_is_not_a_hiccup() {
     detector.reset();
     assert_eq!(detector.push(&tick(3_000, 100.0)), None);
 }
+
+#[test]
+fn micro_hiccups_make_a_stutter() {
+    let mut detector = StutterDetector::new();
+    assert_eq!(detector.push(&tick(1_000, 8.0)), None);
+    assert_eq!(detector.push(&tick(2_000, 12.0)), None);
+    assert_eq!(
+        detector.push(&tick(3_000, 9.5)),
+        Some(Trigger::Stutter {
+            start_ms: 992,
+            end_ms: 3_000,
+            count: 3,
+            worst_ms: 12.0
+        })
+    );
+}
+
+#[test]
+fn noise_below_8ms_is_ignored() {
+    let mut detector = StutterDetector::new();
+    for wall_ms in (0..10).map(|k| k * 500) {
+        assert_eq!(detector.push(&tick(wall_ms, 7.9)), None);
+    }
+}

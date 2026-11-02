@@ -96,6 +96,8 @@ How to use this file:
 
 ### Changed
 
+- Sensitive mode now also catches hitches from 8 ms, where it caught only those of 50 ms and up,
+  and the tray says when hitches were seen.
 - The project is now called Vestigium, and its GitHub repository was renamed to match. Links to
   the old addresses redirect.
 - The background watcher now runs as `Vestigium.exe` and the window as `Vestigium.Window.exe`.

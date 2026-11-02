@@ -13,10 +13,10 @@ use vestigium_collect::{
     unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
-    OccurrenceSummary, Output, PressureSpan, ProbeTick, ProcessCounters, ProcessTop, RING_MS,
-    Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest,
-    last_seen, process_rates, programs,
+    Blackbox, DiskInfo, Gap, GapReason, GateState, HICCUP_MS, HungWindow, MachineInfo, Media,
+    Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick, ProcessCounters,
+    ProcessTop, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing,
+    WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -40,6 +40,9 @@ const TRIM_AFTER_TICKS: usize = 10;
 const STOPPED_GAP_MIN_MS: i64 = 5_000;
 const HOUR_MS: i64 = 60 * 60_000;
 const DAY_MS: i64 = 24 * HOUR_MS;
+/// How long a late probe wake stays available to a capture that ends later.
+const HICCUPS_KEPT_MS: i64 = 15 * 60_000;
+const HICCUPS_KEPT: usize = 10_000;
 
 /// Lets the owner wait for the sampler to write its last batch and stop.
 #[derive(Debug)]
@@ -78,6 +81,8 @@ pub struct Wiring {
     pub readings: Arc<Mutex<Ring<Reading>>>,
     /// The pressure episodes of the last ten minutes, for the live screen.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
+    /// Late probe wakes of the last fifteen minutes, kept while sensitive mode is on.
+    pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     /// Retention is read from here at every prune, so a change applies on the next one.
     pub settings: Arc<Mutex<Settings>>,
     /// Set by the pipe after it cleared the history.
@@ -120,6 +125,7 @@ struct Sampler {
     now: Arc<Mutex<NowFrame>>,
     readings: Arc<Mutex<Ring<Reading>>>,
     pressure: Arc<Mutex<Vec<PressureSpan>>>,
+    hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     settings: Arc<Mutex<Settings>>,
     cleared: Arc<AtomicBool>,
     /// Events and the bookmark that covers them, waiting for the next batch.
@@ -176,6 +182,7 @@ impl Sampler {
             now: wiring.now,
             readings: wiring.readings,
             pressure: wiring.pressure,
+            hiccups: wiring.hiccups,
             settings: wiring.settings,
             cleared: wiring.cleared,
             events: Vec::new(),
@@ -295,11 +302,17 @@ impl Sampler {
         if self.cleared.swap(false, Ordering::AcqRel) {
             self.forget(ts_ms);
         }
-        self.blackbox.set_sensitive(self.sensitive.is_on());
+        let sensitive = self.sensitive.is_on();
+        self.blackbox.set_sensitive(sensitive);
         let mut probe_max_lag_ms: f32 = 0.0;
+        let mut ticks_seen = Vec::new();
         for tick in self.probe_rx.try_iter() {
             probe_max_lag_ms = probe_max_lag_ms.max(tick.lag_ms);
+            ticks_seen.push(tick);
             self.blackbox.push_probe(tick);
+        }
+        if sensitive {
+            keep_hiccups(&mut lock(&self.hiccups), &ticks_seen, ts_ms);
         }
         let memory = memory_info()?;
         let (cpu, pdh) = (sources.cpu.sample()?, sources.pdh.sample()?);
@@ -383,6 +396,7 @@ impl Sampler {
         self.take_events();
         let outputs = self.blackbox.poll(ts_ms);
         self.keep(outputs, ts_ms);
+        self.publish_suggestion();
         if self.batcher.due(ts_ms) {
             self.flush();
         }
@@ -461,8 +475,20 @@ impl Sampler {
         self.blackbox = self.blackbox.emptied();
         lock(&self.readings).clear();
         lock(&self.pressure).clear();
+        lock(&self.hiccups).clear();
         lock(&self.now).latest = None;
         self.publish_recent(now);
+    }
+
+    /// Hands the tray whether sensitive mode saw hitches worth a deep capture.
+    fn publish_suggestion(&self) {
+        let suggests = self.blackbox.suggests_capture();
+        let mut status = lock(&self.status);
+        if status.suggest_capture != suggests {
+            status.suggest_capture = suggests;
+            drop(status);
+            shutdown::wake();
+        }
     }
 
     fn publish_recent(&self, now: i64) {
@@ -582,6 +608,28 @@ impl Sampler {
     }
 }
 
+/// Adds the late wakes among `ticks` to `kept`, then drops what is old or beyond the cap.
+fn keep_hiccups(kept: &mut VecDeque<ProbeHiccup>, ticks: &[ProbeTick], now_ms: i64) {
+    kept.extend(
+        ticks
+            .iter()
+            .filter(|tick| tick.lag_ms >= HICCUP_MS.start)
+            .map(|tick| ProbeHiccup {
+                ts_ms: tick.wall_ms,
+                lag_ms: tick.lag_ms,
+            }),
+    );
+    while kept
+        .front()
+        .is_some_and(|h| now_ms - h.ts_ms > HICCUPS_KEPT_MS)
+    {
+        kept.pop_front();
+    }
+    while kept.len() > HICCUPS_KEPT {
+        kept.pop_front();
+    }
+}
+
 /// Hands back the pages only startup touched (PDH name tables, DLL setup); the rest fault back in.
 fn release_idle_pages() {
     // SAFETY: (usize::MAX, usize::MAX) asks Windows to trim this process's working set.
@@ -644,6 +692,7 @@ mod tests {
                 now: now.clone(),
                 readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
                 pressure: Arc::new(Mutex::new(Vec::new())),
+                hiccups: Arc::new(Mutex::new(VecDeque::new())),
                 settings: Arc::new(Mutex::new(Settings::default())),
                 cleared: Arc::new(AtomicBool::new(false)),
             },
@@ -926,6 +975,48 @@ mod tests {
         stop(&running);
 
         assert!(recorded, "no gap for the pause");
+    }
+
+    fn tick(wall_ms: i64, lag_ms: f32) -> ProbeTick {
+        ProbeTick { wall_ms, lag_ms }
+    }
+
+    #[test]
+    fn hiccups_keep_the_late_wakes_from_8_ms() {
+        let mut kept = VecDeque::new();
+
+        keep_hiccups(
+            &mut kept,
+            &[tick(1_000, 7.9), tick(2_000, 8.0), tick(3_000, 600.0)],
+            3_000,
+        );
+
+        let times: Vec<i64> = kept.iter().map(|h| h.ts_ms).collect();
+        assert_eq!(times, [2_000, 3_000]);
+    }
+
+    #[test]
+    fn hiccups_drop_what_is_older_than_fifteen_minutes() {
+        let mut kept = VecDeque::new();
+        keep_hiccups(&mut kept, &[tick(0, 20.0), tick(1_000, 20.0)], 1_000);
+
+        keep_hiccups(&mut kept, &[], HICCUPS_KEPT_MS + 500);
+
+        let times: Vec<i64> = kept.iter().map(|h| h.ts_ms).collect();
+        assert_eq!(times, [1_000]);
+    }
+
+    #[test]
+    fn hiccups_stop_at_the_cap() {
+        let mut kept = VecDeque::new();
+        let ticks: Vec<ProbeTick> = (0..HICCUPS_KEPT as i64 + 5)
+            .map(|k| tick(k, 20.0))
+            .collect();
+
+        keep_hiccups(&mut kept, &ticks, 10_000);
+
+        assert_eq!(kept.len(), HICCUPS_KEPT);
+        assert_eq!(kept.front().map(|h| h.ts_ms), Some(5));
     }
 
     #[test]

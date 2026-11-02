@@ -1,10 +1,10 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::{
-    Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, HUNG_AFTER_MS, HangSpan, HangTracker,
-    HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan, ProbeTick, ProcessTop, Ring,
-    Sample, Severity, StutterDetector, Trigger, WinEvent, Window, classify, facts, freeze,
-    severity, suspects,
+    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, HUNG_AFTER_MS, HangSpan,
+    HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan, ProbeTick,
+    ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger, WinEvent, Window, classify,
+    facts, freeze, severity, suspects,
 };
 
 /// How much the rings keep.
@@ -87,6 +87,10 @@ pub struct Blackbox {
     /// Pressure episodes that ended; hints are left out.
     pressure: Ring<PressureSpan>,
     stutter: StutterDetector,
+    /// Stutters emitted since sensitive mode went on.
+    stutters: u32,
+    /// The first of those blamed a driver or nothing clear.
+    first_stutter_open: bool,
     hang_tracker: HangTracker,
     episodes: EpisodeDetector,
     sensitive: bool,
@@ -108,6 +112,8 @@ impl Blackbox {
             freezes: Ring::with_capacity(64),
             pressure: Ring::with_capacity(64),
             stutter: StutterDetector::new(),
+            stutters: 0,
+            first_stutter_open: false,
             hang_tracker: HangTracker::new(),
             episodes: EpisodeDetector::new(),
             sensitive: false,
@@ -234,8 +240,15 @@ impl Blackbox {
     pub fn set_sensitive(&mut self, on: bool) {
         if !on {
             self.stutter.reset();
+            self.stutters = 0;
+            self.first_stutter_open = false;
         }
         self.sensitive = on;
+    }
+
+    /// Whether the stutters of this sensitive-mode session call for a deep capture.
+    pub fn suggests_capture(&self) -> bool {
+        self.sensitive && (self.stutters >= 2 || (self.stutters == 1 && self.first_stutter_open))
     }
 
     /// Occurrences whose window after has passed, finished episodes and recorded gaps.
@@ -408,6 +421,13 @@ impl Blackbox {
                 severe: severity == Severity::Severe,
             },
         ));
+        if self.sensitive && occurrence.kind == OccurrenceKind::Stutter {
+            if self.stutters == 0 {
+                self.first_stutter_open =
+                    matches!(occurrence.cause(), Cause::Driver { .. } | Cause::Unclear);
+            }
+            self.stutters += 1;
+        }
         self.ready.push(Output::Occurrence(Box::new(occurrence)));
     }
 

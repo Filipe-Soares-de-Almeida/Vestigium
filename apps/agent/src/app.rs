@@ -286,6 +286,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 now: shared.now.clone(),
                 readings: shared.readings.clone(),
                 pressure: shared.pressure.clone(),
+                hiccups: shared.hiccups.clone(),
                 settings: shared.settings.clone(),
                 cleared: shared.cleared.clone(),
             },

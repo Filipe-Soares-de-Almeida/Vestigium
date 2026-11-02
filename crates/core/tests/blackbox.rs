@@ -2,10 +2,11 @@ mod common;
 
 use std::collections::HashSet;
 
-use common::{GIB, T, calm, event, machine};
+use common::{GIB, T, calm, event, machine, process};
 use vestigium_core::{
     Blackbox, Cause, EpisodeKind, EventMeaning, Gap, GapReason, HungWindow, Occurrence,
-    OccurrenceKind, Output, PressureSpan, ProbeTick, RING_MS, Severity, Timing, Trigger,
+    OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, RING_MS, Severity, Timing,
+    Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -322,4 +323,89 @@ fn recent_pressure_leaves_hints_out() {
         .any(|o| matches!(o, Output::Episode(e) if e.kind.is_hint()));
     assert!(hinted, "the hint was found");
     assert!(bb.recent_pressure().is_empty());
+}
+
+/// Three 10 ms hiccups one second apart, the first at `T + start_s` seconds.
+fn stutter(bb: &mut Blackbox, start_s: i64) {
+    for k in 0..3 {
+        late(bb, T + (start_s + k) * 1_000, 10.0);
+    }
+}
+
+#[test]
+fn two_stutters_suggest_a_capture() {
+    let mut bb = blackbox();
+    bb.set_sensitive(true);
+    feed(&mut bb, -60, 140);
+    stutter(&mut bb, 1);
+    stutter(&mut bb, 100);
+
+    assert!(!bb.suggests_capture());
+    let found = occurrences(bb.poll(T + 140_000));
+    assert_eq!(found.len(), 2);
+    assert!(found.iter().all(|o| o.kind == OccurrenceKind::Stutter));
+    assert!(bb.suggests_capture());
+}
+
+#[test]
+fn one_unclear_stutter_suggests_a_capture() {
+    let mut bb = blackbox();
+    bb.set_sensitive(true);
+    feed(&mut bb, -60, 40);
+    stutter(&mut bb, 1);
+
+    let found = occurrences(bb.poll(T + 40_000));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cause(), Cause::Unclear);
+    assert!(bb.suggests_capture());
+}
+
+#[test]
+fn one_explained_stutter_does_not_suggest_a_capture() {
+    let mut bb = blackbox();
+    bb.set_sensitive(true);
+    for s in -60..=40 {
+        let mut sample = calm(T + s * 1_000);
+        if (-8..=2).contains(&s) {
+            sample.cpu_pct = 99.0;
+            sample.cores.iter_mut().for_each(|c| c.cpu_pct = 99.0);
+        }
+        bb.push_sample(sample);
+    }
+    bb.push_top(ProcessTop {
+        ts_ms: T - 5_000,
+        entries: vec![process(20, "builder.exe", 90.0, 1, 0.0)],
+    });
+    stutter(&mut bb, 1);
+
+    let found = occurrences(bb.poll(T + 40_000));
+    assert!(matches!(found[0].cause(), Cause::Cpu { .. }));
+    assert!(!bb.suggests_capture());
+}
+
+#[test]
+fn default_mode_never_suggests() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 140);
+    stutter(&mut bb, 1);
+    stutter(&mut bb, 100);
+    late(&mut bb, T + 70_000, 600.0);
+
+    assert!(!occurrences(bb.poll(T + 140_000)).is_empty());
+    assert!(!bb.suggests_capture());
+}
+
+#[test]
+fn turning_sensitive_mode_off_clears_the_suggestion() {
+    let mut bb = blackbox();
+    bb.set_sensitive(true);
+    feed(&mut bb, -60, 40);
+    stutter(&mut bb, 1);
+    occurrences(bb.poll(T + 40_000));
+    assert!(bb.suggests_capture());
+
+    bb.set_sensitive(false);
+    assert!(!bb.suggests_capture());
+    bb.set_sensitive(true);
+    assert!(!bb.suggests_capture());
 }
