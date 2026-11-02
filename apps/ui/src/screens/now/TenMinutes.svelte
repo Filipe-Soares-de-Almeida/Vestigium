@@ -20,6 +20,8 @@
 
   const built = $derived(build(points));
   const latest = $derived(points.at(-1) ?? null);
+  /** Flips with every new second, so the live dot changes as each reading arrives. */
+  const beat = $derived(latest !== null && Math.floor(latest.reading.ts_ms / 1000) % 2 === 1);
 
   /** The second under the readout and how long before the latest one it was. */
   const readout = $derived.by(() => {
@@ -106,7 +108,7 @@
 <section class="card tenmin-card" aria-labelledby="tenmin-title">
   <div class="head">
     <h2 id="tenmin-title">{t("ui.now.tenmin.title")}</h2>
-    <span class="live"><i></i>{t("ui.now.tenmin.live")}</span>
+    <span class="live"><i class:dim={beat}></i>{t("ui.now.tenmin.live")}</span>
   </div>
   <p class="caption">{t("ui.now.tenmin.caption")}</p>
   <div class="tenmin">
@@ -195,6 +197,14 @@
     height: 8px;
     border-radius: 50%;
     background: var(--ok);
+  }
+  .live i.dim {
+    opacity: 0.45;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live i.dim {
+      opacity: 1;
+    }
   }
   .caption {
     margin: -4px 0 12px;

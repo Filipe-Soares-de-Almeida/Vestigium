@@ -113,8 +113,9 @@ How to use this file:
 
 ### Fixed
 
-- The "Live" dot on the Now screen no longer blinks. The blinking kept the window redrawing all
-  the time, so while Now was open it used about a third of one processor; it now uses under 1%.
+- The "Live" dot on the Now screen now dims and brightens with each new reading, once a second,
+  instead of pulsing on its own. The pulse kept the window redrawing all the time, so while Now was
+  open it used about a third of one processor; it now uses about 2% of one.
 - On Windows 10 the window now shows its top edge like the other three; Windows leaves it out for
   windows that draw their own title bar. It is hidden while the window is maximized.
 - Memory pressure is now recorded when more than 85% of memory stays in use for two minutes,
