@@ -4,7 +4,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,8 +30,8 @@ pub enum Request {
     },
     /// Deletes everything watched so far; settings stay.
     ClearHistory,
-    /// Stores the deep captures the helper left in the data folder.
-    ImportCaptures,
+    /// Stores the deep captures and health scans the helper left in the data folder.
+    ImportResults,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,9 +54,10 @@ pub enum Response {
         settings: Settings,
         autostart: bool,
     },
-    /// The ids of the deep captures stored by an import, in the order they were read.
+    /// The ids of the deep captures and health scans stored by an import, in the order read.
     Imported {
-        ids: Vec<i64>,
+        captures: Vec<i64>,
+        scans: Vec<i64>,
     },
     /// The command was carried out.
     Done,

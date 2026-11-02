@@ -29,7 +29,7 @@ fn every_request_roundtrips_as_json() {
         Request::SetSettings(settings),
         Request::SetAutostart { on: false },
         Request::ClearHistory,
-        Request::ImportCaptures,
+        Request::ImportResults,
     ];
     for request in requests {
         assert_eq!(roundtrip(&request), request);
@@ -86,7 +86,10 @@ fn every_response_roundtrips_as_json() {
             settings: Settings::default(),
             autostart: true,
         },
-        Response::Imported { ids: vec![3, 4] },
+        Response::Imported {
+            captures: vec![3, 4],
+            scans: vec![5],
+        },
         Response::Done,
         Response::Error {
             code: ErrorCode::InvalidSetting,

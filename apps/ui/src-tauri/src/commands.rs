@@ -195,8 +195,8 @@ pub async fn start_capture(
         *lock(&slot) = Some(run);
         std::thread::spawn(move || {
             let exit_code = process.wait();
-            let ids = match link.call(&Request::ImportCaptures) {
-                Ok(Response::Imported { ids }) => ids,
+            let ids = match link.call(&Request::ImportResults) {
+                Ok(Response::Imported { captures, .. }) => captures,
                 _ => Vec::new(),
             };
             *lock(&slot) = None;
@@ -217,8 +217,8 @@ pub fn capture_run(state: State<'_, AppState>) -> Option<CaptureRun> {
 #[tauri::command]
 pub async fn import_captures(state: State<'_, AppState>) -> Result<Vec<i64>, UiError> {
     let link = state.link.clone();
-    blocking(move || match link.call(&Request::ImportCaptures)? {
-        Response::Imported { ids } => Ok(ids),
+    blocking(move || match link.call(&Request::ImportResults)? {
+        Response::Imported { captures, .. } => Ok(captures),
         other => Err(refused(other)),
     })
     .await

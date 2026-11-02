@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use vestigium_core::health::{SCAN_VERSION, ScanResult};
 use vestigium_core::{CAPTURE_VERSION, DeepCapture, ProbeHiccup};
 use vestigium_store::Store;
 
@@ -8,7 +9,7 @@ use vestigium_store::Store;
 /// A file that does not decode is kept, since the helper writes it only when its capture ends.
 pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -> Vec<i64> {
     let mut ids = Vec::new();
-    for path in capture_files(dir) {
+    for path in numbered_files(dir, "capture") {
         let Some(mut capture) = read_capture(&path) else {
             continue;
         };
@@ -27,8 +28,24 @@ pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -
     ids
 }
 
-/// The files named `<digits>.capture`, in name order.
-fn capture_files(dir: &Path) -> Vec<PathBuf> {
+/// Stores the health scan files of `dir` and deletes them; returns the ids in name order.
+pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
+    let mut ids = Vec::new();
+    for path in numbered_files(dir, "scan") {
+        let Some(scan) = read_versioned::<ScanResult>(&path, SCAN_VERSION) else {
+            continue;
+        };
+        let Ok(id) = store.insert_scan(&scan) else {
+            continue;
+        };
+        ids.push(id);
+        let _ = fs::remove_file(&path);
+    }
+    ids
+}
+
+/// The files named `<digits>.<extension>`, in name order.
+fn numbered_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -36,24 +53,29 @@ fn capture_files(dir: &Path) -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .map(|entry| entry.path())
-        .filter(|path| is_capture_name(path))
+        .filter(|path| is_numbered(path, extension))
         .collect();
     files.sort();
     files
 }
 
-fn is_capture_name(path: &Path) -> bool {
+fn is_numbered(path: &Path, extension: &str) -> bool {
     let digits = path
         .file_name()
         .and_then(|name| name.to_str())
-        .and_then(|name| name.strip_suffix(".capture"));
+        .and_then(|name| name.strip_suffix(&format!(".{extension}")));
     digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn read_capture(path: &Path) -> Option<DeepCapture> {
+    read_versioned(path, CAPTURE_VERSION)
+}
+
+/// A file written as one version byte and a postcard body; `None` for another version.
+fn read_versioned<T: serde::de::DeserializeOwned>(path: &Path, expected: u8) -> Option<T> {
     let bytes = fs::read(path).ok()?;
     let (&version, body) = bytes.split_first()?;
-    if version != CAPTURE_VERSION {
+    if version != expected {
         return None;
     }
     postcard::from_bytes(body).ok()

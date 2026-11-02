@@ -22,6 +22,7 @@ vestigium-i18n = { workspace = true }
 vestigium-ipc = { workspace = true }
 vestigium-store = { workspace = true }
 postcard = { workspace = true }
+serde = { workspace = true }
 tray-icon = { workspace = true }
 
 [dependencies.windows]

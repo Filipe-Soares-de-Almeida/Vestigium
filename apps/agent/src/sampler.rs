@@ -92,6 +92,8 @@ pub struct Wiring {
     pub settings: Arc<Mutex<Settings>>,
     /// Set by the pipe after it cleared the history.
     pub cleared: Arc<AtomicBool>,
+    /// Set by the pipe after it stored a health scan.
+    pub health_due: Arc<AtomicBool>,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -133,6 +135,7 @@ struct Sampler {
     hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     settings: Arc<Mutex<Settings>>,
     cleared: Arc<AtomicBool>,
+    health_due: Arc<AtomicBool>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
@@ -196,6 +199,7 @@ impl Sampler {
             hiccups: wiring.hiccups,
             settings: wiring.settings,
             cleared: wiring.cleared,
+            health_due: wiring.health_due,
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
@@ -433,7 +437,8 @@ impl Sampler {
                 self.check_health(ts_ms);
             }
         }
-        if self.first_health_ms.is_some_and(|at| ts_ms >= at) {
+        let scanned = self.health_due.swap(false, Ordering::AcqRel);
+        if scanned || self.first_health_ms.is_some_and(|at| ts_ms >= at) {
             self.first_health_ms = None;
             self.check_health(ts_ms);
         }
@@ -747,6 +752,7 @@ mod tests {
                 hiccups: Arc::new(Mutex::new(VecDeque::new())),
                 settings: Arc::new(Mutex::new(Settings::default())),
                 cleared: Arc::new(AtomicBool::new(false)),
+                health_due: Arc::new(AtomicBool::new(false)),
             },
         )
         .unwrap();

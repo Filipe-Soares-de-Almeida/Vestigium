@@ -21,7 +21,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
-use crate::import::import_captures;
+use crate::import::{import_captures, import_scans};
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -100,6 +100,10 @@ pub struct Shared {
     pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     /// Where the helper leaves finished deep captures.
     pub captures_dir: PathBuf,
+    /// Where the helper leaves finished health scans.
+    pub scans_dir: PathBuf,
+    /// Set after a scan was stored; the sampler runs a health pass on its next tick.
+    pub health_due: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
 }
@@ -199,14 +203,17 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             shutdown::wake();
             Response::Done
         }
-        Request::ImportCaptures => {
+        Request::ImportResults => {
             let Some(store) = store else {
                 return error(ErrorCode::Failed, "the history database is not open");
             };
             let hiccups: Vec<ProbeHiccup> = lock(&shared.hiccups).iter().copied().collect();
-            Response::Imported {
-                ids: import_captures(&shared.captures_dir, &hiccups, store),
+            let captures = import_captures(&shared.captures_dir, &hiccups, store);
+            let scans = import_scans(&shared.scans_dir, store);
+            if !scans.is_empty() {
+                shared.health_due.store(true, Ordering::Release);
             }
+            Response::Imported { captures, scans }
         }
         Request::SetAutostart { on } => {
             let changed = if on {
@@ -253,11 +260,15 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         cleared: Arc::new(AtomicBool::new(false)),
         hiccups: Arc::new(Mutex::new(VecDeque::new())),
         captures_dir: data_dir.join("captures"),
+        scans_dir: data_dir.join("scans"),
+        health_due: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
 
-    if let Err(err) = fs::create_dir_all(&shared.captures_dir) {
-        lock(&shared.status).last_error = Some(err.to_string());
+    for dir in [&shared.captures_dir, &shared.scans_dir] {
+        if let Err(err) = fs::create_dir_all(dir) {
+            lock(&shared.status).last_error = Some(err.to_string());
+        }
     }
 
     let (probe_tx, probe_rx) = mpsc::channel();
@@ -289,6 +300,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 hiccups: shared.hiccups.clone(),
                 settings: shared.settings.clone(),
                 cleared: shared.cleared.clone(),
+                health_due: shared.health_due.clone(),
             },
         )
         .map_err(failed)?,
@@ -307,6 +319,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         let mut settings_store = Store::open(&db).ok();
         if let Some(store) = settings_store.as_mut() {
             import_captures(&shared.captures_dir, &[], store);
+            import_scans(&shared.scans_dir, store);
         }
         thread::Builder::new()
             .name("pipe".to_string())
@@ -413,6 +426,8 @@ mod tests {
             cleared: Arc::new(AtomicBool::new(false)),
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             captures_dir: PathBuf::from("captures"),
+            scans_dir: PathBuf::from("scans"),
+            health_due: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
     }
@@ -602,24 +617,51 @@ mod tests {
     }
 
     #[test]
-    fn import_captures_needs_the_store_and_answers_with_ids() {
+    fn import_results_needs_the_store_and_answers_with_ids() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let mut shared = shared();
         shared.captures_dir = dir.path().join("captures");
+        shared.scans_dir = dir.path().join("scans");
         fs::create_dir(&shared.captures_dir).unwrap();
+        fs::create_dir(&shared.scans_dir).unwrap();
 
         assert!(matches!(
-            handle(Request::ImportCaptures, &shared, None),
+            handle(Request::ImportResults, &shared, None),
             Response::Error {
                 code: ErrorCode::Failed,
                 ..
             }
         ));
         assert_eq!(
-            handle(Request::ImportCaptures, &shared, Some(&mut store)),
-            Response::Imported { ids: Vec::new() }
+            handle(Request::ImportResults, &shared, Some(&mut store)),
+            Response::Imported {
+                captures: Vec::new(),
+                scans: Vec::new()
+            }
         );
+        assert!(!shared.health_due.load(Ordering::Acquire));
+
+        let scan = vestigium_core::health::ScanResult {
+            ts_ms: 1,
+            boot: None,
+        };
+        let mut bytes = vec![vestigium_core::health::SCAN_VERSION];
+        bytes.extend(postcard::to_allocvec(&scan).unwrap());
+        fs::write(shared.scans_dir.join("7.scan"), bytes).unwrap();
+        assert_eq!(
+            handle(Request::ImportResults, &shared, Some(&mut store)),
+            Response::Imported {
+                captures: Vec::new(),
+                scans: vec![1]
+            }
+        );
+        assert!(
+            shared.health_due.load(Ordering::Acquire),
+            "a new scan asks for a pass"
+        );
+        assert_eq!(store.last_scan().unwrap(), Some(scan));
+        assert!(!shared.scans_dir.join("7.scan").exists());
     }
 
     #[test]

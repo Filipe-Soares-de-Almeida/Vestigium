@@ -4131,6 +4131,7 @@ name = "vestigium-agent"
 version = "0.0.0"
 dependencies = [
  "postcard",
+ "serde",
  "tempfile",
  "tray-icon 0.26.1",
  "vestigium-brand",
