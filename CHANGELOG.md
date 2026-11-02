@@ -126,6 +126,10 @@ How to use this file:
 - "Using the most" on the Now screen lists each program once, with the processor, memory and disk
   of all its processes added up, instead of one row per process. A browser running a dozen
   processes no longer fills the list with its own name, and its row shows what it uses in total.
+- When the Now screen opens during a stretch of CPU, disk or memory pressure, or within ten minutes
+  of one, its chart marks those seconds as under pressure from where the stretch began, as Today's
+  timeline does, instead of only from the moment the screen opened. The window and the background
+  watcher must be updated together for this.
 - The "Live" dot on the Now screen now dims and brightens with each new reading, once a second,
   instead of pulsing on its own. The pulse kept the window redrawing all the time, so while Now was
   open it used about a third of one processor; it now uses about 2% of one.

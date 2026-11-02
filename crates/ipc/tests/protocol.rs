@@ -1,4 +1,4 @@
-use vestigium_core::{EpisodeKind, LanguagePref, Reading, Settings};
+use vestigium_core::{EpisodeKind, LanguagePref, PressureSpan, Reading, Settings};
 use vestigium_ipc::{
     AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
 };
@@ -66,6 +66,18 @@ fn every_response_roundtrips_as_json() {
                 gpu_pct: None,
                 probe_lag_ms: 1.2,
             }],
+            pressure: vec![
+                PressureSpan {
+                    kind: EpisodeKind::MemoryHigh,
+                    start_ms: 400,
+                    end_ms: Some(900),
+                },
+                PressureSpan {
+                    kind: EpisodeKind::CpuSaturated,
+                    start_ms: 1_000,
+                    end_ms: None,
+                },
+            ],
         },
         Response::Settings {
             settings: Settings::default(),
@@ -97,4 +109,22 @@ fn now_lists_the_open_pressure_episodes() {
     let json = serde_json::to_value(Response::Now(Box::new(frame))).unwrap();
     assert_eq!(json["type"], "now");
     assert_eq!(json["pressure"], serde_json::json!(["MemoryHigh"]));
+}
+
+#[test]
+fn recent_carries_the_pressure_spans() {
+    let response = Response::Recent {
+        readings: Vec::new(),
+        pressure: vec![PressureSpan {
+            kind: EpisodeKind::CpuSaturated,
+            start_ms: 1_000,
+            end_ms: None,
+        }],
+    };
+    let json = serde_json::to_value(response).unwrap();
+    assert_eq!(json["type"], "recent");
+    assert_eq!(
+        json["pressure"],
+        serde_json::json!([{ "kind": "CpuSaturated", "start_ms": 1_000, "end_ms": null }])
+    );
 }

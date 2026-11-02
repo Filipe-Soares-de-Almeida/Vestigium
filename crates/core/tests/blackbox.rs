@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use common::{GIB, T, calm, event, machine};
 use vestigium_core::{
     Blackbox, Cause, EpisodeKind, EventMeaning, Gap, GapReason, HungWindow, Occurrence,
-    OccurrenceKind, Output, ProbeTick, Severity, Timing, Trigger,
+    OccurrenceKind, Output, PressureSpan, ProbeTick, RING_MS, Severity, Timing, Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -256,4 +256,70 @@ fn pressure_lasts_until_drained() {
 
     bb.drain(T + 131_000);
     assert!(bb.open_pressure().is_empty());
+}
+
+#[test]
+fn recent_pressure_keeps_the_episodes_of_the_last_ten_minutes() {
+    let mut bb = blackbox();
+    let short_of_memory = |s: i64| {
+        let mut sample = calm(T + s * 1_000);
+        sample.mem_avail_bytes = GIB / 2;
+        sample
+    };
+    for s in 0..=130 {
+        bb.push_sample(short_of_memory(s));
+    }
+    let memory = |end_ms| PressureSpan {
+        kind: EpisodeKind::MemoryHigh,
+        start_ms: T,
+        end_ms,
+    };
+    assert_eq!(bb.recent_pressure(), [memory(None)], "under way");
+
+    feed(&mut bb, 131, 150);
+    for s in 151..=300 {
+        bb.push_sample(short_of_memory(s));
+    }
+    assert_eq!(
+        bb.recent_pressure(),
+        [
+            memory(Some(T + 130_000)),
+            PressureSpan {
+                start_ms: T + 151_000,
+                ..memory(None)
+            },
+        ],
+        "the one that ended, then the one under way"
+    );
+
+    bb.drain(T + 301_000);
+    bb.poll(T + 130_001 + RING_MS);
+    assert_eq!(
+        bb.recent_pressure(),
+        [PressureSpan {
+            start_ms: T + 151_000,
+            ..memory(Some(T + 300_000))
+        }],
+        "the first left the ten minutes; the second was closed by the drain"
+    );
+}
+
+#[test]
+fn recent_pressure_leaves_hints_out() {
+    let mut bb = blackbox();
+    for s in 0..=20 {
+        let mut sample = calm(T + s * 1_000);
+        for core in &mut sample.cores {
+            core.dpc_pct = 30.0;
+        }
+        bb.push_sample(sample);
+    }
+    feed(&mut bb, 21, 40);
+
+    let hinted = bb
+        .poll(T + 40_000)
+        .into_iter()
+        .any(|o| matches!(o, Output::Episode(e) if e.kind.is_hint()));
+    assert!(hinted, "the hint was found");
+    assert!(bb.recent_pressure().is_empty());
 }

@@ -173,9 +173,12 @@ export const handlers: Record<string, Handler> = {
     const send = (message: LiveMessage) => channel.onmessage(message);
     const startedAt = Date.now();
     const kept = firstUse ? 40 : 600;
+    // The watcher sends the episode under way once it counts, from the start of the heavy stretch.
+    const openFor = scenario === "pressure" && HEAVY_FOR_S.pressure >= 60 ? HEAVY_FOR_S.pressure : 0;
     const recent: LivePoint[] = [];
     for (let ago = kept; ago >= 1; ago--) {
-      recent.push(point(readingAt(startedAt - ago * 1000, ago), []));
+      const pressure: EpisodeKind[] = ago < openFor ? ["CpuSaturated"] : [];
+      recent.push(point(readingAt(startedAt - ago * 1000, ago), pressure));
     }
     setTimeout(() => send({ kind: "recent", points: recent }), 30);
 

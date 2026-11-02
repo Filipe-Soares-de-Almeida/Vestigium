@@ -43,7 +43,7 @@ pub struct Lanes {
 }
 
 impl LivePoint {
-    /// `pressure` lists the episodes open at that second; the recent minutes carry none.
+    /// `pressure` lists the pressure episodes that second falls in.
     pub fn of(reading: Reading, pressure: &[EpisodeKind]) -> LivePoint {
         let none = Reading {
             cpu_pct: 0.0,
@@ -105,8 +105,8 @@ pub fn run_live(
     stop: &Receiver<()>,
     period: Duration,
 ) {
-    let readings = match call(&Request::Recent) {
-        Ok(Response::Recent { readings }) => readings,
+    let (readings, pressure) = match call(&Request::Recent) {
+        Ok(Response::Recent { readings, pressure }) => (readings, pressure),
         _ => {
             send(LiveMessage::Stopped);
             return;
@@ -114,7 +114,14 @@ pub fn run_live(
     };
     let points = readings
         .into_iter()
-        .map(|r| LivePoint::of(r, &[]))
+        .map(|r| {
+            let open: Vec<EpisodeKind> = pressure
+                .iter()
+                .filter(|span| span.covers(r.ts_ms))
+                .map(|span| span.kind.clone())
+                .collect();
+            LivePoint::of(r, &open)
+        })
         .collect();
     if !send(LiveMessage::Recent { points }) {
         return;
@@ -146,7 +153,7 @@ pub fn run_live(
 mod tests {
     use std::sync::mpsc;
 
-    use vestigium_core::{EpisodeKind, Sample};
+    use vestigium_core::{EpisodeKind, PressureSpan, Sample};
 
     use super::*;
 
@@ -175,6 +182,7 @@ mod tests {
         Ok(match request {
             Request::Recent => Response::Recent {
                 readings: Vec::new(),
+                pressure: Vec::new(),
             },
             Request::Now => Response::Now(Box::default()),
             _ => Response::Done,
@@ -272,6 +280,69 @@ mod tests {
             gpu_pct: gpu,
             probe_lag_ms: 1.0,
         }
+    }
+
+    #[test]
+    fn recent_seconds_inside_an_episode_are_under_pressure() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+        let disk = EpisodeKind::DiskBusy {
+            disk: "0 C:".to_string(),
+        };
+
+        run_live(
+            |request| {
+                Ok(match request {
+                    Request::Recent => Response::Recent {
+                        readings: (1..=6)
+                            .map(|s| Reading {
+                                ts_ms: s * 1_000,
+                                ..reading(20.0, Some(50.0), 5.0, None)
+                            })
+                            .collect(),
+                        pressure: vec![
+                            PressureSpan {
+                                kind: EpisodeKind::CpuSaturated,
+                                start_ms: 2_000,
+                                end_ms: Some(3_000),
+                            },
+                            PressureSpan {
+                                kind: disk.clone(),
+                                start_ms: 5_000,
+                                end_ms: None,
+                            },
+                        ],
+                    },
+                    other => agent(other)?,
+                })
+            },
+            |message| {
+                sent.push(message);
+                false
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        let Some(LiveMessage::Recent { points }) = sent.first() else {
+            panic!("the recent minutes come first");
+        };
+        let states: Vec<PcState> = points.iter().map(|p| p.state).collect();
+        assert_eq!(
+            states,
+            [
+                PcState::Calm,
+                PcState::Pressure,
+                PcState::Pressure,
+                PcState::Calm,
+                PcState::Pressure,
+                PcState::Pressure,
+            ]
+        );
+        assert_eq!(points[1].lanes.cpu, PcState::Pressure);
+        assert_eq!(points[1].lanes.disk, PcState::Calm);
+        assert_eq!(points[5].lanes.disk, PcState::Pressure);
+        assert_eq!(points[5].lanes.cpu, PcState::Calm);
     }
 
     #[test]

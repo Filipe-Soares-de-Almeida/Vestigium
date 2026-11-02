@@ -223,11 +223,14 @@ mod tests {
     fn an_older_watcher_is_another_version() {
         let refusal = Response::Error {
             code: ErrorCode::Protocol,
-            message: format!("protocol {PROTOCOL_VERSION} is not supported; this agent speaks 2"),
+            message: format!(
+                "protocol {PROTOCOL_VERSION} is not supported; this agent speaks {}",
+                PROTOCOL_VERSION - 1
+            ),
         };
         assert!(matches!(same_protocol(refusal), Err(UiError::Mismatch)));
         let older = Response::Hello {
-            protocol: 2,
+            protocol: PROTOCOL_VERSION - 1,
             agent_version: "0.0.0".into(),
         };
         assert!(matches!(same_protocol(older), Err(UiError::Mismatch)));

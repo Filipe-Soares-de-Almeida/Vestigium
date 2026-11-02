@@ -2,9 +2,9 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::{
     Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, HUNG_AFTER_MS, HangSpan, HangTracker,
-    HungWindow, MachineInfo, Occurrence, OccurrenceKind, ProbeTick, ProcessTop, Ring, Sample,
-    Severity, StutterDetector, Trigger, WinEvent, Window, classify, facts, freeze, severity,
-    suspects,
+    HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan, ProbeTick, ProcessTop, Ring,
+    Sample, Severity, StutterDetector, Trigger, WinEvent, Window, classify, facts, freeze,
+    severity, suspects,
 };
 
 /// How much the rings keep.
@@ -84,6 +84,8 @@ pub struct Blackbox {
     gaps: Ring<Gap>,
     /// Freezes long enough to make every app look hung, as (start, end).
     freezes: Ring<(i64, i64)>,
+    /// Pressure episodes that ended; hints are left out.
+    pressure: Ring<PressureSpan>,
     stutter: StutterDetector,
     hang_tracker: HangTracker,
     episodes: EpisodeDetector,
@@ -104,6 +106,7 @@ impl Blackbox {
             hangs: Ring::with_capacity(256),
             gaps: Ring::with_capacity(64),
             freezes: Ring::with_capacity(64),
+            pressure: Ring::with_capacity(64),
             stutter: StutterDetector::new(),
             hang_tracker: HangTracker::new(),
             episodes: EpisodeDetector::new(),
@@ -261,6 +264,15 @@ impl Blackbox {
         self.episodes.open_pressure()
     }
 
+    /// The pressure episodes of the rings' span, those that ended and then those under way.
+    pub fn recent_pressure(&self) -> Vec<PressureSpan> {
+        self.pressure
+            .iter()
+            .cloned()
+            .chain(self.episodes.open_spans())
+            .collect()
+    }
+
     /// Counts what happened in the 24 h before `now_ms`.
     pub fn recent(&self, now_ms: i64) -> RecentState {
         let mut state = RecentState::default();
@@ -401,6 +413,11 @@ impl Blackbox {
                 EpisodeKind::DpcIsrHint { .. } | EpisodeKind::DiskLatencyHint { .. }
             ) {
                 self.notable.push_back((episode.end_ms, Notable::Episode));
+                self.pressure.push(PressureSpan {
+                    kind: episode.kind.clone(),
+                    start_ms: episode.start_ms,
+                    end_ms: Some(episode.end_ms),
+                });
             }
             self.ready.push(Output::Episode(episode));
         }
@@ -415,6 +432,8 @@ impl Blackbox {
         self.hangs.drop_while(|h| h.end_ms < cutoff_ms);
         self.gaps.drop_while(|g| g.end_ms < cutoff_ms);
         self.freezes.drop_while(|&(_, end)| end < cutoff_ms);
+        self.pressure
+            .drop_while(|span| span.end_ms.is_some_and(|end| end < cutoff_ms));
         while self
             .notable
             .front()

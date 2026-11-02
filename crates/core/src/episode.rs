@@ -52,6 +52,21 @@ pub struct Episode {
     pub truncated: bool,
 }
 
+/// A pressure episode of the recent minutes; `end_ms` is `None` while it is under way.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PressureSpan {
+    pub kind: EpisodeKind,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+}
+
+impl PressureSpan {
+    /// Whether the sample stamped `ts_ms` falls inside, both ends included, as on the timeline.
+    pub fn covers(&self, ts_ms: i64) -> bool {
+        self.start_ms <= ts_ms && self.end_ms.is_none_or(|end| ts_ms <= end)
+    }
+}
+
 /// What a culprit is judged by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Weigh {
@@ -249,10 +264,22 @@ impl EpisodeDetector {
 
     /// The pressure episodes, not hints, that have lasted long enough to count and not ended.
     pub fn open_pressure(&self) -> Vec<EpisodeKind> {
+        self.open_spans()
+            .into_iter()
+            .map(|span| span.kind)
+            .collect()
+    }
+
+    /// The episodes `open_pressure` lists, each from its start.
+    pub fn open_spans(&self) -> Vec<PressureSpan> {
         self.runs
             .iter()
             .filter(|run| !run.kind.is_hint() && run.qualifies())
-            .map(|run| run.kind.clone())
+            .map(|run| PressureSpan {
+                kind: run.kind.clone(),
+                start_ms: run.start_ms,
+                end_ms: None,
+            })
             .collect()
     }
 

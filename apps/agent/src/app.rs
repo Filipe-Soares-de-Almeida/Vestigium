@@ -6,8 +6,8 @@ use std::time::Duration;
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
 use vestigium_core::{
-    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, RING_MS, Reading, RecentState, Ring, RunGate,
-    SENSITIVE_FOR, Settings, Timing,
+    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PressureSpan, RING_MS, Reading, RecentState,
+    Ring, RunGate, SENSITIVE_FOR, Settings, Timing,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -87,6 +87,8 @@ pub struct Shared {
     pub now: Arc<Mutex<NowFrame>>,
     /// The last ten minutes, one reading a second.
     pub readings: Arc<Mutex<Ring<Reading>>>,
+    /// The pressure episodes of the last ten minutes, ended or under way.
+    pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     pub settings: Arc<Mutex<Settings>>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
@@ -127,14 +129,17 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
         Request::Now => Response::Now(Box::new(lock(&shared.now).clone())),
         Request::Recent => {
             let since_ms = wall_ms() - RING_MS;
-            let readings = lock(&shared.readings);
-            Response::Recent {
-                readings: readings
-                    .iter()
-                    .filter(|r| r.ts_ms >= since_ms)
-                    .copied()
-                    .collect(),
-            }
+            let readings = lock(&shared.readings)
+                .iter()
+                .filter(|r| r.ts_ms >= since_ms)
+                .copied()
+                .collect();
+            let pressure = lock(&shared.pressure)
+                .iter()
+                .filter(|span| span.end_ms.is_none_or(|end| end >= since_ms))
+                .cloned()
+                .collect();
+            Response::Recent { readings, pressure }
         }
         Request::SetPaused { paused } => {
             shared.gate.set(if paused {
@@ -209,6 +214,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         recent: Arc::new(Mutex::new(RecentState::default())),
         now: Arc::new(Mutex::new(NowFrame::default())),
         readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
+        pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
         exe: std::env::current_exe().map_err(failed)?,
     });
@@ -238,6 +244,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 recent: shared.recent.clone(),
                 now: shared.now.clone(),
                 readings: shared.readings.clone(),
+                pressure: shared.pressure.clone(),
                 settings: shared.settings.clone(),
             },
         )
@@ -355,6 +362,7 @@ mod tests {
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: Arc::new(Mutex::new(NowFrame::default())),
             readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
+            pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
@@ -376,7 +384,7 @@ mod tests {
 
     #[test]
     fn older_protocols_are_refused() {
-        for protocol in [1, 2] {
+        for protocol in [1, 2, 3] {
             let response = handle(Request::Hello { protocol }, &shared(), None);
             assert!(matches!(
                 response,
@@ -443,12 +451,38 @@ mod tests {
             });
         }
 
-        let Response::Recent { readings } = handle(Request::Recent, &shared, None) else {
+        let Response::Recent { readings, .. } = handle(Request::Recent, &shared, None) else {
             panic!("not the recent readings");
         };
 
         let times: Vec<i64> = readings.iter().map(|r| r.ts_ms).collect();
         assert_eq!(times, [now - 590_000, now - 30_000, now - 1_000]);
+    }
+
+    #[test]
+    fn recent_brings_the_pressure_of_those_minutes() {
+        let shared = shared();
+        let now = wall_ms();
+        let span = |start_ago_ms: i64, end_ago_ms: Option<i64>| PressureSpan {
+            kind: EpisodeKind::CpuSaturated,
+            start_ms: now - start_ago_ms,
+            end_ms: end_ago_ms.map(|ago| now - ago),
+        };
+        *lock(&shared.pressure) = vec![
+            span(900_000, Some(700_000)),
+            span(650_000, Some(400_000)),
+            span(90_000, None),
+        ];
+
+        let Response::Recent { pressure, .. } = handle(Request::Recent, &shared, None) else {
+            panic!("not the recent readings");
+        };
+
+        assert_eq!(
+            pressure,
+            [span(650_000, Some(400_000)), span(90_000, None)],
+            "the one that ended before the ten minutes is left out"
+        );
     }
 
     #[test]

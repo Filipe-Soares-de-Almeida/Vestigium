@@ -25,7 +25,9 @@ pub use blackbox::{
     Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, RING_MS,
     RecentState, Timing,
 };
-pub use episode::{Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, QUIET_MS};
+pub use episode::{
+    Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, PressureSpan, QUIET_MS,
+};
 pub use event::{
     CURATED, Channel, CuratedEvent, EventMeaning, WinEvent, classify, query_xml, query_xml_for,
 };

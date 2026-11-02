@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use vestigium_core::{
-    EpisodeKind, HungWindow, OccurrenceSummary, ProcessTop, Reading, Sample, Settings,
+    EpisodeKind, HungWindow, OccurrenceSummary, PressureSpan, ProcessTop, Reading, Sample, Settings,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -42,6 +42,9 @@ pub enum Response {
     /// One reading a second, oldest first.
     Recent {
         readings: Vec<Reading>,
+        /// CPU, disk and memory pressure episodes of those minutes, ended or under way; hints are
+        /// left out.
+        pressure: Vec<PressureSpan>,
     },
     Settings {
         settings: Settings,

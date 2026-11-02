@@ -1,5 +1,6 @@
 use vestigium_core::{
-    CoreLoad, DiskLoad, Episode, EpisodeDetector, EpisodeKind, ProcessSample, ProcessTop, Sample,
+    CoreLoad, DiskLoad, Episode, EpisodeDetector, EpisodeKind, PressureSpan, ProcessSample,
+    ProcessTop, Sample,
 };
 
 const GIB: u64 = 1 << 30;
@@ -306,4 +307,42 @@ fn open_pressure_follows_the_timeline_rule() {
     assert_eq!(open.len(), 3);
     assert_eq!(stored.len(), open.len());
     assert!(stored.iter().all(|kind| open.contains(kind)));
+}
+
+#[test]
+fn open_spans_start_where_the_episode_starts() {
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 9, calm, false);
+    feed(&mut detector, 10, 140, memory_high, false);
+    feed(&mut detector, 141, 141, dpc_storm, false);
+
+    assert_eq!(
+        detector.open_spans(),
+        [PressureSpan {
+            kind: EpisodeKind::MemoryHigh,
+            start_ms: 10_000,
+            end_ms: None,
+        }]
+    );
+}
+
+#[test]
+fn a_span_covers_its_ends_and_runs_on_while_open() {
+    let ended = PressureSpan {
+        kind: EpisodeKind::CpuSaturated,
+        start_ms: 2_000,
+        end_ms: Some(5_000),
+    };
+    let covered: Vec<i64> = (1..=6)
+        .map(|s| s * 1_000)
+        .filter(|&ts| ended.covers(ts))
+        .collect();
+    assert_eq!(covered, [2_000, 3_000, 4_000, 5_000]);
+
+    let open = PressureSpan {
+        end_ms: None,
+        ..ended
+    };
+    assert!(!open.covers(1_000));
+    assert!(open.covers(i64::MAX));
 }

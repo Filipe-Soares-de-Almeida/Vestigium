@@ -13,9 +13,9 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
-    OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RING_MS, Reading,
-    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest, last_seen,
-    process_rates, programs,
+    OccurrenceSummary, Output, PressureSpan, ProbeTick, ProcessCounters, ProcessTop, RING_MS,
+    Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest,
+    last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -75,6 +75,8 @@ pub struct Wiring {
     pub now: Arc<Mutex<NowFrame>>,
     /// The last ten minutes, one reading a second, for the live screen.
     pub readings: Arc<Mutex<Ring<Reading>>>,
+    /// The pressure episodes of the last ten minutes, for the live screen.
+    pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     /// Retention is read from here at every prune, so a change applies on the next one.
     pub settings: Arc<Mutex<Settings>>,
 }
@@ -114,6 +116,7 @@ struct Sampler {
     recent: Arc<Mutex<RecentState>>,
     now: Arc<Mutex<NowFrame>>,
     readings: Arc<Mutex<Ring<Reading>>>,
+    pressure: Arc<Mutex<Vec<PressureSpan>>>,
     settings: Arc<Mutex<Settings>>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
@@ -168,6 +171,7 @@ impl Sampler {
             recent: wiring.recent,
             now: wiring.now,
             readings: wiring.readings,
+            pressure: wiring.pressure,
             settings: wiring.settings,
             events: Vec::new(),
             bookmark_xml: None,
@@ -323,6 +327,7 @@ impl Sampler {
                 now.sample = Some(sample.clone());
                 now.pressure = self.blackbox.open_pressure();
             }
+            *lock(&self.pressure) = self.blackbox.recent_pressure();
             self.batcher.push_sample(sample);
             lock(&self.status).last_sample_ms = Some(ts_ms);
         }
@@ -506,6 +511,7 @@ impl Sampler {
         let outputs = self.blackbox.drain(now);
         self.keep(outputs, now);
         lock(&self.now).pressure.clear();
+        *lock(&self.pressure) = self.blackbox.recent_pressure();
         self.flush_final();
         if self.away_since.is_none() {
             self.away_since = Some((now, reason));
@@ -617,6 +623,7 @@ mod tests {
                 recent: Arc::new(Mutex::new(RecentState::default())),
                 now: now.clone(),
                 readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
+                pressure: Arc::new(Mutex::new(Vec::new())),
                 settings: Arc::new(Mutex::new(Settings::default())),
             },
         )
