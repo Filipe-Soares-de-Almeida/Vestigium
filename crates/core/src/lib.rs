@@ -12,6 +12,7 @@ pub mod health;
 mod machine;
 mod minute;
 mod occurrence;
+mod postmortem;
 mod probe;
 mod process;
 mod reading;
@@ -49,6 +50,7 @@ pub use hang::{HUNG_AFTER_MS, HangTracker, HungWindow};
 pub use machine::{DiskInfo, MachineInfo, Media};
 pub use minute::{DiskMinute, MINUTE_MS, MinuteRollup, MinuteSample, minute_of, summarize_minute};
 pub use occurrence::{Occurrence, OccurrenceKind, OccurrenceSummary};
+pub use postmortem::{POSTMORTEM_BEFORE_MS, POSTMORTEM_REACH_MS, postmortem};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
 pub use process::{
     ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, heaviest, last_seen,
@@ -63,7 +65,9 @@ pub use sample::{CoreLoad, DiskLoad, Sample, SampleV1};
 pub use settings::{
     ColorTheme, DetailLevel, LanguagePref, Retention, SettingError, Settings, ThemePref,
 };
-pub use shutdown::{PowerLossDetail, SHUTTING_DOWN, power_loss_detail, unexpected_shutdown_ms};
+pub use shutdown::{
+    CrashKind, PowerLossDetail, SHUTTING_DOWN, power_loss_detail, unexpected_shutdown_ms,
+};
 pub use stutter::{BURST_COUNT, BURST_WINDOW_MS, HICCUP_MS, StutterDetector};
 pub use trigger::{HangOutcome, Severity, Trigger, severity};
 pub use window::{Gap, GapReason, HangSpan, Window};

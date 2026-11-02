@@ -9,6 +9,8 @@ pub enum OccurrenceKind {
     Stutter,
     AppHang,
     Reported,
+    /// The PC went down while watched and came back with a reboot.
+    PostMortem,
 }
 
 impl OccurrenceKind {
@@ -18,12 +20,14 @@ impl OccurrenceKind {
             Trigger::Stutter { .. } => OccurrenceKind::Stutter,
             Trigger::AppHang { .. } => OccurrenceKind::AppHang,
             Trigger::Reported { .. } => OccurrenceKind::Reported,
+            Trigger::Crash { .. } => OccurrenceKind::PostMortem,
         }
     }
 
-    /// Freeze is gravest, then a hung app, a stutter, and an event alone.
+    /// A fall is gravest, then a freeze, a hung app, a stutter, and an event alone.
     pub fn rank(self) -> u8 {
         match self {
+            OccurrenceKind::PostMortem => 4,
             OccurrenceKind::Freeze => 3,
             OccurrenceKind::AppHang => 2,
             OccurrenceKind::Stutter => 1,

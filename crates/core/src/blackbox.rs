@@ -479,7 +479,7 @@ fn stall_ms(trigger: &Trigger) -> f32 {
         Trigger::AppHang {
             start_ms, end_ms, ..
         } => (end_ms - start_ms) as f32,
-        Trigger::Reported { .. } => 0.0,
+        Trigger::Reported { .. } | Trigger::Crash { .. } => 0.0,
     }
 }
 

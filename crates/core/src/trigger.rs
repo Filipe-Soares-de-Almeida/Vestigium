@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::WinEvent;
+use crate::{CrashKind, WinEvent};
 
 /// How bad a stall was, by how long it lasted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -52,6 +52,13 @@ pub enum Trigger {
     Reported {
         event: WinEvent,
     },
+    /// The PC went down while watched: `last_ms` is the last stored sample, `down_ms` when
+    /// Windows says it fell.
+    Crash {
+        last_ms: i64,
+        down_ms: i64,
+        kind: CrashKind,
+    },
 }
 
 impl Trigger {
@@ -61,6 +68,7 @@ impl Trigger {
             | Trigger::Stutter { start_ms, .. }
             | Trigger::AppHang { start_ms, .. } => *start_ms,
             Trigger::Reported { event } => event.ts_ms,
+            Trigger::Crash { last_ms, .. } => *last_ms,
         }
     }
 
@@ -70,6 +78,9 @@ impl Trigger {
             | Trigger::Stutter { end_ms, .. }
             | Trigger::AppHang { end_ms, .. } => *end_ms,
             Trigger::Reported { event } => event.ts_ms,
+            Trigger::Crash {
+                last_ms, down_ms, ..
+            } => (*down_ms).max(*last_ms),
         }
     }
 }

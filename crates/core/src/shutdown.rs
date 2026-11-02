@@ -17,6 +17,43 @@ pub struct PowerLossDetail {
     pub power_button: bool,
 }
 
+/// What brought the PC down, as Kernel-Power 41 tells it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CrashKind {
+    BlueScreen {
+        code: u32,
+        params: [u64; 4],
+    },
+    /// The power button was held, as people do when the PC stopped responding.
+    PowerButton,
+    /// Windows was shutting down; the person meant to turn it off.
+    WhileShuttingDown,
+    /// Windows was going to sleep, hibernating or waking.
+    WhileSleeping,
+    /// Nothing recorded: a power cut, a hard hang, or a blue screen that could not be written.
+    NoTrace,
+}
+
+impl PowerLossDetail {
+    /// The stop code wins, then the power button, then the power state being entered.
+    pub fn crash_kind(&self) -> CrashKind {
+        if self.bugcheck_code != 0 {
+            CrashKind::BlueScreen {
+                code: self.bugcheck_code,
+                params: self.bugcheck_params,
+            }
+        } else if self.power_button {
+            CrashKind::PowerButton
+        } else if self.power_state == SHUTTING_DOWN {
+            CrashKind::WhileShuttingDown
+        } else if (2..SHUTTING_DOWN).contains(&self.power_state) {
+            CrashKind::WhileSleeping
+        } else {
+            CrashKind::NoTrace
+        }
+    }
+}
+
 /// The details in a Kernel-Power 41's `<EventData>`; `None` when it has no stop code.
 pub fn power_loss_detail(data_xml: &str) -> Option<PowerLossDetail> {
     let bugcheck_code = data_named(data_xml, "BugcheckCode")?.parse().ok()?;

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::episode::MEMORY_HIGH_PCT;
 use crate::process::per_program;
 use crate::{
-    DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, RoutineKind, Sample, Trigger,
-    WinEvent, Window, classify,
+    CrashKind, DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, RoutineKind, Sample,
+    Trigger, WinEvent, Window, classify,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -86,6 +86,19 @@ pub enum Cause {
     Frames {
         app: String,
     },
+    BlueScreen {
+        code: u32,
+    },
+    /// The PC stopped responding and was turned off with the power button.
+    Unresponsive,
+    /// The PC fell while going to sleep, hibernating or waking.
+    SleepTransition,
+    /// Nothing recorded the fall: a power cut, a hard hang, or a crash that could not write.
+    PowerCut {
+        no_dump: bool,
+    },
+    /// Windows logged a fatal hardware error before the fall.
+    HardwareFault,
 }
 
 /// A value from the window that backs a suspect; the words come from the UI.
@@ -224,6 +237,7 @@ pub fn suspects(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         .filter_map(|rule| rule(focus, window))
         .collect();
     found.extend(app(triggers, window));
+    found.extend(crash(triggers, window));
     if found.is_empty() {
         found.push(unclear(window));
     }
@@ -565,6 +579,71 @@ fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         });
     }
     named
+}
+
+/// What Kernel-Power 41 and the events of the next boot say about a fall.
+fn crash(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
+    let Some(kind) = triggers.iter().find_map(|t| match t {
+        Trigger::Crash { kind, .. } => Some(*kind),
+        _ => None,
+    }) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    let fatal: Vec<Evidence> = events_meaning(window, &[EventMeaning::HardwareError])
+        .into_iter()
+        .filter(|e| matches!(e, Evidence::Event { id: 18, .. }))
+        .collect();
+    if !fatal.is_empty() {
+        found.push(Suspect {
+            cause: Cause::HardwareFault,
+            confidence: Confidence::High,
+            evidence: fatal,
+            next_steps: vec![NextStep::CheckHardwareStability],
+        });
+    }
+    let no_dump = events_meaning(window, &[EventMeaning::NoCrashDump]);
+    let (cause, confidence, next_steps) = match kind {
+        CrashKind::BlueScreen { code, .. } => (
+            Cause::BlueScreen { code },
+            Confidence::High,
+            vec![NextStep::UpdateDriver],
+        ),
+        CrashKind::PowerButton => (
+            Cause::Unresponsive,
+            Confidence::Medium,
+            vec![NextStep::EnableSensitiveMode],
+        ),
+        CrashKind::WhileSleeping => (
+            Cause::SleepTransition,
+            Confidence::Medium,
+            vec![NextStep::UpdateDriver],
+        ),
+        CrashKind::NoTrace => (
+            Cause::PowerCut {
+                no_dump: !no_dump.is_empty(),
+            },
+            Confidence::Low,
+            vec![NextStep::CheckHardwareStability],
+        ),
+        CrashKind::WhileShuttingDown => return found,
+    };
+    let mut evidence = events_meaning(
+        window,
+        &[
+            EventMeaning::PowerLoss,
+            EventMeaning::UnexpectedShutdown,
+            EventMeaning::BugCheck,
+        ],
+    );
+    evidence.extend(no_dump);
+    found.push(Suspect {
+        cause,
+        confidence,
+        evidence,
+        next_steps,
+    });
+    found
 }
 
 /// The ordinary signals, to show that nothing crossed.

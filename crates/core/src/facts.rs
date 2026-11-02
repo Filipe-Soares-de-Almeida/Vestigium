@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::rules::{avail_pct, process_value, worst_disk};
 use crate::{
-    EventMeaning, GapReason, HangOutcome, HangSpan, Metric, Sample, Trigger, Window, classify,
-    crosses_down, threshold,
+    CrashKind, EventMeaning, GapReason, HangOutcome, HangSpan, Metric, Sample, Trigger, Window,
+    classify, crosses_down, threshold,
 };
 
 /// One step of what happened; the UI words it in the reader's language.
@@ -45,6 +45,11 @@ pub enum FactKind {
     },
     Gap {
         reason: GapReason,
+    },
+    /// The last second the watcher stored before the PC went down.
+    LastWatched,
+    WentDown {
+        kind: CrashKind,
     },
 }
 
@@ -106,6 +111,14 @@ pub fn facts(triggers: &[Trigger], window: &Window) -> Vec<Fact> {
                 }
             }
             Trigger::Reported { .. } => {}
+            Trigger::Crash {
+                last_ms,
+                down_ms,
+                kind,
+            } => {
+                facts.push(fact(*last_ms, FactKind::LastWatched));
+                facts.push(fact(*down_ms, FactKind::WentDown { kind: *kind }));
+            }
         }
     }
     for hang in hangs {

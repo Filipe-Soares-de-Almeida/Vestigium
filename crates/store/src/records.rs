@@ -10,11 +10,12 @@ use crate::{Store, StoreError, decode, encode};
 /// Layout of the `Occurrence` and `Episode` BLOBs written today.
 const RECORD_VERSION: i64 = 1;
 
-const KINDS: [OccurrenceKind; 4] = [
+const KINDS: [OccurrenceKind; 5] = [
     OccurrenceKind::Freeze,
     OccurrenceKind::Stutter,
     OccurrenceKind::AppHang,
     OccurrenceKind::Reported,
+    OccurrenceKind::PostMortem,
 ];
 const SEVERITIES: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
 const CHANNELS: [Channel; 2] = [Channel::System, Channel::Application];
