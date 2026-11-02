@@ -24,6 +24,26 @@
   onMount(() => app.start());
   onMount(() => void markFrame());
 
+  // The window behaves as an app: no page-wide select-all and no browser menu, except in text fields.
+  onMount(() => {
+    const editable = (target: EventTarget | null) =>
+      target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea"));
+    const onkeydown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !editable(event.target)) {
+        event.preventDefault();
+      }
+    };
+    const oncontextmenu = (event: MouseEvent) => {
+      if (!editable(event.target)) event.preventDefault();
+    };
+    addEventListener("keydown", onkeydown);
+    addEventListener("contextmenu", oncontextmenu);
+    return () => {
+      removeEventListener("keydown", onkeydown);
+      removeEventListener("contextmenu", oncontextmenu);
+    };
+  });
+
   // Sets data-inactive on the root while another window is active; the title bar dims then.
   onMount(() => {
     const mark = () => {

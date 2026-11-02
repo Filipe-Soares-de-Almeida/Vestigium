@@ -115,6 +115,8 @@ How to use this file:
 
 ### Fixed
 
+- Text in the window can no longer be selected, with the mouse or with Ctrl+A, and a right-click
+  no longer opens the browser's menu; text fields keep both.
 - "Open the data folder" in Settings opens the folder where the history really is, also when
   Windows keeps it in another place for the program that started Vestigium.
 - The PC states chart on Today no longer draws a white frame around itself when it has focus; the
