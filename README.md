@@ -30,9 +30,11 @@ opens. It watches the one PC it is installed on.
 > Vestigium is in early development and there is no build to install yet.
 > What works today, built from source: the background watcher, which records
 > freezes, stutters in sensitive mode, apps that stop responding and stretches
-> of CPU, memory or disk pressure; and the window, with the day's timeline, a
-> report for each freeze with its likely cause and the evidence, the live view
-> of the last ten minutes, and the settings.
+> of CPU, memory or disk pressure; the deep capture, which for a few minutes and
+> with administrator permission names the driver or the app behind stutters;
+> and the window, with the day's timeline, a report for each freeze with its
+> likely cause and the evidence, the captures and what each one found, the live
+> view of the last ten minutes, and the settings.
 
 ## Highlights
 
@@ -51,9 +53,11 @@ opens. It watches the one PC it is installed on.
   Windows keeps, explains each one in plain language — the stop code and the
   driver or module most likely at fault — and deletes the ones you no longer
   need once you confirm.
-- **The driver behind the lag.** A deeper capture measures how long each driver
-  holds the processor and the frame times of the app in front, so stutter and
-  audio crackle point to a driver or an app by name.
+- **The driver behind the lag.** A deep capture of two to ten minutes measures
+  how long each driver holds the processor and the frame times of the apps on
+  screen, so stutter and audio crackle point to a driver or an app by name. Each
+  capture stays in a history, so a second one after a driver update shows
+  whether it helped.
 - **Health checks, tests and reversible fixes.** It flags what in the system is
   a risk — a failing disk, hardware errors, storage resets, throttling, a
   nearly full system drive — and runs RAM and disk tests. When the evidence
