@@ -5,6 +5,7 @@ mod disk;
 mod etw;
 mod events;
 mod gpu;
+mod health;
 mod hung;
 mod memory;
 mod pdh;
@@ -21,6 +22,9 @@ pub use etw::{
 };
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};
+pub use health::{
+    HealthSource, WindowsHealth, antivirus, disk_health, page_files, system_drive, volumes,
+};
 pub use hung::hung_pids;
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
