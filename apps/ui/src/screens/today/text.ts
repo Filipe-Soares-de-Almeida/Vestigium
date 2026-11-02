@@ -31,6 +31,8 @@ export function causeName(cause: Cause): string {
   if ("Driver" in cause) return t(`${KEY}.cause.Driver`, { core: cause.Driver.core });
   if ("DriverModule" in cause) return cause.DriverModule.module;
   if ("Frames" in cause) return t(`${KEY}.cause.Frames`, { app: cause.Frames.app });
+  if ("BlueScreen" in cause) return t(`${KEY}.cause.BlueScreen`);
+  if ("PowerCut" in cause) return t(`${KEY}.cause.PowerCut`);
   return cause.App.name;
 }
 
@@ -48,11 +50,16 @@ export function causeReason(cause: Cause): string | null {
   if ("Driver" in cause) return t(`${KEY}.because.Driver`);
   if ("DriverModule" in cause) return t(`${KEY}.because.DriverModule`, { module: cause.DriverModule.module });
   if ("Frames" in cause) return t(`${KEY}.because.Frames`, { name: cause.Frames.app });
+  if ("BlueScreen" in cause) return t(`${KEY}.because.BlueScreen`);
+  if ("PowerCut" in cause) return t(`${KEY}.because.PowerCut`);
   return t(`${KEY}.because.App`, { name: cause.App.name });
 }
 
 export function causeIcon(cause: Cause): IconName {
+  if (cause === "Unresponsive" || cause === "SleepTransition") return "power";
+  if (cause === "HardwareFault") return "chip";
   if (typeof cause === "string") return cause === "GpuDriver" ? "gpu" : cause === "Throttling" ? "chip" : "app";
+  if ("BlueScreen" in cause || "PowerCut" in cause) return "power";
   if ("Storage" in cause || "DiskIo" in cause) return "disk";
   if ("Memory" in cause) return "memory";
   if ("Cpu" in cause || "Driver" in cause || "DriverModule" in cause) return "chip";
@@ -83,6 +90,7 @@ export function occurrenceTitle(o: OccurrenceSummary, level: DetailLevel): strin
   }
   const exact = level === "Technical" ? formatMs(ms) : duration;
   if (o.kind === "Reported") return kindName(o);
+  if (o.kind === "PostMortem") return `${kindName(o)} · ${causeName(o.cause)}`;
   if (o.kind === "AppHang" && app) return `${kindName(o)} · ${app} · ${exact}`;
   return `${kindName(o)} · ${exact}`;
 }
@@ -171,6 +179,13 @@ export function lede(day: Day, level: DetailLevel): Part[] {
   }
   const first = t(`${KEY}.lede.some${withPressure ? ".pressure" : ""}`, { mostly: opening });
   const reason = causeReason(worst.cause);
+  if (worst.kind === "PostMortem") {
+    const fell = t(`${KEY}.lede.worst.PostMortem${reason ? "" : ".unclear"}`, {
+      time: formatTime(worst.end_ms),
+      reason: reason ?? "",
+    });
+    return emphasize(`${first} ${fell}`, bold);
+  }
   const second = t(`${KEY}.lede.worst${level === "Detailed" ? ".detailed" : ""}${reason ? "" : ".unclear"}`, {
     time: formatTime(worst.start_ms),
     duration: formatDuration(worst.end_ms - worst.start_ms),

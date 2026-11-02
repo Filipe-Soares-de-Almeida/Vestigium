@@ -3,6 +3,7 @@ import { formatClock, formatDuration, formatNumber, formatPercent, formatTime } 
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   Cause,
+  CrashKind,
   DetailLevel,
   Evidence,
   FactKind,
@@ -39,7 +40,12 @@ export type CauseKind =
   | "App"
   | "Unclear"
   | "DriverModule"
-  | "Frames";
+  | "Frames"
+  | "BlueScreen"
+  | "Unresponsive"
+  | "SleepTransition"
+  | "PowerCut"
+  | "HardwareFault";
 
 /** One statement in the forms the detail levels pick from: plain words, the numbers, the counters. */
 export interface Texts {
@@ -112,6 +118,11 @@ const ICON: Record<CauseKind, IconName> = {
   Unclear: "chip",
   DriverModule: "chip",
   Frames: "app",
+  BlueScreen: "power",
+  Unresponsive: "power",
+  SleepTransition: "power",
+  PowerCut: "power",
+  HardwareFault: "chip",
 };
 
 /** Metrics that cross by falling below their threshold. */
@@ -351,6 +362,13 @@ function causeName(cause: Cause, o: Occurrence): { name: string; parts: string[]
   if ("Frames" in cause) {
     return { name: appName(cause.Frames.app), parts: [k("cause.Frames.sub")] };
   }
+  if ("BlueScreen" in cause) {
+    const code = bugcheck(cause.BlueScreen.code);
+    return { name: k("cause.BlueScreen.name"), parts: [k("cause.BlueScreen.sub", { code })] };
+  }
+  if ("PowerCut" in cause) {
+    return { name: k("cause.PowerCut.name"), parts: [cause.PowerCut.no_dump ? k("cause.PowerCut.no_dump") : ""] };
+  }
   return { name: appName(cause.App.name), parts: [cause.App.name] };
 }
 
@@ -411,6 +429,12 @@ function summaryOf(cause: Cause): string {
     return k(intermediary ? "summary.DriverModule.intermediary" : "summary.DriverModule", { module });
   }
   if ("Frames" in cause) return k("summary.Frames", { app: appName(cause.Frames.app) });
+  if ("BlueScreen" in cause) return k("summary.BlueScreen", { code: bugcheck(cause.BlueScreen.code) });
+  if ("PowerCut" in cause) {
+    return [k("summary.PowerCut"), cause.PowerCut.no_dump ? k("summary.PowerCut.no_dump") : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
   return k("summary.App", { app: appName(cause.App.name) });
 }
 
@@ -435,7 +459,9 @@ export function stepsOf(suspects: Suspect[]): Step[] {
             ? `${step}:${driver}`
             : step;
       if (steps.some((known) => known.key === key)) continue;
-      steps.push({ key, text: k(`step.${step}`, { app: app ? appName(app) : "", driver: driver ?? "" }) });
+      // A fall names no driver, so its update step speaks of drivers in general.
+      const any = step === "UpdateDriver" && !driver ? ".any" : "";
+      steps.push({ key, text: k(`step.${step}${any}`, { app: app ? appName(app) : "", driver: driver ?? "" }) });
     }
   }
   return steps;
@@ -444,6 +470,7 @@ export function stepsOf(suspects: Suspect[]): Step[] {
 function factTexts(kind: FactKind): Texts {
   const plain = (text: string): Texts => ({ plain: text, figures: null, tech: null });
   if (kind === "FreezeEnded") return plain(k("fact.FreezeEnded"));
+  if (kind === "LastWatched") return plain(k("fact.LastWatched"));
   if ("FreezeStarted" in kind) {
     const ms = kind.FreezeStarted.duration_ms;
     return {
@@ -499,14 +526,40 @@ function factTexts(kind: FactKind): Texts {
       tech: k("fact.busiest.tech", { exe: name, name: k(`metric.${metric}`), value: shown }),
     };
   }
+  if ("WentDown" in kind) {
+    const crash = kind.WentDown.kind;
+    return {
+      plain: k(`fact.WentDown.${crashKey(crash)}`),
+      figures: null,
+      tech:
+        typeof crash === "object"
+          ? k("fact.WentDown.tech.BlueScreen", { code: bugcheck(crash.BlueScreen.code) })
+          : k("fact.WentDown.tech", { kind: crash }),
+    };
+  }
   return plain(k(`fact.gap.${kind.Gap.reason}`));
 }
 
-const isMark = (kind: FactKind) => typeof kind !== "string" && ("FreezeStarted" in kind || "AppHung" in kind);
+/** "0x00000050", as Windows writes a bug check code. */
+function bugcheck(code: number): string {
+  return `0x${code.toString(16).toUpperCase().padStart(8, "0")}`;
+}
+
+function crashKey(kind: CrashKind): "BlueScreen" | Exclude<CrashKind, object> {
+  return typeof kind === "object" ? "BlueScreen" : kind;
+}
+
+function crashOf(o: Occurrence): CrashTrigger | null {
+  return o.triggers.flatMap((tr) => ("Crash" in tr ? [tr.Crash] : []))[0] ?? null;
+}
+
+const isMark = (kind: FactKind) =>
+  typeof kind !== "string" && ("FreezeStarted" in kind || "AppHung" in kind || "WentDown" in kind);
 
 type FreezeTrigger = Extract<Trigger, { Freeze: unknown }>["Freeze"];
 type HangTrigger = Extract<Trigger, { AppHang: unknown }>["AppHang"];
 type StutterTrigger = Extract<Trigger, { Stutter: unknown }>["Stutter"];
+type CrashTrigger = Extract<Trigger, { Crash: unknown }>["Crash"];
 
 export function freezes(o: Occurrence): FreezeTrigger[] {
   return o.triggers.flatMap((tr) => ("Freeze" in tr ? [tr.Freeze] : []));
@@ -549,6 +602,13 @@ function headline(o: Occurrence, level: DetailLevel): string {
     if (level === "Detailed") return k("headline.Detailed", { kind, duration: formatDuration(o.end_ms - o.start_ms) });
     return kn("headline.Stutter.Technical", count, { kind, worst });
   }
+  const crash = crashOf(o);
+  if (crash) {
+    const key = crashKey(crash.kind);
+    if (level !== "Technical") return k(`headline.PostMortem.${key}`);
+    const code = typeof crash.kind === "object" ? bugcheck(crash.kind.BlueScreen.code) : "";
+    return k(`headline.PostMortem.Technical.${key}`, { code });
+  }
   const event = o.triggers.flatMap((tr) => ("Reported" in tr ? [tr.Reported.event] : []))[0];
   if (!event) return kind;
   if (level === "Simple") return k(`event.${event.meaning}`);
@@ -557,6 +617,8 @@ function headline(o: Occurrence, level: DetailLevel): string {
 }
 
 function figureOf(o: Occurrence): { value: string; caption: string } {
+  const crash = crashOf(o);
+  if (crash) return { value: formatTime(crash.down_ms), caption: k("figure.PostMortem") };
   const span =
     o.kind === "Freeze" ? longest(freezes(o)) : o.kind === "AppHang" ? longest(hangs(o)) : o;
   if (o.kind === "Reported" || !span) {
@@ -569,11 +631,11 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
   const [first, ...rest] = dto.suspects;
   const main = first ?? { cause: "Unclear", confidence: "Low", evidence: [], next_steps: [] };
   const figure = figureOf(dto);
-  const when = `${formatDay(dto.start_ms)}, ${formatClock(dto.start_ms)}`;
+  // A fall is named by when it went down, not by the last second stored before it.
+  const at = crashOf(dto)?.down_ms ?? dto.start_ms;
+  const when = `${formatDay(at)}, ${formatClock(at)}`;
   return {
-    crumb: sameDay(dto.start_ms, Date.now())
-      ? formatTime(dto.start_ms)
-      : `${formatDayShort(dto.start_ms)}, ${formatTime(dto.start_ms)}`,
+    crumb: sameDay(at, Date.now()) ? formatTime(at) : `${formatDayShort(at)}, ${formatTime(at)}`,
     title: headline(dto, level),
     meta: [when, k(`class.${dto.kind}.${dto.severity}`), dto.sensitive ? k("sensitive") : ""]
       .filter(Boolean)

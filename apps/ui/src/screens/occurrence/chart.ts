@@ -67,6 +67,11 @@ const RELEVANT: Record<CauseKind, LaneKey[]> = {
   Unclear: ["cpu", "mem"],
   DriverModule: ["cpu"],
   Frames: ["gpu", "cpu"],
+  BlueScreen: ["cpu", "mem", "disk", "lag"],
+  Unresponsive: ["cpu", "mem", "disk", "lag"],
+  SleepTransition: ["cpu", "disk"],
+  PowerCut: ["cpu", "mem", "lag"],
+  HardwareFault: ["cpu", "gpu"],
 };
 
 const TONES: LaneTone[] = ["calm", "busy", "press", "freeze"];
@@ -135,6 +140,14 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
     });
   }
   for (const tr of dto.triggers) {
+    if ("Crash" in tr) {
+      bands.push({
+        from: rel(tr.Crash.last_ms),
+        to: rel(Math.max(tr.Crash.down_ms, tr.Crash.last_ms + 1000)),
+        tone: "freeze",
+        label: t("ui.occurrence.chart.band.PostMortem"),
+      });
+    }
     if ("Stutter" in tr) {
       bands.push({
         from: rel(tr.Stutter.start_ms),
@@ -154,14 +167,15 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
     );
   }
 
-  const markers = dto.window.events.map((e) => ({
+  // Marks only the events inside the readings, so a fall's next-boot events stay off the axis.
+  const end = x.length ? x[x.length - 1] : 0;
+  const shown = dto.window.events.filter((e) => rel(e.ts_ms) >= (x[0] ?? 0) && rel(e.ts_ms) <= end);
+  const markers = shown.map((e) => ({
     at: rel(e.ts_ms),
     label: t(`ui.occurrence.event.${e.meaning}`),
   }));
   for (const [i, m] of markers.entries()) {
-    summary.push(
-      t("ui.occurrence.chart.summary.event", { event: m.label, time: formatClock(dto.window.events[i].ts_ms) }),
-    );
+    summary.push(t("ui.occurrence.chart.summary.event", { event: m.label, time: formatClock(shown[i].ts_ms) }));
   }
   return { x, originMs: dto.start_ms, lanes, bands, markers, summary };
 }

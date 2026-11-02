@@ -33,6 +33,8 @@
   const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
   const view = $derived(dto ? buildReport(dto, level) : null);
   const chart = $derived(dto && view ? chartView(dto, level, view.cause) : null);
+  /** A fall keeps only what came before it, and its chart says so. */
+  const fall = $derived(dto?.kind === "PostMortem" ? ".PostMortem" : "");
 
   async function load(): Promise<void> {
     failure = null;
@@ -202,9 +204,9 @@
   </div>
 
   <section class="card chartcard" aria-labelledby="occ-chart">
-    <h2 id="occ-chart" class="sub">{t("ui.occurrence.chart.title")}</h2>
+    <h2 id="occ-chart" class="sub">{t(`ui.occurrence.chart.title${fall}`)}</h2>
     {#if dto.truncated}
-      <p class="muted caption">{t("ui.occurrence.chart.truncated")}</p>
+      <p class="muted caption">{t(`ui.occurrence.chart.truncated${fall}`)}</p>
     {/if}
     {#if chart.lanes.length}
       <WindowChart view={chart} />

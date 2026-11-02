@@ -1,7 +1,8 @@
-// Seven occurrences for the report in the browser, #/occurrence/1 to 7, all today; any other id is gone.
+// Eight occurrences for the report in the browser, #/occurrence/1 to 8 (8 is a fall), all today; any other id is gone.
 import type {
   Cause,
   Columns,
+  CrashKind,
   DiskLoad,
   Evidence,
   Fact,
@@ -535,8 +536,61 @@ function stutters(): OccurrenceDto {
   });
 }
 
+/** The PC fell with a blue screen five seconds after the last stored second, memory nearly full. */
+function blueScreen(): OccurrenceDto {
+  const last = at(7, 12, 25);
+  const down = last + 5000;
+  const boot = at(7, 19, 2);
+  const n = noise(8);
+  const crash: CrashKind = { BlueScreen: { code: 0x50, params: [0, 0, 0, 0] } };
+  const loss = event(boot + 1000, "Microsoft-Windows-Kernel-Power", 41, "PowerLoss", 91002);
+  const unexpected = event(boot, "EventLog", 6008, "UnexpectedShutdown", 91001);
+  const report = event(boot + 12_000, "Microsoft-Windows-WER-SystemErrorReporting", 1001, "BugCheck", 91010);
+  const asEvidence = (e: WinEvent): Evidence => ({
+    Event: { ts_ms: e.ts_ms, provider: e.provider, id: e.id, meaning: e.meaning },
+  });
+  return build({
+    id: 8,
+    start: last,
+    end: down,
+    kind: "PostMortem",
+    severity: "Severe",
+    triggers: [{ Crash: { last_ms: last, down_ms: down, kind: crash } }],
+    moment: (rel) =>
+      rel > 0
+        ? null
+        : {
+            cpu: 45 + 15 * Math.sin(rel / 7) + n(6),
+            mem: 80 + 17 * ((rel + 60) / 60) ** 2,
+            c: { active: rel > -30 ? 60 + n(20) : 12 + n(6), latency: rel > -30 ? 40 + n(15) : 2 },
+            lag: rel > -10 ? 20 + (rel + 10) * 9 : 0.6,
+            faults: rel > -30 ? 1800 : 40,
+          },
+    procs: () => [
+      proc(4412, "Browser.exe", 12, 14.2 * GB, 2 * MB),
+      proc(11220, "Game.exe", 31, 9.8 * GB, 6 * MB, 88),
+    ],
+    events: [unexpected, loss, report],
+    truncated: true,
+    suspects: [
+      suspect({ BlueScreen: { code: 0x50 } }, "High", [loss, unexpected, report].map(asEvidence), ["UpdateDriver"]),
+      suspect({ Memory: { process: "Browser.exe" } }, "Medium", [m(last - 20_000, "MemAvailPct", 3, 5)], [
+        "CloseMemoryHeavyApp",
+      ]),
+    ],
+    facts: [
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 14.2 * GB } }],
+      [-20_000, { Crossed: { metric: "MemAvailPct", value: 3, threshold: 5, subject: null } }],
+      [0, "LastWatched"],
+      [5000, { WentDown: { kind: crash } }],
+    ],
+  });
+}
+
 const FIXTURES = new Map(
-  [storageFreeze(), appHang(), diskEpisode(), memoryEpisode(), reported(), unclear(), stutters()].map((o) => [o.id, o]),
+  [storageFreeze(), appHang(), diskEpisode(), memoryEpisode(), reported(), unclear(), stutters(), blueScreen()].map(
+    (o) => [o.id, o],
+  ),
 );
 
 /** `?covered=1`: a deep capture covers occurrence 6, as the report of an older capture would. */

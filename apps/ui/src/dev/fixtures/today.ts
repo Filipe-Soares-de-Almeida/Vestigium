@@ -1,5 +1,5 @@
-// Synthetic history for the Today screen. ?day=full (default), quiet (no stalls) or empty (nothing
-// watched today); ?history=empty is the first use. Nothing here was measured on a real PC.
+// Synthetic history for Today: ?day=full (default), quiet (no stalls) or empty (nothing watched today);
+// ?history=empty is the first use, ?fall=1 adds a fall at 7:12. Nothing here was measured on a real PC.
 import type {
   Episode,
   Gap,
@@ -104,6 +104,9 @@ const todays: OccurrenceSummary[] =
         occurrence(34, "Freeze", at(14, 32, 18), 6.8, "Severe", { Storage: { disk: "0 C:" } }),
         occurrence(35, "Stutter", at(20, 41, 2), 10, "Light", { Cpu: { processes: ["Game.exe"] } }),
         occurrence(36, "Freeze", at(22, 10, 5), 2.4, "Medium", { Memory: { process: "Browser.exe" } }),
+        ...(query.get("fall") === "1"
+          ? [occurrence(8, "PostMortem", at(7, 12, 25), 5, "Severe", { BlueScreen: { code: 0x50 } })]
+          : []),
       ]
     : [];
 

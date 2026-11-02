@@ -100,7 +100,7 @@ export function toneOf(occurrence: OccurrenceSummary): Tone {
 
 const SEVERITY: Record<Severity, number> = { Light: 0, Medium: 1, Severe: 2 };
 /** As the watcher ranks kinds: a freeze is gravest, then a hung app, a stutter, an event alone. */
-const KIND: Record<OccurrenceKind, number> = { Freeze: 3, AppHang: 2, Stutter: 1, Reported: 0 };
+const KIND: Record<OccurrenceKind, number> = { PostMortem: 4, Freeze: 3, AppHang: 2, Stutter: 1, Reported: 0 };
 
 function gravity(o: OccurrenceSummary): number[] {
   return [SEVERITY[o.severity], KIND[o.kind], o.end_ms - o.start_ms];

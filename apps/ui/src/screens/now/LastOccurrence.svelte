@@ -19,11 +19,13 @@
 
   function icon(cause: Cause): IconName {
     if (cause === "GpuDriver") return "gpu";
-    if (cause === "Throttling") return "chip";
+    if (cause === "Throttling" || cause === "HardwareFault") return "chip";
+    if (cause === "Unresponsive" || cause === "SleepTransition") return "power";
     if (typeof cause === "string") return "app";
     if ("Storage" in cause || "DiskIo" in cause) return "disk";
     if ("Memory" in cause) return "memory";
     if ("Cpu" in cause || "Driver" in cause) return "chip";
+    if ("BlueScreen" in cause || "PowerCut" in cause) return "power";
     return "app";
   }
 

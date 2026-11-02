@@ -87,7 +87,7 @@ export interface HungWindow {
 }
 
 export type Severity = "Light" | "Medium" | "Severe";
-export type OccurrenceKind = "Freeze" | "Stutter" | "AppHang" | "Reported";
+export type OccurrenceKind = "Freeze" | "Stutter" | "AppHang" | "Reported" | "PostMortem";
 export type Confidence = "Low" | "Medium" | "High";
 export type Channel = "System" | "Application";
 export type HangOutcome = "Recovered" | "Closed";
@@ -158,7 +158,20 @@ export type Cause =
   | { App: { name: string } }
   | "Unclear"
   | { DriverModule: { module: string; intermediary: boolean } }
-  | { Frames: { app: string } };
+  | { Frames: { app: string } }
+  | { BlueScreen: { code: number } }
+  | "Unresponsive"
+  | "SleepTransition"
+  | { PowerCut: { no_dump: boolean } }
+  | "HardwareFault";
+
+/** How the PC went down, from what Windows logged on the next boot. */
+export type CrashKind =
+  | { BlueScreen: { code: number; params: number[] } }
+  | "PowerButton"
+  | "WhileShuttingDown"
+  | "WhileSleeping"
+  | "NoTrace";
 
 export interface WinEvent {
   ts_ms: number;
@@ -222,7 +235,8 @@ export type Trigger =
         outcome: HangOutcome;
       };
     }
-  | { Reported: { event: WinEvent } };
+  | { Reported: { event: WinEvent } }
+  | { Crash: { last_ms: number; down_ms: number; kind: CrashKind } };
 
 export interface Gap {
   start_ms: number;
@@ -270,7 +284,9 @@ export type FactKind =
   | { Event: { meaning: EventMeaning; provider: string; id: number } }
   | { Crossed: { metric: Metric; value: number; threshold: number; subject: string | null } }
   | { Busiest: { metric: Metric; name: string; value: number } }
-  | { Gap: { reason: GapReason } };
+  | { Gap: { reason: GapReason } }
+  | "LastWatched"
+  | { WentDown: { kind: CrashKind } };
 
 export interface Fact {
   at_ms: number;

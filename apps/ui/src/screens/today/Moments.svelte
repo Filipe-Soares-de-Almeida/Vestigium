@@ -33,7 +33,11 @@
                 <b>{occurrenceTitle(o, level)}</b>
                 <small>{t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}</small>
               </span>
-              <span class="when">{formatTime(o.start_ms)}<br />{formatDuration(o.end_ms - o.start_ms)}</span>
+              {#if o.kind === "PostMortem"}
+                <span class="when">{formatTime(o.end_ms)}</span>
+              {:else}
+                <span class="when">{formatTime(o.start_ms)}<br />{formatDuration(o.end_ms - o.start_ms)}</span>
+              {/if}
               <span class="chev"><Icon name="chevron" /></span>
             </a>
           {:else}
