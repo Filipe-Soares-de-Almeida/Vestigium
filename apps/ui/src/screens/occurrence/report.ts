@@ -359,6 +359,12 @@ function formatUs(us: number): string {
   return us >= 1000 ? formatMs(us / 1000) : k("us", { us: formatNumber(us) });
 }
 
+/** The evidence of one suspect at a detail level, for pages that show a suspect outside a report. */
+export function evidenceLines(s: Suspect, level: DetailLevel): Line[] {
+  const kind = causeKind(s.cause);
+  return s.evidence.map((e) => lineFor(level, evidenceTexts(e, kind)));
+}
+
 function suspectView(s: Suspect, o: Occurrence, level: DetailLevel): SuspectView {
   const kind = causeKind(s.cause);
   const { name, parts } = causeName(s.cause, o);

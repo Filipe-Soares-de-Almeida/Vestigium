@@ -93,6 +93,9 @@ How to use this file:
   kept on the PC (the timeline, the freezes and their reports, the Windows events it read) is
   deleted and the space is given back. Settings stay. The window and the background watcher must
   be updated together for this.
+- Captures: "Investigate stutters" measures every driver and app for a few minutes, after Windows asks
+  for administrator permission once, and names the driver or app behind the stutters; each capture
+  is kept in a history. Nothing leaves the PC.
 
 ### Changed
 

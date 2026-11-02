@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
+  import { captures } from "../lib/capture.svelte";
   import { t } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
@@ -9,13 +10,15 @@
       ? { tone: "off", key: "ui.shell.status.connecting" }
       : app.paused
         ? { tone: "paused", key: "ui.shell.status.paused" }
-        : app.running && app.link.link === "running" && app.link.sensitive_until_ms !== null
-          ? { tone: "ok", key: "ui.shell.status.sensitive" }
-          : app.running
-            ? { tone: "ok", key: "ui.shell.status.watching" }
-            : app.stopped
-              ? { tone: "off", key: "ui.shell.status.stopped" }
-              : { tone: "off", key: "ui.shell.status.unreachable" },
+        : captures.run !== null
+          ? { tone: "ok", key: "ui.shell.status.capturing" }
+          : app.running && app.link.link === "running" && app.link.sensitive_until_ms !== null
+            ? { tone: "ok", key: "ui.shell.status.sensitive" }
+            : app.running
+              ? { tone: "ok", key: "ui.shell.status.watching" }
+              : app.stopped
+                ? { tone: "off", key: "ui.shell.status.stopped" }
+                : { tone: "off", key: "ui.shell.status.unreachable" },
   );
 </script>
 
@@ -27,6 +30,13 @@
     <Icon name="now" />{t("ui.shell.nav.now")}
   </a>
   <div class="sep" role="separator"></div>
+  <a
+    class="nav"
+    href={href.captures()}
+    aria-current={router.section === "captures" ? "page" : undefined}
+  >
+    <Icon name="captures" />{t("ui.shell.nav.captures")}
+  </a>
   <span class="nav soon-item">
     <Icon name="health" />{t("ui.shell.nav.health")}<span class="soon">{t("ui.shell.nav.soon")}</span>
   </span>

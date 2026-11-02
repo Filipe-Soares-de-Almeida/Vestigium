@@ -14,6 +14,7 @@
   import type { DetailLevel, OccurrenceDto } from "../lib/types";
   import { copyText, loadDone, saveDone } from "./occurrence/browser";
   import { chartView } from "./occurrence/chart";
+  import { coveredLine } from "./capture/words";
   import { buildReport, type Line, reportMarkdown } from "./occurrence/report";
   import TechTables from "./occurrence/TechTables.svelte";
   import WindowChart from "./occurrence/WindowChart.svelte";
@@ -141,8 +142,16 @@
       </div>
       <p class="summary">{view.summary}</p>
       {@render evidence(view.main.evidence, true)}
-      {#if view.note}
-        <p class="note">{view.note}</p>
+      {#if dto.capture}
+        <div class="entry">
+          <p>{coveredLine(dto.capture)}</p>
+          <a class="btn" href={href.capture(dto.capture.id)}>{t("ui.captures.covered.open")}</a>
+        </div>
+      {:else if view.note}
+        <div class="entry">
+          <p>{view.note}</p>
+          <a class="btn" href={href.captures(dto.id)}><Icon name="captures" />{t("ui.captures.entry")}</a>
+        </div>
       {/if}
       {#each view.others as other, i (i)}
         <details class="also">
@@ -327,10 +336,21 @@
     color: var(--ink2);
     font-size: 13px;
   }
-  .note {
-    margin: 12px 0 0;
+  .entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    align-items: center;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--stroke2);
+  }
+  .entry p {
+    flex: 1 1 240px;
+    margin: 0;
     color: var(--ink2);
-    font-size: 13px;
+    font-size: 13.5px;
+    line-height: 1.45;
   }
   .also {
     margin-top: 12px;

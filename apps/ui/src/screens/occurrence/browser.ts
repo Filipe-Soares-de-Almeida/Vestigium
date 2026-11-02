@@ -1,21 +1,21 @@
-// What the report keeps in the window itself: the ticked steps of each occurrence, and the clipboard.
+// What a report keeps in the window itself: the ticked steps of each occurrence or capture, and the clipboard.
 
-const key = (id: number) => `vestigium.occurrence.${id}.done`;
+const key = (id: number, scope: string) => `vestigium.${scope}.${id}.done`;
 
-/** The steps ticked on this occurrence; reading state, so it stays in the window, not in settings. */
-export function loadDone(id: number): string[] {
+/** The steps ticked on this occurrence or capture; reading state, so it stays in the window, not in settings. */
+export function loadDone(id: number, scope = "occurrence"): string[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(key(id)) ?? "[]");
+    const value: unknown = JSON.parse(localStorage.getItem(key(id, scope)) ?? "[]");
     return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
   } catch {
     return [];
   }
 }
 
-export function saveDone(id: number, done: string[]): void {
+export function saveDone(id: number, done: string[], scope = "occurrence"): void {
   try {
-    if (done.length) localStorage.setItem(key(id), JSON.stringify(done));
-    else localStorage.removeItem(key(id));
+    if (done.length) localStorage.setItem(key(id, scope), JSON.stringify(done));
+    else localStorage.removeItem(key(id, scope));
   } catch {
     // Without storage the ticks last until the screen closes.
   }

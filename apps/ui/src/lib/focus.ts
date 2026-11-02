@@ -42,3 +42,11 @@ export async function keepFocus(scope: HTMLElement, change: () => unknown): Prom
   const again = key ? scope.querySelector<HTMLElement>(`[data-focus="${CSS.escape(key)}"]`) : null;
   (again ?? scope).focus({ preventScroll: true });
 }
+
+/** Action: puts focus on a card's heading when it appears in place of the control that was just used. */
+export function focusHere(node: HTMLElement): void {
+  void tick().then(() => {
+    const active = document.activeElement;
+    if (!active || active === document.body) node.focus({ preventScroll: true });
+  });
+}

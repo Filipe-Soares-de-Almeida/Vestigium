@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
 
   import ErrorView from "../components/ErrorView.svelte";
+  import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import { marks, timeline } from "../lib/api";
   import { app } from "../lib/app.svelte";
@@ -79,6 +80,12 @@
   <p class="lede">
     {#each lede(day, level) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
   </p>
+  {#if app.suggestCapture}
+    <p class="suggest">
+      <Icon name="captures" />
+      <span>{t("ui.captures.suggest.text")} <a href={href.captures()}>{t("ui.captures.suggest.link")}</a></span>
+    </p>
+  {/if}
   <States {day} {level} />
   <div class="split">
     <Moments items={day.items} {level} />
@@ -94,5 +101,26 @@
   .actions {
     display: flex;
     gap: 10px;
+  }
+  .suggest {
+    display: flex;
+    gap: 10px;
+    align-items: start;
+    margin: -8px 0 14px;
+    color: var(--ink2);
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+  .suggest :global(svg) {
+    flex: none;
+    margin-top: 1px;
+  }
+  .suggest a {
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 6px;
+  }
+  .suggest a:hover {
+    text-decoration: underline;
   }
 </style>

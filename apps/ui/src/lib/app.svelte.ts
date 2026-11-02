@@ -29,6 +29,8 @@ class App {
   stopped = $derived(this.link?.link === "stopped");
   /** A watcher answers on the pipe but not as this window expects. */
   unreachable = $derived(this.link?.link === "mismatch");
+  /** Sensitive mode saw stutters worth a deep capture. */
+  suggestCapture = $derived(this.link?.link === "running" && this.link.suggest_capture);
   /** Settings and pause can change only while the watcher runs. */
   editable = $derived(this.settings?.editable ?? false);
 

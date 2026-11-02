@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import Banner from "./components/Banner.svelte";
   import ErrorView from "./components/ErrorView.svelte";
@@ -9,9 +9,12 @@
   import Toast from "./components/Toast.svelte";
   import WindowControls from "./components/WindowControls.svelte";
   import { app } from "./lib/app.svelte";
+  import { captures } from "./lib/capture.svelte";
   import { markFrame } from "./lib/frame";
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
+  import Capture from "./screens/Capture.svelte";
+  import Captures from "./screens/Captures.svelte";
   import Now from "./screens/Now.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
@@ -22,7 +25,14 @@
   let shown = "";
 
   onMount(() => app.start());
+  onMount(() => captures.watch());
   onMount(() => void markFrame());
+
+  // Stores what finished while the window was closed and restores a running capture, again when the watcher comes up.
+  $effect(() => {
+    void app.running;
+    untrack(() => void captures.sync());
+  });
 
   // The window behaves as an app: no page-wide select-all and no browser menu, except in text fields.
   onMount(() => {
@@ -91,6 +101,10 @@
           <div class="screen">
             {#if router.current.screen === "occurrence"}
               <Occurrence id={router.current.id} />
+            {:else if router.current.screen === "capture"}
+              <Capture id={router.current.id} />
+            {:else if router.current.screen === "captures"}
+              <Captures forOccurrence={router.current.forOccurrence} />
             {:else if router.current.screen === "now"}
               <Now />
             {:else if router.current.screen === "settings"}

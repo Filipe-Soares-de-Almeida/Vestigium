@@ -1,9 +1,12 @@
-// Screens are addressed by the URL hash: #/today, #/occurrence/<id>, #/now, #/settings[/<category>].
+// Screens are addressed by the URL hash: #/today, #/occurrence/<id>, #/now, #/captures[?for=<occurrence id>],
+// #/capture/<id>, #/settings[/<category>].
 
 export type Route =
   | { screen: "today" }
   | { screen: "occurrence"; id: number }
   | { screen: "now" }
+  | { screen: "captures"; forOccurrence: number | null }
+  | { screen: "capture"; id: number }
   | { screen: "settings"; category: string | null };
 
 export type Screen = Route["screen"];
@@ -12,15 +15,23 @@ export const href = {
   today: () => "#/today",
   occurrence: (id: number) => `#/occurrence/${id}`,
   now: () => "#/now",
+  captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
+  capture: (id: number) => `#/capture/${id}`,
   settings: (category?: string) => (category ? `#/settings/${category}` : "#/settings"),
 };
 
 export function parse(hash: string): Route {
-  const [screen, arg] = hash.replace(/^#\/?/, "").split("/");
+  const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
+  const [screen, arg] = path.split("/");
   if (screen === "occurrence" && /^\d+$/.test(arg ?? "")) {
     return { screen: "occurrence", id: Number(arg) };
   }
   if (screen === "now") return { screen: "now" };
+  if (screen === "capture" && /^\d+$/.test(arg ?? "")) return { screen: "capture", id: Number(arg) };
+  if (screen === "captures") {
+    const given = new URLSearchParams(query).get("for") ?? "";
+    return { screen: "captures", forOccurrence: /^\d+$/.test(given) ? Number(given) : null };
+  }
   if (screen === "settings") return { screen: "settings", category: arg || null };
   return { screen: "today" };
 }
@@ -30,12 +41,15 @@ class Router {
 
   /** Changes only when the screen changes, not when a screen moves inside itself. */
   get key(): string {
-    return this.current.screen === "occurrence" ? `occurrence/${this.current.id}` : this.current.screen;
+    const route = this.current;
+    if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
+    return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }
 
   /** The navigation pane item a screen belongs to. */
-  get section(): "today" | "now" | "settings" {
-    return this.current.screen === "occurrence" ? "today" : this.current.screen;
+  get section(): "today" | "now" | "captures" | "settings" {
+    const screen = this.current.screen;
+    return screen === "occurrence" ? "today" : screen === "capture" ? "captures" : screen;
   }
 }
 

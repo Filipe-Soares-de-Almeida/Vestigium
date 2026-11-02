@@ -539,6 +539,28 @@ const FIXTURES = new Map(
   [storageFreeze(), appHang(), diskEpisode(), memoryEpisode(), reported(), unclear(), stutters()].map((o) => [o.id, o]),
 );
 
+/** `?covered=1`: a deep capture covers occurrence 6, as the report of an older capture would. */
+const COVERED = new URLSearchParams(location.search).get("covered") === "1";
+
 export const handlers: Record<string, Handler> = {
-  occurrence: (args) => FIXTURES.get(args.id as number) ?? null,
+  occurrence: (args) => {
+    const found = FIXTURES.get(args.id as number) ?? null;
+    if (!found || !COVERED || found.id !== 6) return found;
+    return {
+      ...found,
+      capture: {
+        id: 1,
+        start_ms: found.start_ms - 60_000,
+        end_ms: found.start_ms + 240_000,
+        suspects: [
+          {
+            cause: { DriverModule: { module: "nvlddmkm.sys", intermediary: false } },
+            confidence: "High",
+            evidence: [{ LongRoutine: { ts_ms: found.start_ms, module: "nvlddmkm.sys", kind: "Dpc", us: 1_240 } }],
+            next_steps: ["UpdateDriver"],
+          },
+        ],
+      },
+    };
+  },
 };
