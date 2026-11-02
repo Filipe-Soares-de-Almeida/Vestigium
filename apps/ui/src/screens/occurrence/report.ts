@@ -37,7 +37,9 @@ export type CauseKind =
   | "GpuDriver"
   | "Throttling"
   | "App"
-  | "Unclear";
+  | "Unclear"
+  | "DriverModule"
+  | "Frames";
 
 /** One statement in the forms the detail levels pick from: plain words, the numbers, the counters. */
 export interface Texts {
@@ -108,6 +110,8 @@ const ICON: Record<CauseKind, IconName> = {
   Throttling: "chip",
   App: "app",
   Unclear: "chip",
+  DriverModule: "chip",
+  Frames: "app",
 };
 
 /** Metrics that cross by falling below their threshold. */
@@ -225,6 +229,64 @@ function evidenceTexts(evidence: Evidence, cause: CauseKind): Texts {
       tech: k("ev.process.tech", { exe: name, pid: String(pid), name: k(`metric.${metric}`), value: shown }),
     };
   }
+  if ("Routine" in evidence) {
+    const r = evidence.Routine;
+    const max = formatUs(r.max_us);
+    return {
+      plain: k("ev.routine.plain", { module: r.module, max }),
+      figures: k("ev.routine.figures", { slow: formatNumber(r.at_least_100us), max }),
+      tech: k("ev.routine.tech", {
+        kind: r.kind.toUpperCase(),
+        module: r.module,
+        count: formatNumber(r.count),
+        max_us: formatNumber(r.max_us),
+        slow: formatNumber(r.at_least_100us),
+        long: formatNumber(r.at_least_1ms),
+        core: formatPercent(r.core_pct),
+      }),
+    };
+  }
+  if ("LongRoutine" in evidence) {
+    const { ts_ms, module, kind, us } = evidence.LongRoutine;
+    const time = formatClock(ts_ms);
+    return {
+      plain: k("ev.longroutine.plain", { module, time }),
+      figures: k("ev.longroutine.figures", { us: formatUs(us), time }),
+      tech: k("ev.longroutine.tech", { kind: kind.toUpperCase(), module, us: formatNumber(us), time }),
+    };
+  }
+  if ("Frames" in evidence) {
+    const f = evidence.Frames;
+    const app = appName(f.app);
+    return {
+      plain: kn("ev.frames.plain", f.hitches, { app }),
+      figures: k("ev.frames.figures", {
+        hitches: formatNumber(f.hitches),
+        frames: formatNumber(f.frames),
+        worst: formatMs(f.worst_ms),
+      }),
+      tech: k("ev.frames.tech", {
+        median: formatMs(f.median_ms),
+        worst: formatMs(f.worst_ms),
+        hitches: formatNumber(f.hitches),
+        frames: formatNumber(f.frames),
+      }),
+    };
+  }
+  if ("Hitch" in evidence) {
+    const { ts_ms, app, frame_ms } = evidence.Hitch;
+    const args = { app: appName(app), ms: formatMs(frame_ms), time: formatClock(ts_ms) };
+    return { plain: k("ev.hitch.plain", args), figures: k("ev.hitch.figures", args), tech: k("ev.hitch.tech", args) };
+  }
+  if ("Hiccup" in evidence) {
+    const { ts_ms, lag_ms } = evidence.Hiccup;
+    const args = { ms: formatMs(lag_ms), time: formatClock(ts_ms) };
+    return { plain: k("ev.hiccup.plain", args), figures: k("ev.hiccup.figures", args), tech: k("ev.hiccup.tech", args) };
+  }
+  if ("CaptureLoss" in evidence) {
+    const lost = formatNumber(evidence.CaptureLoss.lost_events);
+    return { plain: k("ev.loss.plain"), figures: k("ev.loss.figures", { lost }), tech: k("ev.loss.tech", { lost }) };
+  }
   const { name, duration_ms } = evidence.Hang;
   const duration = formatDuration(duration_ms);
   return {
@@ -282,7 +344,19 @@ function causeName(cause: Cause, o: Occurrence): { name: string; parts: string[]
   if ("Driver" in cause) {
     return { name: k("cause.Driver.name"), parts: [k("cause.Driver.sub", { core: k("core", { n: String(cause.Driver.core) }) })] };
   }
+  if ("DriverModule" in cause) {
+    const { module, intermediary } = cause.DriverModule;
+    return { name: module, parts: [k(intermediary ? "cause.DriverModule.intermediary" : "cause.DriverModule.sub")] };
+  }
+  if ("Frames" in cause) {
+    return { name: appName(cause.Frames.app), parts: [k("cause.Frames.sub")] };
+  }
   return { name: appName(cause.App.name), parts: [cause.App.name] };
+}
+
+/** A duration in microseconds, as milliseconds once it reaches one. */
+function formatUs(us: number): string {
+  return us >= 1000 ? formatMs(us / 1000) : k("us", { us: formatNumber(us) });
 }
 
 function suspectView(s: Suspect, o: Occurrence, level: DetailLevel): SuspectView {
@@ -326,6 +400,11 @@ function summaryOf(cause: Cause): string {
       .join(" ");
   }
   if ("Driver" in cause) return k("summary.Driver");
+  if ("DriverModule" in cause) {
+    const { module, intermediary } = cause.DriverModule;
+    return k(intermediary ? "summary.DriverModule.intermediary" : "summary.DriverModule", { module });
+  }
+  if ("Frames" in cause) return k("summary.Frames", { app: appName(cause.Frames.app) });
   return k("summary.App", { app: appName(cause.App.name) });
 }
 
@@ -340,11 +419,17 @@ export function stepsOf(suspects: Suspect[]): Step[] {
   const steps: Step[] = [];
   for (const s of suspects) {
     const app = typeof s.cause !== "string" && "App" in s.cause ? s.cause.App.name : null;
+    const driver = typeof s.cause !== "string" && "DriverModule" in s.cause ? s.cause.DriverModule.module : null;
     for (const step of s.next_steps) {
       if (step === "DeepCapture") continue;
-      const key = step === "ReportToAppVendor" && app ? `${step}:${app}` : step;
+      const key =
+        step === "ReportToAppVendor" && app
+          ? `${step}:${app}`
+          : step === "UpdateDriver" && driver
+            ? `${step}:${driver}`
+            : step;
       if (steps.some((known) => known.key === key)) continue;
-      steps.push({ key, text: k(`step.${step}`, { app: app ? appName(app) : "" }) });
+      steps.push({ key, text: k(`step.${step}`, { app: app ? appName(app) : "", driver: driver ?? "" }) });
     }
   }
   return steps;

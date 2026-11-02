@@ -2,6 +2,7 @@
 
 mod about;
 mod agent;
+mod capture;
 mod commands;
 mod history;
 mod live;
@@ -31,6 +32,11 @@ fn main() {
             commands::clear_history,
             commands::set_settings,
             commands::settings,
+            commands::start_capture,
+            commands::capture_run,
+            commands::import_captures,
+            commands::captures,
+            commands::capture,
             about::about,
             about::open_data_folder,
         ])

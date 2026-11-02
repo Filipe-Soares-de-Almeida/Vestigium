@@ -207,6 +207,7 @@ function build(spec: Spec): OccurrenceDto {
     sensitive: spec.sensitive ?? false,
     truncated: spec.truncated ?? false,
     chart: columns(samples, from, to),
+    capture: null,
   };
 }
 

@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use vestigium_core::{
-    Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, WinEvent, pc_state,
+    DeepCapture, Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, Suspect,
+    WinEvent, capture_findings, capture_suspects, pc_state,
 };
-use vestigium_store::{Store, StoreError};
+use vestigium_store::{CaptureSummary, Store, StoreError};
 
 /// Ranges up to this long are drawn from per-second samples, longer ones from minutes.
 pub const SECONDS_UP_TO_MS: i64 = 6 * 3_600_000;
@@ -68,6 +69,26 @@ pub struct OccurrenceDto {
     pub occurrence: Occurrence,
     /// The window second by second.
     pub chart: Columns,
+    /// What a deep capture that covered this window adds.
+    pub capture: Option<CaptureNote>,
+}
+
+/// A stored deep capture with what it names.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CaptureDto {
+    pub id: i64,
+    #[serde(flatten)]
+    pub capture: DeepCapture,
+    pub findings: Vec<Suspect>,
+}
+
+/// The suspects a deep capture adds to an occurrence it covered.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CaptureNote {
+    pub id: i64,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub suspects: Vec<Suspect>,
 }
 
 /// The watcher's database, read-only, opened when first needed and again after it goes away.
@@ -164,8 +185,26 @@ impl History {
     }
 
     pub fn occurrence(&mut self, id: i64) -> Result<Option<OccurrenceDto>, StoreError> {
-        let found = self.read(|store| store.occurrence(id))?;
-        Ok(found.flatten().map(|occurrence| {
+        let found = self.read(|store| {
+            let Some(occurrence) = store.occurrence(id)? else {
+                return Ok(None);
+            };
+            let (from, to) = (occurrence.window.from_ms, occurrence.window.to_ms);
+            let mut note = None;
+            for summary in store.captures(from, to)? {
+                if let Some(capture) = store.capture(summary.id)? {
+                    note = Some(CaptureNote {
+                        id: summary.id,
+                        start_ms: summary.start_ms,
+                        end_ms: summary.end_ms,
+                        suspects: capture_suspects(from, to, &capture),
+                    });
+                    break;
+                }
+            }
+            Ok(Some((occurrence, note)))
+        })?;
+        Ok(found.flatten().map(|(occurrence, capture)| {
             let window = &occurrence.window;
             let readings: Vec<Reading> = window.samples.iter().map(Reading::of_sample).collect();
             let start_ms = window.from_ms - window.from_ms.rem_euclid(SECOND_MS);
@@ -174,7 +213,28 @@ impl History {
                 id,
                 chart: columns(&buckets, start_ms, SECOND_MS, &[]),
                 occurrence,
+                capture,
             }
+        }))
+    }
+
+    /// Deep captures that overlap `[from_ms, to_ms]`, oldest first.
+    pub fn captures(
+        &mut self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<CaptureSummary>, StoreError> {
+        Ok(self
+            .read(|store| store.captures(from_ms, to_ms))?
+            .unwrap_or_default())
+    }
+
+    pub fn capture(&mut self, id: i64) -> Result<Option<CaptureDto>, StoreError> {
+        let found = self.read(|store| store.capture(id))?;
+        Ok(found.flatten().map(|capture| CaptureDto {
+            id,
+            findings: capture_findings(&capture),
+            capture,
         }))
     }
 

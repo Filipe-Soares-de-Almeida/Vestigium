@@ -34,6 +34,8 @@ pub enum UiError {
     Ipc(IpcError),
     #[error("{0}")]
     Failed(String),
+    #[error("the permission prompt was declined")]
+    Declined,
 }
 
 impl From<IpcError> for UiError {
@@ -62,6 +64,7 @@ impl Serialize for UiError {
             UiError::Store(_) => "store",
             UiError::Ipc(_) => "ipc",
             UiError::Failed(_) => "failed",
+            UiError::Declined => "declined",
         };
         Wire {
             kind,

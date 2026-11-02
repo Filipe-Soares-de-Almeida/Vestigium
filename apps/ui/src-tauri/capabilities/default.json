@@ -23,6 +23,11 @@
     "allow-settings",
     "allow-about",
     "allow-open-data-folder",
-    "allow-clear-history"
+    "allow-clear-history",
+    "allow-start-capture",
+    "allow-capture-run",
+    "allow-import-captures",
+    "allow-captures",
+    "allow-capture"
   ]
 }

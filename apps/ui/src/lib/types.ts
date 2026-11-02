@@ -134,7 +134,8 @@ export type NextStep =
   | "UpdateGpuDriver"
   | "EnableSensitiveMode"
   | "DeepCapture"
-  | "ReportToAppVendor";
+  | "ReportToAppVendor"
+  | "UpdateDriver";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -145,7 +146,9 @@ export type Cause =
   | "GpuDriver"
   | "Throttling"
   | { App: { name: string } }
-  | "Unclear";
+  | "Unclear"
+  | { DriverModule: { module: string; intermediary: boolean } }
+  | { Frames: { app: string } };
 
 export interface WinEvent {
   ts_ms: number;
@@ -170,7 +173,25 @@ export type Evidence =
       };
     }
   | { Process: { pid: number; name: string; metric: Metric; value: number } }
-  | { Hang: { name: string; duration_ms: number } };
+  | { Hang: { name: string; duration_ms: number } }
+  | {
+      Routine: {
+        module: string;
+        kind: RoutineKind;
+        count: number;
+        max_us: number;
+        at_least_100us: number;
+        at_least_1ms: number;
+        core_pct: number;
+      };
+    }
+  | { LongRoutine: { ts_ms: number; module: string; kind: RoutineKind; us: number } }
+  | {
+      Frames: { app: string; frames: number; hitches: number; worst_ms: number; median_ms: number };
+    }
+  | { Hitch: { ts_ms: number; app: string; frame_ms: number } }
+  | { Hiccup: { ts_ms: number; lag_ms: number } }
+  | { CaptureLoss: { lost_events: number } };
 
 export interface Suspect {
   cause: Cause;
@@ -270,6 +291,8 @@ export interface Occurrence {
 
 export interface OccurrenceDto extends Occurrence {
   id: number;
+  /** What a deep capture that covered this window adds. */
+  capture: CaptureNote | null;
   /** The window second by second. */
   chart: Columns;
 }
@@ -313,6 +336,8 @@ export interface AgentStatus {
   started_at_ms: number;
   last_sample_ms: number | null;
   last_error: string | null;
+  /** Sensitive mode saw stutters worth a deep capture. */
+  suggest_capture: boolean;
 }
 
 export type AgentLink =
@@ -384,10 +409,103 @@ export type UiErrorKind =
   | "start_timeout"
   | "store"
   | "ipc"
-  | "failed";
+  | "failed"
+  | "declined";
 
 /** What a failed command rejects with; the window words it from `kind`. */
 export interface UiError {
   kind: UiErrorKind;
   message: string;
+}
+
+export type RoutineKind = "Dpc" | "Isr";
+
+/** DPC or ISR calls of one driver; `buckets` follow the bounds 1, 2, 3, 4, 5, 10, 25, 50, 100, 250, 500, 1000 us. */
+export interface RoutineStats {
+  count: number;
+  total_us: number;
+  max_us: number;
+  buckets: number[];
+}
+
+export interface DriverLatency {
+  module: string;
+  dpc: RoutineStats;
+  isr: RoutineStats;
+}
+
+export interface LongRoutine {
+  ts_ms: number;
+  core: number;
+  module: string;
+  kind: RoutineKind;
+  us: number;
+}
+
+export interface AppFrames {
+  name: string;
+  pid: number;
+  frames: number;
+  median_ms: number;
+  p99_ms: number;
+  worst_ms: number;
+  hitches: number;
+}
+
+export interface FrameHitch {
+  ts_ms: number;
+  app: string;
+  pid: number;
+  frame_ms: number;
+  median_ms: number;
+}
+
+export interface ProbeHiccup {
+  ts_ms: number;
+  lag_ms: number;
+}
+
+/** Whether a part of the capture was measured, or why not. */
+export type CaptureSource = "Ok" | { Unavailable: string };
+
+export interface CaptureSummary {
+  id: number;
+  start_ms: number;
+  end_ms: number;
+}
+
+/** A stored deep capture with what it names. */
+export interface CaptureDto {
+  id: number;
+  start_ms: number;
+  end_ms: number;
+  kernel: CaptureSource;
+  frames: CaptureSource;
+  lost_events: number;
+  drivers: DriverLatency[];
+  longest: LongRoutine[];
+  apps: AppFrames[];
+  hitches: FrameHitch[];
+  hiccups: ProbeHiccup[];
+  findings: Suspect[];
+}
+
+/** What a deep capture that covered an occurrence adds to it. */
+export interface CaptureNote {
+  id: number;
+  start_ms: number;
+  end_ms: number;
+  suspects: Suspect[];
+}
+
+/** A deep capture under way. */
+export interface CaptureRun {
+  started_ms: number;
+  ends_ms: number;
+}
+
+/** Sent as the `capture-finished` event when the helper exits. */
+export interface CaptureFinished {
+  ids: number[];
+  exit_code: number | null;
 }

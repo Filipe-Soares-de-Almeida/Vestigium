@@ -52,6 +52,7 @@ const base: Record<string, Handler> = {
           started_at_ms: startedAt,
           last_sample_ms: Date.now(),
           last_error: null,
+          suggest_capture: query.get("suggest") === "1",
         }
       : { link: state.link },
   settings: () => {

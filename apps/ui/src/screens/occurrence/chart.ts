@@ -65,6 +65,8 @@ const RELEVANT: Record<CauseKind, LaneKey[]> = {
   Throttling: ["cpu"],
   App: ["cpu", "disk"],
   Unclear: ["cpu", "mem"],
+  DriverModule: ["cpu"],
+  Frames: ["gpu", "cpu"],
 };
 
 const TONES: LaneTone[] = ["calm", "busy", "press", "freeze"];

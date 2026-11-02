@@ -2,6 +2,9 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import type {
   AgentLink,
+  CaptureDto,
+  CaptureRun,
+  CaptureSummary,
   LiveMessage,
   MarksDto,
   OccurrenceDto,
@@ -65,4 +68,27 @@ export function settings(): Promise<SettingsDto> {
 
 export function setSettings(settings: Settings): Promise<void> {
   return invoke("set_settings", { settings });
+}
+
+/** Starts a deep capture in the elevated helper; Windows asks for permission first. */
+export function startCapture(minutes: number): Promise<CaptureRun> {
+  return invoke("start_capture", { minutes });
+}
+
+/** The deep capture this window started, while it runs. */
+export function captureRun(): Promise<CaptureRun | null> {
+  return invoke("capture_run");
+}
+
+/** Stores the finished captures the watcher has not stored yet; resolves to their ids. */
+export function importCaptures(): Promise<number[]> {
+  return invoke("import_captures");
+}
+
+export function captures(fromMs: number, toMs: number): Promise<CaptureSummary[]> {
+  return invoke("captures", { fromMs, toMs });
+}
+
+export function capture(id: number): Promise<CaptureDto | null> {
+  return invoke("capture", { id });
 }

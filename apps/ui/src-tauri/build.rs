@@ -15,6 +15,11 @@ const COMMANDS: &[&str] = &[
     "about",
     "open_data_folder",
     "clear_history",
+    "start_capture",
+    "capture_run",
+    "import_captures",
+    "captures",
+    "capture",
 ];
 
 fn main() {

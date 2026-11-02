@@ -28,6 +28,8 @@ export function causeName(cause: Cause): string {
     return process ? t(`${KEY}.cause.Cpu.process`, { process }) : t(`${KEY}.cause.Cpu`);
   }
   if ("Driver" in cause) return t(`${KEY}.cause.Driver`, { core: cause.Driver.core });
+  if ("DriverModule" in cause) return cause.DriverModule.module;
+  if ("Frames" in cause) return t(`${KEY}.cause.Frames`, { app: cause.Frames.app });
   return cause.App.name;
 }
 
@@ -43,6 +45,8 @@ export function causeReason(cause: Cause): string | null {
   if ("Memory" in cause) return t(`${KEY}.because.Memory`);
   if ("Cpu" in cause) return t(`${KEY}.because.Cpu`);
   if ("Driver" in cause) return t(`${KEY}.because.Driver`);
+  if ("DriverModule" in cause) return t(`${KEY}.because.DriverModule`, { module: cause.DriverModule.module });
+  if ("Frames" in cause) return t(`${KEY}.because.Frames`, { name: cause.Frames.app });
   return t(`${KEY}.because.App`, { name: cause.App.name });
 }
 
@@ -50,7 +54,7 @@ export function causeIcon(cause: Cause): IconName {
   if (typeof cause === "string") return cause === "GpuDriver" ? "gpu" : cause === "Throttling" ? "chip" : "app";
   if ("Storage" in cause || "DiskIo" in cause) return "disk";
   if ("Memory" in cause) return "memory";
-  if ("Cpu" in cause || "Driver" in cause) return "chip";
+  if ("Cpu" in cause || "Driver" in cause || "DriverModule" in cause) return "chip";
   return "app";
 }
 
