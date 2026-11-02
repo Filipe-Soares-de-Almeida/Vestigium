@@ -131,6 +131,9 @@ How to use this file:
 
 ### Fixed
 
+- A program with a long name no longer pushes "Using the most" on the Now screen past the edge of
+  its box. The name ends in "…" and shows in full on hover; the process and event tables of a
+  slowdown report and the app and driver tables of a capture do the same.
 - Moving to the live chart with the keyboard shows the newest reading, as on the day's timeline,
   instead of a ring around the chart.
 - A capture no longer counts the Windows desktop compositor, or an app that draws only when

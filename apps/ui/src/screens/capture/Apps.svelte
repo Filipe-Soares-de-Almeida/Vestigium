@@ -31,7 +31,7 @@
       <tbody>
         {#each all as app (app.pid)}
           <tr>
-            <td><b>{app.name}</b></td>
+            <td class="fill" title={app.name}>{app.name}</td>
             <td class="n">{app.pid}</td>
             <td class="n">{formatNumber(app.frames)}</td>
             <td class="n">{frameText(app.median_ms)}</td>
@@ -139,5 +139,8 @@
   .n {
     text-align: right;
     white-space: nowrap;
+  }
+  .fill {
+    font-weight: 600;
   }
 </style>

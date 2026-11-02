@@ -110,6 +110,7 @@
   }
   .who {
     min-width: 200px;
+    overflow-wrap: anywhere;
   }
   .who b {
     display: flex;

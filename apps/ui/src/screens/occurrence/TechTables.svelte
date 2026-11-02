@@ -52,7 +52,7 @@
         <tbody>
           {#each rows as row (row.pid)}
             <tr>
-              <th scope="row" title={row.name}>{row.name}</th>
+              <th scope="row" class="fill" title={row.name}>{row.name}</th>
               <td class="opt">{row.pid}</td>
               <td>{formatPercent(row.cpu, 1)}</td>
               <td>{formatBytes(row.mem)}</td>
@@ -85,7 +85,7 @@
             <tr>
               <td>{formatClock(event.ts_ms)}</td>
               <td class="opt">{event.channel}</td>
-              <th scope="row" title={event.provider}>{event.provider}</th>
+              <th scope="row" class="fill" title={event.provider}>{event.provider}</th>
               <td>{event.id}</td>
               <td>{t(`ui.occurrence.event.${event.meaning}`)}</td>
             </tr>
@@ -150,19 +150,16 @@
     text-align: left;
     white-space: normal;
   }
+  /* The provider shares the spare width with the meaning, which wraps. */
+  .events .fill {
+    width: 35%;
+  }
   .none {
     margin: 0;
     color: var(--ink2);
     font-size: 13px;
   }
   @container content (max-width: 720px) {
-    table:not(.events) {
-      table-layout: fixed;
-    }
-    table:not(.events) tbody th {
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
     th,
     td {
       padding: 6px 4px;

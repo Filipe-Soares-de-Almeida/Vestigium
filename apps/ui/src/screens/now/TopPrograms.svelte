@@ -27,7 +27,7 @@
       <tbody>
         {#each rows as row (row.pid)}
           <tr>
-            <th scope="row" title={row.name}>{row.name}</th>
+            <th scope="row" class="fill" title={row.name}>{row.name}</th>
             <td data-label={t("ui.now.top.cpu")}>{formatPercent(row.cpu_pct, 1)}</td>
             <td data-label={t("ui.now.top.memory")}>{formatBytes(row.private_bytes)}</td>
             <td data-label={t("ui.now.top.disk")}>{formatRate(row.read_bps + row.write_bps)}</td>
@@ -78,15 +78,6 @@
   tbody tr:last-child > * {
     border-bottom: 0;
   }
-  @container content (max-width: 720px) {
-    table {
-      table-layout: fixed;
-    }
-    tbody th {
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
   /* Too narrow for four columns: each program becomes its name over its labelled values. */
   @container top (max-width: 380px) {
     thead {
@@ -114,6 +105,7 @@
     }
     tbody th {
       flex-basis: 100%;
+      max-width: none;
     }
     tbody td::before {
       content: attr(data-label) " ";

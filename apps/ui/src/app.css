@@ -307,6 +307,17 @@ a {
   height: 40px;
   border-radius: 12px;
 }
+/* A table's name cell: its column takes the spare width and a long name ends in an ellipsis,
+   so the table never grows past its box. It keeps 8em when the other columns crowd it out. */
+td.fill,
+th.fill {
+  width: 100%;
+  min-width: 8em;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* The content column is the container; below 720 px two-column grids stack. */
 .split {
