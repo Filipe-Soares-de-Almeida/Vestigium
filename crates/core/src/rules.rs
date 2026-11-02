@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::episode::MEMORY_HIGH_PCT;
 use crate::process::per_program;
 use crate::{
-    DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, Sample, Trigger, WinEvent, Window,
-    classify,
+    DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, RoutineKind, Sample, Trigger,
+    WinEvent, Window, classify,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -79,6 +79,13 @@ pub enum Cause {
         name: String,
     },
     Unclear,
+    DriverModule {
+        module: String,
+        intermediary: bool,
+    },
+    Frames {
+        app: String,
+    },
 }
 
 /// A value from the window that backs a suspect; the words come from the UI.
@@ -107,6 +114,40 @@ pub enum Evidence {
         name: String,
         duration_ms: i64,
     },
+    Routine {
+        module: String,
+        kind: RoutineKind,
+        count: u64,
+        max_us: u32,
+        at_least_100us: u64,
+        at_least_1ms: u64,
+        core_pct: f32,
+    },
+    LongRoutine {
+        ts_ms: i64,
+        module: String,
+        kind: RoutineKind,
+        us: u32,
+    },
+    Frames {
+        app: String,
+        frames: u32,
+        hitches: u32,
+        worst_ms: f32,
+        median_ms: f32,
+    },
+    Hitch {
+        ts_ms: i64,
+        app: String,
+        frame_ms: f32,
+    },
+    Hiccup {
+        ts_ms: i64,
+        lag_ms: f32,
+    },
+    CaptureLoss {
+        lost_events: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +163,7 @@ pub enum NextStep {
     EnableSensitiveMode,
     DeepCapture,
     ReportToAppVendor,
+    UpdateDriver,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

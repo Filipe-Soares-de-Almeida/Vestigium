@@ -1,6 +1,7 @@
 //! Domain types and rules for Vestigium.
 
 mod blackbox;
+mod capture;
 mod episode;
 mod event;
 mod facts;
@@ -24,6 +25,12 @@ mod window;
 pub use blackbox::{
     Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, RING_MS,
     RecentState, Timing,
+};
+pub use capture::{
+    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_VERSION, CaptureSource, DeepCapture,
+    DriverLatency, FrameAggregator, FrameHitch, HITCH_FACTOR, HITCH_MIN_MS, HITCHES_KEPT,
+    LONGEST_KEPT, LongRoutine, ModuleMap, ProbeHiccup, RoutineAggregator, RoutineKind,
+    RoutineStats, capture_findings, capture_suspects, is_intermediary, is_kernel_core,
 };
 pub use episode::{
     Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, PressureSpan, QUIET_MS,
