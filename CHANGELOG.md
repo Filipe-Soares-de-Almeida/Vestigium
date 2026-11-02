@@ -42,7 +42,7 @@ How to use this file:
   Time the PC spent asleep or with watching paused never counts as a freeze. The tray tooltip says
   how many slowdowns the last 24 hours held.
 - The window now has its own layout: a title bar with the Vestigium mark, a navigation pane with
-  Today and Now (Health and Dumps are marked as coming soon), and Settings at the bottom next to
+  Today and Now (Dumps is marked as coming soon), and Settings at the bottom next to
   whether Vestigium is watching, paused or not running. It shows in English or Brazilian
   Portuguese, light or dark, and in one of four colour themes (Red, Graphite, Slate, Indigo),
   following Windows until you choose otherwise. When watching is paused, a banner offers to resume
@@ -103,6 +103,15 @@ How to use this file:
 - The tray icon asks for attention while a critical health point is open, such as a disk that
   reports it is failing or a system drive almost full, and its tooltip says how many. A quiet day
   with no critical point keeps the icon calm.
+- Health, in the navigation pane, shows the PC by area (disks, falls and shutdowns, memory,
+  startup, hardware and graphics, protection), each with its worst mark. An area opens the points
+  that ask for attention, each with its value next to the healthy range, why Vestigium says so and
+  what to do, and lists what it checked without an alert and what resolved in the last 30 days.
+  Marks use a shape and a word, never colour alone. Today shows a Health card while a point is
+  open, and the navigation pane counts the open points.
+- A full scan, on the Health page, reads what Windows shows only with administrator permission,
+  such as what slows startup, after Windows asks for that permission once. It only reads and
+  changes nothing.
 
 ### Changed
 

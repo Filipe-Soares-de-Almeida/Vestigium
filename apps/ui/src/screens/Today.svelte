@@ -11,6 +11,7 @@
   import { href } from "../lib/router.svelte";
   import { buildDay, type Day, dayStart, rangeStart } from "./today/day";
   import Days from "./today/Days.svelte";
+  import HealthCard from "./today/HealthCard.svelte";
   import Moments from "./today/Moments.svelte";
   import States from "./today/States.svelte";
   import { lede } from "./today/text";
@@ -89,7 +90,10 @@
   <States {day} {level} />
   <div class="split">
     <Moments items={day.items} {level} />
-    <Days days={day.days} />
+    <div class="stack">
+      <HealthCard />
+      <Days days={day.days} />
+    </div>
   </div>
 {:else if error !== null}
   <ErrorView {error} onretry={retry} />

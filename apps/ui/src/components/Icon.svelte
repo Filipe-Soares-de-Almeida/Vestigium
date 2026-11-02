@@ -22,6 +22,8 @@
     play: [20, '<rect x="2.5" y="4" width="15" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8.5 7.6v4.8l3.8-2.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>'],
     pc: [20, '<rect x="2.5" y="3.5" width="15" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 16.5h6M10 13.5v3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'],
     wave: [20, '<path d="M2 10h3l1.6-4.5 2.4 9 1.8-4.5h1.4l1.4 2.5 1.4-5 1.2 2.5H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'],
+    power: [20, '<path d="M10 3v6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6 5.6a6 6 0 108 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'],
+    clock: [20, '<circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4.2l2.8 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'],
     info: [20, '<circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.5M10 6.6v.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'],
   } as const satisfies Record<string, readonly [number, string]>;
 

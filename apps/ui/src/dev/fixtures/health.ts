@@ -1,4 +1,4 @@
-// Health page data. URL: ?health=none|attention|critical (default critical) &scan-ms=<wait> &scan-fail=1
+// Health page data. URL: ?health=none|attention|critical (default critical) &scan-never=1 &scan-ms=<wait> &scan-fail=1
 import type { FindingDto, HealthDto, ScanFinished } from "../../lib/types";
 import type { Handler } from "../mock";
 
@@ -6,6 +6,7 @@ const query = new URLSearchParams(location.search);
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const now = Date.now();
+let lastScan: number | null = query.get("scan-never") === "1" ? null : now - 3 * DAY;
 
 const failingDisk: FindingDto = {
   id: 1,
@@ -93,7 +94,7 @@ function data(): HealthDto {
   return {
     open,
     closed: [slowBoot],
-    last_scan_ms: query.get("scan-never") === "1" ? null : now - 3 * DAY,
+    last_scan_ms: lastScan,
     boot: {
       boots: [{ ts_ms: now - 12 * DAY, boot_ms: 108_457, main_path_ms: 68_757, post_boot_ms: 39_700 }],
       delays: [],
@@ -105,8 +106,8 @@ export const handlers: Record<string, Handler> = {
   health: () => data(),
   start_scan: async () => {
     await new Promise((resolve) => setTimeout(resolve, Number(query.get("scan-ms") ?? 1500)));
-    return (query.get("scan-fail") === "1"
-      ? { scans: [], exit_code: 1 }
-      : { scans: [1], exit_code: 0 }) satisfies ScanFinished;
+    if (query.get("scan-fail") === "1") return { scans: [], exit_code: 1 } satisfies ScanFinished;
+    lastScan = Date.now();
+    return { scans: [1], exit_code: 0 } satisfies ScanFinished;
   },
 };

@@ -1,5 +1,5 @@
 // Screens are addressed by the URL hash: #/today, #/occurrence/<id>, #/now, #/captures[?for=<occurrence id>],
-// #/capture/<id>, #/settings[/<category>].
+// #/capture/<id>, #/health[/<area>], #/settings[/<category>].
 
 export type Route =
   | { screen: "today" }
@@ -7,6 +7,7 @@ export type Route =
   | { screen: "now" }
   | { screen: "captures"; forOccurrence: number | null }
   | { screen: "capture"; id: number }
+  | { screen: "health"; area: string | null }
   | { screen: "settings"; category: string | null };
 
 export type Screen = Route["screen"];
@@ -17,6 +18,7 @@ export const href = {
   now: () => "#/now",
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
   capture: (id: number) => `#/capture/${id}`,
+  health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
   settings: (category?: string) => (category ? `#/settings/${category}` : "#/settings"),
 };
 
@@ -32,6 +34,7 @@ export function parse(hash: string): Route {
     const given = new URLSearchParams(query).get("for") ?? "";
     return { screen: "captures", forOccurrence: /^\d+$/.test(given) ? Number(given) : null };
   }
+  if (screen === "health") return { screen: "health", area: arg || null };
   if (screen === "settings") return { screen: "settings", category: arg || null };
   return { screen: "today" };
 }
@@ -43,11 +46,12 @@ class Router {
   get key(): string {
     const route = this.current;
     if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
+    if (route.screen === "health") return `health/${route.area ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }
 
   /** The navigation pane item a screen belongs to. */
-  get section(): "today" | "now" | "captures" | "settings" {
+  get section(): "today" | "now" | "captures" | "health" | "settings" {
     const screen = this.current.screen;
     return screen === "occurrence" ? "today" : screen === "capture" ? "captures" : screen;
   }

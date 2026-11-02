@@ -1,10 +1,13 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
-  import { t } from "../lib/i18n.svelte";
+  import { health } from "../lib/health.svelte";
+  import { t, tn } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
+  import ConcernMark from "./ConcernMark.svelte";
   import Icon from "./Icon.svelte";
 
+  const open = $derived(health.dto?.open.length ?? 0);
   const status = $derived(
     app.link === null
       ? { tone: "off", key: "ui.shell.status.connecting" }
@@ -37,9 +40,20 @@
   >
     <Icon name="captures" />{t("ui.shell.nav.captures")}
   </a>
-  <span class="nav soon-item">
-    <Icon name="health" />{t("ui.shell.nav.health")}<span class="soon">{t("ui.shell.nav.soon")}</span>
-  </span>
+  <a class="nav" href={href.health()} aria-current={router.section === "health" ? "page" : undefined}>
+    <Icon name="health" />{t("ui.shell.nav.health")}
+    {#if open}
+      <span class="count">
+        {#if health.critical}<ConcernMark mark="Critical" word={false} />{/if}
+        <span aria-hidden="true">{open}</span>
+        <span class="sr">
+          {tn("ui.shell.nav.health.open", open)}{health.critical
+            ? `, ${tn("ui.shell.nav.health.critical", health.critical)}`
+            : ""}
+        </span>
+      </span>
+    {/if}
+  </a>
   <span class="nav soon-item">
     <Icon name="dumps" />{t("ui.shell.nav.dumps")}<span class="soon">{t("ui.shell.nav.soon")}</span>
   </span>
@@ -107,6 +121,24 @@
     font: 400 11px/18px var(--f);
     white-space: nowrap;
   }
+  .count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 0 7px;
+    border-radius: 9px;
+    background: var(--stroke2);
+    color: var(--ink);
+    font: 600 11px/18px var(--f);
+  }
+  .count :global(.cn) {
+    gap: 0;
+  }
+  .count :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
   .sep {
     flex: none;
     margin: 6px 10px;
@@ -149,6 +181,9 @@
     }
     .soon-item {
       color: GrayText;
+    }
+    .count {
+      border: 1px solid CanvasText;
     }
     .nav[aria-current="page"]::before {
       forced-color-adjust: none;
