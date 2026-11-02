@@ -121,6 +121,8 @@ How to use this file:
 
 ### Changed
 
+- On its first run the watcher reads the last 30 days of the Windows events it follows instead of
+  the last 7, so the health checks that look back a month see the whole month from the start.
 - Sensitive mode now also catches hitches from 8 ms, where it caught only those of 50 ms and up,
   and the tray says when hitches were seen.
 - The project is now called Vestigium, and its GitHub repository was renamed to match. Links to

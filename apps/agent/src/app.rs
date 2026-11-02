@@ -31,7 +31,7 @@ const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 /// How far back the first run reads the curated Windows events.
-const EVENT_BACKFILL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const EVENT_BACKFILL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Ten minutes of readings at 1 Hz, with room for late ticks.
 const READINGS_KEPT: usize = 660;
 
