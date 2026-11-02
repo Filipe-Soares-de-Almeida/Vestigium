@@ -27,7 +27,8 @@ pub struct PassNow<'a> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PassOutcome {
     pub changes: usize,
-    pub critical: bool,
+    /// Findings rated critical after this pass.
+    pub critical: u32,
     /// The Security Center was asked, so the pages it touched can be handed back.
     pub asked_security_center: bool,
 }
@@ -108,7 +109,10 @@ impl<S: HealthSource> HealthPass<S> {
         store.apply_findings(&changes, now.ts_ms)?;
         Ok(PassOutcome {
             changes: changes.len(),
-            critical: fresh.iter().any(|f| f.concern == Concern::Critical),
+            critical: fresh
+                .iter()
+                .filter(|f| f.concern == Concern::Critical)
+                .count() as u32,
             asked_security_center,
         })
     }
@@ -243,7 +247,7 @@ mod tests {
 
         let first = run(&mut pass, &mut store, NOW, &[]);
         assert_eq!(first.changes, 1);
-        assert!(first.critical);
+        assert_eq!(first.critical, 1);
         assert_eq!(
             store.open_findings().unwrap()[0].finding.kind,
             FindingKind::LowSpace
@@ -252,7 +256,7 @@ mod tests {
         pass.source.free_gb = 50;
         let second = run(&mut pass, &mut store, NOW + DAY_MS / 24, &[]);
         assert_eq!(second.changes, 1);
-        assert!(!second.critical);
+        assert_eq!(second.critical, 0);
         assert!(store.open_findings().unwrap().is_empty());
     }
 

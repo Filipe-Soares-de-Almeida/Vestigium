@@ -55,6 +55,8 @@ pub struct RecentState {
     pub severe: u32,
     /// Pressure episodes; hints are left out.
     pub episodes: u32,
+    /// Health findings rated critical that are open now.
+    pub critical_findings: u32,
 }
 
 /// Something counted by `RecentState`.

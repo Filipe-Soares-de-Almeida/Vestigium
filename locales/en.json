@@ -8,6 +8,7 @@
   "tray.tooltip.sensitive": "Vestigium — watching closely (sensitive mode)",
   "tray.tooltip.attention": "Vestigium — watching · slowdowns in the last 24 h: {count}",
   "tray.tooltip.problem": "Vestigium — watching · severe freezes in the last 24 h: {count}",
+  "tray.tooltip.health": "Vestigium — watching · critical points in Health: {count}",
   "tray.tooltip.suggest_capture": "Hitches seen: open Vestigium to look into them",
   "tray.autostart": "Start with Windows",
   "tray.exit": "Exit",

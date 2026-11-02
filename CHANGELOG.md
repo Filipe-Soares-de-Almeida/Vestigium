@@ -100,6 +100,9 @@ How to use this file:
   field for the length, for stutters too rare to show up in ten minutes.
 - The watcher also keeps the Windows warning that a crash dump could not be prepared, which
   explains a blue screen that left no dump behind; it shows among the events of an occurrence.
+- The tray icon asks for attention while a critical health point is open, such as a disk that
+  reports it is failing or a system drive almost full, and its tooltip says how many. A quiet day
+  with no critical point keeps the icon calm.
 
 ### Changed
 

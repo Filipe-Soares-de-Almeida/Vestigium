@@ -22,6 +22,8 @@ use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
+use vestigium_core::health::Concern;
+
 use crate::app::lock;
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
@@ -153,6 +155,8 @@ struct Sampler {
     /// When each disk last had I/O.
     disk_active_ms: HashMap<String, i64>,
     commit_limit_bytes: u64,
+    /// Critical health findings open now, for the tray.
+    critical_findings: u32,
 }
 
 /// The data sources a tick reads, opened once on the sampler thread.
@@ -212,6 +216,7 @@ impl Sampler {
             first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
             disk_active_ms: HashMap::new(),
             commit_limit_bytes: 0,
+            critical_findings: 0,
             store,
         };
         sampler.recall_last_day(now);
@@ -226,6 +231,12 @@ impl Sampler {
 
     /// Counts what the history already holds for the last 24 h, so the tray survives a restart.
     fn recall_last_day(&mut self, now: i64) {
+        if let Ok(open) = self.store.open_findings() {
+            self.critical_findings = open
+                .iter()
+                .filter(|f| f.finding.concern == Concern::Critical)
+                .count() as u32;
+        }
         if let Ok(occurrences) = self.store.occurrences(now - DAY_MS, now) {
             lock(&self.now).latest = occurrences.last().cloned();
             for o in occurrences {
@@ -461,8 +472,13 @@ impl Sampler {
             commit_limit_bytes: self.commit_limit_bytes,
         };
         match self.health.run(&mut self.store, &now) {
-            Ok(outcome) if outcome.asked_security_center => release_idle_pages(),
-            Ok(_) => {}
+            Ok(outcome) => {
+                self.critical_findings = outcome.critical;
+                self.publish_recent(ts_ms);
+                if outcome.asked_security_center {
+                    release_idle_pages();
+                }
+            }
             Err(err) => self.report(&err),
         }
     }
@@ -549,7 +565,10 @@ impl Sampler {
     }
 
     fn publish_recent(&self, now: i64) {
-        let recent = self.blackbox.recent(now);
+        let recent = RecentState {
+            critical_findings: self.critical_findings,
+            ..self.blackbox.recent(now)
+        };
         let mut shown = lock(&self.recent);
         if *shown != recent {
             *shown = recent;

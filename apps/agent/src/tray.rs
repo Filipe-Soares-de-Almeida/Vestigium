@@ -46,6 +46,7 @@ struct Texts {
     /// Templates with a `{count}` of the last 24 h.
     attention: String,
     problem: String,
+    health: String,
     /// The extra tooltip line that points to the deep capture.
     suggest_capture: String,
     pause: String,
@@ -60,6 +61,7 @@ impl Texts {
             sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
             attention: catalog.get("tray.tooltip.attention").to_string(),
             problem: catalog.get("tray.tooltip.problem").to_string(),
+            health: catalog.get("tray.tooltip.health").to_string(),
             suggest_capture: catalog.get("tray.tooltip.suggest_capture").to_string(),
             pause: catalog.get("tray.pause").to_string(),
             resume: catalog.get("tray.resume").to_string(),
@@ -75,6 +77,7 @@ impl Texts {
             match now.recent {
                 Level::Normal => self.watching.clone(),
                 Level::Attention(n) => self.attention.replace("{count}", &n.to_string()),
+                Level::Health(n) => self.health.replace("{count}", &n.to_string()),
                 Level::Problem(n) => self.problem.replace("{count}", &n.to_string()),
             }
         };
@@ -107,7 +110,7 @@ impl Shown {
         } else {
             match self.recent {
                 Level::Normal => Badge::None,
-                Level::Attention(_) => Badge::Attention,
+                Level::Attention(_) | Level::Health(_) => Badge::Attention,
                 Level::Problem(_) => Badge::Problem,
             }
         }
@@ -119,13 +122,15 @@ impl Shown {
     }
 }
 
-/// What the last 24 h held: nothing, slowdowns, or a severe freeze.
+/// What the last 24 h held: nothing, slowdowns, or a severe freeze; or, when calm, a critical
+/// health finding.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Level {
     #[default]
     Normal,
     Attention(u32),
     Problem(u32),
+    Health(u32),
 }
 
 impl Level {
@@ -134,6 +139,8 @@ impl Level {
             Level::Problem(recent.severe)
         } else if recent.occurrences + recent.episodes > 0 {
             Level::Attention(recent.occurrences + recent.episodes)
+        } else if recent.critical_findings > 0 {
+            Level::Health(recent.critical_findings)
         } else {
             Level::Normal
         }
@@ -142,7 +149,7 @@ impl Level {
     pub fn state(self) -> TrayState {
         match self {
             Level::Normal => TrayState::Normal,
-            Level::Attention(_) => TrayState::Attention,
+            Level::Attention(_) | Level::Health(_) => TrayState::Attention,
             Level::Problem(_) => TrayState::Problem,
         }
     }
@@ -312,6 +319,10 @@ mod tests {
             Badge::Attention
         );
         assert_eq!(shown(false, false, Level::Normal).badge(), Badge::None);
+        assert_eq!(
+            shown(false, false, Level::Health(1)).badge(),
+            Badge::Attention
+        );
     }
 
     #[test]
@@ -322,6 +333,7 @@ mod tests {
             sensitive: "closely".to_string(),
             attention: "slow {count}".to_string(),
             problem: "severe {count}".to_string(),
+            health: "health {count}".to_string(),
             suggest_capture: "look into it".to_string(),
             pause: String::new(),
             resume: String::new(),
@@ -352,11 +364,29 @@ mod tests {
             occurrences: 2,
             severe: 0,
             episodes: 1,
+            critical_findings: 0,
         };
         let severe = RecentState { severe: 1, ..slow };
+        let unhealthy = RecentState {
+            critical_findings: 2,
+            ..quiet
+        };
 
         assert_eq!(Level::of(&quiet), Level::Normal);
         assert_eq!(Level::of(&slow), Level::Attention(3));
         assert_eq!(Level::of(&severe), Level::Problem(1));
+        assert_eq!(Level::of(&unhealthy), Level::Health(2));
+        assert_eq!(
+            Level::of(&unhealthy).state(),
+            vestigium_ipc::TrayState::Attention
+        );
+        assert_eq!(
+            Level::of(&RecentState {
+                critical_findings: 2,
+                ..slow
+            }),
+            Level::Attention(3),
+            "slowdowns speak first"
+        );
     }
 }

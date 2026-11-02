@@ -8,6 +8,7 @@
   "tray.tooltip.sensitive": "Vestigium — observando de perto (modo sensível)",
   "tray.tooltip.attention": "Vestigium — observando · lentidões nas últimas 24 h: {count}",
   "tray.tooltip.problem": "Vestigium — observando · travamentos graves nas últimas 24 h: {count}",
+  "tray.tooltip.health": "Vestigium — observando · pontos críticos na Saúde: {count}",
   "tray.tooltip.suggest_capture": "Engasgos vistos: abra o Vestigium para investigá-los",
   "tray.autostart": "Iniciar com o Windows",
   "tray.exit": "Sair",

@@ -469,6 +469,7 @@ mod tests {
             occurrences: 1,
             severe: 1,
             episodes: 0,
+            critical_findings: 0,
         };
 
         let Response::Status(status) = handle(Request::Status, &shared, None) else {
