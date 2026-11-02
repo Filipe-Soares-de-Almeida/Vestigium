@@ -29,12 +29,15 @@ opens. It watches the one PC it is installed on.
 > [!WARNING]
 > Vestigium is in early development and there is no build to install yet.
 > What works today, built from source: the background watcher, which records
-> freezes, stutters in sensitive mode, apps that stop responding and stretches
-> of CPU, memory or disk pressure; the deep capture, which for a few minutes and
-> with administrator permission names the driver or the app behind stutters;
-> and the window, with the day's timeline, a report for each freeze with its
-> likely cause and the evidence, the captures and what each one found, the live
-> view of the last ten minutes, and the settings.
+> freezes, stutters in sensitive mode, apps that stop responding, stretches of
+> CPU, memory or disk pressure, and falls of the whole PC such as a blue screen;
+> the health checks, which watch disks, free space, memory, shutdowns, startup,
+> hardware and antivirus every hour; the deep capture and the full health scan,
+> which ask for administrator permission once; and the window, with the day's
+> timeline, a report for each freeze or fall with its likely cause and the
+> evidence, the health of the PC by area with what to do about each point, the
+> captures and what each one found, the live view of the last ten minutes, and
+> the settings.
 
 ## Highlights
 
@@ -42,7 +45,9 @@ opens. It watches the one PC it is installed on.
   seconds and comes back, or stutters in a game, a video or a call, the report
   says when it happened, how long it lasted, what was running and which cause
   the readings point to — a storage reset, the graphics driver, memory
-  pressure, CPU throttling, one app. When nothing matches, it says so.
+  pressure, CPU throttling, one app. When nothing matches, it says so. A fall
+  of the whole PC — a blue screen, the power button held down, a power cut —
+  gets a report too, with what the PC was doing in the two minutes before.
 - **The minutes before are already stored.** The agent keeps a rolling
   window of system load, the busiest processes and Windows events, so a report
   covers what led up to a stop of a fraction of a second or a full minute, and
