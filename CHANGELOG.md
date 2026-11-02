@@ -131,6 +131,8 @@ How to use this file:
 
 ### Fixed
 
+- Moving to the live chart with the keyboard shows the newest reading, as on the day's timeline,
+  instead of a ring around the chart.
 - A capture no longer counts the Windows desktop compositor, or an app that draws only when
   something on screen changes, as stuttering: their pauses are idle time, not late frames. Captures
   already stored are read the same way.

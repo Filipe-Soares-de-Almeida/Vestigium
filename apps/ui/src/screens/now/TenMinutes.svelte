@@ -194,6 +194,9 @@
         if (zoom.drag(event)) chart?.readAt(null);
       }}
       {onkeydown}
+      onfocus={() => {
+        if (plot?.matches(":focus-visible") && !readout) chart?.readAt(0);
+      }}
       onblur={() => chart?.readAt(null)}
     >
       <div class="canvas" style:height="{HEIGHT}px" bind:this={host}></div>
@@ -310,8 +313,9 @@
     min-width: 0;
     border-radius: 8px;
   }
+  /* Keyboard focus shows as the readout at the newest second, not as a ring. */
   .plot:focus-visible {
-    outline-offset: 6px;
+    outline: none;
   }
   .canvas :global(.u-cursor-x) {
     border-right: 1px solid var(--ink3);
