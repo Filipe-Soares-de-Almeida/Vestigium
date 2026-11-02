@@ -2,6 +2,7 @@
 
 mod blackbox;
 mod capture;
+mod dump;
 mod episode;
 mod event;
 mod facts;
@@ -36,6 +37,10 @@ pub use capture::{
     LONGEST_KEPT, LongRoutine, ModuleMap, ON_DEMAND_SHARE, ProbeHiccup, RoutineAggregator,
     RoutineKind, RoutineStats, capture_findings, capture_suspects, is_compositor, is_intermediary,
     is_kernel_core, renders_steadily, steady_only,
+};
+pub use dump::{
+    Analysis, DUMP_FALL_REACH_MS, DUMP_VERSION, DumpCulprit, DumpKind, DumpRecord, Fault,
+    bug_check_report, dump_culprit, dump_of_fall, fault_address, kernel_dump_kind,
 };
 pub use episode::{
     Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, PressureSpan, QUIET_MS,

@@ -381,11 +381,19 @@ pub fn is_intermediary(module: &str) -> bool {
     NAMES.iter().any(|n| module.eq_ignore_ascii_case(n))
 }
 
-/// The kernel and the HAL: they run everyone's routines and are never named.
+/// The kernel and the HAL, under each image name Windows loads them as; they run everyone's
+/// routines and are never named.
 pub fn is_kernel_core(module: &str) -> bool {
-    ["ntoskrnl.exe", "hal.dll"]
-        .iter()
-        .any(|n| module.eq_ignore_ascii_case(n))
+    [
+        "ntoskrnl.exe",
+        "ntkrnlmp.exe",
+        "ntkrnlpa.exe",
+        "ntkrpamp.exe",
+        "ntkrla57.exe",
+        "hal.dll",
+    ]
+    .iter()
+    .any(|n| module.eq_ignore_ascii_case(n))
 }
 
 /// A module worth naming: not the kernel core and not an address no image holds.
