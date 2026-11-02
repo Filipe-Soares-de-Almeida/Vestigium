@@ -2,6 +2,7 @@
 
 mod cpu;
 mod disk;
+mod frame;
 mod hang;
 mod memory;
 mod starve;
@@ -44,6 +45,11 @@ enum Scenario {
     Starve {
         seconds: u64,
     },
+    FrameHitch {
+        seconds: u64,
+        every_secs: u64,
+        hitch_ms: u64,
+    },
 }
 
 impl Scenario {
@@ -67,6 +73,9 @@ impl Scenario {
             }
             Scenario::Starve { .. } => {
                 "a freeze occurrence of 1-5 s, with CPU as the top suspect and vestigium-scenarios.exe first"
+            }
+            Scenario::FrameHitch { .. } => {
+                "in a deep capture, vestigium-scenarios.exe with one hitched frame at each stall"
             }
         }
     }
@@ -97,6 +106,11 @@ impl Scenario {
             }
             Scenario::HangWindow { seconds } => hang::hang(seconds),
             Scenario::Starve { seconds } => starve::starve(seconds),
+            Scenario::FrameHitch {
+                seconds,
+                every_secs,
+                hitch_ms,
+            } => frame::hitch(seconds, every_secs, hitch_ms),
         }
     }
 }
@@ -149,7 +163,8 @@ fn usage() -> String {
   disk-saturate    --file <path> [--seconds 45] [--threads 16] [--create-gb N]
   io-burst         --file <path on the system disk> [--seconds 20] [--create-gb N]
   hang-window      [--seconds 12]
-  starve           [--seconds 3]   (elevated terminal; never more than 5 s)"
+  starve           [--seconds 3]   (elevated terminal; never more than 5 s)
+  frame-hitch      [--seconds 60] [--every 3] [--hitch-ms 120]"
         .to_string()
 }
 
@@ -181,6 +196,11 @@ fn parse(args: &[String]) -> Result<Scenario, String> {
         },
         "starve" => Scenario::Starve {
             seconds: options.number("--seconds", 3)?.clamp(1, 5),
+        },
+        "frame-hitch" => Scenario::FrameHitch {
+            seconds: options.number("--seconds", 60)?.clamp(5, 600),
+            every_secs: options.number("--every", 3)?.clamp(1, 60),
+            hitch_ms: options.number("--hitch-ms", 120)?.clamp(20, 2000),
         },
         other => return Err(format!("unknown scenario {other}\n{}", usage())),
     };
