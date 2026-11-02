@@ -29,8 +29,9 @@ pub use blackbox::{
 pub use capture::{
     AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_VERSION, CaptureSource, DeepCapture,
     DriverLatency, FrameAggregator, FrameHitch, HITCH_FACTOR, HITCH_MIN_MS, HITCHES_KEPT,
-    LONGEST_KEPT, LongRoutine, ModuleMap, ProbeHiccup, RoutineAggregator, RoutineKind,
-    RoutineStats, capture_findings, capture_suspects, is_intermediary, is_kernel_core,
+    LONGEST_KEPT, LongRoutine, ModuleMap, ON_DEMAND_SHARE, ProbeHiccup, RoutineAggregator,
+    RoutineKind, RoutineStats, capture_findings, capture_suspects, is_compositor, is_intermediary,
+    is_kernel_core, renders_steadily, steady_only,
 };
 pub use episode::{
     Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, PressureSpan, QUIET_MS,

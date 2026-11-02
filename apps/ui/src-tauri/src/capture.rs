@@ -12,8 +12,8 @@ use windows::core::{PCWSTR, w};
 
 use crate::agent::UiError;
 
-/// Capture lengths the window offers, in minutes.
-pub const CAPTURE_MINUTES: [u64; 3] = [2, 5, 10];
+/// Capture lengths the window accepts, in minutes.
+pub const CAPTURE_MINUTES: std::ops::RangeInclusive<u64> = 1..=60;
 
 /// A deep capture under way: when it started and when it should end, Unix epoch milliseconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

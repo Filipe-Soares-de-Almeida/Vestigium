@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Exit code for a job the helper does not run.
 pub const REFUSED: u8 = 2;
-pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=10;
+pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=60;
 
 /// The closed list of jobs.
 #[derive(Debug, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
     }
     let minutes = minutes.ok_or("--minutes is required")?;
     if !MINUTES.contains(&minutes) {
-        return Err(format!("--minutes must be 1 to 10, not {minutes}"));
+        return Err(format!("--minutes must be 1 to 60, not {minutes}"));
     }
     Ok(Job::DeepCapture {
         minutes,
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn minutes_out_of_range_is_refused() {
-        for m in ["0", "11", "-1", "five"] {
+        for m in ["0", "61", "-1", "five"] {
             assert!(parse(&args(&["deep-capture", "--minutes", m, "--out", "x"])).is_err());
         }
     }

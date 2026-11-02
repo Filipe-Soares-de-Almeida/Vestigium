@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use vestigium_core::{
     DeepCapture, Episode, Gap, MINUTE_MS, Occurrence, OccurrenceSummary, PcState, Reading, Suspect,
-    WinEvent, capture_findings, capture_suspects, pc_state,
+    WinEvent, capture_findings, capture_suspects, pc_state, steady_only,
 };
 use vestigium_store::{CaptureSummary, Store, StoreError};
 
@@ -231,10 +231,13 @@ impl History {
 
     pub fn capture(&mut self, id: i64) -> Result<Option<CaptureDto>, StoreError> {
         let found = self.read(|store| store.capture(id))?;
-        Ok(found.flatten().map(|capture| CaptureDto {
-            id,
-            findings: capture_findings(&capture),
-            capture,
+        Ok(found.flatten().map(|capture| {
+            let capture = steady_only(&capture);
+            CaptureDto {
+                id,
+                findings: capture_findings(&capture),
+                capture,
+            }
         }))
     }
 

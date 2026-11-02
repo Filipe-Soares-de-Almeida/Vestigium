@@ -124,6 +124,9 @@ How to use this file:
 
 ### Fixed
 
+- A capture no longer counts the Windows desktop compositor, or an app that draws only when
+  something on screen changes, as stuttering: their pauses are idle time, not late frames. Captures
+  already stored are read the same way.
 - Text in the window can no longer be selected, with the mouse or with Ctrl+A, and a right-click
   no longer opens the browser's menu; text fields keep both.
 - "Open the data folder" in Settings opens the folder where the history really is, also when

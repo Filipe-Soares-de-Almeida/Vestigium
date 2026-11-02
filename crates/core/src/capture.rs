@@ -18,6 +18,8 @@ pub const HITCH_FACTOR: f32 = 2.5;
 /// ...and at least this long, in milliseconds, is a hitch.
 pub const HITCH_MIN_MS: f32 = 20.0;
 pub const HITCHES_KEPT: usize = 200;
+/// Share of frames over the hitch line past which an app draws only when something changes.
+pub const ON_DEMAND_SHARE: f32 = 0.05;
 
 /// Frames an app needs in a capture to be reported.
 const MIN_FRAMES: usize = 60;
@@ -309,7 +311,7 @@ impl FrameAggregator {
                     });
                 }
             }
-            apps.push(AppFrames {
+            let app = AppFrames {
                 name,
                 pid,
                 frames: frames.len() as u32,
@@ -317,7 +319,12 @@ impl FrameAggregator {
                 p99_ms: sorted[p99_rank - 1],
                 worst_ms: sorted[sorted.len() - 1],
                 hitches: count,
-            });
+            };
+            if !renders_steadily(&app) {
+                hitches.retain(|h| h.app != app.name || h.pid != app.pid);
+                continue;
+            }
+            apps.push(app);
         }
         apps.sort_by(|a, b| {
             b.hitches
@@ -335,6 +342,31 @@ impl FrameAggregator {
         hitches.sort_by_key(|h| h.ts_ms);
         (apps, hitches)
     }
+}
+
+/// The desktop compositor, whose frames are the screen's, not an app's.
+pub fn is_compositor(app: &str) -> bool {
+    app.eq_ignore_ascii_case("dwm.exe")
+}
+
+/// An app drawing at a steady pace: not the compositor, and no more than `ON_DEMAND_SHARE` of its
+/// frames over the hitch line; one that draws only when something changes has idle gaps, not hitches.
+pub fn renders_steadily(app: &AppFrames) -> bool {
+    !is_compositor(&app.name) && app.hitches as f32 <= ON_DEMAND_SHARE * app.frames as f32
+}
+
+/// The capture with only the apps that draw steadily and their hitches.
+pub fn steady_only(capture: &DeepCapture) -> DeepCapture {
+    let mut kept = capture.clone();
+    kept.apps.retain(renders_steadily);
+    kept.hitches.retain(|h| {
+        !is_compositor(&h.app)
+            && !capture
+                .apps
+                .iter()
+                .any(|a| a.name == h.app && a.pid == h.pid && !renders_steadily(a))
+    });
+    kept
 }
 
 /// Frameworks that run other drivers' code, so the time they show is not theirs.
@@ -363,6 +395,7 @@ fn nameable(module: &str) -> bool {
 
 /// Drivers and apps the whole capture names, for its own page.
 pub fn capture_findings(capture: &DeepCapture) -> Vec<Suspect> {
+    let capture = &steady_only(capture);
     let duration_ms = (capture.end_ms - capture.start_ms).max(1);
     let mut found: Vec<(Suspect, f64)> = capture
         .drivers
@@ -448,6 +481,7 @@ fn app_finding(app: &AppFrames, capture: &DeepCapture) -> (Suspect, f64) {
 
 /// What the capture adds to an occurrence whose window is `from_ms` to `to_ms`.
 pub fn capture_suspects(from_ms: i64, to_ms: i64, capture: &DeepCapture) -> Vec<Suspect> {
+    let capture = &steady_only(capture);
     let inside = |ts_ms: i64| (from_ms..=to_ms).contains(&ts_ms);
     let hiccups: Vec<&ProbeHiccup> = capture.hiccups.iter().filter(|h| inside(h.ts_ms)).collect();
     let hitches: Vec<&FrameHitch> = capture.hitches.iter().filter(|h| inside(h.ts_ms)).collect();
@@ -907,7 +941,7 @@ mod tests {
     #[test]
     fn frames_are_summarised_and_hitches_kept_worst_first() {
         let mut agg = FrameAggregator::new();
-        for i in 0..1_000 {
+        for i in 0..5_000 {
             agg.add("game", 1, i, 10.0);
         }
         for i in 0..HITCHES_KEPT as i64 + 20 {
@@ -1149,5 +1183,54 @@ mod tests {
             }
         ));
         assert_eq!(postcard::to_stdvec(&suspect).expect("encode"), bytes);
+    }
+
+    #[test]
+    fn compositor_and_on_demand_apps_are_left_out() {
+        let mut agg = FrameAggregator::new();
+        for i in 0..200 {
+            agg.add("dwm.exe", 10, i * 7, 7.0);
+            agg.add("game.exe", 11, i * 7, 7.0);
+            agg.add("browser.exe", 12, i * 7, 7.0);
+        }
+        agg.add("dwm.exe", 10, 5_000, 1_000.0);
+        agg.add("game.exe", 11, 5_000, 120.0);
+        for i in 0..20 {
+            agg.add("browser.exe", 12, 6_000 + i * 1_000, 1_000.0);
+        }
+        let (apps, hitches) = agg.finish();
+        let names: Vec<&str> = apps.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["game.exe"]);
+        assert!(hitches.iter().all(|h| h.app == "game.exe"));
+    }
+
+    #[test]
+    fn stored_capture_drops_the_compositor() {
+        let mut stored = capture();
+        stored.apps.push(AppFrames {
+            name: "dwm.exe".into(),
+            pid: 99,
+            frames: 29_839,
+            median_ms: 5.6,
+            p99_ms: 900.0,
+            worst_ms: 1_008.0,
+            hitches: 2_374,
+        });
+        stored.hitches.push(FrameHitch {
+            ts_ms: stored.start_ms + 1_000,
+            app: "dwm.exe".into(),
+            pid: 99,
+            frame_ms: 1_008.0,
+            median_ms: 5.6,
+        });
+        let steady = steady_only(&stored);
+        assert!(steady.apps.iter().all(|a| a.name != "dwm.exe"));
+        assert!(steady.hitches.iter().all(|h| h.app != "dwm.exe"));
+        let named = capture_findings(&stored);
+        assert!(
+            !named
+                .iter()
+                .any(|s| matches!(&s.cause, Cause::Frames { app } if app == "dwm.exe"))
+        );
     }
 }
