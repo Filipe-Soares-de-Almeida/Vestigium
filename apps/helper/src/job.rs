@@ -17,18 +17,26 @@ pub enum Job {
     },
     /// Reads the boot diagnostics, which need elevation, into `out`.
     HealthScan { out: PathBuf },
+    /// Reads what every crash dump Windows kept says, into `out`.
+    DumpScan { out: PathBuf },
 }
 
 /// The job these arguments name, or why they name none.
 pub fn parse(args: &[String]) -> Result<Job, String> {
     let (name, rest) = args.split_first().ok_or("no job")?;
-    if name == "health-scan" {
-        return match rest {
-            [flag, out] if flag == "--out" => Ok(Job::HealthScan {
-                out: PathBuf::from(out),
-            }),
-            _ => Err("health-scan takes --out <file> and nothing else".to_string()),
+    if name == "health-scan" || name == "dump-scan" {
+        let [flag, out] = rest else {
+            return Err(format!("{name} takes --out <file> and nothing else"));
         };
+        if flag != "--out" {
+            return Err(format!("{name} takes --out <file> and nothing else"));
+        }
+        let out = PathBuf::from(out);
+        return Ok(if name == "health-scan" {
+            Job::HealthScan { out }
+        } else {
+            Job::DumpScan { out }
+        });
     }
     if name != "deep-capture" {
         return Err(format!("unknown job {name}"));
@@ -118,6 +126,23 @@ mod tests {
             &["health-scan", "--minutes", "5"],
             &["health-scan", "--out", "a", "--out", "b"],
             &["health-scan", "--out", "a", "--run", "cmd.exe"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn dump_scan_takes_only_its_output() {
+        assert_eq!(
+            parse(&args(&["dump-scan", "--out", r"C:\a.dumps"])),
+            Ok(Job::DumpScan {
+                out: PathBuf::from(r"C:\a.dumps")
+            })
+        );
+        for bad in [
+            &["dump-scan"][..],
+            &["dump-scan", "--out", "a", "--path", r"C:\Windows"],
+            &["dump-scan", "--path", r"C:\Windows\MEMORY.DMP"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }

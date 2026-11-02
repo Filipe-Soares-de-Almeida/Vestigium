@@ -39,8 +39,9 @@ pub use capture::{
     is_kernel_core, renders_steadily, steady_only,
 };
 pub use dump::{
-    Analysis, DUMP_FALL_REACH_MS, DUMP_VERSION, DumpCulprit, DumpKind, DumpRecord, Fault,
-    bug_check_report, dump_culprit, dump_of_fall, fault_address, kernel_dump_kind, listing_changes,
+    Analysis, DUMP_FALL_REACH_MS, DUMP_SCAN_VERSION, DUMP_VERSION, DumpCulprit, DumpKind,
+    DumpRecord, DumpScan, Fault, bug_check_report, dump_culprit, dump_of_fall, fault_address,
+    kernel_dump_kind, listing_changes,
 };
 pub use episode::{
     Culprit, Episode, EpisodeDetector, EpisodeKind, HINT_EVERY_MS, PressureSpan, QUIET_MS,

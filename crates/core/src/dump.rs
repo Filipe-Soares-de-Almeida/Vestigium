@@ -5,6 +5,8 @@ use crate::capture::{is_intermediary, is_kernel_core};
 
 /// Layout of the `DumpRecord` BLOB written today.
 pub const DUMP_VERSION: u8 = 1;
+/// Layout of the `DumpScan` file the helper writes today.
+pub const DUMP_SCAN_VERSION: u8 = 1;
 /// Farthest a dump's crash time may be from a fall for the two to be the same event.
 pub const DUMP_FALL_REACH_MS: i64 = 5 * 60_000;
 
@@ -55,6 +57,13 @@ pub struct DumpRecord {
     pub size_bytes: u64,
     /// `None` until the helper read it, and for a dump it could not read.
     pub analysis: Option<Analysis>,
+}
+
+/// What one elevated read of the dump folders found, for the watcher to import.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DumpScan {
+    pub ts_ms: i64,
+    pub dumps: Vec<DumpRecord>,
 }
 
 /// Who the dump points at.
