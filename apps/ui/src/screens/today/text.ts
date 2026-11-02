@@ -1,7 +1,8 @@
 import type { IconName } from "../../components/Icon.svelte";
-import { formatClock, formatDuration, formatNumber, formatPercent, formatTime } from "../../lib/format";
+import { formatClock, formatDuration, formatPercent, formatTime } from "../../lib/format";
 import { t, tn } from "../../lib/i18n.svelte";
 import type { Cause, DetailLevel, Episode, OccurrenceSummary } from "../../lib/types";
+import { formatMs } from "../occurrence/format";
 import { type Day, diskLabel, mostlyOf, worstOf } from "./day";
 
 const KEY = "ui.today";
@@ -80,7 +81,7 @@ export function occurrenceTitle(o: OccurrenceSummary, level: DetailLevel): strin
     }
     return t(`${KEY}.title.${o.kind}`, { duration });
   }
-  const exact = level === "Technical" ? t(`${KEY}.ms`, { ms: formatNumber(ms) }) : duration;
+  const exact = level === "Technical" ? formatMs(ms) : duration;
   if (o.kind === "Reported") return kindName(o);
   if (o.kind === "AppHang" && app) return `${kindName(o)} · ${app} · ${exact}`;
   return `${kindName(o)} · ${exact}`;
@@ -153,7 +154,7 @@ export function lede(day: Day, level: DetailLevel): Part[] {
       t(`${KEY}.lede.technical`, {
         clock: formatClock(worst.start_ms),
         kind: kindName(worst),
-        ms: t(`${KEY}.ms`, { ms: formatNumber(worst.end_ms - worst.start_ms) }),
+        ms: formatMs(worst.end_ms - worst.start_ms),
         cause: causeName(worst.cause),
       }),
       counts,

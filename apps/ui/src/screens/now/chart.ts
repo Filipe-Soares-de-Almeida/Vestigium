@@ -12,7 +12,8 @@ const BAND_H = 38;
 /** Room on the right for the dot of the latest value. */
 export const RIGHT = 7;
 export const HEIGHT = LANES.length * LANE_H;
-const SPAN_S = 600;
+/** The seconds the chart shows when it is not zoomed. */
+export const SPAN_S = 600;
 /** A longer step than this between seconds is a gap, and the line breaks there. */
 const GAP_S = 2.5;
 
@@ -70,7 +71,8 @@ function faded(hex: string, alpha: number): string {
 }
 
 export interface LaneChart {
-  set(built: Built): void;
+  /** Draws `built`; `view` is the stretch of seconds to show, or `null` for the latest ten minutes. */
+  set(built: Built, view: { from: number; to: number } | null): void;
   /** Moves the readout `secondsAgo` before the latest second, or takes it away with `null`. */
   readAt(secondsAgo: number | null): void;
   destroy(): void;
@@ -86,12 +88,14 @@ export function laneChart(
 ): LaneChart {
   let colors = readColors();
   let rows: (LivePoint | null)[] = [];
+  let view: { from: number; to: number } | null = null;
   const perPct = BAND_H / 100;
 
   const scales: uPlot.Scales = {
     x: {
       time: false,
-      range: (_u, _min, max) => (max == null ? [0, SPAN_S] : [max - SPAN_S, max]),
+      range: (_u, _min, max) =>
+        view ? [view.from, view.to] : max == null ? [0, SPAN_S] : [max - SPAN_S, max],
     },
   };
   LANES.forEach((_, i) => {
@@ -156,7 +160,7 @@ export function laneChart(
         (u) => {
           const latest = rows.at(-1);
           const xs = u.data[0];
-          if (!latest || xs.length === 0) return;
+          if (!latest || xs.length === 0 || xs[xs.length - 1] > (u.scales.x.max ?? Infinity)) return;
           const { ctx } = u;
           const ratio = devicePixelRatio;
           const x = u.valToPos(xs[xs.length - 1], "x", true);
@@ -194,8 +198,9 @@ export function laneChart(
   size.observe(target);
 
   return {
-    set(built) {
+    set(built, next) {
       rows = built.rows;
+      view = next;
       plot.setData(built.data);
     },
     readAt(secondsAgo) {

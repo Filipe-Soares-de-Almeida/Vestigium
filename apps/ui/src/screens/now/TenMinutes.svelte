@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import ZoomBar from "../../components/ZoomBar.svelte";
+  import { formatClock, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import type { LivePoint } from "../../lib/types";
-  import { HEIGHT, RIGHT, build, laneChart, type LaneChart } from "./chart";
+  import { wheelZoom, Zoom } from "../../lib/zoom.svelte";
+  import { HEIGHT, RIGHT, SPAN_S, build, laneChart, type LaneChart } from "./chart";
   import { LANES, STATE_TOKEN, laneValue } from "./lanes";
 
   let { points, onsay }: { points: LivePoint[]; onsay: (text: string) => void } = $props();
@@ -11,14 +14,45 @@
   const AXIS = [10, 8, 6, 4, 2, 0];
   /** Below this plot width only the two ends of the axis are labelled. */
   const AXIS_FULL_FROM = 300;
+  const MIN_VIEW_S = 20;
+  /** Tick spacings in seconds for a zoomed view; the first that leaves 84 px between labels wins. */
+  const STEPS = [5, 10, 15, 30, 60, 120, 300];
 
   let host: HTMLDivElement;
   let chart: LaneChart | null = null;
   let cursor = $state<{ idx: number; left: number } | null>(null);
+  let plot = $state<HTMLElement>();
   let plotWidth = $state(0);
   let tipWidth = $state(0);
 
   const built = $derived(build(points));
+  /** The stretch on screen, in seconds; a zoomed view keeps its place while new seconds arrive. */
+  const zoom = new Zoom({
+    bounds: () => {
+      const to = built.data[0].at(-1) ?? SPAN_S;
+      return { from: to - SPAN_S, to };
+    },
+    width: () => plotWidth,
+    minSpan: MIN_VIEW_S,
+    inset: { left: 0, right: RIGHT },
+  });
+  const range = $derived(
+    t("ui.zoom.range", { from: formatClock(zoom.from * 1000), to: formatClock((zoom.from + zoom.span) * 1000) }),
+  );
+  const zoomTicks = $derived.by(() => {
+    const view = zoom.view;
+    if (!view) return [];
+    const width = zoom.plotWidth;
+    const every = STEPS.find((step) => (step * width) / zoom.span >= 84) ?? 300;
+    const out: { left: number; label: string }[] = [];
+    for (let at = Math.ceil(view.from / every) * every; at <= view.to; at += every) {
+      const px = ((at - view.from) / zoom.span) * width;
+      if (px >= 40 && px <= width - 40) {
+        out.push({ left: (px / width) * 100, label: every < 60 ? formatClock(at * 1000) : formatTime(at * 1000) });
+      }
+    }
+    return out;
+  });
   const latest = $derived(points.at(-1) ?? null);
   /** Flips with every new second, so the live dot changes as each reading arrives. */
   const beat = $derived(latest !== null && Math.floor(latest.reading.ts_ms / 1000) % 2 === 1);
@@ -58,12 +92,17 @@
     chart = laneChart(host, (idx, left) => {
       cursor = idx === null || left < 0 ? null : { idx, left };
     });
-    chart.set(built);
+    chart.set(built, zoom.view);
     return () => chart?.destroy();
   });
 
+  // A zoomed view whose seconds have all left the ten minutes gives way to the whole chart.
   $effect(() => {
-    chart?.set(built);
+    if (zoom.view && zoom.view.to <= (built.data[0][0] ?? 0)) zoom.reset();
+  });
+
+  $effect(() => {
+    chart?.set(built, zoom.view);
   });
 
   function ago(seconds: number): string {
@@ -79,10 +118,18 @@
     return laneValue(lane.value(row.reading)) ?? t("ui.now.lane.none");
   }
 
-  // Arrows step 5 s (Shift: 60 s), Home and End jump, Esc takes the readout away.
+  // Arrows step 5 s (Shift: 60 s), Home and End jump, + − and 0 zoom, Esc takes the readout away.
   function onkeydown(event: KeyboardEvent): void {
     const xs = built.data[0];
     if (!chart || xs.length === 0) return;
+    if (zoom.key(event.key, readout ? readout.left : zoom.plotWidth / 2)) {
+      event.preventDefault();
+      const at = readout?.ago ?? null;
+      chart.set(built, zoom.view);
+      chart.readAt(at);
+      onsay(zoom.view ? t("ui.zoom.said", { range }) : t("ui.zoom.said.all"));
+      return;
+    }
     const oldest = Math.round(xs[xs.length - 1] - xs[0]);
     const at = readout?.ago ?? null;
     const step = event.shiftKey ? 60 : 5;
@@ -94,6 +141,10 @@
     else if (event.key === "Escape") next = null;
     else return;
     event.preventDefault();
+    if (next !== null) {
+      zoom.reveal(xs[xs.length - 1] - next);
+      chart.set(built, zoom.view);
+    }
     chart.readAt(next);
     if (readout) {
       const row = readout.row;
@@ -129,11 +180,19 @@
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
       class="plot"
+      class:pan={zoom.view !== null}
       role="application"
       tabindex="0"
       aria-label={t("ui.now.chart.label")}
       aria-describedby="tenmin-summary"
+      bind:this={plot}
       bind:clientWidth={plotWidth}
+      use:wheelZoom={zoom}
+      onpointerdown={(event) => plot && zoom.press(event, plot)}
+      onpointerup={() => zoom.release()}
+      onpointermove={(event) => {
+        if (zoom.drag(event)) chart?.readAt(null);
+      }}
       {onkeydown}
       onblur={() => chart?.readAt(null)}
     >
@@ -156,16 +215,23 @@
         </div>
       {/if}
       <div class="axis" style:margin-right="{RIGHT}px" aria-hidden="true">
-        {#each AXIS as minutes (minutes)}
-          {#if minutes === 10 || minutes === 0 || plotWidth >= AXIS_FULL_FROM}
-            <span style:left="{100 - minutes * 10}%">
-              {minutes === 0 ? t("ui.now.axis.now") : t("ui.now.axis.minutes", { minutes })}
-            </span>
-          {/if}
-        {/each}
+        {#if zoom.view}
+          {#each zoomTicks as tick (tick.label)}
+            <span class="mid" style:left="{tick.left}%">{tick.label}</span>
+          {/each}
+        {:else}
+          {#each AXIS as minutes (minutes)}
+            {#if minutes === 10 || minutes === 0 || plotWidth >= AXIS_FULL_FROM}
+              <span style:left="{100 - minutes * 10}%">
+                {minutes === 0 ? t("ui.now.axis.now") : t("ui.now.axis.minutes", { minutes })}
+              </span>
+            {/if}
+          {/each}
+        {/if}
       </div>
     </div>
   </div>
+  <ZoomBar {zoom} {range} {plot} />
   <p class="sr" id="tenmin-summary">{summary}</p>
 </section>
 
@@ -295,6 +361,15 @@
   }
   .axis span:last-child {
     transform: translateX(-100%);
+  }
+  .axis span.mid {
+    transform: translateX(-50%);
+  }
+  .plot.pan {
+    cursor: grab;
+  }
+  .plot.pan:active {
+    cursor: grabbing;
   }
   @container content (max-width: 720px) {
     .tenmin {

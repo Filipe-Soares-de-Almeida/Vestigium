@@ -1,4 +1,4 @@
-import { formatNumber } from "../../lib/format";
+import { formatDuration, formatNumber } from "../../lib/format";
 import { lang, t } from "../../lib/i18n.svelte";
 
 // Sizes, dates and names the report needs on top of lib/format.
@@ -20,8 +20,13 @@ export function formatRate(bytesPerS: number): string {
   return `${formatBytes(bytesPerS)}/s`;
 }
 
-export function formatMs(ms: number): string {
-  return `${formatNumber(Math.round(ms))} ms`;
+/** "812 ms", "1,01 s" from a second, "2 min 5 s" from a minute; `digits` keeps decimals below a second. */
+export function formatMs(ms: number, digits = 0): string {
+  const rounded = Number(ms.toFixed(digits));
+  if (rounded < 1000) return `${formatNumber(rounded, digits)} ms`;
+  if (rounded >= 60_000) return formatDuration(rounded);
+  const seconds = new Intl.NumberFormat(lang(), { maximumFractionDigits: 2 }).format(rounded / 1000);
+  return `${seconds} s`;
 }
 
 /** "domingo, 1 de novembro" in pt-BR, "Sunday, November 1" in English. */

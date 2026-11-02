@@ -96,6 +96,8 @@ How to use this file:
 - Captures: "Investigate stutters" measures every driver and app for a few minutes, after Windows asks
   for administrator permission once, and names the driver or app behind the stutters; each capture
   is kept in a history. Nothing leaves the PC.
+- A capture can last any whole number of minutes from 1 to 60: a fourth choice, Custom, opens a
+  field for the length, for stutters too rare to show up in ten minutes.
 
 ### Changed
 
@@ -121,6 +123,11 @@ How to use this file:
 - Update the window and the background watcher together: this window does not talk to a watcher
   from an earlier version still running, and says so until that watcher is exited from the tray
   and Vestigium is opened again.
+- The live chart on the Now screen and the timeline of a capture now zoom like the day's timeline:
+  Ctrl and the mouse wheel zoom, dragging or Shift and the wheel move, and "Whole range" shows
+  everything again. A zoomed live chart stays where it is while new seconds arrive.
+- Durations of a second or more now read in seconds ("1,01 s") instead of thousands of milliseconds
+  ("1.008 ms"), which looked like one millisecond in Portuguese.
 
 ### Fixed
 

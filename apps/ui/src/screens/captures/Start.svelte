@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from "svelte";
+
   import Icon from "../../components/Icon.svelte";
   import { app } from "../../lib/app.svelte";
   import { captures } from "../../lib/capture.svelte";
@@ -8,8 +10,25 @@
   let { context }: { context: string | null } = $props();
 
   const LENGTHS = [2, 5, 10] as const;
+  const MIN_MINUTES = 1;
+  const MAX_MINUTES = 60;
 
-  let minutes = $state<(typeof LENGTHS)[number]>(5);
+  let choice = $state<(typeof LENGTHS)[number] | "custom">(5);
+  /** What the number field holds; `null` while it is empty or not a number. */
+  let custom = $state<number | null>(15);
+  let field = $state<HTMLInputElement>();
+
+  const customValid = $derived(
+    custom !== null && Number.isInteger(custom) && custom >= MIN_MINUTES && custom <= MAX_MINUTES,
+  );
+  const minutes = $derived(choice === "custom" ? custom : choice);
+  const ready = $derived(choice !== "custom" || customValid);
+
+  /** Picks the custom tile; a click moves on to the field, the arrow keys stay on the tiles. */
+  function pickCustom(event: MouseEvent): void {
+    choice = "custom";
+    if (event.detail > 0) void tick().then(() => field?.focus());
+  }
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const measures = $derived(
@@ -41,15 +60,50 @@
           type="button"
           role="radio"
           class="tile"
-          aria-checked={minutes === length}
-          tabindex={minutes === length ? 0 : -1}
-          onclick={() => (minutes = length)}
+          aria-checked={choice === length}
+          tabindex={choice === length ? 0 : -1}
+          onclick={() => (choice = length)}
         >
           <b>{t("ui.captures.dur.name", { minutes: length })}</b>
           <span>{t(`ui.captures.dur.${length}.hint`)}</span>
         </button>
       {/each}
+      <button
+        type="button"
+        role="radio"
+        class="tile"
+        aria-checked={choice === "custom"}
+        tabindex={choice === "custom" ? 0 : -1}
+        onclick={pickCustom}
+      >
+        <b>{t("ui.captures.dur.custom")}</b>
+        <span>{t("ui.captures.dur.custom.hint")}</span>
+      </button>
     </div>
+    {#if choice === "custom"}
+      <div class="custom">
+        <label for="dur-custom">{t("ui.captures.dur.custom.label")}</label>
+        <div class="entry">
+          <input
+            id="dur-custom"
+            type="number"
+            inputmode="numeric"
+            min={MIN_MINUTES}
+            max={MAX_MINUTES}
+            step="1"
+            bind:value={custom}
+            bind:this={field}
+            aria-invalid={!customValid}
+            aria-describedby={customValid ? "dur-custom-help" : "dur-custom-help dur-custom-error"}
+          />
+          <span>{t("ui.captures.dur.custom.unit")}</span>
+        </div>
+        <p class="hint" id="dur-custom-help">{t("ui.captures.dur.custom.help")}</p>
+        {#if !customValid}
+          <p class="error" id="dur-custom-error" role="alert">{t("ui.captures.dur.custom.error")}</p>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <ul class="facts">
@@ -60,7 +114,9 @@
 
   <p class="hint">{t("ui.captures.start.hint")}</p>
   <div class="actions">
-    <button type="button" class="btn accent" disabled={!app.running} onclick={() => captures.begin(minutes)}>
+    <button type="button" class="btn accent" disabled={!app.running || !ready}
+      onclick={() => minutes !== null && captures.begin(minutes)}
+    >
       <Icon name="shield" />{t("ui.captures.start.button")}
     </button>
     {#if !app.running}
@@ -89,7 +145,7 @@
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
   }
   .tile {
@@ -116,6 +172,42 @@
   .tile[aria-checked="true"] {
     border-color: transparent;
     box-shadow: 0 0 0 2px var(--accent);
+  }
+  .custom {
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .custom label {
+    color: var(--ink2);
+    font: 600 13px/1.5 var(--f);
+  }
+  .entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink2);
+  }
+  .entry input {
+    width: 96px;
+    padding: 7px 10px;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--ink);
+    font: 400 15px/1.4 var(--f);
+  }
+  .entry input[aria-invalid="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .error {
+    margin: 0;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.45;
   }
   .facts {
     display: grid;

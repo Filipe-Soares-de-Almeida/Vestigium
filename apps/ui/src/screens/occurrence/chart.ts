@@ -92,7 +92,7 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
     const values = dto.chart[COLUMN[key]];
     const known = values.flatMap((v, i) => (v === null ? [] : [[v, i] as const]));
     if (!known.length) continue;
-    const format = isMs(key) ? formatMs : (v: number) => formatPercent(v);
+    const format = isMs(key) ? (v: number) => formatMs(v) : (v: number) => formatPercent(v);
     const [max, at] = known.reduce((a, b) => (b[0] > a[0] ? b : a));
     const min = Math.min(...known.map(([v]) => v));
     const log = isMs(key);

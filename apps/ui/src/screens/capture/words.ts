@@ -3,7 +3,7 @@ import type { Entry } from "../../lib/capture.svelte";
 import { formatDuration, formatNumber, formatTime } from "../../lib/format";
 import { t } from "../../lib/i18n.svelte";
 import type { AppFrames, CaptureDto, CaptureNote, DetailLevel, Suspect } from "../../lib/types";
-import { appName, formatDay, formatDayShort, formatList, sameDay } from "../occurrence/format";
+import { appName, formatDay, formatDayShort, formatList, formatMs, sameDay } from "../occurrence/format";
 import { evidenceLines, type Line, lineFor, stepsOf, type Step, type Texts } from "../occurrence/report";
 import {
   alignment,
@@ -41,13 +41,17 @@ export function driverName(module: string): string {
 }
 
 export const usText = (us: number): string =>
-  us >= 1000 ? `${formatNumber(us / 1000, 2)} ms` : `${formatNumber(us)} µs`;
+  us >= 999_995 ? formatMs(us / 1000) : us >= 1000 ? `${formatNumber(us / 1000, 2)} ms` : `${formatNumber(us)} µs`;
 
 /** Total time in a driver: milliseconds below a second, seconds above. */
 const totalText = (us: number): string =>
   us >= 1_000_000 ? formatDuration(us / 1000) : `${formatNumber(us / 1000)} ms`;
 
-export const frameText = (ms: number): string => `${formatNumber(ms, ms < 10 ? 1 : 0)} ms`;
+export const frameText = (ms: number): string => formatMs(ms, ms < 10 ? 1 : 0);
+
+/** "50–120 ms" while both ends are under a second, "800 ms–1,2 s" otherwise. */
+const rangeText = (min: number, max: number): string =>
+  max < 1000 ? `${formatNumber(min)}–${formatNumber(max)} ms` : `${formatMs(min)}–${formatMs(max)}`;
 
 const timesText = (times: number): string => formatNumber(times, times < 10 ? 1 : 0);
 
@@ -400,12 +404,12 @@ function alignSummary(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): s
     return pick(level, { plain: k("align.calm"), figures: k("align.calm.d"), tech: k("align.calm.t") });
   }
   const times = formatList(dto.hiccups.map((h) => formatTime(h.ts_ms)));
-  const range = `${formatNumber(al.minStallMs)}–${formatNumber(al.maxStallMs)}`;
+  const range = rangeText(al.minStallMs, al.maxStallMs);
   const parts = [
     pick(level, {
       plain: count("align.stalls", al.stalls),
       figures: count("align.stalls.d", al.stalls, { range, times }),
-      tech: k("align.stalls.t", { count: al.stalls, lags: dto.hiccups.map((h) => formatNumber(h.lag_ms, 1)).join(", ") }),
+      tech: k("align.stalls.t", { count: al.stalls, lags: dto.hiccups.map((h) => formatMs(h.lag_ms, 1)).join(", ") }),
     }),
   ];
   const top = conclusionOf(dto, rows);
@@ -486,9 +490,9 @@ export function buildResult(dto: CaptureDto, level: DetailLevel): ResultView {
 export function markLine(kind: 0 | 1 | 2, value: number, who: string, level: DetailLevel, median: number | null): string {
   if (kind === 0) {
     return pick(level, {
-      plain: k("mark.stall.plain", { ms: formatNumber(value) }),
-      figures: k("mark.stall.d", { ms: formatNumber(value) }),
-      tech: k("mark.stall.t", { ms: formatNumber(value, 1) }),
+      plain: k("mark.stall.plain", { ms: formatMs(value) }),
+      figures: k("mark.stall.d", { ms: formatMs(value) }),
+      tech: k("mark.stall.t", { ms: formatMs(value, 1) }),
     });
   }
   if (kind === 1) {
@@ -503,7 +507,7 @@ export function markLine(kind: 0 | 1 | 2, value: number, who: string, level: Det
   return pick(level, {
     plain: median === null ? k("mark.frame.plain.short", { app, ms: frameText(value) }) : k("mark.frame.plain", { app, ms: frameText(value), median: normal }),
     figures: median === null ? k("mark.frame.d.short", { app, ms: frameText(value) }) : k("mark.frame.d", { app, ms: frameText(value), median: normal }),
-    tech: k("mark.frame.t", { exe: who, ms: formatNumber(value, 1) }),
+    tech: k("mark.frame.t", { exe: who, ms: formatMs(value, 1) }),
   });
 }
 
