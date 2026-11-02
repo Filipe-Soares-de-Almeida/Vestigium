@@ -47,6 +47,8 @@ pub struct Analysis {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DumpRecord {
     pub path: String,
+    /// The file's last write, Unix epoch ms; with the path, it tells an overwritten dump apart.
+    pub file_ms: i64,
     pub kind: DumpKind,
     /// When the PC or the app crashed, Unix epoch ms; the file's time when the dump does not say.
     pub crash_ms: i64,

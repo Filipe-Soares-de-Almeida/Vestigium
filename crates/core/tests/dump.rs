@@ -40,6 +40,7 @@ fn named(culprit: Option<DumpCulprit>) -> Option<(String, Confidence)> {
 fn record(kind: DumpKind, crash_ms: i64, code: Option<u32>) -> DumpRecord {
     DumpRecord {
         path: format!(r"C:\Windows\{kind:?}.dmp"),
+        file_ms: crash_ms,
         kind,
         crash_ms,
         size_bytes: 1 << 20,

@@ -18,6 +18,7 @@ pub struct PruneReport {
     pub captures: usize,
     pub findings: usize,
     pub scans: usize,
+    pub dumps: usize,
 }
 
 impl Store {
@@ -72,6 +73,10 @@ impl Store {
                  AND id <> (SELECT id FROM scan ORDER BY ts_ms DESC, id DESC LIMIT 1)",
                 params![records_cutoff],
             )?,
+            dumps: tx.execute(
+                "DELETE FROM dump WHERE deleted_ms < ?1",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
@@ -90,6 +95,7 @@ impl Store {
             "capture",
             "finding",
             "scan",
+            "dump",
         ] {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }

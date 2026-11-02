@@ -2,6 +2,7 @@
 
 mod batch;
 mod captures;
+mod dumps;
 mod health;
 mod prune;
 mod read;
@@ -11,6 +12,7 @@ mod segment;
 
 pub use batch::Batcher;
 pub use captures::CaptureSummary;
+pub use dumps::DumpRow;
 pub use health::FindingRecord;
 pub use prune::PruneReport;
 pub use schema::{Batch, SCHEMA_VERSION, Store};
