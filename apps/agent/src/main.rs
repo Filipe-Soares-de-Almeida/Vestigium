@@ -2,6 +2,7 @@
 
 mod app;
 mod autostart;
+mod health;
 mod icon;
 mod import;
 mod paths;

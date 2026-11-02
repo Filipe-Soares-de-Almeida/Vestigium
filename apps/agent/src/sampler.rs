@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use vestigium_collect::{
     CollectError, CpuSampler, Delivered, EventSubscription, HighResTimer, PdhSampler,
-    ProcessSnapshotter, disk_media, hung_pids, logical_cpus, memory_info, physical_drive,
-    unbiased_ms, wall_ms,
+    ProcessSnapshotter, WindowsHealth, disk_media, hung_pids, logical_cpus, memory_info,
+    physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
     Blackbox, DiskInfo, Gap, GapReason, GateState, HICCUP_MS, HungWindow, MachineInfo, Media,
@@ -23,6 +23,7 @@ use vestigium_store::{Batch, Batcher, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use crate::app::lock;
+use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
 use crate::sensitive::SensitiveMode;
 use crate::shutdown;
@@ -40,6 +41,10 @@ const TRIM_AFTER_TICKS: usize = 10;
 const STOPPED_GAP_MIN_MS: i64 = 5_000;
 const HOUR_MS: i64 = 60 * 60_000;
 const DAY_MS: i64 = 24 * HOUR_MS;
+/// A disk with I/O this recently is spinning, so a health read does not wake it.
+const DISK_BUSY_MS: i64 = 60_000;
+/// The first health pass waits this long after a start, which stays light.
+const FIRST_HEALTH_AFTER_MS: i64 = 60_000;
 /// How long a late probe wake stays available to a capture that ends later.
 const HICCUPS_KEPT_MS: i64 = 15 * 60_000;
 const HICCUPS_KEPT: usize = 10_000;
@@ -139,6 +144,12 @@ struct Sampler {
     /// GPU use per process at the latest sample, for the next ranking.
     gpu_by_pid: HashMap<u32, f32>,
     logical_cpus: u32,
+    health: HealthPass<WindowsHealth>,
+    /// When the first health pass is due; afterwards a pass runs with every hourly prune.
+    first_health_ms: Option<i64>,
+    /// When each disk last had I/O.
+    disk_active_ms: HashMap<String, i64>,
+    commit_limit_bytes: u64,
 }
 
 /// The data sources a tick reads, opened once on the sampler thread.
@@ -193,6 +204,10 @@ impl Sampler {
             snapshots: VecDeque::with_capacity(TOP_EVERY + 1),
             gpu_by_pid: HashMap::new(),
             logical_cpus: logical_cpus(),
+            health: HealthPass::new(WindowsHealth),
+            first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
+            disk_active_ms: HashMap::new(),
+            commit_limit_bytes: 0,
             store,
         };
         sampler.recall_last_day(now);
@@ -337,6 +352,14 @@ impl Sampler {
             };
             self.gpu_by_pid = pdh.gpu.map(|gpu| gpu.per_pid).unwrap_or_default();
             self.learn_machine(&sample);
+            for disk in sample
+                .disks
+                .iter()
+                .filter(|d| d.active_pct > 0.0 || d.bytes_per_s > 0.0)
+            {
+                self.disk_active_ms.insert(disk.name.clone(), ts_ms);
+            }
+            self.commit_limit_bytes = sample.commit_limit_bytes;
             {
                 let mut readings = lock(&self.readings);
                 readings.drop_while(|r| r.ts_ms < ts_ms - RING_MS);
@@ -406,8 +429,37 @@ impl Sampler {
             if let Err(err) = self.store.prune(ts_ms, &retention) {
                 self.report(&err);
             }
+            if self.first_health_ms.is_none() {
+                self.check_health(ts_ms);
+            }
+        }
+        if self.first_health_ms.is_some_and(|at| ts_ms >= at) {
+            self.first_health_ms = None;
+            self.check_health(ts_ms);
         }
         Ok(())
+    }
+
+    /// Runs a health pass: a minute after start, then every full hour with the prune.
+    fn check_health(&mut self, ts_ms: i64) {
+        let busy_disks = self
+            .disk_active_ms
+            .iter()
+            .filter(|(_, at)| ts_ms - **at <= DISK_BUSY_MS)
+            .map(|(name, _)| name.clone())
+            .collect();
+        let machine = self.blackbox.machine().clone();
+        let now = PassNow {
+            ts_ms,
+            machine: &machine,
+            busy_disks: &busy_disks,
+            commit_limit_bytes: self.commit_limit_bytes,
+        };
+        match self.health.run(&mut self.store, &now) {
+            Ok(outcome) if outcome.asked_security_center => release_idle_pages(),
+            Ok(_) => {}
+            Err(err) => self.report(&err),
+        }
     }
 
     /// Names the processes with a window not responding, from the latest process snapshot.

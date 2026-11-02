@@ -110,4 +110,11 @@ impl Store {
             |row| row.get(0),
         )?)
     }
+
+    /// When the oldest history still stored begins, of any resolution.
+    pub fn first_segment_ms(&self) -> Result<Option<i64>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT min(start_ms) FROM segment", [], |row| row.get(0))?)
+    }
 }
