@@ -112,7 +112,9 @@ function process(
 
 function top(): ProcessSample[] {
   const list = [
-    process(4120, "chrome.exe", 3.8, 1.9, 0.3, 3),
+    process(4120, "chrome.exe", 2.1, 0.9, 0.2, 3),
+    process(4188, "chrome.exe", 1.2, 0.6, 0.1),
+    process(4302, "chrome.exe", 0.5, 0.4, 0),
     process(8812, "Discord.exe", 1.4, 0.61, 0.1, 1),
     process(1544, "MsMpEng.exe", 0.8, 0.31, 0.4),
     process(6020, "explorer.exe", 0.5, 0.18, 0),
@@ -122,7 +124,25 @@ function top(): ProcessSample[] {
   if (scenario === "busy" || scenario === "pressure") {
     list.push(process(5566, "ffmpeg.exe", scenario === "pressure" ? 91 : 52, 0.9, 12));
   }
-  return list.sort((a, b) => b.cpu_pct - a.cpu_pct);
+  return programs(list);
+}
+
+/** The watcher's rule, restated for the mock: one row per program, its processes summed. */
+function programs(list: ProcessSample[]): ProcessSample[] {
+  const byName = new Map<string, ProcessSample>();
+  for (const p of [...list].sort((a, b) => b.cpu_pct - a.cpu_pct)) {
+    const sum = byName.get(p.name);
+    if (!sum) {
+      byName.set(p.name, { ...p });
+      continue;
+    }
+    sum.cpu_pct += p.cpu_pct;
+    sum.private_bytes += p.private_bytes;
+    sum.read_bps += p.read_bps;
+    sum.write_bps += p.write_bps;
+    sum.gpu_pct = Math.min(100, sum.gpu_pct + p.gpu_pct);
+  }
+  return [...byName.values()].sort((a, b) => b.cpu_pct - a.cpu_pct);
 }
 
 const latest: OccurrenceSummary | null =

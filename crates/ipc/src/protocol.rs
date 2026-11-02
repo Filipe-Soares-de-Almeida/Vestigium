@@ -93,6 +93,7 @@ pub struct AgentStatus {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NowFrame {
     pub sample: Option<Sample>,
+    /// The busiest programs, each summing its processes under the pid of the busiest one.
     pub top: Option<ProcessTop>,
     /// Processes with a window not responding at the last check.
     pub hung: Vec<HungWindow>,

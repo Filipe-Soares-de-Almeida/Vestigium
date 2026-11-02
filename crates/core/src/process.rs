@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use serde::{Deserialize, Serialize};
 
@@ -84,20 +85,59 @@ impl From<ProcessTopV1> for ProcessTop {
 pub(crate) fn per_program(
     items: impl IntoIterator<Item = (u32, String, f64)>,
 ) -> Vec<(u32, String, f64)> {
-    let mut programs: HashMap<String, (u32, f64, f64)> = HashMap::new();
+    merge_programs(items, |value| *value, |total, value| *total += value)
+}
+
+/// Every program in `samples` once, its processes summed under the pid of its busiest by CPU;
+/// busiest first.
+pub fn programs(samples: &[ProcessSample]) -> Vec<ProcessSample> {
+    let items = samples.iter().map(|s| (s.pid, s.name.clone(), s.clone()));
+    merge_programs(
+        items,
+        |s| f64::from(s.cpu_pct),
+        |total, s| {
+            total.cpu_pct += s.cpu_pct;
+            total.private_bytes = total.private_bytes.saturating_add(s.private_bytes);
+            total.read_bps += s.read_bps;
+            total.write_bps += s.write_bps;
+            // Each process reports its busiest engine; the sum never passes a whole engine.
+            total.gpu_pct = (total.gpu_pct + s.gpu_pct).min(100.0);
+        },
+    )
+    .into_iter()
+    .map(|(pid, _, total)| ProcessSample { pid, ..total })
+    .collect()
+}
+
+/// Merges `(pid, name, value)` per program name, keeping the pid of its heaviest by `weight`;
+/// heaviest first.
+fn merge_programs<T>(
+    items: impl IntoIterator<Item = (u32, String, T)>,
+    weight: impl Fn(&T) -> f64,
+    add: impl Fn(&mut T, T),
+) -> Vec<(u32, String, T)> {
+    let mut programs: HashMap<String, (u32, f64, T)> = HashMap::new();
     for (pid, name, value) in items {
-        let (top_pid, top_value, total) = programs.entry(name).or_insert((pid, value, 0.0));
-        if value > *top_value || (value == *top_value && pid < *top_pid) {
-            (*top_pid, *top_value) = (pid, value);
+        let heft = weight(&value);
+        match programs.entry(name) {
+            Entry::Vacant(slot) => {
+                slot.insert((pid, heft, value));
+            }
+            Entry::Occupied(mut slot) => {
+                let (top_pid, top_heft, total) = slot.get_mut();
+                if heft > *top_heft || (heft == *top_heft && pid < *top_pid) {
+                    (*top_pid, *top_heft) = (pid, heft);
+                }
+                add(total, value);
+            }
         }
-        *total += value;
     }
-    let mut summed: Vec<(u32, String, f64)> = programs
+    let mut merged: Vec<(u32, String, T)> = programs
         .into_iter()
         .map(|(name, (pid, _, total))| (pid, name, total))
         .collect();
-    summed.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)));
-    summed
+    merged.sort_by(|a, b| weight(&b.2).total_cmp(&weight(&a.2)).then(a.0.cmp(&b.0)));
+    merged
 }
 
 /// The latest counters of every process in `snapshots`, oldest first; one that exited keeps its last.
@@ -109,13 +149,12 @@ pub fn last_seen(snapshots: &[&[ProcessCounters]]) -> Vec<ProcessCounters> {
     latest.into_values().cloned().collect()
 }
 
-/// Union of the `per_metric` heaviest processes by CPU, private memory, I/O and GPU, sorted by CPU.
-pub fn top_processes(
+/// Rates of every process in `curr` over the `elapsed_ms` since `prev`; the idle process is left out.
+pub fn process_rates(
     prev: &[ProcessCounters],
     curr: &[ProcessCounters],
     elapsed_ms: u64,
     logical_cpus: u32,
-    per_metric: usize,
     gpu: &HashMap<u32, f32>,
 ) -> Vec<ProcessSample> {
     let previous: HashMap<(u32, i64), &ProcessCounters> =
@@ -123,8 +162,7 @@ pub fn top_processes(
     let elapsed_s = elapsed_ms as f64 / 1000.0;
     let capacity_100ns = elapsed_ms as f64 * 10_000.0 * f64::from(logical_cpus);
 
-    let samples: Vec<ProcessSample> = curr
-        .iter()
+    curr.iter()
         .filter(|p| p.pid != 0)
         .map(|p| {
             let (cpu, read, write) = match previous.get(&(p.pid, p.create_time)) {
@@ -158,8 +196,11 @@ pub fn top_processes(
                 gpu_pct: gpu.get(&p.pid).copied().unwrap_or(0.0),
             }
         })
-        .collect();
+        .collect()
+}
 
+/// Union of the `per_metric` heaviest samples by CPU, private memory, I/O and GPU, sorted by CPU.
+pub fn heaviest(samples: Vec<ProcessSample>, per_metric: usize) -> Vec<ProcessSample> {
     let mut chosen = vec![false; samples.len()];
     mark_heaviest(&samples, &mut chosen, per_metric, |s| f64::from(s.cpu_pct));
     mark_heaviest(&samples, &mut chosen, per_metric, |s| {

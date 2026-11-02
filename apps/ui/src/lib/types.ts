@@ -349,6 +349,7 @@ export interface SettingsDto {
 
 export interface NowFrame {
   sample: Sample | null;
+  /** The busiest programs, each summing its processes under the pid of the busiest one. */
   top: ProcessTop | null;
   hung: HungWindow[];
   latest: OccurrenceSummary | null;

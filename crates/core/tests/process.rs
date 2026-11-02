@@ -1,6 +1,22 @@
 use std::collections::HashMap;
 
-use vestigium_core::{ProcessCounters, last_seen, top_processes};
+use vestigium_core::{
+    ProcessCounters, ProcessSample, heaviest, last_seen, process_rates, programs,
+};
+
+fn top_processes(
+    prev: &[ProcessCounters],
+    curr: &[ProcessCounters],
+    elapsed_ms: u64,
+    logical_cpus: u32,
+    per_metric: usize,
+    gpu: &HashMap<u32, f32>,
+) -> Vec<ProcessSample> {
+    heaviest(
+        process_rates(prev, curr, elapsed_ms, logical_cpus, gpu),
+        per_metric,
+    )
+}
 
 fn counters(pid: u32, name: &str) -> ProcessCounters {
     ProcessCounters {
@@ -182,5 +198,60 @@ fn gpu_ranks_as_a_fourth_metric() {
     assert_eq!(
         top.iter().find(|s| s.pid == 10).map(|s| s.gpu_pct),
         Some(0.0)
+    );
+}
+
+fn sample(pid: u32, name: &str, cpu: f32, private_mib: u64, io: f32, gpu: f32) -> ProcessSample {
+    ProcessSample {
+        pid,
+        name: name.to_string(),
+        cpu_pct: cpu,
+        private_bytes: private_mib << 20,
+        read_bps: io / 2.0,
+        write_bps: io / 2.0,
+        gpu_pct: gpu,
+    }
+}
+
+#[test]
+fn programs_sum_every_process_of_a_program() {
+    let rates = [
+        sample(30, "msedge.exe", 4.0, 300, 1_000.0, 0.0),
+        sample(31, "msedge.exe", 9.0, 200, 3_000.0, 40.0),
+        sample(32, "msedge.exe", 1.0, 100, 0.0, 70.0),
+        sample(40, "game.exe", 12.0, 900, 500.0, 20.0),
+    ];
+
+    let summed = programs(&rates);
+
+    assert_eq!(summed.len(), 2);
+    let edge = &summed[0];
+    assert_eq!(edge.name, "msedge.exe");
+    assert_eq!(edge.pid, 31, "under the pid of its busiest process");
+    assert_eq!(edge.cpu_pct, 14.0);
+    assert_eq!(edge.private_bytes, 600 << 20);
+    assert_eq!(edge.read_bps + edge.write_bps, 4_000.0);
+    assert_eq!(edge.gpu_pct, 100.0, "never more than a whole engine");
+    assert_eq!(summed[1].name, "game.exe", "busiest by CPU first");
+}
+
+#[test]
+fn programs_rank_a_program_by_its_processes_together() {
+    let rates: Vec<ProcessSample> = (0..6)
+        .map(|i| sample(50 + i, "rustc.exe", 3.0, 50, 0.0, 0.0))
+        .chain([sample(60, "editor.exe", 10.0, 400, 0.0, 0.0)])
+        .collect();
+
+    let top = heaviest(programs(&rates), 1);
+
+    let names: Vec<&str> = top.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["rustc.exe", "editor.exe"],
+        "the editor stays for its memory"
+    );
+    assert_eq!(
+        top[0].cpu_pct, 18.0,
+        "six processes at 3% outweigh one at 10%"
     );
 }

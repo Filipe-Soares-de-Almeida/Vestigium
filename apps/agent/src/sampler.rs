@@ -14,8 +14,8 @@ use vestigium_collect::{
 use vestigium_core::{
     Blackbox, DiskInfo, Gap, GapReason, GateState, HungWindow, MachineInfo, Media, Notable,
     OccurrenceSummary, Output, ProbeTick, ProcessCounters, ProcessTop, RING_MS, Reading,
-    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, last_seen,
-    top_processes,
+    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest, last_seen,
+    process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -347,18 +347,22 @@ impl Sampler {
                 .skip(1)
                 .map(|(_, s)| s.as_slice())
                 .collect();
+            let rates = process_rates(
+                old,
+                &last_seen(&since),
+                (now - then).max(0.0) as u64,
+                self.logical_cpus,
+                &self.gpu_by_pid,
+            );
+            // The live screen ranks programs; detection and history keep each process.
+            lock(&self.now).top = Some(ProcessTop {
+                ts_ms,
+                entries: heaviest(programs(&rates), TOP_PER_METRIC),
+            });
             let top = ProcessTop {
                 ts_ms,
-                entries: top_processes(
-                    old,
-                    &last_seen(&since),
-                    (now - then).max(0.0) as u64,
-                    self.logical_cpus,
-                    TOP_PER_METRIC,
-                    &self.gpu_by_pid,
-                ),
+                entries: heaviest(rates, TOP_PER_METRIC),
             };
-            lock(&self.now).top = Some(top.clone());
             self.blackbox.push_top(top.clone());
             self.batcher.push_processes(top);
         }
@@ -575,6 +579,7 @@ mod tests {
         gate: Arc<RunGate>,
         handle: SamplerHandle,
         status: Arc<Mutex<AgentStatus>>,
+        now: Arc<Mutex<NowFrame>>,
         probe_tx: mpsc::Sender<ProbeTick>,
         power_tx: mpsc::Sender<PowerEvent>,
         events_tx: mpsc::Sender<Delivered>,
@@ -596,6 +601,7 @@ mod tests {
         let (events_tx, events_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(AgentStatus::default()));
         let sensitive = SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR);
+        let now = Arc::new(Mutex::new(NowFrame::default()));
         let handle = run_sampler(
             store,
             Wiring {
@@ -609,7 +615,7 @@ mod tests {
                 sensitive,
                 status: status.clone(),
                 recent: Arc::new(Mutex::new(RecentState::default())),
-                now: Arc::new(Mutex::new(NowFrame::default())),
+                now: now.clone(),
                 readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
                 settings: Arc::new(Mutex::new(Settings::default())),
             },
@@ -619,6 +625,7 @@ mod tests {
             gate,
             handle,
             status,
+            now,
             probe_tx,
             power_tx,
             events_tx,
@@ -682,6 +689,23 @@ mod tests {
 
         assert!(written, "no batch was written while running");
         assert_eq!(lock(&status).last_error, None);
+    }
+
+    #[test]
+    fn sampler_ranks_programs_for_the_live_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), NEVER_DUE);
+
+        let ranked = wait_until(PATIENCE, || lock(&running.now).top.is_some());
+        let top = lock(&running.now).top.clone();
+        stop(&running);
+
+        assert!(ranked, "no ranking within the patience");
+        let mut names: Vec<String> = top.unwrap().entries.into_iter().map(|p| p.name).collect();
+        let listed = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), listed, "each program once");
     }
 
     #[test]

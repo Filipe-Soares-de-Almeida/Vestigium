@@ -6,7 +6,7 @@
 
   let { top }: { top: ProcessTop | null } = $props();
 
-  // The watcher ranks the busiest processes by processor; the first five are shown.
+  // The watcher ranks the busiest programs by processor, each summing its processes; five show.
   const rows = $derived(top?.entries.slice(0, 5) ?? []);
 </script>
 
