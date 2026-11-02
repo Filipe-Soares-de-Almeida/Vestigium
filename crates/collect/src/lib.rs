@@ -1,5 +1,6 @@
 //! Windows data sources of Vestigium.
 
+mod blackbox;
 mod boot;
 mod cpu;
 mod disk;
@@ -15,6 +16,7 @@ mod probe;
 mod processes;
 mod timer;
 
+pub use blackbox::{BlackboxRing, RING_RECORDS, RingContents};
 pub use boot::{BOOT_LOG, boot_report};
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};

@@ -109,6 +109,12 @@ How to use this file:
   what to do, and lists what it checked without an alert and what resolved in the last 30 days.
   Marks use a shape and a word, never colour alone. Today shows a Health card while a point is
   open, and the navigation pane counts the open points.
+- When the PC goes down while Vestigium watches it (a blue screen, the power button held down, a
+  fall while going to sleep, or a power cut), the next start turns it into its own report once
+  Windows logs the fall: what went down and how, what the PC was doing in the two minutes before,
+  and what to do. The watcher keeps those last seconds in a small file it writes to disk once a
+  minute while the PC is calm and every five seconds while it is strained. Closing Vestigium or
+  ending it from Task Manager is never taken for a fall.
 - A full scan, on the Health page, reads what Windows shows only with administrator permission,
   such as what slows startup, after Windows asks for that permission once. It only reads and
   changes nothing.

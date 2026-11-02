@@ -301,6 +301,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 settings: shared.settings.clone(),
                 cleared: shared.cleared.clone(),
                 health_due: shared.health_due.clone(),
+                ring_path: Some(data_dir.join("blackbox.ring")),
             },
         )
         .map_err(failed)?,

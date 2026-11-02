@@ -91,7 +91,7 @@ export type OccurrenceKind = "Freeze" | "Stutter" | "AppHang" | "Reported" | "Po
 export type Confidence = "Low" | "Medium" | "High";
 export type Channel = "System" | "Application";
 export type HangOutcome = "Recovered" | "Closed";
-export type GapReason = "Paused" | "Suspended" | "Stopped";
+export type GapReason = "Paused" | "Suspended" | "Stopped" | "Crashed";
 export type Media = "Ssd" | "Hdd" | "Unknown";
 
 export type Metric =

@@ -8,6 +8,8 @@ pub enum GapReason {
     Paused,
     Suspended,
     Stopped,
+    /// The PC went down while watched, and Windows said so on the next boot.
+    Crashed,
 }
 
 /// A span with nothing watched; nothing inside it counts as a stall.

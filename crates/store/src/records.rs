@@ -19,7 +19,12 @@ const KINDS: [OccurrenceKind; 5] = [
 ];
 const SEVERITIES: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
 const CHANNELS: [Channel; 2] = [Channel::System, Channel::Application];
-const REASONS: [GapReason; 3] = [GapReason::Paused, GapReason::Suspended, GapReason::Stopped];
+const REASONS: [GapReason; 4] = [
+    GapReason::Paused,
+    GapReason::Suspended,
+    GapReason::Stopped,
+    GapReason::Crashed,
+];
 /// Stored meaning codes are positions in this list plus one; new meanings go at the end.
 const MEANINGS: [EventMeaning; 15] = [
     EventMeaning::StorageReset,

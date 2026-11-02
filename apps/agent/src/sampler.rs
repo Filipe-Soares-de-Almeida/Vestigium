@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::mem;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
@@ -8,15 +9,15 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    CollectError, CpuSampler, Delivered, EventSubscription, HighResTimer, PdhSampler,
+    BlackboxRing, CollectError, CpuSampler, Delivered, EventSubscription, HighResTimer, PdhSampler,
     ProcessSnapshotter, WindowsHealth, disk_media, hung_pids, logical_cpus, memory_info,
     physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    Blackbox, DiskInfo, Gap, GapReason, GateState, HICCUP_MS, HungWindow, MachineInfo, Media,
-    Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick, ProcessCounters,
-    ProcessTop, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing,
-    WinEvent, heaviest, last_seen, process_rates, programs,
+    Blackbox, DiskInfo, EventMeaning, Gap, GapReason, GateState, HICCUP_MS, HungWindow,
+    MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick,
+    ProcessCounters, ProcessTop, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings,
+    Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -25,6 +26,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetS
 use vestigium_core::health::Concern;
 
 use crate::app::lock;
+use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
 use crate::sensitive::SensitiveMode;
@@ -96,6 +98,8 @@ pub struct Wiring {
     pub cleared: Arc<AtomicBool>,
     /// Set by the pipe after it stored a health scan.
     pub health_due: Arc<AtomicBool>,
+    /// The black box file that outlives a fall; `None` keeps none.
+    pub ring_path: Option<PathBuf>,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -107,7 +111,9 @@ pub fn run_sampler(store: Store, wiring: Wiring) -> io::Result<SamplerHandle> {
             let gate = wiring.gate.clone();
             let mut sampler = Sampler::new(store, wiring);
             sampler.run(&gate);
+            sampler.settle_fall(wall_ms(), true);
             sampler.leave(GapReason::Stopped);
+            sampler.close_ring();
             let _ = done_tx.send(());
         })?;
     Ok(SamplerHandle {
@@ -157,6 +163,15 @@ struct Sampler {
     commit_limit_bytes: u64,
     /// Critical health findings open now, for the tray.
     critical_findings: u32,
+    ring: Option<BlackboxRing>,
+    ring_sync: RingSync,
+    /// A stop that may have been a fall, until Windows says so.
+    fall: Option<Fall>,
+    /// Where the time away began, held until the fall is settled.
+    held_gap: Option<i64>,
+    started_ms: i64,
+    /// Windows logged a hardware error since the start.
+    hardware_error: bool,
 }
 
 /// The data sources a tick reads, opened once on the sampler thread.
@@ -182,6 +197,7 @@ impl Sources {
 impl Sampler {
     fn new(store: Store, wiring: Wiring) -> Sampler {
         let now = wall_ms();
+        let opened = wiring.ring_path.as_deref().map(BlackboxRing::open);
         let machine = store.machine().ok().flatten().unwrap_or(MachineInfo {
             logical_cpus: logical_cpus(),
             mem_total_bytes: memory_info().map_or(0, |m| m.total_bytes),
@@ -217,14 +233,34 @@ impl Sampler {
             disk_active_ms: HashMap::new(),
             commit_limit_bytes: 0,
             critical_findings: 0,
+            ring: None,
+            ring_sync: RingSync::new(now),
+            fall: None,
+            held_gap: None,
+            started_ms: now,
+            hardware_error: false,
             store,
         };
         sampler.recall_last_day(now);
-        if let Ok(Some(last)) = sampler.store.last_sample_end_ms()
+        let history_last = sampler.store.last_sample_end_ms().ok().flatten();
+        match opened {
+            Some(Ok((ring, held))) => {
+                sampler.ring = Some(ring);
+                sampler.fall = Fall::after(held, history_last, now);
+            }
+            Some(Err(err)) => sampler.report(&err),
+            None => {}
+        }
+        let away_from = history_last.or_else(|| sampler.fall.as_ref().map(Fall::last_ms));
+        if let Some(last) = away_from
             && now - last > STOPPED_GAP_MIN_MS
         {
-            sampler.away_since = Some((last, GapReason::Stopped));
-            sampler.come_back(now);
+            if sampler.fall.is_some() {
+                sampler.held_gap = Some(last);
+            } else {
+                sampler.away_since = Some((last, GapReason::Stopped));
+                sampler.come_back(now);
+            }
         }
         sampler
     }
@@ -345,6 +381,12 @@ impl Sampler {
             keep_hiccups(&mut lock(&self.hiccups), &ticks_seen, ts_ms);
         }
         let memory = memory_info()?;
+        let mut strain = Strain {
+            mem_used_pct: used_pct(memory.total_bytes, memory.avail_bytes),
+            worst_lag_ms: probe_max_lag_ms.max(sampler_lag_ms),
+            hardware_error: self.hardware_error,
+            ..Strain::default()
+        };
         let (cpu, pdh) = (sources.cpu.sample()?, sources.pdh.sample()?);
         if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
             let sample = Sample {
@@ -381,10 +423,15 @@ impl Sampler {
                 readings.push(Reading::of_sample(&sample));
             }
             self.blackbox.push_sample(sample.clone());
+            if let Some(ring) = self.ring.as_mut() {
+                ring.push_sample(&sample);
+            }
             {
+                let pressure = self.blackbox.open_pressure();
+                strain.pressure_open = !pressure.is_empty();
                 let mut now = lock(&self.now);
                 now.sample = Some(sample.clone());
-                now.pressure = self.blackbox.open_pressure();
+                now.pressure = pressure;
             }
             *lock(&self.pressure) = self.blackbox.recent_pressure();
             self.batcher.push_sample(sample);
@@ -428,13 +475,18 @@ impl Sampler {
                 entries: heaviest(rates, TOP_PER_METRIC),
             };
             self.blackbox.push_top(top.clone());
+            if let Some(ring) = self.ring.as_mut() {
+                ring.push_top(&top);
+            }
             self.batcher.push_processes(top);
         }
 
         self.take_events();
+        self.settle_fall(ts_ms, false);
         let outputs = self.blackbox.poll(ts_ms);
         self.keep(outputs, ts_ms);
         self.publish_suggestion();
+        self.sync_ring(ts_ms, strain);
         if self.batcher.due(ts_ms) {
             self.flush();
         }
@@ -503,7 +555,15 @@ impl Sampler {
 
     /// Moves delivered events into the black box and the next batch, with their bookmark.
     fn take_events(&mut self) {
+        let now = wall_ms();
         while let Ok(delivered) = self.events_rx.try_recv() {
+            let event = &delivered.event;
+            if event.meaning == EventMeaning::HardwareError && event.ts_ms >= self.started_ms {
+                self.hardware_error = true;
+            }
+            if let Some(fall) = self.fall.as_mut() {
+                fall.offer(event, now);
+            }
             self.blackbox.push_event(delivered.event.clone());
             self.events.push(delivered.event);
             self.bookmark_xml = Some(delivered.bookmark_xml);
@@ -539,9 +599,61 @@ impl Sampler {
         self.publish_recent(now);
     }
 
-    /// Hands the tray the counts of the last 24 h, and wakes it when they changed.
+    /// Turns a fall Windows has spoken about into a post-mortem, and records the time away;
+    /// `force` settles it with what is known so far.
+    fn settle_fall(&mut self, now: i64, force: bool) {
+        if !force && !self.fall.as_ref().is_some_and(|f| f.settled(now)) {
+            return;
+        }
+        let Some(fall) = self.fall.take() else {
+            return;
+        };
+        let reason = match fall.occurrence(&self.store) {
+            Ok(Some(occurrence)) => {
+                let severe = occurrence.severity == Severity::Severe;
+                self.blackbox
+                    .remember(occurrence.end_ms, Notable::Occurrence { severe });
+                self.keep(vec![Output::Occurrence(Box::new(occurrence))], now);
+                GapReason::Crashed
+            }
+            Ok(None) => GapReason::Stopped,
+            Err(err) => {
+                self.report(&err);
+                GapReason::Stopped
+            }
+        };
+        if let Some(start_ms) = self.held_gap.take() {
+            self.blackbox.push_gap(Gap {
+                start_ms,
+                end_ms: self.started_ms.max(start_ms),
+                reason,
+            });
+        }
+    }
+
+    /// Puts the black box on disk when its sync is due.
+    fn sync_ring(&mut self, now: i64, strain: Strain) {
+        if let Some(ring) = &self.ring
+            && self.ring_sync.due(now, strain)
+            && let Err(err) = ring.flush()
+        {
+            self.report(&err);
+        }
+    }
+
+    /// Marks the black box closed cleanly, once everything is written.
+    fn close_ring(&mut self) {
+        if let Some(ring) = self.ring.as_mut()
+            && let Err(err) = ring.close_cleanly()
+        {
+            self.report(&err);
+        }
+    }
+
     /// Drops what was watched before the history was cleared; the event bookmark stays.
     fn forget(&mut self, now: i64) {
+        self.fall = None;
+        self.held_gap = None;
         let _ = self.batcher.take_final();
         self.events.clear();
         self.gaps.clear();
@@ -564,6 +676,7 @@ impl Sampler {
         }
     }
 
+    /// Hands the tray the counts of the last 24 h, and wakes it when they changed.
     fn publish_recent(&self, now: i64) {
         let recent = RecentState {
             critical_findings: self.critical_findings,
@@ -635,6 +748,11 @@ impl Sampler {
         lock(&self.now).pressure.clear();
         *lock(&self.pressure) = self.blackbox.recent_pressure();
         self.flush_final();
+        if let Some(ring) = &self.ring
+            && let Err(err) = ring.flush()
+        {
+            self.report(&err);
+        }
         if self.away_since.is_none() {
             self.away_since = Some((now, reason));
         }
@@ -706,6 +824,13 @@ fn keep_hiccups(kept: &mut VecDeque<ProbeHiccup>, ticks: &[ProbeTick], now_ms: i
     }
 }
 
+fn used_pct(total_bytes: u64, avail_bytes: u64) -> f32 {
+    if total_bytes == 0 {
+        return 0.0;
+    }
+    (total_bytes.saturating_sub(avail_bytes) as f64 * 100.0 / total_bytes as f64) as f32
+}
+
 /// Hands back the pages only startup touched (PDH name tables, DLL setup); the rest fault back in.
 fn release_idle_pages() {
     // SAFETY: (usize::MAX, usize::MAX) asks Windows to trim this process's working set.
@@ -719,7 +844,8 @@ mod tests {
 
     use vestigium_collect::ProbeConfig;
     use vestigium_core::{
-        Channel, DEFAULT_PROBE_PERIOD, EventMeaning, OccurrenceKind, SENSITIVE_FOR, Sample,
+        Channel, CrashKind, DEFAULT_PROBE_PERIOD, EventMeaning, OccurrenceKind, SENSITIVE_FOR,
+        Sample, Trigger,
     };
     use vestigium_store::{Series, decode, encode};
 
@@ -772,6 +898,7 @@ mod tests {
                 settings: Arc::new(Mutex::new(Settings::default())),
                 cleared: Arc::new(AtomicBool::new(false)),
                 health_due: Arc::new(AtomicBool::new(false)),
+                ring_path: Some(dir.join("blackbox.ring")),
             },
         )
         .unwrap();
@@ -996,6 +1123,196 @@ mod tests {
         stop(&running);
 
         assert!(recorded, "no gap for the time the agent was stopped");
+    }
+
+    fn delivered(
+        ts_ms: i64,
+        provider: &str,
+        id: u16,
+        meaning: EventMeaning,
+        data_xml: String,
+    ) -> Delivered {
+        Delivered {
+            event: WinEvent {
+                ts_ms,
+                channel: Channel::System,
+                provider: provider.to_string(),
+                id,
+                record_id: ts_ms as u64,
+                level: 1,
+                meaning,
+                data_xml,
+            },
+            bookmark_xml: "<BookmarkList/>".to_string(),
+        }
+    }
+
+    /// The Kernel-Power 41 of a blue screen with stop code 0x50, as the next boot logs it.
+    fn power_loss(ts_ms: i64) -> Delivered {
+        let data = "<EventData><Data Name='BugcheckCode'>80</Data>\
+            <Data Name='SleepInProgress'>0</Data><Data Name='PowerButtonTimestamp'>0</Data></EventData>";
+        delivered(
+            ts_ms,
+            "Microsoft-Windows-Kernel-Power",
+            41,
+            EventMeaning::PowerLoss,
+            data.to_string(),
+        )
+    }
+
+    /// The EventLog 6008 that dates a fall at `down_ms`, in UTC.
+    fn unexpected_shutdown(ts_ms: i64, down_ms: i64) -> Delivered {
+        let utc = systemtime(down_ms);
+        let hex: String = utc
+            .iter()
+            .chain(utc.iter())
+            .flat_map(|v| v.to_le_bytes())
+            .map(|b| format!("{b:02X}"))
+            .collect();
+        let data = format!("<EventData><Binary>{hex}</Binary></EventData>");
+        delivered(
+            ts_ms,
+            "EventLog",
+            6008,
+            EventMeaning::UnexpectedShutdown,
+            data,
+        )
+    }
+
+    /// A Windows SYSTEMTIME for a Unix time: year, month, weekday, day, hour, minute, second, ms.
+    fn systemtime(ms: i64) -> [u16; 8] {
+        let (days, rest) = (ms.div_euclid(DAY_MS), ms.rem_euclid(DAY_MS));
+        // Civil date from days since 1970-01-01, after Howard Hinnant's algorithm.
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = yoe + era * 400 + i64::from(month <= 2);
+        let parts = [
+            year,
+            month,
+            0,
+            day,
+            rest / HOUR_MS,
+            rest / 60_000 % 60,
+            rest / 1000 % 60,
+            rest % 1000,
+        ];
+        parts.map(|v| v as u16)
+    }
+
+    fn quiet(ts_ms: i64) -> Sample {
+        Sample {
+            ts_ms,
+            cpu_pct: 20.0,
+            dpc_pct: 0.0,
+            isr_pct: 0.0,
+            perf_limit_pct: 100.0,
+            proc_perf_pct: 100.0,
+            mem_total_bytes: 16 << 30,
+            mem_avail_bytes: 1 << 30,
+            commit_bytes: 20 << 30,
+            commit_limit_bytes: 24 << 30,
+            hard_faults_per_s: 0.0,
+            gpu_pct: None,
+            probe_max_lag_ms: 1.0,
+            sampler_lag_ms: 0.0,
+            cores: Vec::new(),
+            disks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn clean_exit_is_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = start(dir.path(), Duration::from_secs(1));
+        assert!(wait_until(PATIENCE, || sampled(&first.status)));
+        stop(&first);
+
+        let second = start(dir.path(), Duration::from_secs(1));
+        let now = wall_ms();
+        second
+            .events_tx
+            .send(unexpected_shutdown(now, now - 1_000))
+            .unwrap();
+        second.events_tx.send(power_loss(now + 1)).unwrap();
+        let taken = wait_until(PATIENCE, || {
+            history(dir.path())
+                .events(i64::MIN, i64::MAX)
+                .unwrap()
+                .len()
+                == 2
+        });
+        stop(&second);
+
+        assert!(taken, "the events never reached the history");
+        let store = history(dir.path());
+        let occurrences = store.occurrences(i64::MIN, i64::MAX).unwrap();
+        assert!(
+            occurrences
+                .iter()
+                .all(|o| o.kind != OccurrenceKind::PostMortem)
+        );
+        let gaps = store.gaps(i64::MIN, i64::MAX).unwrap();
+        assert!(gaps.iter().all(|g| g.reason != GapReason::Crashed));
+    }
+
+    #[test]
+    fn crash_becomes_a_postmortem_occurrence() {
+        let dir = tempfile::tempdir().unwrap();
+        let last = wall_ms() - 10 * 60_000;
+        {
+            let (mut ring, _) = BlackboxRing::open(&dir.path().join("blackbox.ring")).unwrap();
+            for i in 0..30 {
+                ring.push_sample(&quiet(last - 29_000 + i * 1_000));
+            }
+            // Dropped without a clean close, as a fall leaves it.
+        }
+
+        let running = start(dir.path(), Duration::from_secs(1));
+        let boot = wall_ms() - 60_000;
+        running
+            .events_tx
+            .send(unexpected_shutdown(boot, last + 2_000))
+            .unwrap();
+        running.events_tx.send(power_loss(boot + 1_000)).unwrap();
+        let found = wait_until(PATIENCE, || {
+            history(dir.path())
+                .occurrences(i64::MIN, i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|o| o.kind == OccurrenceKind::PostMortem)
+        });
+        stop(&running);
+
+        assert!(found, "the fall left no post-mortem");
+        let store = history(dir.path());
+        let summary = store
+            .occurrences(i64::MIN, i64::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|o| o.kind == OccurrenceKind::PostMortem)
+            .unwrap();
+        let occurrence = store.occurrence(summary.id).unwrap().unwrap();
+        assert!(matches!(
+            occurrence.triggers[..],
+            [Trigger::Crash {
+                last_ms,
+                down_ms,
+                kind: CrashKind::BlueScreen { code: 0x50, .. },
+            }] if last_ms == last && down_ms == last + 2_000
+        ));
+        assert_eq!(occurrence.window.samples.len(), 30);
+        let gaps = store.gaps(i64::MIN, i64::MAX).unwrap();
+        assert!(
+            gaps.iter()
+                .any(|g| g.reason == GapReason::Crashed && g.start_ms == last),
+            "the time away was not recorded as a fall: {gaps:?}"
+        );
     }
 
     #[test]
