@@ -96,6 +96,9 @@ mod tests {
             data_bytes: Some(96),
         })
         .unwrap();
-        assert_eq!(json, serde_json::json!({ "version": "1.2.3", "data_bytes": 96 }));
+        assert_eq!(
+            json,
+            serde_json::json!({ "version": "1.2.3", "data_bytes": 96 })
+        );
     }
 }
