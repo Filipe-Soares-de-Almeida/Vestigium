@@ -4173,6 +4173,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vestigium-helper"
+version = "0.0.0"
+dependencies = [
+ "postcard",
+ "tempfile",
+ "vestigium-collect",
+ "vestigium-core",
+ "windows",
+ "winresource",
+]
+
+[[package]]
 name = "vestigium-i18n"
 version = "0.0.0"
 dependencies = [

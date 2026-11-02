@@ -1,0 +1,112 @@
+use std::path::PathBuf;
+
+/// Exit code for a job the helper does not run.
+pub const REFUSED: u8 = 2;
+pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=10;
+
+/// The closed list of jobs.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Job {
+    /// Traces DPC/ISR time per driver and frame times for `minutes`, into `out`; `etl` keeps the raw trace.
+    DeepCapture {
+        minutes: u64,
+        out: PathBuf,
+        etl: Option<PathBuf>,
+    },
+}
+
+/// The job these arguments name, or why they name none.
+pub fn parse(args: &[String]) -> Result<Job, String> {
+    let (name, rest) = args.split_first().ok_or("no job")?;
+    if name != "deep-capture" {
+        return Err(format!("unknown job {name}"));
+    }
+    let (mut minutes, mut out, mut etl) = (None, None, None);
+    let mut it = rest.iter();
+    while let Some(flag) = it.next() {
+        let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
+        match flag.as_str() {
+            "--minutes" if minutes.is_none() => {
+                minutes = Some(value.parse::<u64>().map_err(|e| e.to_string())?)
+            }
+            "--out" if out.is_none() => out = Some(PathBuf::from(value)),
+            "--etl" if etl.is_none() => etl = Some(PathBuf::from(value)),
+            other => return Err(format!("unexpected {other}")),
+        }
+    }
+    let minutes = minutes.ok_or("--minutes is required")?;
+    if !MINUTES.contains(&minutes) {
+        return Err(format!("--minutes must be 1 to 10, not {minutes}"));
+    }
+    Ok(Job::DeepCapture {
+        minutes,
+        out: out.ok_or("--out is required")?,
+        etl,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn refuses_unknown_job() {
+        assert!(parse(&args(&["delete-dumps", "--minutes", "5"])).is_err());
+        assert!(parse(&args(&[])).is_err());
+    }
+
+    #[test]
+    fn minutes_out_of_range_is_refused() {
+        for m in ["0", "11", "-1", "five"] {
+            assert!(parse(&args(&["deep-capture", "--minutes", m, "--out", "x"])).is_err());
+        }
+    }
+
+    #[test]
+    fn repeated_or_unknown_flags_are_refused() {
+        assert!(
+            parse(&args(&[
+                "deep-capture",
+                "--minutes",
+                "5",
+                "--minutes",
+                "6",
+                "--out",
+                "x"
+            ]))
+            .is_err()
+        );
+        assert!(
+            parse(&args(&[
+                "deep-capture",
+                "--minutes",
+                "5",
+                "--run",
+                "cmd.exe"
+            ]))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn deep_capture_parses() {
+        assert_eq!(
+            parse(&args(&[
+                "deep-capture",
+                "--minutes",
+                "5",
+                "--out",
+                r"C:\a.capture"
+            ])),
+            Ok(Job::DeepCapture {
+                minutes: 5,
+                out: PathBuf::from(r"C:\a.capture"),
+                etl: None
+            })
+        );
+    }
+}
