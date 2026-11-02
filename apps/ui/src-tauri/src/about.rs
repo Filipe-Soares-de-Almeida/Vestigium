@@ -37,11 +37,25 @@ pub fn open_data_folder() -> Result<(), UiError> {
     let dir = data_dir()
         .filter(|dir| dir.is_dir())
         .ok_or_else(|| UiError::Failed("the data folder does not exist yet".into()))?;
+    // The final path, so Explorer finds a folder Windows redirects for a packaged parent process.
+    let dir = std::fs::canonicalize(&dir).map_or(dir, plain);
     Command::new("explorer.exe")
         .arg(dir)
         .spawn()
         .map(drop)
         .map_err(|err| UiError::Failed(err.to_string()))
+}
+
+/// `path` without the `\\?\` prefix `canonicalize` adds, which Explorer does not accept.
+fn plain(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else if let Some(local) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(local)
+    } else {
+        path
+    }
 }
 
 /// The folder that holds the watcher's database.
@@ -81,6 +95,21 @@ mod tests {
         std::fs::create_dir(dir.path().join("old")).unwrap();
         std::fs::write(dir.path().join("old").join("note.txt"), [0u8; 10]).unwrap();
         assert_eq!(folder_bytes(dir.path()).unwrap(), Some(4618));
+    }
+
+    #[test]
+    fn explorer_gets_the_path_without_the_verbatim_prefix() {
+        assert_eq!(
+            plain(PathBuf::from(
+                r"\\?\C:\Users\Ana\AppData\Local\Vestigium\data"
+            )),
+            PathBuf::from(r"C:\Users\Ana\AppData\Local\Vestigium\data")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\server\share\data")),
+            PathBuf::from(r"\\server\share\data")
+        );
+        assert_eq!(plain(PathBuf::from(r"D:\data")), PathBuf::from(r"D:\data"));
     }
 
     #[test]

@@ -115,6 +115,8 @@ How to use this file:
 
 ### Fixed
 
+- "Open the data folder" in Settings opens the folder where the history really is, also when
+  Windows keeps it in another place for the program that started Vestigium.
 - The PC states chart on Today no longer draws a white frame around itself when it has focus; the
   highlighted stretch and its tooltip show where the keyboard is.
 - With a state picked on the PC states chart, clicking a stretch of another state now switches to
