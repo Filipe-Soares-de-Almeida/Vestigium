@@ -1,12 +1,12 @@
 <script lang="ts">
-  // The 16 px Lapidado: four facets of a cut V, filled from the colour theme's own ramp.
+  // The title bar's Lapidado: four facets of a cut V, filled from the colour theme's own ramp.
 </script>
 
-<svg class="mark" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-  <path class="f1" d="M2.2 3L3.9 3L8 13.2Z" />
-  <path class="f2" d="M3.9 3L5.6 3L8 7.6L8 13.2Z" />
-  <path class="f3" d="M10.4 3L12.1 3L8 13.2L8 7.6Z" />
-  <path class="f4" d="M12.1 3L13.8 3L8 13.2Z" />
+<svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+  <path class="f1" d="M0.46 1.47L2.67 1.47L8 14.73Z" />
+  <path class="f2" d="M2.67 1.47L4.88 1.47L8 7.45L8 14.73Z" />
+  <path class="f3" d="M11.12 1.47L13.33 1.47L8 14.73L8 7.45Z" />
+  <path class="f4" d="M13.33 1.47L15.54 1.47L8 14.73Z" />
 </svg>
 
 <style>

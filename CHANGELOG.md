@@ -98,14 +98,15 @@ How to use this file:
 - The background watcher saves its history once a minute, compressed, and hands memory it only
   needed at startup back to Windows: about 30 MB of disk writes a day and 5 MB of memory in use,
   measured on a typical desktop.
-- The tray icon is now the Vestigium mark, a faceted V, in the taskbar's own white or black, and
-  it follows Windows when the taskbar turns dark or light. A badge in its corner tells the state by
+- The tray icon is now the Vestigium mark, the red faceted V of the app icon, on a light or a dark
+  taskbar alike, and Task Manager shows it the same way. A badge in its corner tells the state by
   its shape: a ring when the last 24 hours held slowdowns, a solid dot after a severe freeze, two
   bars over a dimmed mark while watching is paused, and a dashed ring with a dot while sensitive
   mode is on. The ring and the dot take the accent of the chosen colour theme, and the icon is
   drawn at the taskbar's own size, so it stays sharp at 125%, 150% and 200% display scale.
 - The window, its taskbar button, the installer and the watcher in Task Manager now show the
-  Vestigium icon, a red V cut like a gemstone, the same in every colour theme.
+  Vestigium icon, a red V cut like a gemstone, the same in every colour theme. The V fills almost
+  the whole icon, and the mark in the window's title bar is 22 px.
 - Update the window and the background watcher together: this window does not talk to a watcher
   from an earlier version still running, and says so until that watcher is exited from the tray
   and Vestigium is opened again.

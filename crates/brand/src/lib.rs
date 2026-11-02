@@ -5,18 +5,9 @@ mod canvas;
 use canvas::{Canvas, Point, Shape};
 pub use canvas::{Image, Rgb};
 
-/// The V outline of the hand-tuned 16 px drawing.
-const OUTLINE_16: [Point; 6] = [
-    (2.2, 3.0),
-    (5.6, 3.0),
-    (8.0, 7.6),
-    (10.4, 3.0),
-    (13.8, 3.0),
-    (8.0, 13.2),
-];
-
-/// The facet line the 16 px silhouette cuts, from the notch to the tip.
-const CUT_16: (Point, Point) = ((8.0, 7.6), (8.0, 13.2));
+/// How much the drawings below are enlarged around their centre, so the V spans 94% of the icon.
+const GROW_48: f32 = 1.32;
+const GROW_16: f32 = 1.3;
 
 /// The V outline on the 48 grid.
 const OUTLINE: [Point; 6] = [
@@ -114,20 +105,11 @@ impl TrayInk {
     }
 }
 
-/// The tray glyph, `size` pixels a side: the 16 px silhouette, its badge in the bottom-right quadrant.
+/// The tray glyph, `size` pixels a side: the app icon's 16 px facets, its badge in the bottom-right quadrant.
 pub fn tray(size: u32, badge: Badge, colours: TrayInk) -> Image {
     let mut canvas = Canvas::new(size, 16.0);
-    let glyph = Shape::Poly {
-        points: OUTLINE_16.to_vec(),
-        grow: 0.25,
-    };
     let faded = if badge == Badge::Paused { 0.45 } else { 1.0 };
-    canvas.fill(&glyph, colours.ink, faded);
-    canvas.erase(&Shape::Line {
-        from: CUT_16.0,
-        to: CUT_16.1,
-        half: 0.3,
-    });
+    facets_16(&mut canvas, faded);
 
     let centre = (12.5, 12.5);
     let knockout = |radius| Shape::Circle { centre, radius };
@@ -185,36 +167,49 @@ pub fn tray(size: u32, badge: Badge, colours: TrayInk) -> Image {
 pub fn app_icon(size: u32) -> Image {
     if size <= 16 {
         let mut canvas = Canvas::new(size, 16.0);
-        let colours = [0, 1, 3, 5].map(|facet| FACET_COLOURS[facet]);
-        for (points, colour) in FACETS_16.iter().zip(colours) {
-            let facet = Shape::Poly {
-                points: points.to_vec(),
-                grow: 0.15,
-            };
-            canvas.fill(&facet, colour, 1.0);
-        }
+        facets_16(&mut canvas, 1.0);
         return canvas.image();
     }
     let mut canvas = Canvas::new(size, 48.0);
     let lowered = Shape::Poly {
-        points: OUTLINE.map(|(x, y)| (x, y + 1.2)).to_vec(),
+        points: OUTLINE.map(grow_48).map(|(x, y)| (x, y + 1.2)).to_vec(),
         grow: 0.3,
     };
     canvas.shadow(&lowered, 1.2, 0.35);
     for (points, colour) in FACETS.iter().zip(FACET_COLOURS) {
         let facet = Shape::Poly {
-            points: points.to_vec(),
+            points: points.map(grow_48).to_vec(),
             grow: 0.3,
         };
         canvas.fill(&facet, colour, 1.0);
     }
     let edges = EDGES.map(|(from, to)| Shape::Line {
-        from,
-        to,
+        from: grow_48(from),
+        to: grow_48(to),
         half: 0.35,
     });
     canvas.fill(&Shape::Union(edges.into()), [0xff; 3], 0.22);
     canvas.image()
+}
+
+/// The four facets of the 16 px drawing, at `alpha`.
+fn facets_16(canvas: &mut Canvas, alpha: f32) {
+    let colours = [0, 1, 3, 5].map(|facet| FACET_COLOURS[facet]);
+    for (points, colour) in FACETS_16.iter().zip(colours) {
+        let facet = Shape::Poly {
+            points: points.iter().map(|&p| grow_16(p)).collect(),
+            grow: 0.15,
+        };
+        canvas.fill(&facet, colour, alpha);
+    }
+}
+
+fn grow_48((x, y): Point) -> Point {
+    (24.0 + (x - 24.0) * GROW_48, 24.5 + (y - 24.5) * GROW_48)
+}
+
+fn grow_16((x, y): Point) -> Point {
+    (8.0 + (x - 8.0) * GROW_16, 8.1 + (y - 8.1) * GROW_16)
 }
 
 #[cfg(test)]
@@ -252,10 +247,10 @@ mod tests {
     }
 
     #[test]
-    fn the_silhouette_is_ink_and_the_corners_stay_clear() {
+    fn the_glyph_takes_the_app_facets_and_the_corners_stay_clear() {
         let image = tray(16, Badge::None, colours());
 
-        assert_eq!(image.pixel(3, 3), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(image.pixel(2, 3), [0xff, 0x53, 0x55, 0xff]);
         assert_eq!(image.pixel(0, 0)[3], 0);
         assert_eq!(image.pixel(15, 15)[3], 0);
         assert_eq!(image.pixel(8, 2)[3], 0);
@@ -293,7 +288,7 @@ mod tests {
     fn paused_dims_the_glyph_and_draws_bars_in_ink() {
         let image = tray(16, Badge::Paused, colours());
 
-        assert_eq!(image.pixel(3, 3)[3], 115);
+        assert_eq!(image.pixel(2, 3)[3], 115);
         assert_eq!(image.pixel(10, 12), [0xff, 0xff, 0xff, 0xff]);
         assert_eq!(image.pixel(12, 12)[3], 0);
     }
@@ -317,16 +312,16 @@ mod tests {
     #[test]
     fn the_app_icon_keeps_its_fixed_facets() {
         let image = app_icon(256);
-        // The middle of the first and the last facet, on the 48 grid scaled to 256.
-        assert_eq!(image.pixel(76, 103), [0xff, 0x53, 0x55, 0xff]);
-        assert_eq!(image.pixel(179, 103), [0x9b, 0x0e, 0x1e, 0xff]);
+        // The middle of the first and the last facet, enlarged on the 48 grid and scaled to 256.
+        assert_eq!(image.pixel(60, 94), [0xff, 0x53, 0x55, 0xff]);
+        assert_eq!(image.pixel(196, 94), [0x9b, 0x0e, 0x1e, 0xff]);
         assert_eq!(image.pixel(0, 0)[3], 0);
     }
 
     #[test]
     fn the_app_icon_casts_a_soft_shadow_below_the_tip() {
         let image = app_icon(256);
-        let below = image.pixel(128, 222);
+        let below = image.pixel(128, 244);
 
         assert_eq!(&below[..3], &[0, 0, 0]);
         assert!((1..0x80).contains(&below[3]));
