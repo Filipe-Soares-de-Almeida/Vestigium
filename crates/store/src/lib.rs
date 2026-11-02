@@ -2,6 +2,7 @@
 
 mod batch;
 mod captures;
+mod health;
 mod prune;
 mod read;
 mod records;
@@ -10,6 +11,7 @@ mod segment;
 
 pub use batch::Batcher;
 pub use captures::CaptureSummary;
+pub use health::FindingRecord;
 pub use prune::PruneReport;
 pub use schema::{Batch, SCHEMA_VERSION, Store};
 pub use segment::{Segment, Series, decode, encode};

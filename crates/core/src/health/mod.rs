@@ -115,6 +115,16 @@ pub struct BootReport {
     pub delays: Vec<BootDelay>,
 }
 
+/// Layout of the `ScanResult` the elevated helper writes and the store keeps.
+pub const SCAN_VERSION: u8 = 1;
+
+/// What one full scan read with elevation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScanResult {
+    pub ts_ms: i64,
+    pub boot: BootReport,
+}
+
 /// One physical disk's health, read without elevation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DiskHealth {
