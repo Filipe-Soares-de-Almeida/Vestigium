@@ -16,6 +16,7 @@ mod presentmon;
 mod probe;
 mod processes;
 mod timer;
+mod tweaks;
 
 pub use blackbox::{BlackboxRing, RING_RECORDS, RingContents};
 pub use boot::{BOOT_LOG, boot_report};
@@ -40,6 +41,10 @@ pub use presentmon::{
 pub use probe::{ProbeConfig, spawn_probe};
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
+pub use tweaks::{
+    RESTORE_CREATED, RESTORE_SKIPPED, RestoreEvent, exe_of, has_battery, hiberfile_bytes,
+    monitor_count, read_setting, restore_event, restore_events, startup_entries,
+};
 
 /// Why a data source failed.
 #[derive(Debug, thiserror::Error)]
