@@ -202,6 +202,11 @@ pub fn combined_surface(runs: &[SurfaceScan]) -> Option<SurfaceScan> {
     Some(combined)
 }
 
+/// Size of the benchmark's temporary file.
+pub const BENCH_FILE_BYTES: u64 = 1 << 30;
+/// Longest a benchmark mode runs.
+pub const BENCH_SECONDS: f64 = 5.0;
+
 /// How a disk is attached, as the storage stack reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Bus {
@@ -246,6 +251,16 @@ impl BenchMode {
             BenchMode::SeqRead | BenchMode::SeqWrite => 8,
             BenchMode::RandRead32 | BenchMode::RandWrite32 => 32,
             BenchMode::RandRead1 | BenchMode::RandWrite1 => 1,
+        }
+    }
+
+    /// Most a mode writes: one pass over the file sequentially, less at random.
+    pub fn write_cap(self, file_bytes: u64) -> u64 {
+        match self {
+            BenchMode::SeqWrite => file_bytes,
+            BenchMode::RandWrite32 => file_bytes.min(256 << 20),
+            BenchMode::RandWrite1 => file_bytes.min(64 << 20),
+            _ => u64::MAX,
         }
     }
 

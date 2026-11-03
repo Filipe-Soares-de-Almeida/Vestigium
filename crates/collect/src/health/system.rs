@@ -58,10 +58,15 @@ pub fn volumes() -> Vec<VolumeSpace> {
         .collect()
 }
 
-/// The physical drive that holds the Windows folder, asked of the volume opened with no access
-/// rights; a volume spread over several drives answers with the first.
+/// The physical drive that holds the Windows folder; a volume over several drives gives the first.
 pub fn system_drive() -> Option<u32> {
-    let path = HSTRING::from(format!(r"\\.\{}", windows_letter()?));
+    volume_drive(&windows_letter()?)
+}
+
+/// The physical drive under the volume of `letter` ("C:" or "C:\"), asked of the volume opened
+/// with no access rights; a volume spread over several drives answers with the first.
+pub fn volume_drive(letter: &str) -> Option<u32> {
+    let path = HSTRING::from(format!(r"\\.\{}", letter.trim_end_matches('\\')));
     // SAFETY: opens the volume for a query only; closed below.
     let volume = unsafe {
         CreateFileW(

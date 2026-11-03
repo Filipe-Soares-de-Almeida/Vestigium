@@ -10,6 +10,7 @@ mod events;
 mod gpu;
 mod health;
 mod hung;
+mod hwtest;
 mod memory;
 mod pdh;
 mod presentmon;
@@ -30,9 +31,14 @@ pub use etw::{
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};
 pub use health::{
-    HealthSource, WindowsHealth, antivirus, disk_health, page_files, system_drive, volumes,
+    HealthSource, WindowsHealth, antivirus, disk_bus, disk_health, disk_nvme, page_files,
+    system_drive, volume_drive, volumes,
 };
 pub use hung::hung_pids;
+pub use hwtest::{
+    BenchTarget, LockedRegion, MemoryProgress, PatternRun, Words, benchmark,
+    memory_diagnostic_events, memory_test, run_patterns,
+};
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
 pub use presentmon::{

@@ -193,6 +193,7 @@ fn quick_run(started_ms: i64, ended_ms: i64) -> TestRun {
             total_bytes: 32 * GIB,
             tested_bytes: 4 * GIB,
             rounds: 3,
+            passes: 21,
             error_count: 0,
             errors: Vec::new(),
             failure: None,

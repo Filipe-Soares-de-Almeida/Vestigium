@@ -1,8 +1,8 @@
 use vestigium_core::health::{
     BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingChange,
     FindingKind, HealthFact, HealthInputs, Measure, NvmeHealth, PageFile, Reference,
-    SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_health,
-    reconcile, smart_attributes,
+    SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_detail,
+    nvme_health, reconcile, smart_attributes,
 };
 use vestigium_core::hwtest::{
     MemoryQuick, Outcome, SurfaceAggregator, TestData, TestRun, VolumeCheck, VolumeResult,
@@ -773,6 +773,7 @@ fn quick(errors: u64) -> TestData {
         total_bytes: 32 * GB,
         tested_bytes: 4 * GB,
         rounds: 2,
+        passes: 14,
         error_count: errors,
         errors: Vec::new(),
         failure: None,
@@ -907,4 +908,21 @@ fn test_runs_past_the_reach_are_ignored() {
     let mut inputs = healthy();
     inputs.tests.push(test_run(120, Subject::Pc, quick(5)));
     assert!(of_kind(&evaluate(&inputs), FindingKind::MemoryTestErrors).is_empty());
+}
+
+#[test]
+fn nvme_detail_reads_the_lifetime_counters() {
+    let mut log = vec![0u8; 512];
+    log[1..3].copy_from_slice(&310u16.to_le_bytes());
+    log[3] = 100;
+    log[4] = 10;
+    log[48..56].copy_from_slice(&2_000u64.to_le_bytes());
+    log[128..136].copy_from_slice(&5_000u64.to_le_bytes());
+    log[144..152].copy_from_slice(&7u64.to_le_bytes());
+    let detail = nvme_detail(&log).expect("a full log");
+    assert_eq!(detail.health.temperature_c, 37);
+    assert_eq!(detail.data_written_bytes, 2_000 * 512_000);
+    assert_eq!(detail.power_on_hours, 5_000);
+    assert_eq!(detail.unsafe_shutdowns, 7);
+    assert_eq!(nvme_detail(&log[..100]), None);
 }

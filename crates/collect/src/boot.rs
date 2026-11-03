@@ -15,7 +15,7 @@ const BATCH: usize = 32;
 const DAY_MS: u64 = 24 * 60 * 60_000;
 
 /// An event log handle, closed when dropped.
-struct Handle(EVT_HANDLE);
+pub(crate) struct Handle(pub(crate) EVT_HANDLE);
 
 impl Drop for Handle {
     fn drop(&mut self) {

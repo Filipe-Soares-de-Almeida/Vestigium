@@ -12,7 +12,8 @@ pub(crate) use boot::is_security;
 pub use reliability::{failures_between, is_failure};
 pub use rules::evaluate;
 pub use smart::{
-    NVME_WORN_PCT, NvmeHealth, SmartAttribute, WATCHED_ATTRIBUTES, nvme_health, smart_attributes,
+    NVME_WORN_PCT, NvmeDetail, NvmeHealth, SmartAttribute, WATCHED_ATTRIBUTES, nvme_detail,
+    nvme_health, smart_attributes,
 };
 
 /// Layout of the `Finding` BLOB written today.

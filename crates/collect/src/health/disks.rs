@@ -1,10 +1,11 @@
 use std::ffi::c_void;
 
-use vestigium_core::health::{DiskHealth, nvme_health, smart_attributes};
+use vestigium_core::health::{DiskHealth, NvmeDetail, nvme_detail, nvme_health, smart_attributes};
+use vestigium_core::hwtest::Bus;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    BusTypeNvme, CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING,
+    BusTypeAta, BusTypeNvme, BusTypeSata, BusTypeUsb, CreateFileW, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
@@ -86,7 +87,7 @@ fn property_query(property: i32, extra: &[u8]) -> Vec<u8> {
     query
 }
 
-fn is_nvme(drive: &Drive) -> bool {
+fn bus_type(drive: &Drive) -> Option<i32> {
     drive
         .ask(
             IOCTL_STORAGE_QUERY_PROPERTY,
@@ -98,7 +99,29 @@ fn is_nvme(drive: &Drive) -> bool {
                 d.get(BUS_TYPE_AT..BUS_TYPE_AT + 4)?.try_into().ok()?,
             ))
         })
-        == Some(BusTypeNvme.0)
+}
+
+fn is_nvme(drive: &Drive) -> bool {
+    bus_type(drive) == Some(BusTypeNvme.0)
+}
+
+/// How physical drive `index` is attached; a RAID controller or an unknown answer is `Other`.
+pub fn disk_bus(index: u32) -> Bus {
+    match Drive::open(index).and_then(|drive| bus_type(&drive)) {
+        Some(t) if t == BusTypeSata.0 || t == BusTypeAta.0 => Bus::Sata,
+        Some(t) if t == BusTypeNvme.0 => Bus::Nvme,
+        Some(t) if t == BusTypeUsb.0 => Bus::Usb,
+        _ => Bus::Other,
+    }
+}
+
+/// The whole NVMe health log of physical drive `index`; `None` for any other disk.
+pub fn disk_nvme(index: u32) -> Option<NvmeDetail> {
+    let drive = Drive::open(index)?;
+    is_nvme(&drive)
+        .then(|| nvme_log(&drive))
+        .flatten()
+        .and_then(|log| nvme_detail(&log))
 }
 
 /// The NVMe health log page, asked through the storage stack rather than a pass-through.

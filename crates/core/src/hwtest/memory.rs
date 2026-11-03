@@ -65,6 +65,8 @@ pub struct MemoryQuick {
     pub tested_bytes: u64,
     /// Full rounds of every pattern.
     pub rounds: u32,
+    /// Patterns finished, counting those of an unfinished round.
+    pub passes: u32,
     pub error_count: u64,
     pub errors: Vec<MemoryError>,
     /// Why the test could not run, when it did not.

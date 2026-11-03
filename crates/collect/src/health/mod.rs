@@ -4,9 +4,9 @@ mod system;
 
 use vestigium_core::health::{DiskHealth, PageFile, SecurityProduct, VolumeSpace};
 
-pub use disks::disk_health;
+pub use disks::{disk_bus, disk_health, disk_nvme};
 pub use security::antivirus;
-pub use system::{page_files, system_drive, volumes};
+pub use system::{page_files, system_drive, volume_drive, volumes};
 
 /// What a health pass reads from Windows, so the agent's tests can stand in for the machine.
 pub trait HealthSource {

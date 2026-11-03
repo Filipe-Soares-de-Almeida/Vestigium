@@ -30,6 +30,39 @@ pub struct NvmeHealth {
     pub media_errors: u64,
 }
 
+/// Everything of the NVMe health log the Tests screen shows; the findings read `NvmeHealth`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NvmeDetail {
+    pub health: NvmeHealth,
+    pub data_read_bytes: u64,
+    pub data_written_bytes: u64,
+    pub power_cycles: u64,
+    pub power_on_hours: u64,
+    pub unsafe_shutdowns: u64,
+    pub error_log_entries: u64,
+}
+
+/// The NVMe log counts data in units of 1000 sectors of 512 bytes.
+const NVME_DATA_UNIT: u64 = 512_000;
+
+/// The low 64 bits of the 128-bit counter at `at` in an NVMe health log.
+fn counter(log: &[u8], at: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(log.get(at..at + 8)?.try_into().ok()?))
+}
+
+/// The detail of an NVMe health log; `None` when shorter than the fields it holds.
+pub fn nvme_detail(log: &[u8]) -> Option<NvmeDetail> {
+    Some(NvmeDetail {
+        health: nvme_health(log)?,
+        data_read_bytes: counter(log, 32)?.saturating_mul(NVME_DATA_UNIT),
+        data_written_bytes: counter(log, 48)?.saturating_mul(NVME_DATA_UNIT),
+        power_cycles: counter(log, 112)?,
+        power_on_hours: counter(log, 128)?,
+        unsafe_shutdowns: counter(log, 144)?,
+        error_log_entries: counter(log, 176)?,
+    })
+}
+
 /// The attributes of a 512-byte SMART READ DATA block: 30 entries of 12 bytes from byte 2.
 pub fn smart_attributes(data: &[u8]) -> Vec<SmartAttribute> {
     (0..ENTRIES)
