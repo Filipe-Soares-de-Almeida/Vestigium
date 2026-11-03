@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use vestigium_core::{Hive, Setting, SettingStore, StartupEntry, StartupList, Value};
+use vestigium_core::{Guid, Hive, Setting, SettingStore, StartupEntry, StartupList, Value};
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_DIR_NOT_EMPTY, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL, LUID,
     LocalFree, STATUS_SUCCESS, WIN32_ERROR,
@@ -85,9 +85,9 @@ pub fn read_setting(setting: &Setting) -> Option<Value> {
             let status = unsafe {
                 PowerReadACValueIndex(
                     None,
-                    Some(&GUID::from_u128(scheme)),
-                    Some(&GUID::from_u128(*subgroup)),
-                    Some(&GUID::from_u128(*setting)),
+                    Some(&GUID::from_u128(scheme.0)),
+                    Some(&GUID::from_u128(subgroup.0)),
+                    Some(&GUID::from_u128(setting.0)),
                     &mut value,
                 )
             };
@@ -222,7 +222,7 @@ fn read_service(name: &str) -> Option<Value> {
     })
 }
 
-fn active_scheme() -> Option<u128> {
+fn active_scheme() -> Option<Guid> {
     let mut scheme: *mut GUID = std::ptr::null_mut();
     // SAFETY: Windows allocates the GUID, freed with LocalFree below.
     let status = unsafe { PowerGetActiveScheme(None, &mut scheme) };
@@ -235,7 +235,7 @@ fn active_scheme() -> Option<u128> {
         let _ = LocalFree(Some(HLOCAL(scheme.cast())));
         guid
     };
-    Some(guid.to_u128())
+    Some(Guid(guid.to_u128()))
 }
 
 /// The programs Windows starts at sign-in from the Run keys and the Startup folders.
@@ -564,14 +564,14 @@ pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
             },
         ) => write_service(name, *start, *delayed, *running),
         (Setting::PowerAc { subgroup, setting }, Value::Index(index)) => {
-            let scheme = GUID::from_u128(active_scheme().ok_or(ERROR_FILE_NOT_FOUND.0)?);
+            let scheme = GUID::from_u128(active_scheme().ok_or(ERROR_FILE_NOT_FOUND.0)?.0);
             // SAFETY: writes one AC value of the active scheme.
             ok(unsafe {
                 PowerWriteACValueIndex(
                     None,
                     &scheme,
-                    Some(&GUID::from_u128(*subgroup)),
-                    Some(&GUID::from_u128(*setting)),
+                    Some(&GUID::from_u128(subgroup.0)),
+                    Some(&GUID::from_u128(setting.0)),
                     *index,
                 )
             })?;
@@ -580,7 +580,7 @@ pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
         }
         (Setting::ActiveScheme, Value::Scheme(scheme)) => {
             // SAFETY: makes an existing scheme the active one.
-            ok(unsafe { PowerSetActiveScheme(None, Some(&GUID::from_u128(*scheme))) })
+            ok(unsafe { PowerSetActiveScheme(None, Some(&GUID::from_u128(scheme.0))) })
         }
         (Setting::Hibernation, Value::On(on)) => {
             enable_privilege("SeCreatePagefilePrivilege")?;

@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use vestigium_core::health::{SCAN_VERSION, ScanResult};
 use vestigium_core::{
-    CAPTURE_VERSION, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION, DeepCapture, DumpDeletion, DumpScan,
-    ProbeHiccup,
+    Applier, CAPTURE_VERSION, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION, DeepCapture, DumpDeletion,
+    DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
 };
 use vestigium_store::Store;
 
@@ -86,6 +86,29 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
         let _ = fs::remove_file(&path);
     }
     (ids, deleted)
+}
+
+/// Stores the tweak results of `dir` in the history and deletes them with their plans; returns
+/// the ids of the changes in the order read.
+pub fn import_tweaks(dir: &Path, store: &mut Store) -> Vec<i64> {
+    let mut ids = Vec::new();
+    for path in numbered_files(dir, "tweaked") {
+        let Some(results) = read_versioned::<TweakResults>(&path, TWEAK_PLAN_VERSION) else {
+            continue;
+        };
+        let stored: Result<Vec<i64>, _> = results
+            .changes
+            .iter()
+            .map(|change| store.record_tweak_change(change, results.ts_ms, Applier::Elevated))
+            .collect();
+        let Ok(stored) = stored else {
+            continue;
+        };
+        ids.extend(stored);
+        let _ = fs::remove_file(path.with_extension("plan"));
+        let _ = fs::remove_file(&path);
+    }
+    ids
 }
 
 /// The files named `<digits>.<extension>`, in name order.
@@ -313,6 +336,45 @@ mod tests {
             !dumps.join("20.delete").exists(),
             "the list it answered is cleaned up"
         );
+    }
+
+    #[test]
+    fn imports_a_tweaked_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mpo = vestigium_core::TweakId::Mpo;
+        let change = vestigium_core::TweakChange {
+            tweak: mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![vestigium_core::SettingResult {
+                change: vestigium_core::SettingChange {
+                    setting: mpo.settings()[0].clone(),
+                    from: vestigium_core::Value::Absent,
+                    to: vestigium_core::Value::Dword(5),
+                },
+                error: None,
+            }],
+            restore_point: Some(vestigium_core::RestorePoint::Created),
+        };
+        fs::write(tweaks.join("30.plan"), [TWEAK_PLAN_VERSION]).unwrap();
+        write_versioned(
+            &tweaks.join("30.tweaked"),
+            TWEAK_PLAN_VERSION,
+            &TweakResults {
+                ts_ms: 30,
+                changes: vec![change.clone()],
+            },
+        );
+
+        assert_eq!(import_tweaks(&tweaks, &mut store), vec![1]);
+        assert!(import_tweaks(&tweaks, &mut store).is_empty());
+        assert!(!tweaks.join("30.plan").exists() && !tweaks.join("30.tweaked").exists());
+        let rows = store.tweaks_in_place().unwrap();
+        assert_eq!(rows[0].change, change);
+        assert_eq!(rows[0].applier, Applier::Elevated);
     }
 
     #[test]

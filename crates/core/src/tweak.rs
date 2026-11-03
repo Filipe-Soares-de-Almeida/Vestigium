@@ -17,13 +17,13 @@ const HELPED_DAYS: i64 = 7;
 /// FILETIME counts 100 ns from 1601; Unix milliseconds count from 1970.
 const FILETIME_UNIX_MS: i64 = 11_644_473_600_000;
 
-pub const SCHEME_BALANCED: u128 = 0x381b4222_f694_41f0_9685_ff5bb260df2e;
-pub const SCHEME_POWER_SAVER: u128 = 0xa1841308_3541_4fab_bc81_f71556f20b4a;
-pub const SCHEME_HIGH_PERFORMANCE: u128 = 0x8c5e7fda_e8bf_4a96_9a85_a6e23a8c635c;
-pub const SUB_PCIEXPRESS: u128 = 0x501a4d13_42af_4429_9fd1_a8218c268e20;
-pub const PCIE_ASPM: u128 = 0xee12f906_d277_404b_b6da_e5fa1a576df5;
-pub const SUB_USB: u128 = 0x2a737441_1930_4402_8d77_b2bebba308a3;
-pub const USB_SELECTIVE_SUSPEND: u128 = 0x48e6b7a6_50f5_4782_a5d4_53bb8f07e226;
+pub const SCHEME_BALANCED: Guid = Guid(0x381b4222_f694_41f0_9685_ff5bb260df2e);
+pub const SCHEME_POWER_SAVER: Guid = Guid(0xa1841308_3541_4fab_bc81_f71556f20b4a);
+pub const SCHEME_HIGH_PERFORMANCE: Guid = Guid(0x8c5e7fda_e8bf_4a96_9a85_a6e23a8c635c);
+pub const SUB_PCIEXPRESS: Guid = Guid(0x501a4d13_42af_4429_9fd1_a8218c268e20);
+pub const PCIE_ASPM: Guid = Guid(0xee12f906_d277_404b_b6da_e5fa1a576df5);
+pub const SUB_USB: Guid = Guid(0x2a737441_1930_4402_8d77_b2bebba308a3);
+pub const USB_SELECTIVE_SUSPEND: Guid = Guid(0x48e6b7a6_50f5_4782_a5d4_53bb8f07e226);
 
 const POWER_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Power";
 const GRAPHICS_KEY: &str = r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
@@ -32,6 +32,52 @@ const CRASH_KEY: &str = r"SYSTEM\CurrentControlSet\Control\CrashControl";
 const LOCAL_DUMPS_KEY: &str = r"SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps";
 const GAME_DVR_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\GameDVR";
 const GAME_CONFIG_KEY: &str = r"System\GameConfigStore";
+
+/// A GUID such as a power scheme's, kept as text so JSON and the window read it whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Guid(pub u128);
+
+impl std::fmt::Display for Guid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let v = self.0;
+        write!(
+            f,
+            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+            v >> 96,
+            (v >> 80) & 0xffff,
+            (v >> 64) & 0xffff,
+            (v >> 48) & 0xffff,
+            v & 0xffff_ffff_ffff
+        )
+    }
+}
+
+impl std::str::FromStr for Guid {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Guid, String> {
+        let digits: String = text.trim_matches(['{', '}']).split('-').collect();
+        if digits.len() != 32 {
+            return Err(format!("{text} is not a GUID"));
+        }
+        u128::from_str_radix(&digits, 16)
+            .map(Guid)
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl Serialize for Guid {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Guid {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Guid, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
 
 /// Services that are never changed: security, updates and what keeps them running.
 const FORBIDDEN_SERVICES: [&str; 12] = [
@@ -147,8 +193,8 @@ pub enum Setting {
     },
     /// A plugged-in value of the active power scheme.
     PowerAc {
-        subgroup: u128,
-        setting: u128,
+        subgroup: Guid,
+        setting: Guid,
     },
     ActiveScheme,
     /// Whether Windows keeps a hibernation file.
@@ -174,7 +220,7 @@ pub enum Value {
         running: bool,
     },
     Index(u32),
-    Scheme(u128),
+    Scheme(Guid),
     On(bool),
     Bytes(Vec<u8>),
 }

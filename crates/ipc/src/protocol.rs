@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use vestigium_core::{
-    EpisodeKind, HungWindow, OccurrenceSummary, PressureSpan, ProcessTop, Reading, Sample, Settings,
+    EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, Reading,
+    Sample, Settings, TweakChange,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,9 +31,13 @@ pub enum Request {
     },
     /// Deletes everything watched so far; settings stay.
     ClearHistory,
-    /// Stores the deep captures, health scans, dump reads and dump deletions the helper left in the
-    /// data folder.
+    /// Stores the deep captures, health scans, dump reads, dump deletions and tweak results the
+    /// helper left in the data folder.
     ImportResults,
+    /// Applies or undoes a tweak of the signed-in user's own settings and keeps it in the history.
+    ApplyUserTweak {
+        item: PlanItem,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,13 +60,19 @@ pub enum Response {
         settings: Settings,
         autostart: bool,
     },
-    /// The ids of the deep captures, health scans and dumps stored by an import, in the order
-    /// read, and how many dumps it marked as deleted.
+    /// The ids of the deep captures, health scans, dumps and tweak changes stored by an import, in
+    /// the order read, and how many dumps it marked as deleted.
     Imported {
         captures: Vec<i64>,
         scans: Vec<i64>,
         dumps: Vec<i64>,
         deleted: u32,
+        tweaks: Vec<i64>,
+    },
+    /// A user tweak was carried out; `id` is its history row.
+    TweakApplied {
+        id: i64,
+        change: TweakChange,
     },
     /// The command was carried out.
     Done,

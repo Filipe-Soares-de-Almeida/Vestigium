@@ -7,10 +7,11 @@ use std::thread;
 use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::{EventSubscription, ProbeConfig, spawn_probe, wall_ms};
+use vestigium_collect::{EventSubscription, ProbeConfig, WindowsSettings, spawn_probe, wall_ms};
 use vestigium_core::{
-    DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PressureSpan, ProbeHiccup, RING_MS, Reading,
-    RecentState, Ring, RunGate, SENSITIVE_FOR, Settings, Timing,
+    Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PlanItem, PressureSpan, ProbeHiccup,
+    RING_MS, Reading, RecentState, Ring, RunGate, SENSITIVE_FOR, SettingStore, Settings, Timing,
+    carry_out, check_item,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -21,7 +22,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
-use crate::import::{import_captures, import_dumps, import_scans};
+use crate::import::{import_captures, import_dumps, import_scans, import_tweaks};
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -104,6 +105,8 @@ pub struct Shared {
     pub scans_dir: PathBuf,
     /// Where the helper leaves dump reads and deletion results.
     pub dumps_dir: PathBuf,
+    /// Where the helper leaves the results of elevated tweaks.
+    pub tweaks_dir: PathBuf,
     /// Set after a scan was stored; the sampler runs a health pass on its next tick.
     pub health_due: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
@@ -116,6 +119,23 @@ pub fn lang_for(pref: LanguagePref, system: Lang) -> Lang {
         LanguagePref::System => system,
         LanguagePref::En => Lang::En,
         LanguagePref::PtBr => Lang::PtBr,
+    }
+}
+
+/// Carries out a tweak of the user's own settings and keeps it, written or not, in the history.
+fn apply_user_tweak(
+    item: &PlanItem,
+    store: &mut Store,
+    settings: &mut impl SettingStore,
+    now_ms: i64,
+) -> Response {
+    if let Err(why) = check_item(item, Applier::User) {
+        return error(ErrorCode::InvalidSetting, why);
+    }
+    let change = carry_out(item, settings);
+    match store.record_tweak_change(&change, now_ms, Applier::User) {
+        Ok(id) => Response::TweakApplied { id, change },
+        Err(err) => error(ErrorCode::Failed, err),
     }
 }
 
@@ -216,12 +236,20 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 shared.health_due.store(true, Ordering::Release);
             }
             let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
+            let tweaks = import_tweaks(&shared.tweaks_dir, store);
             Response::Imported {
                 captures,
                 scans,
                 dumps,
                 deleted,
+                tweaks,
             }
+        }
+        Request::ApplyUserTweak { item } => {
+            let Some(store) = store else {
+                return error(ErrorCode::Failed, "the history database is not open");
+            };
+            apply_user_tweak(&item, store, &mut WindowsSettings, wall_ms())
         }
         Request::SetAutostart { on } => {
             let changed = if on {
@@ -270,11 +298,17 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         captures_dir: data_dir.join("captures"),
         scans_dir: data_dir.join("scans"),
         dumps_dir: data_dir.join("dumps"),
+        tweaks_dir: data_dir.join("tweaks"),
         health_due: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
 
-    for dir in [&shared.captures_dir, &shared.scans_dir, &shared.dumps_dir] {
+    for dir in [
+        &shared.captures_dir,
+        &shared.scans_dir,
+        &shared.dumps_dir,
+        &shared.tweaks_dir,
+    ] {
         if let Err(err) = fs::create_dir_all(dir) {
             lock(&shared.status).last_error = Some(err.to_string());
         }
@@ -331,6 +365,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             import_captures(&shared.captures_dir, &[], store);
             import_scans(&shared.scans_dir, store);
             import_dumps(&shared.dumps_dir, store);
+            import_tweaks(&shared.tweaks_dir, store);
         }
         thread::Builder::new()
             .name("pipe".to_string())
@@ -397,6 +432,76 @@ mod tests {
         list.iter().map(|s| s.to_string()).collect()
     }
 
+    struct FakeSettings(Vec<(vestigium_core::Setting, vestigium_core::Value)>);
+
+    impl SettingStore for FakeSettings {
+        fn read(&mut self, setting: &vestigium_core::Setting) -> Option<vestigium_core::Value> {
+            self.0
+                .iter()
+                .find(|(s, _)| s == setting)
+                .map(|(_, v)| v.clone())
+        }
+
+        fn write(
+            &mut self,
+            setting: &vestigium_core::Setting,
+            value: &vestigium_core::Value,
+        ) -> Result<(), u32> {
+            for (s, v) in &mut self.0 {
+                if s == setting {
+                    *v = value.clone();
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn user_tweak_records_before_and_after() {
+        use vestigium_core::{SettingChange, TweakId, Value};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let dvr = TweakId::GameDvr.settings();
+        let mut settings = FakeSettings(dvr.iter().map(|s| (s.clone(), Value::Dword(1))).collect());
+        let item = PlanItem {
+            tweak: TweakId::GameDvr,
+            subject: None,
+            undo_of: None,
+            changes: dvr
+                .iter()
+                .map(|s| SettingChange {
+                    setting: s.clone(),
+                    from: Value::Dword(1),
+                    to: Value::Dword(0),
+                })
+                .collect(),
+        };
+
+        let Response::TweakApplied { id, change } =
+            apply_user_tweak(&item, &mut store, &mut settings, 50)
+        else {
+            panic!("applied");
+        };
+        assert!(change.succeeded());
+        assert!(settings.0.iter().all(|(_, v)| *v == Value::Dword(0)));
+        assert_eq!(store.tweaks_in_place().unwrap()[0].id, id);
+
+        let mut elevated = item.clone();
+        elevated.tweak = TweakId::Mpo;
+        elevated.changes = vec![SettingChange {
+            setting: TweakId::Mpo.settings()[0].clone(),
+            from: Value::Absent,
+            to: Value::Dword(5),
+        }];
+        assert!(matches!(
+            apply_user_tweak(&elevated, &mut store, &mut settings, 60),
+            Response::Error {
+                code: ErrorCode::InvalidSetting,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn options_default_to_one_minute_batches() {
         let options = Options::parse(args(&[]));
@@ -439,6 +544,7 @@ mod tests {
             captures_dir: PathBuf::from("captures"),
             scans_dir: PathBuf::from("scans"),
             dumps_dir: PathBuf::from("dumps"),
+            tweaks_dir: PathBuf::from("tweaks"),
             health_due: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
@@ -654,7 +760,8 @@ mod tests {
                 captures: Vec::new(),
                 scans: Vec::new(),
                 dumps: Vec::new(),
-                deleted: 0
+                deleted: 0,
+                tweaks: Vec::new(),
             }
         );
         assert!(!shared.health_due.load(Ordering::Acquire));
@@ -672,7 +779,8 @@ mod tests {
                 captures: Vec::new(),
                 scans: vec![1],
                 dumps: Vec::new(),
-                deleted: 0
+                deleted: 0,
+                tweaks: Vec::new(),
             }
         );
         assert!(

@@ -545,3 +545,15 @@ fn carry_out_refuses_a_setting_changed_since() {
     );
     assert_eq!(store.writes, 0);
 }
+
+#[test]
+fn guid_reads_and_writes_its_usual_text() {
+    let balanced: vestigium_core::Guid = "381b4222-f694-41f0-9685-ff5bb260df2e".parse().unwrap();
+    assert_eq!(balanced, SCHEME_BALANCED);
+    assert_eq!(balanced.to_string(), "381b4222-f694-41f0-9685-ff5bb260df2e");
+    assert_eq!(
+        "{381B4222-F694-41F0-9685-FF5BB260DF2E}".parse(),
+        Ok(balanced)
+    );
+    assert!("381b4222".parse::<vestigium_core::Guid>().is_err());
+}

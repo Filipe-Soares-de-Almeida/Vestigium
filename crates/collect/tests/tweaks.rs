@@ -10,8 +10,11 @@ use windows::core::HSTRING;
 struct TestKey(String);
 
 impl TestKey {
-    fn new() -> TestKey {
-        TestKey(format!(r"Software\Vestigium-test-{}", std::process::id()))
+    fn new(test: &str) -> TestKey {
+        TestKey(format!(
+            r"Software\Vestigium-test-{}-{test}",
+            std::process::id()
+        ))
     }
 
     fn set_dword(&self, name: &str, value: u32) {
@@ -39,7 +42,7 @@ impl Drop for TestKey {
 
 #[test]
 fn reads_a_dword_and_an_absent_value() {
-    let key = TestKey::new();
+    let key = TestKey::new("read");
     let dword = |name: &str| Setting::Dword {
         hive: Hive::CurrentUser,
         key: key.0.clone(),
@@ -115,7 +118,7 @@ fn the_restore_query_is_accepted() {
 
 #[test]
 fn writes_and_deletes_a_dword_and_an_empty_key() {
-    let key = TestKey::new();
+    let key = TestKey::new("write");
     let answer = Setting::Dword {
         hive: Hive::CurrentUser,
         key: key.0.clone(),

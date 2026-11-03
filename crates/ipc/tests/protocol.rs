@@ -1,4 +1,23 @@
-use vestigium_core::{EpisodeKind, LanguagePref, PressureSpan, Reading, Settings};
+use vestigium_core::{
+    EpisodeKind, LanguagePref, PCIE_ASPM, PlanItem, PressureSpan, Reading, SUB_PCIEXPRESS, Setting,
+    SettingChange, SettingResult, Settings, TweakChange, TweakId, Value,
+};
+
+fn aspm_item() -> PlanItem {
+    PlanItem {
+        tweak: TweakId::PcieAspm,
+        subject: None,
+        undo_of: None,
+        changes: vec![SettingChange {
+            setting: Setting::PowerAc {
+                subgroup: SUB_PCIEXPRESS,
+                setting: PCIE_ASPM,
+            },
+            from: Value::Index(2),
+            to: Value::Index(0),
+        }],
+    }
+}
 use vestigium_ipc::{
     AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
 };
@@ -30,6 +49,7 @@ fn every_request_roundtrips_as_json() {
         Request::SetAutostart { on: false },
         Request::ClearHistory,
         Request::ImportResults,
+        Request::ApplyUserTweak { item: aspm_item() },
     ];
     for request in requests {
         assert_eq!(roundtrip(&request), request);
@@ -91,6 +111,24 @@ fn every_response_roundtrips_as_json() {
             scans: vec![5],
             dumps: vec![6],
             deleted: 1,
+            tweaks: vec![7],
+        },
+        Response::TweakApplied {
+            id: 8,
+            change: TweakChange {
+                tweak: TweakId::PcieAspm,
+                subject: None,
+                undo_of: None,
+                results: aspm_item()
+                    .changes
+                    .into_iter()
+                    .map(|change| SettingResult {
+                        change,
+                        error: None,
+                    })
+                    .collect(),
+                restore_point: None,
+            },
         },
         Response::Done,
         Response::Error {
