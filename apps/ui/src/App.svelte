@@ -11,6 +11,7 @@
   import { app } from "./lib/app.svelte";
   import { captures } from "./lib/capture.svelte";
   import { dumps } from "./lib/dumps.svelte";
+  import { tweaks } from "./lib/tweaks.svelte";
   import { markFrame } from "./lib/frame";
   import { health } from "./lib/health.svelte";
   import { t } from "./lib/i18n.svelte";
@@ -23,6 +24,7 @@
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
   import Today from "./screens/Today.svelte";
+  import Tweaks from "./screens/Tweaks.svelte";
 
   let content: HTMLElement;
   let main: HTMLElement;
@@ -33,6 +35,7 @@
   onMount(() => void markFrame());
   onMount(() => health.watch());
   onMount(() => dumps.watch());
+  onMount(() => tweaks.watch());
 
   // Stores what finished while the window was closed and restores a running capture, again when the watcher comes up.
   $effect(() => {
@@ -115,6 +118,8 @@
               <Health area={router.current.area} />
             {:else if router.current.screen === "dumps"}
               <Dumps id={router.current.id} />
+            {:else if router.current.screen === "tweaks"}
+              <Tweaks key={router.current.key} />
             {:else if router.current.screen === "now"}
               <Now />
             {:else if router.current.screen === "settings"}

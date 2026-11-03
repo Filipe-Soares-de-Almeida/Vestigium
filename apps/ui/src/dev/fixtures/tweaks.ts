@@ -51,6 +51,7 @@ function advice(
     signals: [],
     applier: "Elevated",
     takes: "Now",
+    current: partial.changes.map((c) => ({ setting: c.setting, value: c.from })),
     ...partial,
   };
 }
@@ -121,9 +122,25 @@ const ALL: Advice[] = [
     applier: "User",
     takes: "NextSignIn",
   }),
-  advice("PowerPlan", { status: "AlreadySet", changes: [], applier: "User" }),
-  advice("CrashDump", { status: "AlreadySet", changes: [], takes: "Restart" }),
-  advice("StartupApp", { subject: "SecurityTray", status: "Protected", changes: [], takes: "NextSignIn" }),
+  advice("PowerPlan", {
+    status: "AlreadySet",
+    changes: [],
+    current: [{ setting: "ActiveScheme", value: { Scheme: "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" } }],
+    applier: "User",
+  }),
+  advice("CrashDump", {
+    status: "AlreadySet",
+    changes: [],
+    current: [{ setting: dword(LM, String.raw`SYSTEM\CurrentControlSet\Control\CrashControl`, "CrashDumpEnabled"), value: { Dword: 7 } }],
+    takes: "Restart",
+  }),
+  advice("StartupApp", {
+    subject: "SecurityTray",
+    status: "Protected",
+    changes: [],
+    current: [{ setting: approval(LM, "SecurityTray"), value: "Absent" }],
+    takes: "NextSignIn",
+  }),
 ];
 
 function initial(): { advice: Advice[]; history: TweakRow[] } {
@@ -152,11 +169,16 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
       outside: false,
     });
     return {
-      advice: ALL.filter((a) => a.tweak !== "GameDvr").concat({ ...dvrAdvice, status: "AlreadySet", changes: [] }),
+      advice: ALL.filter((a) => a.tweak !== "GameDvr").concat(settledBy(dvrAdvice)),
       history: [row(2, dvrAdvice, 5, null), row(1, first, 12, 9)],
     };
   }
   return { advice: ALL, history: [] };
+}
+
+/** The advice once its changes are written: nothing left to change, the new values in place. */
+function settledBy(a: Advice): Advice {
+  return { ...a, status: "AlreadySet", changes: [], current: a.changes.map((c) => ({ setting: c.setting, value: c.to })) };
 }
 
 let state = initial();
@@ -202,7 +224,7 @@ export const handlers: Record<string, Handler> = {
       const row = record(a, without);
       rows.push(row);
       if (row.change.results.every((r) => r.error === null)) {
-        state.advice = state.advice.map((x) => (x === a ? { ...x, status: "AlreadySet", changes: [] } : x));
+        state.advice = state.advice.map((x) => (x === a ? settledBy(x) : x));
       }
     }
     state.history = [...rows, ...state.history];

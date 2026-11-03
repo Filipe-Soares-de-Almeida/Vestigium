@@ -126,6 +126,17 @@ How to use this file:
   a confirmation; what each one said stays. The page also says whether Windows is set to write a
   dump at all. A fall's report shows the dump of that fall, and the Health point about a blue
   screen leaving no dump leads to the setting.
+- Optimizations, in the navigation pane, lists a fixed set of Windows settings (fast startup,
+  hibernation, power savings, program preloading, search indexing, Game Bar background
+  recording, GPU scheduling, multiplane overlay, apps that open at sign-in, and the dumps Windows
+  keeps), each with what it holds now. A tweak is recommended only when Vestigium saw a sign on
+  this PC that it would help, and says which; the others say why not. Applying asks for
+  confirmation, shows what changes and when it takes effect, makes a restore point first when
+  Windows asks for permission, and keeps the value from before so every change can be undone in
+  one click. Each change shows whether it helped, by the same sign counted before and after.
+  Security software, Windows Update and the page file are never offered, and a startup app is
+  only ever turned off, never removed. Health points and the Dumps page link to the tweak that
+  answers them.
 
 ### Changed
 

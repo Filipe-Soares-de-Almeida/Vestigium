@@ -2,6 +2,7 @@
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
   import { dumps } from "../lib/dumps.svelte";
+  import { tweaks } from "../lib/tweaks.svelte";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
@@ -60,6 +61,15 @@
   <a class="nav" href={href.dumps()} aria-current={router.section === "dumps" ? "page" : undefined}>
     <Icon name="dumps" />{t("ui.shell.nav.dumps")}
     {#if space}<span class="size">{formatBytes(space)}</span>{/if}
+  </a>
+  <a class="nav" href={href.tweaks()} aria-current={router.section === "tweaks" ? "page" : undefined}>
+    <Icon name="tweaks" />{t("ui.shell.nav.tweaks")}
+    {#if tweaks.recommended}
+      <span class="count">
+        <span aria-hidden="true">{tweaks.recommended}</span>
+        <span class="sr">{tn("ui.shell.nav.tweaks.signals", tweaks.recommended)}</span>
+      </span>
+    {/if}
   </a>
   <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
   <a

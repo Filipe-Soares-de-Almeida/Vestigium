@@ -1,5 +1,6 @@
 // Screens are addressed by the URL hash: #/today, #/occurrence/<id>, #/now, #/captures[?for=<occurrence id>],
-// #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/settings[/<category>].
+// #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>],
+// #/settings[/<category>].
 
 export type Route =
   | { screen: "today" }
@@ -9,6 +10,7 @@ export type Route =
   | { screen: "capture"; id: number }
   | { screen: "health"; area: string | null }
   | { screen: "dumps"; id: number | null }
+  | { screen: "tweaks"; key: string | null }
   | { screen: "settings"; category: string | null };
 
 export type Screen = Route["screen"];
@@ -21,6 +23,7 @@ export const href = {
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
   dumps: (id?: number) => (id ? `#/dumps/${id}` : "#/dumps"),
+  tweaks: (key?: string) => (key ? `#/tweaks/${encodeURIComponent(key)}` : "#/tweaks"),
   settings: (category?: string) => (category ? `#/settings/${category}` : "#/settings"),
 };
 
@@ -38,6 +41,7 @@ export function parse(hash: string): Route {
   }
   if (screen === "health") return { screen: "health", area: arg || null };
   if (screen === "dumps") return { screen: "dumps", id: /^\d+$/.test(arg ?? "") ? Number(arg) : null };
+  if (screen === "tweaks") return { screen: "tweaks", key: arg ? decodeURIComponent(arg) : null };
   if (screen === "settings") return { screen: "settings", category: arg || null };
   return { screen: "today" };
 }
@@ -54,7 +58,7 @@ class Router {
   }
 
   /** The navigation pane item a screen belongs to. */
-  get section(): "today" | "now" | "captures" | "health" | "dumps" | "settings" {
+  get section(): "today" | "now" | "captures" | "health" | "dumps" | "tweaks" | "settings" {
     const screen = this.current.screen;
     return screen === "occurrence" ? "today" : screen === "capture" ? "captures" : screen;
   }

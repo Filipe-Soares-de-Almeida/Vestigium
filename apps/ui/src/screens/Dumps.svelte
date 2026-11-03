@@ -10,7 +10,9 @@
   import { dumps } from "../lib/dumps.svelte";
   import { errorText } from "../lib/errors";
   import { t, tn } from "../lib/i18n.svelte";
+  import { href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
+  import { keyOf, tweaks } from "../lib/tweaks.svelte";
   import type { DetailLevel } from "../lib/types";
   import Row from "./dumps/Row.svelte";
   import { at, entries, type Entry, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, TONE } from "./dumps/words";
@@ -37,6 +39,12 @@
   const crash = $derived(setting(dumps.dto?.crash ?? null, level));
   // The helper's result reaches the history through the watcher.
   const blocked = $derived(!app.running);
+  /** The dump tweaks the optimizations page recommends here. */
+  const dumpTweaks = $derived(
+    tweaks.dto?.advice.filter(
+      (a) => (a.tweak === "CrashDump" || a.tweak === "AppDumps") && a.status === "Ready" && a.signals.length > 0,
+    ) ?? [],
+  );
 
   $effect(() => {
     const wanted = id;
@@ -209,6 +217,9 @@
           <ConcernMark mark={crash.ok ? "Ok" : "Attention"} word={!crash.ok} />
           <span>{crash.text}</span>
         </p>
+        {#each dumpTweaks as a (keyOf(a))}
+          <p class="tweak"><Icon name="tweaks" /><a href={href.tweaks(keyOf(a))}>{t(`ui.dumps.tweak.${a.tweak}`)}</a></p>
+        {/each}
       </section>
     </div>
   </div>
@@ -384,6 +395,17 @@
     font-size: 13.5px;
     line-height: 1.45;
     overflow-wrap: anywhere;
+  }
+  .tweak {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 10px 0 0;
+    font-size: 13.5px;
+  }
+  .tweak a {
+    color: var(--accent);
+    font-weight: 600;
   }
   .setting :global(.cn) {
     padding-top: 1px;

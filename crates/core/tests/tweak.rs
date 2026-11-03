@@ -193,6 +193,9 @@ fn already_set_is_not_offered() {
         assert!(!a.recommended());
     }
     assert_eq!(advice_for(&set, TweakId::Mpo).status, Status::Unavailable);
+    let plan = advice_for(&set, TweakId::PowerPlan);
+    assert_eq!(plan.current[0].value, Value::Scheme(SCHEME_BALANCED));
+    assert!(advice_for(&set, TweakId::Mpo).current.is_empty());
 }
 
 #[test]

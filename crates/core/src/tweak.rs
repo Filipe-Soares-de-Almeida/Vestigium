@@ -460,8 +460,17 @@ pub struct Advice {
     /// Empty when nothing here says the tweak would help.
     pub signals: Vec<Signal>,
     pub changes: Vec<SettingChange>,
+    /// What each setting of the tweak holds now; empty when none could be read.
+    pub current: Vec<SettingValue>,
     pub applier: Applier,
     pub takes: Takes,
+}
+
+/// One setting and what it holds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingValue {
+    pub setting: Setting,
+    pub value: Value,
 }
 
 impl Advice {
@@ -489,6 +498,7 @@ pub fn advise(inputs: &TweakInputs) -> Vec<Advice> {
                 signals(tweak, inputs),
                 changes.unwrap_or_default(),
                 &tweak.settings(),
+                inputs,
             )
         })
         .collect();
@@ -506,6 +516,7 @@ fn advice(
     signals: Vec<Signal>,
     changes: Vec<SettingChange>,
     settings: &[Setting],
+    inputs: &TweakInputs,
 ) -> Advice {
     let applier = if !settings.is_empty() && settings.iter().all(|s| s.applier() == Applier::User) {
         Applier::User
@@ -518,6 +529,15 @@ fn advice(
         status,
         signals,
         changes,
+        current: settings
+            .iter()
+            .filter_map(|s| {
+                value(inputs, s).map(|v| SettingValue {
+                    setting: s.clone(),
+                    value: v.clone(),
+                })
+            })
+            .collect(),
         applier,
         takes: tweak.takes(),
     }
@@ -612,6 +632,7 @@ fn startup_advice(entry: &StartupEntry, inputs: &TweakInputs) -> Advice {
         signals,
         changes,
         &settings,
+        inputs,
     )
 }
 

@@ -5,7 +5,8 @@
   import Icon from "../../components/Icon.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
-  import type { DetailLevel, FindingDto } from "../../lib/types";
+  import { keyOf, tweaks } from "../../lib/tweaks.svelte";
+  import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
   import { loadDone, saveDone } from "../occurrence/browser";
   import { areaOf } from "./areas";
   import { findingView } from "./words";
@@ -13,6 +14,19 @@
   let { finding, level }: { finding: FindingDto; level: DetailLevel } = $props();
 
   const view = $derived(findingView(finding, level));
+  /** The tweak that answers each kind of point, where one does. */
+  const TWEAK_OF: Partial<Record<FindingDto["kind"], TweakId>> = {
+    WindowsOnHdd: "SysMain",
+    LowSpace: "Hibernation",
+    ShutdownUnfinished: "FastStartup",
+    DisplayResets: "GpuScheduling",
+    SlowBoot: "StartupApp",
+  };
+  /** The tweak the optimizations page recommends for this point, when it has a signal for it. */
+  const tweak = $derived.by(() => {
+    const wanted = TWEAK_OF[finding.kind];
+    return tweaks.dto?.advice.find((a) => a.tweak === wanted && a.status === "Ready" && a.signals.length > 0) ?? null;
+  });
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
   const pct = (x: number, max: number) => Math.max(0, Math.min(100, (x / max) * 100));
@@ -94,6 +108,9 @@
         </div>
       {:else}
         <p class="muted none">{t("ui.health.todo.none")}</p>
+      {/if}
+      {#if tweak}
+        <p class="secure"><Icon name="tweaks" /><a href={href.tweaks(keyOf(tweak))}>{t("ui.health.see_tweak")}</a></p>
       {/if}
       {#if finding.kind === "NoCrashDump"}
         <p class="secure"><Icon name="dumps" /><a href={href.dumps()}>{t("ui.health.see_dump_setting")}</a></p>

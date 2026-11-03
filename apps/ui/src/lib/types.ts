@@ -814,8 +814,15 @@ export interface Advice {
   /** Empty when nothing here says the tweak would help. */
   signals: TweakSignal[];
   changes: SettingChange[];
+  /** What each setting of the tweak holds now; empty when none could be read. */
+  current: SettingValue[];
   applier: Applier;
   takes: Takes;
+}
+
+export interface SettingValue {
+  setting: TweakSetting;
+  value: TweakValue;
 }
 
 export interface SettingResult {
