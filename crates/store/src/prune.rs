@@ -19,6 +19,7 @@ pub struct PruneReport {
     pub findings: usize,
     pub scans: usize,
     pub dumps: usize,
+    pub tweak_changes: usize,
 }
 
 impl Store {
@@ -77,13 +78,19 @@ impl Store {
                 "DELETE FROM dump WHERE deleted_ms < ?1",
                 params![records_cutoff],
             )?,
+            // A change still in place stays at any age, so it can always be undone.
+            tweak_changes: tx.execute(
+                "DELETE FROM tweak_change WHERE applied_ms < ?1
+                 AND (undone_ms IS NOT NULL OR undo_of IS NOT NULL)",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
     }
 
-    /// Deletes everything watched and gives the space back; settings, machine facts and the
-    /// event bookmark stay, so cleared events are not read again.
+    /// Deletes everything watched and gives the space back; settings, machine facts, the event
+    /// bookmark and the tweak history stay, so events are not read again and changes can be undone.
     pub fn clear_history(&mut self) -> Result<(), StoreError> {
         let tx = self.conn.transaction()?;
         for table in [
