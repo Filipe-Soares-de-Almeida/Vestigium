@@ -153,6 +153,9 @@
       </div>
       <p class="summary">{view.summary}</p>
       {@render evidence(view.main.evidence, true)}
+      {#if dto.tests.length}
+        <p class="test-note"><Icon name="tests" />{t("ui.occurrence.during_test", { test: t(`ui.occurrence.test.${dto.tests[0].kind}`) })}</p>
+      {/if}
       {#if dto.capture}
         <div class="entry">
           <p>{coveredLine(dto.capture)}</p>
@@ -255,6 +258,17 @@
 {/if}
 
 <style>
+  .test-note {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 0 0 12px;
+    color: var(--ink2);
+    font-size: 14px;
+  }
+  .test-note :global(svg) {
+    flex: none;
+  }
   .crumb {
     display: flex;
     flex-wrap: wrap;

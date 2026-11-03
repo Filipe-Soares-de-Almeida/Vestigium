@@ -1,6 +1,6 @@
 <script lang="ts" module>
   /** How something stands in Health: shape and word together, so colour never carries it alone. */
-  export type MarkKind = "Critical" | "Attention" | "Ok" | "Unknown" | "Closed";
+  export type MarkKind = "Critical" | "Attention" | "Ok" | "Unknown" | "Closed" | "Partial" | "Running";
 </script>
 
 <script lang="ts">
@@ -36,6 +36,11 @@
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+    {:else if mark === "Partial"}
+      <circle cx="7" cy="7" r="5.8" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M7 1.2a5.8 5.8 0 010 11.6z" fill="currentColor" />
+    {:else if mark === "Running"}
+      <path class="spin" d="M7 1.4a5.6 5.6 0 105.6 5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
     {:else}
       <circle cx="7" cy="7" r="5.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.2 2" />
     {/if}
@@ -61,6 +66,26 @@
   }
   .Attention svg {
     color: var(--press);
+  }
+  .Partial svg {
+    color: var(--ink2);
+  }
+  .Running svg {
+    color: var(--accent);
+  }
+  .spin {
+    transform-origin: 7px 7px;
+    animation: spin 1.1s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation: none;
+    }
   }
   @media (forced-colors: active) {
     svg {

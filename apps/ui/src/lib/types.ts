@@ -1069,6 +1069,8 @@ export interface DiskDto {
   bus: Bus;
   bytes: number | null;
   volumes: string[];
+  /** The MB/s typical of a disk of this kind, per benchmark mode. */
+  ranges: { mode: BenchMode; low: number; high: number }[];
 }
 
 export interface VolumeDto {
@@ -1081,6 +1083,7 @@ export interface VolumeDto {
 }
 
 export interface SurfaceProgress {
+  disk: number;
   ts_ms: number;
   at_bytes: number;
   from_bytes: number;

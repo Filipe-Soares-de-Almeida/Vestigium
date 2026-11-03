@@ -32,6 +32,19 @@
     restart: [16, '<path d="M12.6 8.2A4.6 4.6 0 1111.2 4.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11.8 2.4v2.9H8.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'],
     live: [20, '<rect x="2.5" y="4" width="15" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 17h6M10 14v3M6 9.5h2l1.2-2.5 1.6 5 1.2-2.5H14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'],
     trash: [16, '<path d="M2.5 4h11M6.3 4V2.6h3.4V4M4.3 4l.7 9.5h6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'],
+    tests: [16, '<rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 8.2l2 2L11 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>'],
+    ssd: [20, '<rect x="3" y="5" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 10h5M13.5 10h.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'],
+    hdd: [20, '<rect x="3" y="4" width="14" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 13.5h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'],
+    scan: [20, '<rect x="3" y="3" width="14" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 10h14" stroke="currentColor" stroke-width="1.5"/><path d="M7 3v14M13 3v14" stroke="currentColor" stroke-width="1.5" opacity=".55"/>'],
+    fsck: [20, '<path d="M5 3h7l3 3v11H5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.5 11l1.8 1.8 3.4-3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'],
+    gauge: [20, '<path d="M3.5 14a6.5 6.5 0 1113 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 14l3.2-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'],
+    smart: [20, '<path d="M2 10h3.5l2-4.5 3 9 2-4.5H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'],
+    windows: [20, '<rect x="3" y="3" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="3" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="11" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>'],
+    outside: [20, '<path d="M8 4H5a2 2 0 00-2 2v9a2 2 0 002 2h9a2 2 0 002-2v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11 3h6v6M17 3l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'],
+    start: [16, '<path d="M5 3.5l7.5 4.5L5 12.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'],
+    stop: [16, '<rect x="4" y="4" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/>'],
+    resume: [16, '<path d="M4 3.5v9M7.5 3.5l6 4.5-6 4.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'],
+    write: [16, '<path d="M3 13l.8-3.2 6.6-6.6 2.4 2.4-6.6 6.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'],
   } as const satisfies Record<string, readonly [number, string]>;
 
   export type IconName = keyof typeof ICONS;

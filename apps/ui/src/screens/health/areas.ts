@@ -12,9 +12,9 @@ export interface Area {
 }
 
 export const AREAS: Area[] = [
-  { id: "disks", icon: "disk", kinds: ["DiskSmart", "StorageErrors", "LowSpace", "WindowsOnHdd"] },
+  { id: "disks", icon: "disk", kinds: ["DiskSmart", "StorageErrors", "DiskUnreadable", "VolumeErrors", "LowSpace", "WindowsOnHdd"] },
   { id: "falls", icon: "power", kinds: ["DirtyRestarts", "ShutdownUnfinished", "FailuresRising", "NoCrashDump"] },
-  { id: "memory", icon: "memory", kinds: ["MemoryOften", "PageFile"] },
+  { id: "memory", icon: "memory", kinds: ["MemoryOften", "PageFile", "MemoryTestErrors"] },
   { id: "startup", icon: "clock", kinds: ["SlowBoot"] },
   { id: "hardware", icon: "chip", kinds: ["HardwareErrors", "DisplayResets", "Throttling"] },
   { id: "protection", icon: "shield", kinds: ["TwoAntivirus"] },
@@ -22,6 +22,8 @@ export const AREAS: Area[] = [
 
 /** What the watcher can read only through a full scan. */
 const NEEDS_SCAN: FindingKind[] = ["SlowBoot"];
+/** What only a test the person runs can find; with no finding there is nothing to claim. */
+const FROM_TESTS: FindingKind[] = ["MemoryTestErrors", "DiskUnreadable", "VolumeErrors"];
 
 /** How an area or a check stands: a finding's concern, nothing to say, or not read yet. */
 export type Mark = Concern | "Ok" | "Unknown";
@@ -56,7 +58,7 @@ export function areaState(area: Area, dto: HealthDto): AreaState {
     .sort((a, b) => rank(b.concern) - rank(a.concern) || a.opened_ms - b.opened_ms);
   const closed = dto.closed.filter((f) => area.kinds.includes(f.kind));
   const checks: Check[] = area.kinds
-    .filter((kind) => !open.some((f) => f.kind === kind))
+    .filter((kind) => !open.some((f) => f.kind === kind) && !FROM_TESTS.includes(kind))
     .map((kind) => ({
       kind,
       mark: NEEDS_SCAN.includes(kind) && dto.last_scan_ms === null ? "Unknown" : "Ok",

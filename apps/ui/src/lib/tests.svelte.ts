@@ -30,9 +30,8 @@ class Tests {
   /** Windows is asking for permission, or a test is being set up. */
   busy = $state(false);
 
-  /** Reads now and listens for progress and the end of a test; returns the function that stops it. */
-  watch(): () => void {
-    void this.load();
+  /** Listens for progress and the end of a test for the whole window; returns the function that stops it. */
+  listen(): () => void {
     const progress = listen<TestProgress>("test-progress", (event) => {
       this.progress = event.payload;
     });

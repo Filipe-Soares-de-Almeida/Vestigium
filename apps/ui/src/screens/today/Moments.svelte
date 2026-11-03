@@ -47,6 +47,7 @@
               <span class="what">
                 <b>{episodeTitle(e, level)}</b>
                 <small>{episodeMeta(e)}</small>
+                {#if item.byTest}<small>{t("ui.today.episode.by_test")}</small>{/if}
               </span>
               <span class="when">{formatTime(e.start_ms)}<br />{formatDuration(e.end_ms - e.start_ms)}</span>
             </div>

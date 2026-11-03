@@ -36,7 +36,7 @@ export type Tone = "busy" | "press" | "freeze";
 /** A row of the list: an occurrence, which has a report, or a pressure episode, which has none. */
 export type Item =
   | { kind: "occurrence"; start: number; occurrence: OccurrenceSummary }
-  | { kind: "episode"; start: number; episode: Episode };
+  | { kind: "episode"; start: number; episode: Episode; byTest: boolean };
 
 export interface DayCount {
   start: number;
@@ -152,12 +152,14 @@ export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto): D
   const occurrences = marks.occurrences
     .filter((o) => o.start_ms >= start && o.start_ms < now)
     .sort((a, b) => a.start_ms - b.start_ms);
+  // A Vestigium test that ran then caused some episodes; the marks say which, in episode order.
+  const byTest = new Set(marks.episodes.filter((_, i) => marks.by_test[i]));
   const episodes = marks.episodes
     .filter((e) => isPressure(e) && e.end_ms > start && e.start_ms < now)
     .sort((a, b) => a.start_ms - b.start_ms);
   const items: Item[] = [
     ...occurrences.map((occurrence) => ({ kind: "occurrence" as const, start: occurrence.start_ms, occurrence })),
-    ...episodes.map((episode) => ({ kind: "episode" as const, start: episode.start_ms, episode })),
+    ...episodes.map((episode) => ({ kind: "episode" as const, start: episode.start_ms, episode, byTest: byTest.has(episode) })),
   ].sort((a, b) => a.start - b.start);
   const days: DayCount[] = Array.from({ length: DAYS_SHOWN }, (_, i) => {
     const from = dayStart(now, i + 1 - DAYS_SHOWN);

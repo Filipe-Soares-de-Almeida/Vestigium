@@ -11,6 +11,7 @@
   import { app } from "./lib/app.svelte";
   import { captures } from "./lib/capture.svelte";
   import { dumps } from "./lib/dumps.svelte";
+  import { hwtests } from "./lib/tests.svelte";
   import { tweaks } from "./lib/tweaks.svelte";
   import { markFrame } from "./lib/frame";
   import { health } from "./lib/health.svelte";
@@ -24,6 +25,7 @@
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
   import Today from "./screens/Today.svelte";
+  import Tests from "./screens/Tests.svelte";
   import Tweaks from "./screens/Tweaks.svelte";
 
   let content: HTMLElement;
@@ -36,6 +38,7 @@
   onMount(() => health.watch());
   onMount(() => dumps.watch());
   onMount(() => tweaks.watch());
+  onMount(() => hwtests.listen());
 
   // Stores what finished while the window was closed and restores a running capture, again when the watcher comes up.
   $effect(() => {
@@ -99,7 +102,7 @@
   </header>
   <NavPane />
   <div class="content" bind:this={content}>
-    <main id="main" tabindex="-1" bind:this={main}>
+    <main id="main" tabindex="-1" bind:this={main} class:still={router.current.screen === "tests"}>
       {#if app.failure !== null}
         <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
       {:else if app.loading}
@@ -120,6 +123,8 @@
               <Dumps id={router.current.id} />
             {:else if router.current.screen === "tweaks"}
               <Tweaks key={router.current.key} />
+            {:else if router.current.screen === "tests"}
+              <Tests device={router.current.device} />
             {:else if router.current.screen === "now"}
               <Now />
             {:else if router.current.screen === "settings"}
@@ -176,5 +181,31 @@
     max-width: 1060px;
     padding: 26px 36px 70px;
     outline: none;
+  }
+  /* A screen that scrolls inside its own panel holds the page still. */
+  .content:has(main.still) {
+    overflow: hidden;
+  }
+  main.still {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding-bottom: 20px;
+  }
+  main.still > :global(.screen) {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+  @media (max-height: 520px) {
+    .content:has(main.still) {
+      overflow: auto;
+    }
+    main.still {
+      display: block;
+      height: auto;
+    }
   }
 </style>

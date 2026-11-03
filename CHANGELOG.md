@@ -139,6 +139,18 @@ How to use this file:
   answers them.
 - The background watcher keeps the results of the Windows Memory Diagnostic, and Health shows a
   critical point when it found memory errors, until a later run comes out clean.
+- Tests, in the navigation pane, checks the memory and each disk without changing anything on
+  them. For the memory: it schedules the Windows Memory Diagnostic for the next restart and shows
+  what it covered, and it runs a quick test on the part of the memory that is free now, for 1, 5
+  or 15 minutes, in the background. For each disk: what the disk says about itself (SMART or the
+  NVMe health log; a hard disk is read only when asked, since reading wakes it), a read of the
+  whole disk that maps how long each part takes and finds the parts that do not read, with stop
+  and continue, a check of each NTFS volume's file system, and a short speed measurement with a
+  temporary file next to the range typical for that kind of disk. The memory and the disks are
+  listed on the left and the chosen one's report scrolls on its own. Every result says what it
+  covered and what it cannot see, a test that runs shows its progress and can be stopped, and
+  the tests that need it ask Windows for permission. Health shows the errors these tests find
+  and links to them; Today and the occurrence report say when a Vestigium test was running.
 
 ### Changed
 

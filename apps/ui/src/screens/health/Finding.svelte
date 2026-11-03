@@ -27,6 +27,14 @@
     const wanted = TWEAK_OF[finding.kind];
     return tweaks.dto?.advice.find((a) => a.tweak === wanted && a.status === "Ready" && a.signals.length > 0) ?? null;
   });
+  /** Where on the Tests page a point can be checked: the memory, a disk by number, or the page. */
+  const test = $derived.by((): string | null => {
+    if (["HardwareErrors", "MemoryTestErrors"].includes(finding.kind)) return href.tests("memory");
+    if (!["DiskSmart", "StorageErrors", "DiskUnreadable", "VolumeErrors"].includes(finding.kind)) return null;
+    const s = finding.subject;
+    const number = typeof s === "object" && "Disk" in s ? s.Disk.split(" ")[0] : null;
+    return href.tests(number && /^\d+$/.test(number) ? number : undefined);
+  });
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
   const pct = (x: number, max: number) => Math.max(0, Math.min(100, (x / max) * 100));
@@ -111,6 +119,9 @@
       {/if}
       {#if tweak}
         <p class="secure"><Icon name="tweaks" /><a href={href.tweaks(keyOf(tweak))}>{t("ui.health.see_tweak")}</a></p>
+      {/if}
+      {#if test}
+        <p class="secure"><Icon name="tests" /><a href={test}>{t(finding.kind === "HardwareErrors" || finding.kind === "MemoryTestErrors" ? "ui.health.see_test.memory" : "ui.health.see_test.disk")}</a></p>
       {/if}
       {#if finding.kind === "NoCrashDump"}
         <p class="secure"><Icon name="dumps" /><a href={href.dumps()}>{t("ui.health.see_dump_setting")}</a></p>

@@ -11,7 +11,8 @@ use vestigium_collect::{
 use vestigium_core::health::{DiskHealth, NvmeDetail, Subject};
 use vestigium_core::hwtest::{
     BENCH_FILE_BYTES, BENCH_SECONDS, BenchMode, Bus, MemoryDiagnostic, Pattern, QUICK_MINUTES,
-    SurfaceProgress, TEST_RUN_VERSION, TestKind, TestRun, memory_diagnostics, quick_test_size,
+    SurfaceProgress, TEST_RUN_VERSION, TestKind, TestRun, bench_reference, memory_diagnostics,
+    quick_test_size,
 };
 use vestigium_core::{MachineInfo, Media};
 
@@ -43,6 +44,15 @@ pub struct DiskDto {
     pub bytes: Option<u64>,
     /// Roots of the volumes on it, such as "C:\".
     pub volumes: Vec<String>,
+    /// The MB/s typical of a disk of this kind, per benchmark mode; none where disks vary too much.
+    pub ranges: Vec<BenchRange>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct BenchRange {
+    pub mode: BenchMode,
+    pub low: f32,
+    pub high: f32,
 }
 
 /// One fixed volume the benchmark and the file system check can use.
@@ -190,11 +200,22 @@ pub fn disk_list(machine: Option<&MachineInfo>, volumes: &[VolumeDto]) -> Vec<Di
     numbers.sort();
     numbers
         .into_iter()
-        .map(|(number, name)| DiskDto {
+        .map(|(number, name)| (number, name, disk_media(number), disk_bus(number)))
+        .map(|(number, name, media, bus)| DiskDto {
             number,
             name,
-            media: disk_media(number),
-            bus: disk_bus(number),
+            media,
+            bus,
+            ranges: BenchMode::ALL
+                .into_iter()
+                .filter_map(|mode| {
+                    bench_reference(bus, media, mode).map(|(low, high)| BenchRange {
+                        mode,
+                        low,
+                        high,
+                    })
+                })
+                .collect(),
             bytes: disk_size(number),
             volumes: volumes
                 .iter()
@@ -394,6 +415,7 @@ mod tests {
     fn a_fresh_progress_file_without_a_result_is_a_scan_under_way() {
         let dir = tempfile::tempdir().unwrap();
         let progress = SurfaceProgress {
+            disk: 1,
             ts_ms: 10_000,
             at_bytes: 5,
             from_bytes: 0,

@@ -2,6 +2,7 @@
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
   import { dumps } from "../lib/dumps.svelte";
+  import { hwtests } from "../lib/tests.svelte";
   import { tweaks } from "../lib/tweaks.svelte";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
@@ -69,6 +70,12 @@
         <span aria-hidden="true">{tweaks.recommended}</span>
         <span class="sr">{tn("ui.shell.nav.tweaks.signals", tweaks.recommended)}</span>
       </span>
+    {/if}
+  </a>
+  <a class="nav" href={href.tests()} aria-current={router.section === "tests" ? "page" : undefined}>
+    <Icon name="tests" />{t("ui.shell.nav.tests")}
+    {#if hwtests.running || hwtests.dto?.scan}
+      <span class="count"><ConcernMark mark="Running" word={false} /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
     {/if}
   </a>
   <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>

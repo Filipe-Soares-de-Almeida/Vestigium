@@ -24,6 +24,14 @@ const GIB = 2 ** 30;
 const MIB = 2 ** 20;
 const now = Date.now();
 
+const range = (low: number, high: number) => ({ low, high });
+const NVME = (
+  [["SeqRead", range(1500, 7500)], ["SeqWrite", range(1000, 7000)], ["RandRead32", range(300, 3000)], ["RandWrite32", range(300, 3000)], ["RandRead1", range(40, 100)], ["RandWrite1", range(100, 300)]] as const
+).map(([mode, r]) => ({ mode, ...r }));
+const HDD = (
+  [["SeqRead", range(80, 250)], ["SeqWrite", range(80, 250)], ["RandRead32", range(0.5, 3)], ["RandWrite32", range(0.5, 3)], ["RandRead1", range(0.3, 1.5)], ["RandWrite1", range(0.3, 3)]] as const
+).map(([mode, r]) => ({ mode, ...r }));
+
 const PATTERNS: Pattern[] = ["OwnAddress", "Random", "Compare", "SolidBits", "Checkerboard", "WalkingOnes", "WalkingZeros"];
 const MODES: BenchMode[] = ["SeqRead", "SeqWrite", "RandRead32", "RandWrite32", "RandRead1", "RandWrite1"];
 
@@ -156,8 +164,8 @@ function dto(): TestsDto {
     },
     diagnostics: none ? [] : diagnostics(errors),
     disks: [
-      { number: 0, name: "0 C:", media: "Ssd", bus: "Nvme", bytes: 1000 * GIB, volumes: ["C:\\"] },
-      { number: 1, name: "1 D:", media: "Hdd", bus: "Sata", bytes: 2000 * GIB, volumes: ["D:\\"] },
+      { number: 0, name: "0 C:", media: "Ssd", bus: "Nvme", bytes: 1000 * GIB, volumes: ["C:\\"], ranges: NVME },
+      { number: 1, name: "1 D:", media: "Hdd", bus: "Sata", bytes: 2000 * GIB, volumes: ["D:\\"], ranges: HDD },
     ],
     volumes: [
       { root: "C:\\", total_bytes: 930 * GIB, free_bytes: 410 * GIB, system: true, disk: 0, file_system: "NTFS" },
@@ -170,6 +178,7 @@ function dto(): TestsDto {
         ? {
             stem: String(now - 600_000),
             progress: {
+              disk: 1,
               ts_ms: now,
               at_bytes: 310 * GIB,
               from_bytes: 0,
@@ -227,6 +236,7 @@ function startSurface(disk: number): RunningTest {
     const blocks = at / MIB;
     void emit("test-progress", {
       kind: "surface",
+      disk,
       ts_ms: Date.now(),
       at_bytes: at,
       from_bytes: 0,

@@ -89,6 +89,7 @@ impl SurfaceScan {
 /// Where a running scan stands, rewritten every few seconds for the window.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceProgress {
+    pub disk: u32,
     pub ts_ms: i64,
     pub at_bytes: u64,
     pub from_bytes: u64,
@@ -159,6 +160,7 @@ impl SurfaceAggregator {
 
     pub fn progress(&self, ts_ms: i64, at_bytes: u64) -> SurfaceProgress {
         SurfaceProgress {
+            disk: self.scan.disk,
             ts_ms,
             at_bytes,
             from_bytes: self.scan.from_bytes,
