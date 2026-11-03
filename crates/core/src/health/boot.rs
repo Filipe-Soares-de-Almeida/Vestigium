@@ -11,6 +11,12 @@ const SECURITY_WORDS: [&str; 5] = [
     "msmpeng",
 ];
 
+/// Whether a name looks like a security product's, which is never offered for removal.
+pub(crate) fn is_security(name: &str) -> bool {
+    let name = name.to_lowercase();
+    SECURITY_WORDS.iter().any(|word| name.contains(word))
+}
+
 impl BootReport {
     /// Keeps one Diagnostics-Performance event: 100 is a measured boot, 101 to 110 a step that
     /// slowed it. Returns false for any other id or data it cannot read.
@@ -38,9 +44,7 @@ impl BootReport {
                     return false;
                 };
                 let file = data_named(data_xml, "Name").unwrap_or_default();
-                let security = SECURITY_WORDS.iter().any(|word| {
-                    name.to_lowercase().contains(word) || file.to_lowercase().contains(word)
-                });
+                let security = is_security(name) || is_security(file);
                 self.delays.push(BootDelay {
                     ts_ms,
                     kind: match id {

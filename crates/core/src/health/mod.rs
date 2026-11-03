@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{EventMeaning, MachineInfo, Media, NextStep, WinEvent};
 
+pub(crate) use boot::is_security;
 pub use reliability::{failures_between, is_failure};
 pub use rules::evaluate;
 pub use smart::{
