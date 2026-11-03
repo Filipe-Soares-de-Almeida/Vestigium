@@ -1,8 +1,13 @@
 use std::path::Path;
 
-use vestigium_core::{Hive, Setting, StartupEntry, StartupList, Value};
+use vestigium_core::{Hive, Setting, SettingStore, StartupEntry, StartupList, Value};
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HLOCAL, LocalFree, STATUS_SUCCESS,
+    CloseHandle, ERROR_DIR_NOT_EMPTY, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL, LUID,
+    LocalFree, STATUS_SUCCESS, WIN32_ERROR,
+};
+use windows::Win32::Security::{
+    AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES,
+    TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::Storage::FileSystem::{FindClose, FindFirstFileW, WIN32_FIND_DATAW};
 use windows::Win32::System::EventLog::{
@@ -11,20 +16,26 @@ use windows::Win32::System::EventLog::{
 };
 use windows::Win32::System::Power::{
     CallNtPowerInformation, GetSystemPowerStatus, PowerGetActiveScheme, PowerReadACValueIndex,
-    SYSTEM_POWER_CAPABILITIES, SYSTEM_POWER_STATUS, SystemPowerCapabilities,
+    PowerSetActiveScheme, PowerWriteACValueIndex, SYSTEM_POWER_CAPABILITIES, SYSTEM_POWER_STATUS,
+    SystemPowerCapabilities, SystemReserveHiberFile,
 };
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_EXPAND_SZ, REG_SZ, REG_VALUE_TYPE,
-    RRF_RT_REG_BINARY, RRF_RT_REG_DWORD, RegCloseKey, RegEnumValueW, RegGetValueW, RegOpenKeyExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_BINARY, REG_DWORD,
+    REG_EXPAND_SZ, REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE, RRF_RT_REG_BINARY,
+    RRF_RT_REG_DWORD, RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW,
+    RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegQueryInfoKeyW, RegSetKeyValueW,
 };
 use windows::Win32::System::Services::{
-    CloseServiceHandle, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfig2W,
-    QueryServiceConfigW, QueryServiceStatus, SC_HANDLE, SC_MANAGER_CONNECT,
-    SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_QUERY_CONFIG,
-    SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_STATUS,
+    ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
+    ENUM_SERVICE_TYPE, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfig2W,
+    QueryServiceConfigW, QueryServiceStatus, SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_CHANGE_CONFIG,
+    SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONTROL_STOP, SERVICE_DELAYED_AUTO_START_INFO,
+    SERVICE_ERROR, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_RUNNING,
+    SERVICE_START, SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STOP, StartServiceW,
 };
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CMONITORS};
-use windows::core::{GUID, HSTRING, PWSTR};
+use windows::core::{GUID, HSTRING, PCWSTR, PWSTR};
 
 use crate::CollectError;
 use crate::events::render_text;
@@ -473,4 +484,268 @@ fn iso_utc(ms: i64) -> String {
         rest % 3600 / 60,
         rest % 60
     )
+}
+
+/// The Win32 error behind a failed call.
+fn code(err: &windows::core::Error) -> u32 {
+    WIN32_ERROR::from_error(err).map_or(err.code().0 as u32, |e| e.0)
+}
+
+fn ok(status: WIN32_ERROR) -> Result<(), u32> {
+    if status == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(status.0)
+    }
+}
+
+/// Writes one setting; elevation is needed for every hive but the user's and for services.
+pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
+    match (setting, value) {
+        (Setting::Dword { hive, key, name }, Value::Dword(v)) => {
+            // SAFETY: writes one DWORD from a 4-byte buffer; creates the key when missing.
+            ok(unsafe {
+                RegSetKeyValueW(
+                    root(*hive),
+                    &HSTRING::from(key.as_str()),
+                    &HSTRING::from(name.as_str()),
+                    REG_DWORD.0,
+                    Some((&raw const *v).cast()),
+                    4,
+                )
+            })
+        }
+        (Setting::Dword { hive, key, name }, Value::Absent) => delete_value(root(*hive), key, name),
+        (Setting::StartupApproval { hive, list, name }, Value::Absent) => {
+            delete_value(root(*hive), list.approval_key(), name)
+        }
+        (Setting::StartupApproval { hive, list, name }, Value::Bytes(bytes)) => {
+            // SAFETY: writes a binary value from a buffer of the length passed.
+            ok(unsafe {
+                RegSetKeyValueW(
+                    root(*hive),
+                    &HSTRING::from(list.approval_key()),
+                    &HSTRING::from(name.as_str()),
+                    REG_BINARY.0,
+                    Some(bytes.as_ptr().cast()),
+                    bytes.len() as u32,
+                )
+            })
+        }
+        (Setting::Key { hive, key }, Value::Present) => {
+            let mut created = HKEY::default();
+            // SAFETY: creates or opens a key for writing; closed right after.
+            let status = unsafe {
+                RegCreateKeyExW(
+                    root(*hive),
+                    &HSTRING::from(key.as_str()),
+                    None,
+                    PCWSTR::null(),
+                    REG_OPTION_NON_VOLATILE,
+                    KEY_WRITE,
+                    None,
+                    &mut created,
+                    None,
+                )
+            };
+            if status == ERROR_SUCCESS {
+                // SAFETY: closes the key opened above.
+                let _ = unsafe { RegCloseKey(created) };
+            }
+            ok(status)
+        }
+        (Setting::Key { hive, key }, Value::Absent) => delete_empty_key(root(*hive), key),
+        (
+            Setting::Service { name },
+            Value::Service {
+                start,
+                delayed,
+                running,
+            },
+        ) => write_service(name, *start, *delayed, *running),
+        (Setting::PowerAc { subgroup, setting }, Value::Index(index)) => {
+            let scheme = GUID::from_u128(active_scheme().ok_or(ERROR_FILE_NOT_FOUND.0)?);
+            // SAFETY: writes one AC value of the active scheme.
+            ok(unsafe {
+                PowerWriteACValueIndex(
+                    None,
+                    &scheme,
+                    Some(&GUID::from_u128(*subgroup)),
+                    Some(&GUID::from_u128(*setting)),
+                    *index,
+                )
+            })?;
+            // SAFETY: applies the scheme again so the new value takes effect.
+            ok(unsafe { PowerSetActiveScheme(None, Some(&scheme)) })
+        }
+        (Setting::ActiveScheme, Value::Scheme(scheme)) => {
+            // SAFETY: makes an existing scheme the active one.
+            ok(unsafe { PowerSetActiveScheme(None, Some(&GUID::from_u128(*scheme))) })
+        }
+        (Setting::Hibernation, Value::On(on)) => {
+            enable_privilege("SeCreatePagefilePrivilege")?;
+            let wanted = u8::from(*on);
+            // SAFETY: the input buffer is the one-byte BOOLEAN the information level reads.
+            let status = unsafe {
+                CallNtPowerInformation(
+                    SystemReserveHiberFile,
+                    Some((&raw const wanted).cast()),
+                    1,
+                    None,
+                    0,
+                )
+            };
+            if status == STATUS_SUCCESS {
+                Ok(())
+            } else {
+                Err(status.0 as u32)
+            }
+        }
+        _ => Err(ERROR_FILE_NOT_FOUND.0),
+    }
+}
+
+/// Deletes one value; a value already gone counts as deleted.
+fn delete_value(hive: HKEY, key: &str, name: &str) -> Result<(), u32> {
+    // SAFETY: deletes one value of one key; both names are owned strings.
+    let status = unsafe { RegDeleteKeyValueW(hive, &HSTRING::from(key), &HSTRING::from(name)) };
+    if status == ERROR_FILE_NOT_FOUND {
+        Ok(())
+    } else {
+        ok(status)
+    }
+}
+
+/// Deletes a key that holds no value and no subkey; one that does stays.
+fn delete_empty_key(hive: HKEY, key: &str) -> Result<(), u32> {
+    let mut opened = HKEY::default();
+    // SAFETY: opens a key for reading; closed below.
+    let status = unsafe { RegOpenKeyExW(hive, &HSTRING::from(key), None, KEY_READ, &mut opened) };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    ok(status)?;
+    let (mut subkeys, mut values) = (0u32, 0u32);
+    // SAFETY: asks only for the two counts.
+    let status = unsafe {
+        RegQueryInfoKeyW(
+            opened,
+            None,
+            None,
+            None,
+            Some(&mut subkeys),
+            None,
+            None,
+            Some(&mut values),
+            None,
+            None,
+            None,
+            None,
+        )
+    };
+    // SAFETY: closes the key opened above.
+    let _ = unsafe { RegCloseKey(opened) };
+    ok(status)?;
+    if subkeys + values > 0 {
+        return Err(ERROR_DIR_NOT_EMPTY.0);
+    }
+    // SAFETY: deletes the empty key.
+    ok(unsafe { RegDeleteKeyW(hive, &HSTRING::from(key)) })
+}
+
+fn write_service(name: &str, start: u32, delayed: bool, running: bool) -> Result<(), u32> {
+    // SAFETY: a connection to the local service manager; closed by `Service`.
+    let manager =
+        Service(unsafe { OpenSCManagerW(None, None, SC_MANAGER_CONNECT) }.map_err(|e| code(&e))?);
+    let access = SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START | SERVICE_STOP;
+    // SAFETY: opens one service to change it; closed by `Service`.
+    let service = Service(
+        unsafe { OpenServiceW(manager.0, &HSTRING::from(name), access) }.map_err(|e| code(&e))?,
+    );
+    // SAFETY: changes only the start type; every other field is left as it is.
+    unsafe {
+        ChangeServiceConfigW(
+            service.0,
+            ENUM_SERVICE_TYPE(SERVICE_NO_CHANGE),
+            SERVICE_START_TYPE(start),
+            SERVICE_ERROR(SERVICE_NO_CHANGE),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .map_err(|e| code(&e))?;
+    let mut info = SERVICE_DELAYED_AUTO_START_INFO {
+        fDelayedAutostart: (start == 2 && delayed).into(),
+    };
+    // SAFETY: the struct is the one the information level reads.
+    unsafe {
+        ChangeServiceConfig2W(
+            service.0,
+            SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            Some((&raw mut info).cast()),
+        )
+    }
+    .map_err(|e| code(&e))?;
+    let mut status = SERVICE_STATUS::default();
+    // SAFETY: the handle has SERVICE_QUERY_STATUS.
+    unsafe { QueryServiceStatus(service.0, &mut status) }.map_err(|e| code(&e))?;
+    let is_running = status.dwCurrentState == SERVICE_RUNNING;
+    if is_running && !running {
+        // SAFETY: the handle has SERVICE_STOP; the status buffer is the one the call fills.
+        unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) }
+            .map_err(|e| code(&e))?;
+    } else if !is_running && running {
+        // SAFETY: the handle has SERVICE_START; no arguments are passed.
+        unsafe { StartServiceW(service.0, None) }.map_err(|e| code(&e))?;
+    }
+    Ok(())
+}
+
+/// Turns on one privilege the process token holds but keeps off by default.
+fn enable_privilege(name: &str) -> Result<(), u32> {
+    let mut token = HANDLE::default();
+    // SAFETY: opens this process's own token; closed below.
+    unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token,
+        )
+    }
+    .map_err(|e| code(&e))?;
+    let mut luid = LUID::default();
+    // SAFETY: looks the privilege name up on this machine.
+    let looked = unsafe { LookupPrivilegeValueW(None, &HSTRING::from(name), &mut luid) };
+    let result = looked.map_err(|e| code(&e)).and_then(|()| {
+        let mut privileges = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            ..Default::default()
+        };
+        privileges.Privileges[0].Luid = luid;
+        privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        // SAFETY: one privilege in a struct sized for one; the previous state is not asked for.
+        unsafe { AdjustTokenPrivileges(token, false, Some(&privileges), 0, None, None) }
+            .map_err(|e| code(&e))
+    });
+    // SAFETY: closes the token opened above.
+    let _ = unsafe { CloseHandle(token) };
+    result
+}
+
+/// The settings of this PC, read and written through the Windows API.
+pub struct WindowsSettings;
+
+impl SettingStore for WindowsSettings {
+    fn read(&mut self, setting: &Setting) -> Option<Value> {
+        read_setting(setting)
+    }
+
+    fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32> {
+        write_setting(setting, value)
+    }
 }

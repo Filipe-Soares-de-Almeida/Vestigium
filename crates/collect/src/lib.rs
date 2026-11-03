@@ -42,8 +42,9 @@ pub use probe::{ProbeConfig, spawn_probe};
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
 pub use tweaks::{
-    RESTORE_CREATED, RESTORE_SKIPPED, RestoreEvent, exe_of, has_battery, hiberfile_bytes,
-    monitor_count, read_setting, restore_event, restore_events, startup_entries,
+    RESTORE_CREATED, RESTORE_SKIPPED, RestoreEvent, WindowsSettings, exe_of, has_battery,
+    hiberfile_bytes, monitor_count, read_setting, restore_event, restore_events, startup_entries,
+    write_setting,
 };
 
 /// Why a data source failed.

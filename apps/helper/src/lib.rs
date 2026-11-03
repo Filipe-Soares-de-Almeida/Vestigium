@@ -7,3 +7,4 @@ pub mod job;
 mod output;
 mod pinned;
 pub mod scan;
+pub mod tweak;

@@ -21,6 +21,8 @@ pub enum Job {
     DumpScan { out: PathBuf },
     /// Deletes the dumps a list file names, each checked again.
     DeleteDumps { list: PathBuf },
+    /// Applies or undoes the tweaks a plan file names, each checked against the catalog.
+    Tweak { plan: PathBuf },
 }
 
 /// The job these arguments name, or why they name none.
@@ -46,6 +48,14 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
                 list: PathBuf::from(list),
             }),
             _ => Err("delete-dumps takes --list <file> and nothing else".to_string()),
+        };
+    }
+    if name == "tweak" {
+        return match rest {
+            [flag, plan] if flag == "--plan" => Ok(Job::Tweak {
+                plan: PathBuf::from(plan),
+            }),
+            _ => Err("tweak takes --plan <file> and nothing else".to_string()),
         };
     }
     if name != "deep-capture" {
@@ -88,6 +98,8 @@ mod tests {
         assert!(parse(&args(&["wipe-disk", "--out", "x"])).is_err());
         assert!(parse(&args(&["delete-dumps", "--minutes", "5"])).is_err());
         assert!(parse(&args(&["delete-dumps", "--list", "a", "--list", "b"])).is_err());
+        assert!(parse(&args(&["tweak", "--list", "a"])).is_err());
+        assert!(parse(&args(&["tweak", "--plan", "a", "--plan", "b"])).is_err());
         assert!(parse(&args(&[])).is_err());
     }
 

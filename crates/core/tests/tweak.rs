@@ -389,3 +389,159 @@ fn helped_counts_equal_windows() {
     assert!(helped(TweakId::GameDvr, NOW - DAY / 2, &after).is_none());
     assert!(helped(TweakId::CrashDump, applied, &after).is_none());
 }
+
+struct FakeStore {
+    values: Vec<(Setting, Value)>,
+    fails: Option<Setting>,
+    writes: usize,
+}
+
+impl vestigium_core::SettingStore for FakeStore {
+    fn read(&mut self, setting: &Setting) -> Option<Value> {
+        self.values
+            .iter()
+            .find(|(s, _)| s == setting)
+            .map(|(_, v)| v.clone())
+    }
+
+    fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32> {
+        if self.fails.as_ref() == Some(setting) {
+            return Err(5);
+        }
+        self.writes += 1;
+        match self.values.iter_mut().find(|(s, _)| s == setting) {
+            Some((_, v)) => *v = value.clone(),
+            None => self.values.push((setting.clone(), value.clone())),
+        }
+        Ok(())
+    }
+}
+
+fn item(
+    tweak: TweakId,
+    changes: Vec<(Setting, Value)>,
+    undo_of: Option<i64>,
+) -> vestigium_core::PlanItem {
+    vestigium_core::PlanItem {
+        tweak,
+        subject: None,
+        undo_of,
+        changes: changes
+            .into_iter()
+            .map(|(setting, to)| SettingChange {
+                setting,
+                from: Value::Absent,
+                to,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn refuses_a_key_outside_the_catalog() {
+    let elsewhere = Setting::Dword {
+        hive: Hive::LocalMachine,
+        key: r"SOFTWARE\Elsewhere".into(),
+        name: "OverlayTestMode".into(),
+    };
+    let plan = item(TweakId::Mpo, vec![(elsewhere, Value::Dword(5))], None);
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::Elevated).is_err());
+    let mpo = TweakId::Mpo.settings()[0].clone();
+    let plan = item(TweakId::Mpo, vec![(mpo, Value::Dword(5))], None);
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::Elevated).is_ok());
+}
+
+#[test]
+fn refuses_a_security_service() {
+    let defender = Setting::Service {
+        name: "WinDefend".into(),
+    };
+    let stopped = Value::Service {
+        start: 4,
+        delayed: false,
+        running: false,
+    };
+    let plan = item(TweakId::SysMain, vec![(defender, stopped)], None);
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::Elevated).is_err());
+    let mut tray = item(
+        TweakId::StartupApp,
+        vec![(
+            Setting::StartupApproval {
+                hive: Hive::LocalMachine,
+                list: StartupList::Run,
+                name: "SecurityHealth".into(),
+            },
+            Value::Bytes(disabled_approval(NOW)),
+        )],
+        None,
+    );
+    tray.subject = Some("SecurityHealth".into());
+    assert!(vestigium_core::check_item(&tray, vestigium_core::Applier::Elevated).is_err());
+}
+
+#[test]
+fn a_user_setting_is_never_written_elevated() {
+    let dvr = TweakId::GameDvr.settings()[0].clone();
+    let plan = item(TweakId::GameDvr, vec![(dvr, Value::Dword(0))], None);
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::Elevated).is_err());
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::User).is_ok());
+}
+
+#[test]
+fn undo_value_must_fit_the_setting() {
+    let mpo = TweakId::Mpo.settings()[0].clone();
+    let odd = item(
+        TweakId::Mpo,
+        vec![(mpo.clone(), Value::Bytes(vec![1; 12]))],
+        Some(4),
+    );
+    assert!(vestigium_core::check_item(&odd, vestigium_core::Applier::Elevated).is_err());
+    let back = item(TweakId::Mpo, vec![(mpo, Value::Dword(3))], Some(4));
+    assert!(vestigium_core::check_item(&back, vestigium_core::Applier::Elevated).is_ok());
+}
+
+#[test]
+fn carry_out_records_what_was_there_and_stops_at_the_first_failure() {
+    let settings = TweakId::AppDumps.settings();
+    let mut store = FakeStore {
+        values: settings
+            .iter()
+            .map(|s| (s.clone(), Value::Absent))
+            .collect(),
+        fails: Some(settings[1].clone()),
+        writes: 0,
+    };
+    let plan = item(
+        TweakId::AppDumps,
+        vec![
+            (settings[0].clone(), Value::Present),
+            (settings[1].clone(), Value::Dword(1)),
+            (settings[2].clone(), Value::Dword(10)),
+        ],
+        None,
+    );
+    let done = vestigium_core::carry_out(&plan, &mut store);
+    assert_eq!(done.results.len(), 2);
+    assert_eq!(done.results[0].error, None);
+    assert_eq!(done.results[0].change.from, Value::Absent);
+    assert_eq!(done.results[1].error, Some(5));
+    assert_eq!(store.writes, 1);
+    assert!(!done.succeeded());
+}
+
+#[test]
+fn carry_out_refuses_a_setting_changed_since() {
+    let crash = TweakId::CrashDump.settings()[0].clone();
+    let mut store = FakeStore {
+        values: vec![(crash.clone(), Value::Dword(3))],
+        fails: None,
+        writes: 0,
+    };
+    let plan = item(TweakId::CrashDump, vec![(crash, Value::Dword(7))], None);
+    let done = vestigium_core::carry_out(&plan, &mut store);
+    assert_eq!(
+        done.results[0].error,
+        Some(vestigium_core::ERROR_CHANGED_SINCE)
+    );
+    assert_eq!(store.writes, 0);
+}

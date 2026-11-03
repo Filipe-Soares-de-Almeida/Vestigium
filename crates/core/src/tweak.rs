@@ -490,40 +490,47 @@ fn target(tweak: TweakId, inputs: &TweakInputs) -> Option<Vec<SettingChange>> {
     let mut changes = Vec::new();
     for setting in tweak.settings() {
         let from = value(inputs, &setting)?.clone();
-        let to = match (tweak, &setting, &from) {
-            (TweakId::FastStartup | TweakId::GpuScheduling, _, Value::Absent) => return None,
-            (TweakId::GpuScheduling, _, Value::Dword(2)) => Value::Dword(1),
-            (TweakId::GpuScheduling, _, Value::Dword(1)) => Value::Dword(2),
-            (TweakId::GpuScheduling, _, _) => return None,
-            (TweakId::PowerPlan, _, Value::Scheme(SCHEME_POWER_SAVER)) => {
-                Value::Scheme(SCHEME_BALANCED)
-            }
-            (TweakId::CrashDump, _, Value::Dword(0)) => Value::Dword(7),
-            (TweakId::PowerPlan | TweakId::CrashDump, _, _) => from.clone(),
-            // A LocalDumps key already there was set up by someone; it is left as it is.
-            (TweakId::AppDumps, Setting::Key { .. }, Value::Present) => return Some(Vec::new()),
-            (TweakId::AppDumps, Setting::Key { .. }, _) => Value::Present,
-            (TweakId::AppDumps, Setting::Dword { name, .. }, _) if name == "DumpType" => {
-                Value::Dword(1)
-            }
-            (TweakId::AppDumps, _, _) => Value::Dword(10),
-            (TweakId::PcieAspm | TweakId::UsbSuspend, _, _) => Value::Index(0),
-            (TweakId::Hibernation, _, _) => Value::On(false),
-            (TweakId::SysMain | TweakId::WindowsSearch, _, _) => Value::Service {
-                start: 4,
-                delayed: false,
-                running: false,
-            },
-            (TweakId::Mpo, _, _) => Value::Dword(5),
-            (TweakId::FastStartup | TweakId::GameDvr | TweakId::StartupApp, _, _) => {
-                Value::Dword(0)
-            }
-        };
+        // A LocalDumps key already there was set up by someone; it is left as it is.
+        if tweak == TweakId::AppDumps && from == Value::Present {
+            return Some(Vec::new());
+        }
+        let to = apply_value(tweak, &setting, &from)?;
         if from != to {
             changes.push(SettingChange { setting, from, to });
         }
     }
     Some(changes)
+}
+
+/// What applying `tweak` writes to `setting` while it holds `from`; `None` when the tweak
+/// cannot act on it. A startup approval is written by `disabled_approval` instead.
+pub fn apply_value(tweak: TweakId, setting: &Setting, from: &Value) -> Option<Value> {
+    Some(match (tweak, setting, from) {
+        (TweakId::StartupApp, _, _) => return None,
+        (TweakId::FastStartup | TweakId::GpuScheduling, _, Value::Absent) => return None,
+        (TweakId::GpuScheduling, _, Value::Dword(2)) => Value::Dword(1),
+        (TweakId::GpuScheduling, _, Value::Dword(1)) => Value::Dword(2),
+        (TweakId::GpuScheduling, _, _) => return None,
+        (TweakId::PowerPlan, _, Value::Scheme(SCHEME_POWER_SAVER)) => {
+            Value::Scheme(SCHEME_BALANCED)
+        }
+        (TweakId::CrashDump, _, Value::Dword(0)) => Value::Dword(7),
+        (TweakId::PowerPlan | TweakId::CrashDump, _, _) => from.clone(),
+        (TweakId::AppDumps, Setting::Key { .. }, _) => Value::Present,
+        (TweakId::AppDumps, Setting::Dword { name, .. }, _) if name == "DumpType" => {
+            Value::Dword(1)
+        }
+        (TweakId::AppDumps, _, _) => Value::Dword(10),
+        (TweakId::PcieAspm | TweakId::UsbSuspend, _, _) => Value::Index(0),
+        (TweakId::Hibernation, _, _) => Value::On(false),
+        (TweakId::SysMain | TweakId::WindowsSearch, _, _) => Value::Service {
+            start: 4,
+            delayed: false,
+            running: false,
+        },
+        (TweakId::Mpo, _, _) => Value::Dword(5),
+        (TweakId::FastStartup | TweakId::GameDvr, _, _) => Value::Dword(0),
+    })
 }
 
 fn startup_advice(entry: &StartupEntry, inputs: &TweakInputs) -> Advice {
@@ -969,6 +976,8 @@ pub enum RestorePoint {
     Failed {
         error: u32,
     },
+    /// Windows accepted the request but logged nothing about it in time.
+    Unconfirmed,
 }
 
 /// One change to Windows as the history keeps it.
@@ -985,5 +994,131 @@ pub struct TweakChange {
 impl TweakChange {
     pub fn succeeded(&self) -> bool {
         self.results.iter().all(|r| r.error.is_none())
+    }
+}
+
+/// Layout of the `TweakPlan` the window writes and the `TweakResults` the helper writes today.
+pub const TWEAK_PLAN_VERSION: u8 = 1;
+/// Most settings one item may change.
+const MOST_CHANGES: usize = 8;
+/// Win32 errors a change records when it is not written.
+pub const ERROR_UNREADABLE: u32 = 1168;
+pub const ERROR_CHANGED_SINCE: u32 = 13;
+
+/// One tweak to apply or undo, as the window asks for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanItem {
+    pub tweak: TweakId,
+    pub subject: Option<String>,
+    /// The history row this item undoes; its changes then carry the values to put back.
+    pub undo_of: Option<i64>,
+    pub changes: Vec<SettingChange>,
+}
+
+/// What the window asks the elevated helper to change, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TweakPlan {
+    pub items: Vec<PlanItem>,
+    /// The person agreed to go on when Windows makes no restore point.
+    pub without_restore_point: bool,
+}
+
+/// What the helper did with a plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TweakResults {
+    pub ts_ms: i64,
+    pub changes: Vec<TweakChange>,
+}
+
+/// Whether `applier` may carry out `item`: every setting belongs to the tweak, is written by that
+/// applier, is not forbidden, and gets a value of its own shape.
+pub fn check_item(item: &PlanItem, applier: Applier) -> Result<(), String> {
+    if item.changes.is_empty() || item.changes.len() > MOST_CHANGES {
+        return Err(format!("{} changes", item.changes.len()));
+    }
+    let catalog = item.tweak.settings();
+    for change in &item.changes {
+        let setting = &change.setting;
+        let belongs = match (item.tweak, setting) {
+            (TweakId::StartupApp, Setting::StartupApproval { name, .. }) => {
+                item.subject.as_deref() == Some(name.as_str())
+            }
+            (TweakId::StartupApp, _) => false,
+            _ => catalog.contains(setting),
+        };
+        if !belongs {
+            return Err(format!("{setting:?} is not part of {:?}", item.tweak));
+        }
+        if setting.applier() != applier {
+            return Err(format!("{setting:?} is not written by {applier:?}"));
+        }
+        if setting.is_forbidden() {
+            return Err(format!("{setting:?} is never changed"));
+        }
+        if !setting.fits(&change.to) {
+            return Err(format!("{:?} does not fit {setting:?}", change.to));
+        }
+        if item.undo_of.is_none()
+            && item.tweak == TweakId::StartupApp
+            && !matches!(&change.to, Value::Bytes(b) if b[0] == 3)
+        {
+            return Err("a startup entry is only ever disabled".into());
+        }
+    }
+    Ok(())
+}
+
+/// Reads and writes Windows settings; the helper and the watcher each bring their own.
+pub trait SettingStore {
+    fn read(&mut self, setting: &Setting) -> Option<Value>;
+    /// The Win32 error when the write failed.
+    fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32>;
+}
+
+/// Carries out one checked item: each setting is read again, written only when the tweak still
+/// leads to the value asked for, and recorded with what it really held. Stops at the first failure.
+pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange {
+    let mut results = Vec::new();
+    for change in &item.changes {
+        let Some(current) = store.read(&change.setting) else {
+            results.push(SettingResult {
+                change: change.clone(),
+                error: Some(ERROR_UNREADABLE),
+            });
+            break;
+        };
+        let leads_there = item.undo_of.is_some()
+            || current == change.to
+            || match (item.tweak, &change.to) {
+                (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
+                _ => {
+                    apply_value(item.tweak, &change.setting, &current).as_ref() == Some(&change.to)
+                }
+            };
+        let error = if !leads_there {
+            Some(ERROR_CHANGED_SINCE)
+        } else if current == change.to {
+            None
+        } else {
+            store.write(&change.setting, &change.to).err()
+        };
+        results.push(SettingResult {
+            change: SettingChange {
+                setting: change.setting.clone(),
+                from: current,
+                to: change.to.clone(),
+            },
+            error,
+        });
+        if error.is_some() {
+            break;
+        }
+    }
+    TweakChange {
+        tweak: item.tweak,
+        subject: item.subject.clone(),
+        undo_of: item.undo_of,
+        results,
+        restore_point: None,
     }
 }

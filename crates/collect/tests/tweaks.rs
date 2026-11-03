@@ -112,3 +112,35 @@ fn the_restore_query_is_accepted() {
     let events = vestigium_collect::restore_events(since).expect("query");
     assert!(events.iter().all(|e| e.ts_ms >= since));
 }
+
+#[test]
+fn writes_and_deletes_a_dword_and_an_empty_key() {
+    let key = TestKey::new();
+    let answer = Setting::Dword {
+        hive: Hive::CurrentUser,
+        key: key.0.clone(),
+        name: "Answer".into(),
+    };
+    vestigium_collect::write_setting(&answer, &Value::Dword(7)).unwrap();
+    assert_eq!(read_setting(&answer), Some(Value::Dword(7)));
+    vestigium_collect::write_setting(&answer, &Value::Absent).unwrap();
+    assert_eq!(read_setting(&answer), Some(Value::Absent));
+    vestigium_collect::write_setting(&answer, &Value::Absent).unwrap();
+
+    let sub = Setting::Key {
+        hive: Hive::CurrentUser,
+        key: format!(r"{}\Sub", key.0),
+    };
+    vestigium_collect::write_setting(&sub, &Value::Present).unwrap();
+    assert_eq!(read_setting(&sub), Some(Value::Present));
+    let inside = Setting::Dword {
+        hive: Hive::CurrentUser,
+        key: format!(r"{}\Sub", key.0),
+        name: "Kept".into(),
+    };
+    vestigium_collect::write_setting(&inside, &Value::Dword(1)).unwrap();
+    assert!(vestigium_collect::write_setting(&sub, &Value::Absent).is_err());
+    vestigium_collect::write_setting(&inside, &Value::Absent).unwrap();
+    vestigium_collect::write_setting(&sub, &Value::Absent).unwrap();
+    assert_eq!(read_setting(&sub), Some(Value::Absent));
+}
