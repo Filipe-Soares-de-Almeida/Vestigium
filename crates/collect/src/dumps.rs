@@ -109,8 +109,17 @@ fn text(key: PCWSTR, value: PCWSTR) -> Option<String> {
     let flags = REG_ROUTINE_FLAGS(RRF_RT_REG_SZ.0 | RRF_RT_REG_EXPAND_SZ.0);
     let mut size = 0u32;
     // SAFETY: a size query with no buffer.
-    let status =
-        unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key, value, flags, None, None, Some(&mut size)) };
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key,
+            value,
+            flags,
+            None,
+            None,
+            Some(&mut size),
+        )
+    };
     if status != ERROR_SUCCESS || size == 0 {
         return None;
     }
