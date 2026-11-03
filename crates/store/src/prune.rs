@@ -20,6 +20,7 @@ pub struct PruneReport {
     pub scans: usize,
     pub dumps: usize,
     pub tweak_changes: usize,
+    pub test_runs: usize,
 }
 
 impl Store {
@@ -84,6 +85,10 @@ impl Store {
                  AND (undone_ms IS NOT NULL OR undo_of IS NOT NULL)",
                 params![records_cutoff],
             )?,
+            test_runs: tx.execute(
+                "DELETE FROM test_run WHERE ended_ms < ?1",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
@@ -103,6 +108,7 @@ impl Store {
             "finding",
             "scan",
             "dump",
+            "test_run",
         ] {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }

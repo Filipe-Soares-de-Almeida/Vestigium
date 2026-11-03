@@ -6,7 +6,7 @@ use vestigium_core::{Gap, WinEvent};
 use crate::records::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -122,6 +122,18 @@ const MIGRATIONS: &[&str] = &[
         data       BLOB    NOT NULL
     );
     CREATE INDEX tweak_change_applied ON tweak_change (applied_ms);",
+    "CREATE TABLE test_run (
+        id         INTEGER PRIMARY KEY,
+        version    INTEGER NOT NULL,
+        kind       INTEGER NOT NULL,
+        subject    TEXT    NOT NULL,
+        started_ms INTEGER NOT NULL,
+        ended_ms   INTEGER NOT NULL,
+        outcome    INTEGER NOT NULL,
+        data       BLOB    NOT NULL,
+        UNIQUE (kind, subject, started_ms)
+    );
+    CREATE INDEX test_run_ended ON test_run (ended_ms);",
 ];
 
 /// What the agent writes in one transaction, every batch.
