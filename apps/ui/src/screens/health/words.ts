@@ -254,6 +254,38 @@ function factTexts(fact: OtherFact): Texts {
       tech: null,
     };
   }
+  if ("MemoryDiagnostic" in fact) {
+    const m = fact.MemoryDiagnostic;
+    const date = when(m.ts_ms);
+    return {
+      plain: m.bad_pages ? kn("ev.memdiag.pages", m.bad_pages, { date }) : k("ev.memdiag", { date }),
+      figures: null,
+      tech: k("ev.memdiag.tech", { pages: formatNumber(m.bad_pages ?? 0) }),
+    };
+  }
+  if ("MemoryQuickTest" in fact) {
+    const q = fact.MemoryQuickTest;
+    return {
+      plain: kn("ev.memquick", q.errors, { tested: formatBytes(q.tested_bytes), date: when(q.ts_ms) }),
+      figures: null,
+      tech: null,
+    };
+  }
+  if ("SurfaceScan" in fact) {
+    const v = fact.SurfaceScan;
+    const date = when(v.ts_ms);
+    return {
+      plain:
+        v.unreadable_blocks > 0
+          ? kn("ev.surface.unreadable", v.unreadable_blocks, { date })
+          : kn("ev.surface.slow", v.slow_blocks, { date }),
+      figures: v.whole_disk ? null : k("ev.surface.partial"),
+      tech: k("ev.surface.tech", { unreadable: formatNumber(v.unreadable_blocks), slow: formatNumber(v.slow_blocks) }),
+    };
+  }
+  if ("VolumeCheck" in fact) {
+    return { plain: k("ev.volume", { date: when(fact.VolumeCheck.ts_ms) }), figures: null, tech: "chkdsk /scan" };
+  }
   const d = fact.SystemDisk;
   return {
     plain: k(`ev.system_disk.${d.media}`, { disk: subjectName({ Disk: d.disk }) }),

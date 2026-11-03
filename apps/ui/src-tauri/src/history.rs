@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use vestigium_core::health::{BootReport, Finding};
+use vestigium_core::health::{BootReport, Finding, Subject};
+use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
     CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap,
     MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, Reading, Suspect, WinEvent,
     bug_check_event, capture_findings, capture_suspects, dump_culprit, pc_state, steady_only,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
+
+use crate::hwtests::TestRunDto;
 
 /// How far back the health page lists the findings that closed.
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
@@ -59,14 +62,53 @@ pub struct TimelineDto {
     pub columns: Columns,
 }
 
-/// What the timeline marks: stalls, pressure, Windows events and holes in watching.
+/// What the timeline marks: stalls, pressure, Windows events, holes in watching and tests.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MarksDto {
     pub history: HistoryState,
     pub occurrences: Vec<OccurrenceSummary>,
     pub episodes: Vec<Episode>,
+    /// For each episode, in order: whether a Vestigium test most likely caused it.
+    pub by_test: Vec<bool>,
     pub events: Vec<WinEvent>,
     pub gaps: Vec<Gap>,
+    pub tests: Vec<TestSpan>,
+}
+
+/// A hardware test that ran inside a span, as the timeline and the report show it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TestSpan {
+    pub id: i64,
+    pub kind: TestKind,
+    pub subject: Subject,
+    pub started_ms: i64,
+    pub ended_ms: i64,
+    pub outcome: Outcome,
+}
+
+/// Test runs that overlap `[from_ms, to_ms]`, the ones that end later included.
+fn test_spans(
+    store: &Store,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Vec<(TestSpan, TestRun)>, StoreError> {
+    const LONGEST_RUN_MS: i64 = 24 * 3_600_000;
+    Ok(store
+        .test_runs(from_ms, to_ms + LONGEST_RUN_MS)?
+        .into_iter()
+        .filter(|row| row.run.started_ms <= to_ms && row.run.ended_ms >= from_ms)
+        .map(|row| {
+            let span = TestSpan {
+                id: row.id,
+                kind: row.run.kind(),
+                subject: row.run.subject.clone(),
+                started_ms: row.run.started_ms,
+                ended_ms: row.run.ended_ms,
+                outcome: row.run.outcome,
+            };
+            (span, row.run)
+        })
+        .collect())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -78,6 +120,8 @@ pub struct OccurrenceDto {
     pub chart: Columns,
     /// What a deep capture that covered this window adds.
     pub capture: Option<CaptureNote>,
+    /// Vestigium tests that ran during the window.
+    pub tests: Vec<TestSpan>,
 }
 
 /// One finding as the health page lists it.
@@ -381,20 +425,27 @@ impl History {
 
     pub fn marks(&mut self, from_ms: i64, to_ms: i64) -> Result<MarksDto, StoreError> {
         let found = self.read(|store| {
+            let episodes = store.episodes(from_ms, to_ms)?;
+            let (tests, runs): (Vec<TestSpan>, Vec<TestRun>) =
+                test_spans(store, from_ms, to_ms)?.into_iter().unzip();
             Ok(MarksDto {
                 history: HistoryState::Ready,
                 occurrences: store.occurrences(from_ms, to_ms)?,
-                episodes: store.episodes(from_ms, to_ms)?,
+                by_test: episodes.iter().map(|e| caused_by_test(e, &runs)).collect(),
+                episodes,
                 events: store.events(from_ms, to_ms)?,
                 gaps: store.gaps(from_ms, to_ms)?,
+                tests,
             })
         })?;
         Ok(found.unwrap_or(MarksDto {
             history: HistoryState::Empty,
             occurrences: Vec::new(),
             episodes: Vec::new(),
+            by_test: Vec::new(),
             events: Vec::new(),
             gaps: Vec::new(),
+            tests: Vec::new(),
         }))
     }
 
@@ -416,9 +467,13 @@ impl History {
                     break;
                 }
             }
-            Ok(Some((occurrence, note)))
+            let tests = test_spans(store, from, to)?
+                .into_iter()
+                .map(|(span, _)| span)
+                .collect();
+            Ok(Some((occurrence, note, tests)))
         })?;
-        Ok(found.flatten().map(|(occurrence, capture)| {
+        Ok(found.flatten().map(|(occurrence, capture, tests)| {
             let window = &occurrence.window;
             let readings: Vec<Reading> = window.samples.iter().map(Reading::of_sample).collect();
             let start_ms = window.from_ms - window.from_ms.rem_euclid(SECOND_MS);
@@ -428,6 +483,7 @@ impl History {
                 chart: columns(&buckets, start_ms, SECOND_MS, &[]),
                 occurrence,
                 capture,
+                tests,
             }
         }))
     }
@@ -529,6 +585,23 @@ impl History {
 
     pub fn settings(&mut self) -> Result<Option<vestigium_core::Settings>, StoreError> {
         self.read(|store| store.settings())
+    }
+
+    pub fn machine(&mut self) -> Result<Option<MachineInfo>, StoreError> {
+        Ok(self.read(|store| store.machine())?.flatten())
+    }
+
+    /// Test runs that ended in `[from_ms, to_ms]`, oldest first.
+    pub fn test_runs(&mut self, from_ms: i64, to_ms: i64) -> Result<Vec<TestRunDto>, StoreError> {
+        let rows = self.read(|store| store.test_runs(from_ms, to_ms))?;
+        Ok(rows
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| TestRunDto {
+                id: row.id,
+                run: row.run,
+            })
+            .collect())
     }
 
     /// Runs `query` on the open database; `None` while there is no database yet.

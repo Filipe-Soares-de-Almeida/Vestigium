@@ -9,8 +9,9 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
-    IOCTL_STORAGE_PREDICT_FAILURE, IOCTL_STORAGE_QUERY_PROPERTY, NVMeDataTypeLogPage,
-    ProtocolTypeNvme, StorageDeviceProperty, StorageDeviceProtocolSpecificProperty,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_PREDICT_FAILURE, IOCTL_STORAGE_QUERY_PROPERTY,
+    NVMeDataTypeLogPage, ProtocolTypeNvme, StorageDeviceProperty,
+    StorageDeviceProtocolSpecificProperty,
 };
 use windows::core::HSTRING;
 
@@ -113,6 +114,14 @@ pub fn disk_bus(index: u32) -> Bus {
         Some(t) if t == BusTypeUsb.0 => Bus::Usb,
         _ => Bus::Other,
     }
+}
+
+/// Size of physical drive `index` in bytes, from its geometry, which needs no access rights.
+pub fn disk_size(index: u32) -> Option<u64> {
+    let geometry = Drive::open(index)?.ask(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, &[], 256)?;
+    // DISK_GEOMETRY_EX: a 24-byte DISK_GEOMETRY, then DiskSize.
+    let size = i64::from_le_bytes(geometry.get(24..32)?.try_into().ok()?);
+    u64::try_from(size).ok()
 }
 
 /// The whole NVMe health log of physical drive `index`; `None` for any other disk.

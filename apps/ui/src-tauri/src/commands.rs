@@ -1,5 +1,9 @@
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
@@ -17,8 +21,15 @@ use crate::capture::{
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto,
 };
+use crate::hwtests::{
+    DiskDetailDto, RUNS_SHOWN_MS, RunningTest, TestFinished, TestProgress, TestsDto, disk_list,
+    disk_scan_args, letter_of, memory_diagnostic_exe, memory_now, read_progress, run_benchmark,
+    run_memory_test, scan_under_way, tests_file, volume_check_args, volume_list, write_versioned,
+};
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
+use vestigium_core::health::Subject;
+use vestigium_core::hwtest::{BENCH_FILE_BYTES, QUICK_MINUTES, TestKind, TestRun};
 
 /// What every command works with: the database, the pipe and the live stream.
 pub struct AppState {
@@ -28,6 +39,10 @@ pub struct AppState {
     live_stop: Mutex<Option<Sender<()>>>,
     /// The deep capture this window started, until its helper exits.
     capture_run: Arc<Mutex<Option<CaptureRun>>>,
+    /// The hardware test this window started, until it ends.
+    test: Arc<Mutex<Option<RunningTest>>>,
+    /// The thread of a test that runs in this window, which closing the window waits for.
+    test_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl Default for AppState {
@@ -37,6 +52,8 @@ impl Default for AppState {
             link: Arc::new(Link::new(Link::sibling_agent())),
             live_stop: Mutex::new(None),
             capture_run: Arc::new(Mutex::new(None)),
+            test: Arc::new(Mutex::new(None)),
+            test_thread: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -348,6 +365,338 @@ pub async fn captures(
 pub async fn capture(state: State<'_, AppState>, id: i64) -> Result<Option<CaptureDto>, UiError> {
     let history = state.history.clone();
     blocking(move || Ok(lock(&history).capture(id)?)).await
+}
+
+/// The Tests page: memory free now, Windows' memory diagnostics, disks, volumes and earlier runs.
+#[tauri::command]
+pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
+    let (history, running) = (state.history.clone(), state.test.clone());
+    blocking(move || {
+        let now = now_ms();
+        let (runs, machine) = {
+            let mut history = lock(&history);
+            (
+                history.test_runs(now - RUNS_SHOWN_MS, now)?,
+                history.machine()?,
+            )
+        };
+        let volumes = volume_list();
+        Ok(TestsDto {
+            memory: memory_now(),
+            diagnostics: crate::hwtests::diagnostics(),
+            disks: disk_list(machine.as_ref(), &volumes),
+            volumes,
+            runs,
+            running: lock(&running).clone(),
+            scan: tests_dir().and_then(|dir| scan_under_way(&dir, now)),
+            bench_file_bytes: BENCH_FILE_BYTES,
+        })
+    })
+    .await
+}
+
+/// SMART or NVMe detail of one disk, read now.
+#[tauri::command]
+pub async fn disk_detail(number: u32, name: String) -> Result<DiskDetailDto, UiError> {
+    blocking(move || Ok(crate::hwtests::disk_detail(number, &name, now_ms()))).await
+}
+
+/// Opens Windows' own Memory Diagnostic, which asks for permission and offers to restart.
+#[tauri::command]
+pub async fn open_memory_diagnostic() -> Result<(), UiError> {
+    blocking(|| launch_elevated(&memory_diagnostic_exe(), "").map(drop)).await
+}
+
+/// Tests part of the free memory for `minutes`, in this window; it hears `test-progress` and
+/// `test-finished`.
+#[tauri::command]
+pub async fn start_memory_test(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    minutes: u32,
+) -> Result<RunningTest, UiError> {
+    if !QUICK_MINUTES.contains(&minutes) {
+        return Err(UiError::Failed(format!("{minutes} minutes is not offered")));
+    }
+    if memory_now().quick_bytes.is_none() {
+        return Err(UiError::Failed(
+            "too little free memory for a quick test".into(),
+        ));
+    }
+    start_in_window(
+        app,
+        &state,
+        TestKind::MemoryQuick,
+        Subject::Pc,
+        Some(i64::from(minutes) * 60_000),
+        move |stop, progress| run_memory_test(minutes, stop, progress),
+    )
+}
+
+/// Measures one volume with a temporary file, in this window.
+#[tauri::command]
+pub async fn start_benchmark(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    volume: String,
+) -> Result<RunningTest, UiError> {
+    let found = volume_list()
+        .into_iter()
+        .find(|v| v.root.eq_ignore_ascii_case(&volume))
+        .ok_or_else(|| UiError::Failed(format!("{volume} is not a fixed volume")))?;
+    start_in_window(
+        app,
+        &state,
+        TestKind::DiskBenchmark,
+        Subject::Volume(found.root.clone()),
+        None,
+        move |stop, progress| Ok(run_benchmark(&found, stop, progress)),
+    )
+}
+
+fn start_in_window(
+    app: AppHandle,
+    state: &State<'_, AppState>,
+    kind: TestKind,
+    subject: Subject,
+    length_ms: Option<i64>,
+    work: impl FnOnce(&AtomicBool, &mut dyn FnMut(TestProgress)) -> Result<TestRun, UiError>
+    + Send
+    + 'static,
+) -> Result<RunningTest, UiError> {
+    let (slot, link) = (state.test.clone(), state.link.clone());
+    let running = claim(&slot, kind, subject, length_ms, None)?;
+    let stop = running.stop.clone();
+    let worker_slot = slot.clone();
+    let spawned = std::thread::Builder::new()
+        .name("test".to_string())
+        .spawn(move || {
+            let result = work(&stop, &mut |p| {
+                let _ = app.emit("test-progress", p);
+            });
+            let finished = match result {
+                Ok(run) => {
+                    let written = History::default_path()
+                        .and_then(|db| tests_file(&db, run.started_ms, "test"))
+                        .map(|path| write_versioned(&path, &run));
+                    let id = match written {
+                        Some(Ok(())) => imported_test(&link),
+                        _ => None,
+                    };
+                    TestFinished {
+                        id,
+                        run: Some(run),
+                        exit_code: None,
+                    }
+                }
+                Err(_) => TestFinished {
+                    id: None,
+                    run: None,
+                    exit_code: None,
+                },
+            };
+            *lock(&worker_slot) = None;
+            let _ = app.emit("test-finished", finished);
+        });
+    match spawned {
+        Ok(thread) => {
+            *lock(&state.test_thread) = Some(thread);
+            Ok(running)
+        }
+        Err(err) => {
+            *lock(&slot) = None;
+            Err(UiError::Failed(err.to_string()))
+        }
+    }
+}
+
+/// Holds the one test slot for a new run; another test running refuses it.
+fn claim(
+    slot: &Mutex<Option<RunningTest>>,
+    kind: TestKind,
+    subject: Subject,
+    length_ms: Option<i64>,
+    stop_file: Option<PathBuf>,
+) -> Result<RunningTest, UiError> {
+    let mut held = lock(slot);
+    if held.is_some() {
+        return Err(UiError::Failed("a test is already running".into()));
+    }
+    let started_ms = now_ms();
+    let running = RunningTest {
+        kind,
+        subject,
+        started_ms,
+        ends_ms: length_ms.map(|l| started_ms + l),
+        stop: Arc::new(AtomicBool::new(false)),
+        stop_file,
+    };
+    *held = Some(running.clone());
+    Ok(running)
+}
+
+/// The id of the newest test run the watcher just stored, while it runs.
+fn imported_test(link: &Link) -> Option<i64> {
+    match link.call(&Request::ImportResults) {
+        Ok(Response::Imported { tests, .. }) => tests.last().copied(),
+        _ => None,
+    }
+}
+
+/// The tests folder beside the watcher's database.
+fn tests_dir() -> Option<PathBuf> {
+    let db = History::default_path()?;
+    tests_file(&db, 0, "test")?.parent().map(PathBuf::from)
+}
+
+/// Reads physical drive `disk` from `from_mib` in the elevated helper; the window hears progress
+/// every few seconds and `test-finished` when the helper exits.
+#[tauri::command]
+pub async fn start_surface_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    disk: u32,
+    from_mib: u64,
+) -> Result<RunningTest, UiError> {
+    let (slot, link) = (state.test.clone(), state.link.clone());
+    blocking(move || {
+        let (helper, out) = helper_and_test_file("surface")?;
+        let running = claim(
+            &slot,
+            TestKind::DiskSurface,
+            Subject::Disk(disk.to_string()),
+            None,
+            Some(out.with_extension("stop")),
+        )?;
+        let process = match launch_elevated(&helper, &disk_scan_args(disk, from_mib, &out)) {
+            Ok(process) => process,
+            Err(err) => {
+                *lock(&slot) = None;
+                return Err(err);
+            }
+        };
+        std::thread::spawn(move || {
+            let progress = out.with_extension("progress");
+            let exit_code = loop {
+                if let Some(code) = process.exited_within(2_000) {
+                    break code;
+                }
+                if let Some(p) = read_progress(&progress) {
+                    let _ = app.emit("test-progress", TestProgress::Surface(p));
+                }
+            };
+            let id = imported_test(&link);
+            *lock(&slot) = None;
+            let _ = app.emit(
+                "test-finished",
+                TestFinished {
+                    id,
+                    run: None,
+                    exit_code,
+                },
+            );
+        });
+        Ok(running)
+    })
+    .await
+}
+
+/// Checks the file system of one volume in the elevated helper; the window hears `test-finished`.
+#[tauri::command]
+pub async fn start_volume_check(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    volume: String,
+) -> Result<RunningTest, UiError> {
+    let letter = letter_of(&volume)
+        .ok_or_else(|| UiError::Failed(format!("{volume} is not a drive letter")))?;
+    let (slot, link) = (state.test.clone(), state.link.clone());
+    blocking(move || {
+        let (helper, out) = helper_and_test_file("chkdsk")?;
+        let running = claim(
+            &slot,
+            TestKind::VolumeCheck,
+            Subject::Volume(format!("{letter}:\\")),
+            None,
+            None,
+        )?;
+        let process = match launch_elevated(&helper, &volume_check_args(letter, &out)) {
+            Ok(process) => process,
+            Err(err) => {
+                *lock(&slot) = None;
+                return Err(err);
+            }
+        };
+        std::thread::spawn(move || {
+            let exit_code = process.wait();
+            let id = imported_test(&link);
+            *lock(&slot) = None;
+            let _ = app.emit(
+                "test-finished",
+                TestFinished {
+                    id,
+                    run: None,
+                    exit_code,
+                },
+            );
+        });
+        Ok(running)
+    })
+    .await
+}
+
+/// The helper beside the window and a new `<now>.<extension>` in the tests folder.
+fn helper_and_test_file(extension: &str) -> Result<(PathBuf, PathBuf), UiError> {
+    let db = History::default_path()
+        .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
+    let helper = sibling_helper()
+        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let file = tests_file(&db, now_ms(), extension)
+        .ok_or_else(|| UiError::Failed("no data folder".into()))?;
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
+    }
+    Ok((helper, file))
+}
+
+/// Stops the test this window started, or the disk scan whose files `scan` names.
+#[tauri::command]
+pub fn stop_test(state: State<'_, AppState>, scan: Option<String>) -> Result<(), UiError> {
+    if let Some(running) = lock(&state.test).as_ref() {
+        crate::hwtests::stop(running);
+        return Ok(());
+    }
+    let stem = scan.filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    match (stem, tests_dir()) {
+        (Some(stem), Some(dir)) => std::fs::write(dir.join(format!("{stem}.stop")), b"")
+            .map_err(|err| UiError::Failed(err.to_string())),
+        _ => Err(UiError::Failed("no test is running".into())),
+    }
+}
+
+/// The test this window started, while it runs.
+#[tauri::command]
+pub fn test_running(state: State<'_, AppState>) -> Option<RunningTest> {
+    lock(&state.test).clone()
+}
+
+/// Closing the window ends its own test and waits a little for the result to be written; a disk
+/// scan in the helper goes on.
+pub fn finish_tests(state: &AppState) {
+    if let Some(running) = lock(&state.test).as_ref()
+        && running.stop_file.is_none()
+    {
+        running
+            .stop
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    let Some(thread) = lock(&state.test_thread).take() else {
+        return;
+    };
+    let waited = Instant::now();
+    while !thread.is_finished() && waited.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn now_ms() -> i64 {

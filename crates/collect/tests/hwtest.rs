@@ -149,3 +149,15 @@ fn memory_diagnostic_events_read_without_elevation() {
             .all(|e| e.meaning == EventMeaning::MemoryDiagnostic)
     );
 }
+
+#[test]
+fn disk_and_volume_facts_read_without_elevation() {
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let root = format!("{system}\\");
+    assert_eq!(
+        vestigium_collect::file_system(&root).as_deref(),
+        Some("NTFS")
+    );
+    let disk = vestigium_collect::volume_drive(&system).expect("the system volume has a disk");
+    assert!(vestigium_collect::disk_size(disk).is_some_and(|b| b > 1 << 30));
+}

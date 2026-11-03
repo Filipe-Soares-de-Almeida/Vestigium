@@ -122,7 +122,8 @@ export type EventMeaning =
   | "AppHang"
   | "AppCrash"
   | "ServiceCrash"
-  | "NoCrashDump";
+  | "NoCrashDump"
+  | "MemoryDiagnostic";
 
 export type NextStep =
   | "UpdateStorageDriver"
@@ -145,7 +146,10 @@ export type NextStep =
   | "KeepOneAntivirus"
   | "ReviewStartupApps"
   | "WaitForShutdown"
-  | "MoveWindowsToSsd";
+  | "MoveWindowsToSsd"
+  | "RunMemoryDiagnostic"
+  | "RunMemTest86"
+  | "RepairVolume";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -319,6 +323,8 @@ export interface OccurrenceDto extends Occurrence {
   id: number;
   /** What a deep capture that covered this window adds. */
   capture: CaptureNote | null;
+  /** Vestigium tests that ran during the window. */
+  tests: TestSpan[];
   /** The window second by second. */
   chart: Columns;
 }
@@ -349,8 +355,11 @@ export interface MarksDto {
   history: HistoryState;
   occurrences: OccurrenceSummary[];
   episodes: Episode[];
+  /** For each episode, in order: whether a Vestigium test most likely caused it. */
+  by_test: boolean[];
   events: WinEvent[];
   gaps: Gap[];
+  tests: TestSpan[];
 }
 
 export type TrayState = "normal" | "attention" | "problem";
@@ -554,7 +563,10 @@ export type FindingKind =
   | "DirtyRestarts"
   | "ShutdownUnfinished"
   | "FailuresRising"
-  | "NoCrashDump";
+  | "NoCrashDump"
+  | "MemoryTestErrors"
+  | "DiskUnreadable"
+  | "VolumeErrors";
 
 /** What a finding is about: a disk such as "0 C:", a volume such as "C:\", or the whole PC. */
 export type Subject = "Pc" | { Disk: string } | { Volume: string };
@@ -636,7 +648,11 @@ export type HealthFact =
   | { Boot: BootTime }
   | { Delay: BootDelay }
   | { Failures: { last_week: number; weekly_before: number } }
-  | { SystemDisk: { disk: string; media: Media } };
+  | { SystemDisk: { disk: string; media: Media } }
+  | { MemoryDiagnostic: { ts_ms: number; bad_pages: number | null } }
+  | { MemoryQuickTest: { ts_ms: number; errors: number; tested_bytes: number } }
+  | { SurfaceScan: { ts_ms: number; unreadable_blocks: number; slow_blocks: number; whole_disk: boolean } }
+  | { VolumeCheck: { ts_ms: number } };
 
 /** One health finding; `closed_ms` is null while it still holds. */
 export interface FindingDto {
@@ -879,5 +895,243 @@ export interface TweakPick {
 /** What applying or undoing returned: the history rows written and the helper's exit code. */
 export interface TweaksApplied {
   ids: number[];
+  exit_code: number | null;
+}
+
+/** Everything of an NVMe disk's health log the Tests page shows. */
+export interface NvmeDetail {
+  health: NvmeHealth;
+  data_read_bytes: number;
+  data_written_bytes: number;
+  power_cycles: number;
+  power_on_hours: number;
+  unsafe_shutdowns: number;
+  error_log_entries: number;
+}
+
+/** One disk's SMART block and verdict, as the watcher reads it. */
+export interface DiskHealth {
+  name: string;
+  read_ms: number;
+  predict_failure: boolean;
+  attributes: SmartAttribute[];
+  nvme: NvmeHealth | null;
+}
+
+export type TestKind = "MemoryQuick" | "DiskSurface" | "VolumeCheck" | "DiskBenchmark";
+
+/** How a test ended; an interrupted test still reports what it covered. */
+export type TestOutcome = "Clean" | "Problems" | "Interrupted" | "Failed";
+
+export type Pattern =
+  | "OwnAddress"
+  | "Random"
+  | "Compare"
+  | "SolidBits"
+  | "Checkerboard"
+  | "WalkingOnes"
+  | "WalkingZeros";
+
+/** A word that read back different; `offset` is inside the tested memory, not a physical address. */
+export interface MemoryError {
+  offset: number;
+  pattern: Pattern;
+  expected: number;
+  actual: number;
+}
+
+export interface MemoryQuick {
+  total_bytes: number;
+  tested_bytes: number;
+  rounds: number;
+  passes: number;
+  error_count: number;
+  errors: MemoryError[];
+  failure: string | null;
+}
+
+export type Region = "Unread" | { Read: { worst_ms: number } } | "Unreadable";
+
+export interface SlowBlock {
+  offset: number;
+  ms: number;
+}
+
+/** A read-only surface scan; `bands` count blocks under 5, 20, 50, 150, 500 ms and above. */
+export interface SurfaceScan {
+  disk: number;
+  media: Media;
+  disk_bytes: number;
+  sector_bytes: number;
+  from_bytes: number;
+  to_bytes: number;
+  bands: number[];
+  unreadable_blocks: number;
+  regions: Region[];
+  worst: SlowBlock[];
+  unreadable: number[];
+  failure: string | null;
+}
+
+export type Bus = "Sata" | "Nvme" | "Usb" | "Other";
+
+export type BenchMode = "SeqRead" | "SeqWrite" | "RandRead32" | "RandWrite32" | "RandRead1" | "RandWrite1";
+
+export interface BenchResult {
+  mode: BenchMode;
+  mb_per_s: number;
+  iops: number;
+  max_ms: number;
+}
+
+export interface Benchmark {
+  volume: string;
+  bus: Bus;
+  media: Media;
+  file_bytes: number;
+  written_bytes: number;
+  results: BenchResult[];
+  /** Other programs used the disk meanwhile, so the numbers may be low. */
+  outside_io: boolean;
+  failure: string | null;
+}
+
+export type VolumeResult = "NoProblems" | "ProblemsFound" | "CouldNotCheck";
+
+export interface VolumeCheck {
+  volume: string;
+  exit_code: number | null;
+  result: VolumeResult;
+  /** chkdsk's own text, for the technical level. */
+  output: string;
+}
+
+export type TestData =
+  | { MemoryQuick: MemoryQuick }
+  | { DiskSurface: SurfaceScan }
+  | { VolumeCheck: VolumeCheck }
+  | { DiskBenchmark: Benchmark };
+
+export interface TestRun {
+  subject: Subject;
+  started_ms: number;
+  ended_ms: number;
+  outcome: TestOutcome;
+  data: TestData;
+}
+
+export interface TestRunDto extends TestRun {
+  id: number;
+}
+
+/** A test that ran inside a span, as the timeline and the report mark it. */
+export interface TestSpan {
+  id: number;
+  kind: TestKind;
+  subject: Subject;
+  started_ms: number;
+  ended_ms: number;
+  outcome: TestOutcome;
+}
+
+export type DiagnosticResult = "Pass" | "Cancelled" | "Incomplete" | "Errors";
+
+export interface DiagnosticDetail {
+  memory_mb: number;
+  test_type: number;
+  duration_s: number;
+  test_count: number;
+  pages_tested: number;
+  pages_untested: number;
+  bad_pages: number;
+}
+
+/** One run of the Windows Memory Diagnostic, from the System log. */
+export interface MemoryDiagnostic {
+  ts_ms: number;
+  result: DiagnosticResult;
+  detail: DiagnosticDetail | null;
+}
+
+export interface MemoryDto {
+  total_bytes: number;
+  available_bytes: number;
+  /** `null` when too little is free for a quick test. */
+  quick_bytes: number | null;
+  minutes: number[];
+}
+
+export interface DiskDto {
+  number: number;
+  /** As the disk counters name it, such as "0 C:". */
+  name: string;
+  media: Media;
+  bus: Bus;
+  bytes: number | null;
+  volumes: string[];
+}
+
+export interface VolumeDto {
+  root: string;
+  total_bytes: number;
+  free_bytes: number;
+  system: boolean;
+  disk: number | null;
+  file_system: string | null;
+}
+
+export interface SurfaceProgress {
+  ts_ms: number;
+  at_bytes: number;
+  from_bytes: number;
+  disk_bytes: number;
+  bands: number[];
+  unreadable_blocks: number;
+}
+
+/** A disk scan the helper still runs, from the progress file it rewrites. */
+export interface ScanUnderWay {
+  stem: string;
+  progress: SurfaceProgress;
+}
+
+/** The test this window started, while it runs. */
+export interface RunningTest {
+  kind: TestKind;
+  subject: Subject;
+  started_ms: number;
+  ends_ms: number | null;
+}
+
+/** The Tests page. */
+export interface TestsDto {
+  memory: MemoryDto;
+  /** Newest first. */
+  diagnostics: MemoryDiagnostic[];
+  disks: DiskDto[];
+  volumes: VolumeDto[];
+  /** Oldest first. */
+  runs: TestRunDto[];
+  running: RunningTest | null;
+  scan: ScanUnderWay | null;
+  bench_file_bytes: number;
+}
+
+/** SMART or NVMe detail read on request: reading an idle HDD spins it up. */
+export interface DiskDetailDto {
+  health: DiskHealth | null;
+  nvme: NvmeDetail | null;
+}
+
+/** What a running test reports, after each pattern, mode or few seconds. */
+export type TestProgress =
+  | { kind: "memory"; pattern: Pattern; rounds: number; passes: number; error_count: number }
+  | { kind: "benchmark"; mode: BenchMode }
+  | ({ kind: "surface" } & SurfaceProgress);
+
+/** What the window hears when a test ends; `id` is null while the watcher is stopped. */
+export interface TestFinished {
+  id: number | null;
+  run: TestRun | null;
   exit_code: number | null;
 }

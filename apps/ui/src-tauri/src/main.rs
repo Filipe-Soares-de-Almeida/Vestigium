@@ -5,6 +5,7 @@ mod agent;
 mod capture;
 mod commands;
 mod history;
+mod hwtests;
 mod live;
 mod tweaks;
 
@@ -46,6 +47,15 @@ fn main() {
             commands::tweaks,
             commands::apply_tweaks,
             commands::undo_tweak,
+            commands::tests,
+            commands::disk_detail,
+            commands::open_memory_diagnostic,
+            commands::start_memory_test,
+            commands::start_benchmark,
+            commands::start_surface_scan,
+            commands::start_volume_check,
+            commands::stop_test,
+            commands::test_running,
             about::about,
             about::open_data_folder,
         ])
@@ -58,6 +68,7 @@ fn main() {
             ..
         } = event
         {
+            commands::finish_tests(&handle.state::<commands::AppState>());
             handle.exit(0);
         }
     });

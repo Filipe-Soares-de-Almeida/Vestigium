@@ -116,6 +116,21 @@ pub struct Elevated(HANDLE);
 unsafe impl Send for Elevated {}
 
 impl Elevated {
+    /// The exit code when the helper exits within `ms`; `None` while it still runs.
+    pub fn exited_within(&self, ms: u32) -> Option<Option<u32>> {
+        // SAFETY: the handle is the live process handle ShellExecuteExW returned.
+        if unsafe { WaitForSingleObject(self.0, ms) } != WAIT_OBJECT_0 {
+            return None;
+        }
+        let mut code = 0u32;
+        // SAFETY: reads the exit code of the process this handle names into a local.
+        Some(
+            unsafe { GetExitCodeProcess(self.0, &mut code) }
+                .ok()
+                .map(|()| code),
+        )
+    }
+
     /// Waits for the helper to exit and returns its exit code.
     pub fn wait(&self) -> Option<u32> {
         // SAFETY: the handle is the live process handle ShellExecuteExW returned.

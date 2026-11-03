@@ -6,15 +6,18 @@ import type {
   CaptureRun,
   CaptureSummary,
   DeleteFinished,
+  DiskDetailDto,
   DumpScanFinished,
   DumpsDto,
   HealthDto,
   LiveMessage,
   MarksDto,
   OccurrenceDto,
+  RunningTest,
   ScanFinished,
   Settings,
   SettingsDto,
+  TestsDto,
   TimelineDto,
   TweakPick,
   TweaksApplied,
@@ -139,4 +142,49 @@ export function applyTweaks(picks: TweakPick[], withoutRestorePoint: boolean): P
 /** Puts back what one change wrote. */
 export function undoTweak(id: number, withoutRestorePoint: boolean): Promise<TweaksApplied> {
   return invoke("undo_tweak", { id, withoutRestorePoint });
+}
+
+/** The Tests page: memory free now, Windows' memory diagnostics, disks, volumes and earlier runs. */
+export function tests(): Promise<TestsDto> {
+  return invoke("tests");
+}
+
+/** SMART or NVMe detail of one disk, read now; reading an idle HDD spins it up. */
+export function diskDetail(number: number, name: string): Promise<DiskDetailDto> {
+  return invoke("disk_detail", { number, name });
+}
+
+/** Opens Windows' own Memory Diagnostic, which asks for permission and offers to restart. */
+export function openMemoryDiagnostic(): Promise<void> {
+  return invoke("open_memory_diagnostic");
+}
+
+/** Tests part of the free memory in this window; progress and the end arrive as events. */
+export function startMemoryTest(minutes: number): Promise<RunningTest> {
+  return invoke("start_memory_test", { minutes });
+}
+
+/** Measures one volume with a temporary file, in this window. */
+export function startBenchmark(volume: string): Promise<RunningTest> {
+  return invoke("start_benchmark", { volume });
+}
+
+/** Reads a whole disk in the elevated helper, from `fromMib`; Windows asks for permission first. */
+export function startSurfaceScan(disk: number, fromMib: number): Promise<RunningTest> {
+  return invoke("start_surface_scan", { disk, fromMib });
+}
+
+/** Checks one volume's file system in the elevated helper; Windows asks for permission first. */
+export function startVolumeCheck(volume: string): Promise<RunningTest> {
+  return invoke("start_volume_check", { volume });
+}
+
+/** Stops the test this window started, or the disk scan whose files `scan` names. */
+export function stopTest(scan: string | null): Promise<void> {
+  return invoke("stop_test", { scan });
+}
+
+/** The test this window started, while it runs. */
+export function testRunning(): Promise<RunningTest | null> {
+  return invoke("test_running");
 }

@@ -5,7 +5,8 @@ use windows::Wdk::System::SystemInformation::{NtQuerySystemInformation, SYSTEM_I
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
-    GetDriveTypeW, GetLogicalDriveStringsW, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
+    GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
+    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
@@ -56,6 +57,25 @@ pub fn volumes() -> Vec<VolumeSpace> {
             })
         })
         .collect()
+}
+
+/// The file system of the volume at `root` ("C:\"), such as "NTFS".
+pub fn file_system(root: &str) -> Option<String> {
+    let mut name = [0u16; 64];
+    // SAFETY: a NUL-terminated root path and a writable name buffer of its full length.
+    unsafe {
+        GetVolumeInformationW(
+            &HSTRING::from(root),
+            None,
+            None,
+            None,
+            None,
+            Some(&mut name),
+        )
+    }
+    .ok()?;
+    let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    Some(String::from_utf16_lossy(&name[..end]))
 }
 
 /// The physical drive that holds the Windows folder; a volume over several drives gives the first.
