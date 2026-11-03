@@ -32,13 +32,14 @@ opens. It watches the one PC it is installed on.
 > freezes, stutters in sensitive mode, apps that stop responding, stretches of
 > CPU, memory or disk pressure, and falls of the whole PC such as a blue screen;
 > the health checks, which watch disks, free space, memory, shutdowns, startup,
-> hardware and antivirus every hour; the deep capture, the full health scan and
-> the reading and cleanup of crash dumps, which ask for administrator permission
-> once; and the window, with the day's timeline, a report for each freeze or
-> fall with its likely cause and the evidence, the health of the PC by area with
-> what to do about each point, the crash dumps with what each one says, the
-> captures and what each one found, the live view of the last ten minutes, and
-> the settings.
+> hardware and antivirus every hour; the deep capture, the full health scan,
+> the reading and cleanup of crash dumps and the Windows tweaks, which ask for
+> administrator permission once when they need it; and the window, with the
+> day's timeline, a report for each freeze or fall with its likely cause and the
+> evidence, the health of the PC by area with what to do about each point, the
+> crash dumps with what each one says, the tweaks this PC shows a sign for, each
+> one undone in a click, the captures and what each one found, the live view of
+> the last ten minutes, and the settings.
 
 ## Highlights
 
