@@ -736,3 +736,141 @@ export interface DeleteFinished {
   deleted: number;
   exit_code: number | null;
 }
+
+/** One Windows setting Vestigium may offer to change. */
+export type TweakId =
+  | "FastStartup"
+  | "Hibernation"
+  | "PowerPlan"
+  | "PcieAspm"
+  | "UsbSuspend"
+  | "SysMain"
+  | "WindowsSearch"
+  | "GameDvr"
+  | "GpuScheduling"
+  | "Mpo"
+  | "StartupApp"
+  | "AppDumps"
+  | "CrashDump";
+
+export type Hive = "LocalMachine" | "CurrentUser";
+export type StartupList = "Run" | "Run32" | "StartupFolder";
+
+/** Something Windows keeps that a tweak reads and writes; GUIDs come as text. */
+export type TweakSetting =
+  | { Dword: { hive: Hive; key: string; name: string } }
+  | { Key: { hive: Hive; key: string } }
+  | { Service: { name: string } }
+  | { PowerAc: { subgroup: string; setting: string } }
+  | "ActiveScheme"
+  | "Hibernation"
+  | { StartupApproval: { hive: Hive; list: StartupList; name: string } };
+
+/** What a setting holds; "Absent" is a value, key or approval that does not exist. */
+export type TweakValue =
+  | "Absent"
+  | { Dword: number }
+  | "Present"
+  | { Service: { start: number; delayed: boolean; running: boolean } }
+  | { Index: number }
+  | { Scheme: string }
+  | { On: boolean }
+  | { Bytes: number[] };
+
+export interface SettingChange {
+  setting: TweakSetting;
+  from: TweakValue;
+  to: TweakValue;
+}
+
+/** One thing Vestigium observed that backs a tweak. */
+export type TweakSignal =
+  | { Finding: FindingKind }
+  | { UnfinishedShutdowns: { count: number } }
+  | { SleepFalls: { count: number } }
+  | { Stutters: { count: number } }
+  | { DpcIsrStalls: { count: number } }
+  | { GpuDriverStalls: { count: number } }
+  | { DiskBusy: { count: number; culprit: string | null } }
+  | { CpuSaturated: { count: number; culprit: string | null } }
+  | { CaptureDriver: { start_ms: number; module: string } }
+  | { CaptureFrames: { start_ms: number; app: string } }
+  | { AppCrashes: { count: number } }
+  | { HiberFile: { bytes: number } }
+  | { Monitors: { count: number } }
+  | "DumpsOff"
+  | { SlowStartup: { name: string; total_ms: number } };
+
+export type TweakStatus = "Ready" | "AlreadySet" | "Unavailable" | "Protected";
+export type Applier = "User" | "Elevated";
+export type Takes = "Now" | "NextShutdown" | "NextSignIn" | "Restart";
+
+/** One tweak as the page shows it: the change it would make and the signals behind it. */
+export interface Advice {
+  tweak: TweakId;
+  /** The startup entry's name, for StartupApp. */
+  subject: string | null;
+  status: TweakStatus;
+  /** Empty when nothing here says the tweak would help. */
+  signals: TweakSignal[];
+  changes: SettingChange[];
+  applier: Applier;
+  takes: Takes;
+}
+
+export interface SettingResult {
+  change: SettingChange;
+  /** The Win32 error when the setting was not written. */
+  error: number | null;
+}
+
+export type RestorePoint =
+  | "Created"
+  | { Reused: { at_ms: number | null } }
+  | "Off"
+  | { Failed: { error: number } }
+  | "Unconfirmed";
+
+export interface TweakChange {
+  tweak: TweakId;
+  subject: string | null;
+  undo_of: number | null;
+  results: SettingResult[];
+  restore_point: RestorePoint | null;
+}
+
+/** The same signal counted in equal spans before and after a change. */
+export interface Helped {
+  days: number;
+  before: number;
+  after: number;
+}
+
+/** One change in the history; `outside` means Windows now holds something else. */
+export interface TweakRow {
+  id: number;
+  applied_ms: number;
+  undone_ms: number | null;
+  applier: Applier;
+  change: TweakChange;
+  helped: Helped | null;
+  outside: boolean;
+}
+
+/** The tweaks page: every tweak with its signals, the history and Windows' last restore point. */
+export interface TweaksDto {
+  advice: Advice[];
+  history: TweakRow[];
+  last_restore_point_ms: number | null;
+}
+
+export interface TweakPick {
+  tweak: TweakId;
+  subject: string | null;
+}
+
+/** What applying or undoing returned: the history rows written and the helper's exit code. */
+export interface TweaksApplied {
+  ids: number[];
+  exit_code: number | null;
+}

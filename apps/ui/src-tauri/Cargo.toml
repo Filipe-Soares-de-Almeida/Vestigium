@@ -21,6 +21,7 @@ vestigium-collect = { workspace = true }
 vestigium-core = { workspace = true }
 vestigium-ipc = { workspace = true }
 vestigium-store = { workspace = true }
+postcard = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

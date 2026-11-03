@@ -68,6 +68,10 @@ impl Store {
         )
     }
 
+    pub fn tweak_change(&self, id: i64) -> Result<Option<TweakChangeRow>, StoreError> {
+        Ok(self.tweak_rows("WHERE id = ?1", params![id])?.pop())
+    }
+
     /// Changes still in place, whatever their age: each can still be undone.
     pub fn tweaks_in_place(&self) -> Result<Vec<TweakChangeRow>, StoreError> {
         self.tweak_rows("WHERE undone_ms IS NULL AND undo_of IS NULL", params![])

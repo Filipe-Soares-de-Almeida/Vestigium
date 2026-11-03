@@ -6,6 +6,7 @@ mod capture;
 mod commands;
 mod history;
 mod live;
+mod tweaks;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -42,6 +43,9 @@ fn main() {
             commands::dumps,
             commands::start_dump_scan,
             commands::delete_dumps,
+            commands::tweaks,
+            commands::apply_tweaks,
+            commands::undo_tweak,
             about::about,
             about::open_data_folder,
         ])

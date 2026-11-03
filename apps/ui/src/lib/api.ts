@@ -16,6 +16,9 @@ import type {
   Settings,
   SettingsDto,
   TimelineDto,
+  TweakPick,
+  TweaksApplied,
+  TweaksDto,
 } from "./types";
 
 // Every call rejects with a `UiError` from ./types.
@@ -121,4 +124,19 @@ export function startDumpScan(): Promise<DumpScanFinished> {
 /** Deletes these dumps in the elevated helper, which checks each path again. */
 export function deleteDumps(ids: number[]): Promise<DeleteFinished> {
   return invoke("delete_dumps", { ids });
+}
+
+/** Every tweak with its state and signals, the changes made so far and Windows' last restore point. */
+export function tweaks(): Promise<TweaksDto> {
+  return invoke("tweaks");
+}
+
+/** Applies the tweaks picked; Windows asks for permission once for those that need it. */
+export function applyTweaks(picks: TweakPick[], withoutRestorePoint: boolean): Promise<TweaksApplied> {
+  return invoke("apply_tweaks", { picks, withoutRestorePoint });
+}
+
+/** Puts back what one change wrote. */
+export function undoTweak(id: number, withoutRestorePoint: boolean): Promise<TweaksApplied> {
+  return invoke("undo_tweak", { id, withoutRestorePoint });
 }

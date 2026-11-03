@@ -4239,6 +4239,7 @@ dependencies = [
 name = "vestigium-ui"
 version = "0.0.0"
 dependencies = [
+ "postcard",
  "serde",
  "serde_json",
  "tauri",

@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use serde::Serialize;
 use vestigium_core::health::{BootReport, Finding};
 use vestigium_core::{
-    DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap, MINUTE_MS, Occurrence,
-    OccurrenceSummary, PcState, Reading, Suspect, WinEvent, bug_check_event, capture_findings,
-    capture_suspects, dump_culprit, pc_state, steady_only,
+    CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap,
+    MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, Reading, Suspect, WinEvent,
+    bug_check_event, capture_findings, capture_suspects, dump_culprit, pc_state, steady_only,
 };
-use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError};
+use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
 /// How far back the health page lists the findings that closed.
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
@@ -237,6 +237,20 @@ pub struct CaptureNote {
     pub suspects: Vec<Suspect>,
 }
 
+/// What the tweak rules read from the history: the open findings, the recent occurrences,
+/// episodes, captures and events, the machine, and the changes made so far.
+#[derive(Clone, Debug, Default)]
+pub struct TweakHistory {
+    pub findings: Vec<Finding>,
+    pub occurrences: Vec<OccurrenceSummary>,
+    pub episodes: Vec<Episode>,
+    pub captures: Vec<CaptureCauses>,
+    pub events: Vec<WinEvent>,
+    pub machine: Option<MachineInfo>,
+    /// Newest first: those of the shown span and every one still in place.
+    pub changes: Vec<TweakChangeRow>,
+}
+
 /// The watcher's database, read-only, opened when first needed and again after it goes away.
 pub struct History {
     path: Option<PathBuf>,
@@ -252,6 +266,60 @@ impl History {
     pub fn default_path() -> Option<PathBuf> {
         let local = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?;
         Some(PathBuf::from(local).join(r"Vestigium\data\vestigium.db"))
+    }
+
+    /// The folder of the watcher's database, where the helper's files go.
+    pub fn data_dir(&self) -> Option<PathBuf> {
+        self.path.as_deref()?.parent().map(PathBuf::from)
+    }
+
+    /// The signals of the last `evidence_ms` and the tweak changes of the last `shown_ms`.
+    pub fn tweak_history(
+        &mut self,
+        now_ms: i64,
+        evidence_ms: i64,
+        shown_ms: i64,
+    ) -> Result<TweakHistory, StoreError> {
+        let from = now_ms - evidence_ms;
+        let found = self.read(|store| {
+            let mut captures = Vec::new();
+            for summary in store.captures(from, now_ms)? {
+                if let Some(capture) = store.capture(summary.id)? {
+                    captures.push(CaptureCauses {
+                        start_ms: capture.start_ms,
+                        causes: capture_findings(&capture)
+                            .into_iter()
+                            .map(|s| s.cause)
+                            .collect(),
+                    });
+                }
+            }
+            let mut changes = store.tweak_changes(now_ms - shown_ms, now_ms)?;
+            for row in store.tweaks_in_place()? {
+                if !changes.iter().any(|c| c.id == row.id) {
+                    changes.push(row);
+                }
+            }
+            changes.sort_by_key(|r| std::cmp::Reverse((r.applied_ms, r.id)));
+            Ok(TweakHistory {
+                findings: store
+                    .open_findings()?
+                    .into_iter()
+                    .map(|f| f.finding)
+                    .collect(),
+                occurrences: store.occurrences(from, now_ms)?,
+                episodes: store.episodes(from, now_ms)?,
+                captures,
+                events: store.events(from, now_ms)?,
+                machine: store.machine()?,
+                changes,
+            })
+        })?;
+        Ok(found.unwrap_or_default())
+    }
+
+    pub fn tweak_change(&mut self, id: i64) -> Result<Option<TweakChangeRow>, StoreError> {
+        Ok(self.read(|store| store.tweak_change(id))?.flatten())
     }
 
     /// Points of `[from_ms, to_ms)`, peaks kept, at most `max_points` of them.

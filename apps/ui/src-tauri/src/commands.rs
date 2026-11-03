@@ -18,6 +18,7 @@ use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto,
 };
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
+use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 
 /// What every command works with: the database, the pipe and the live stream.
 pub struct AppState {
@@ -361,6 +362,53 @@ async fn send(state: &State<'_, AppState>, request: Request) -> Result<(), UiErr
 }
 
 /// Runs work that waits on the disk or the pipe away from the async runtime.
+/// Every tweak with its state and signals, the changes made so far and Windows' last restore point.
+#[tauri::command]
+pub async fn tweaks(state: State<'_, AppState>) -> Result<TweaksDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || crate::tweaks::read(&mut lock(&history), now_ms())).await
+}
+
+/// Applies the tweaks picked; Windows asks for permission once for those that need it.
+#[tauri::command]
+pub async fn apply_tweaks(
+    state: State<'_, AppState>,
+    picks: Vec<TweakPick>,
+    without_restore_point: bool,
+) -> Result<TweaksApplied, UiError> {
+    let (history, link) = (state.history.clone(), state.link.clone());
+    blocking(move || {
+        crate::tweaks::apply(
+            &mut lock(&history),
+            &link,
+            &picks,
+            without_restore_point,
+            now_ms(),
+        )
+    })
+    .await
+}
+
+/// Puts back what one change wrote.
+#[tauri::command]
+pub async fn undo_tweak(
+    state: State<'_, AppState>,
+    id: i64,
+    without_restore_point: bool,
+) -> Result<TweaksApplied, UiError> {
+    let (history, link) = (state.history.clone(), state.link.clone());
+    blocking(move || {
+        crate::tweaks::undo_change(
+            &mut lock(&history),
+            &link,
+            id,
+            without_restore_point,
+            now_ms(),
+        )
+    })
+    .await
+}
+
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, UiError> + Send + 'static,
 ) -> Result<T, UiError> {
