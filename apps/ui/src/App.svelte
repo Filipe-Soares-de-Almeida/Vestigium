@@ -10,12 +10,14 @@
   import WindowControls from "./components/WindowControls.svelte";
   import { app } from "./lib/app.svelte";
   import { captures } from "./lib/capture.svelte";
+  import { dumps } from "./lib/dumps.svelte";
   import { markFrame } from "./lib/frame";
   import { health } from "./lib/health.svelte";
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
   import Capture from "./screens/Capture.svelte";
   import Captures from "./screens/Captures.svelte";
+  import Dumps from "./screens/Dumps.svelte";
   import Health from "./screens/Health.svelte";
   import Now from "./screens/Now.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
@@ -30,6 +32,7 @@
   onMount(() => captures.watch());
   onMount(() => void markFrame());
   onMount(() => health.watch());
+  onMount(() => dumps.watch());
 
   // Stores what finished while the window was closed and restores a running capture, again when the watcher comes up.
   $effect(() => {
@@ -110,6 +113,8 @@
               <Captures forOccurrence={router.current.forOccurrence} />
             {:else if router.current.screen === "health"}
               <Health area={router.current.area} />
+            {:else if router.current.screen === "dumps"}
+              <Dumps id={router.current.id} />
             {:else if router.current.screen === "now"}
               <Now />
             {:else if router.current.screen === "settings"}

@@ -42,7 +42,7 @@ How to use this file:
   Time the PC spent asleep or with watching paused never counts as a freeze. The tray tooltip says
   how many slowdowns the last 24 hours held.
 - The window now has its own layout: a title bar with the Vestigium mark, a navigation pane with
-  Today and Now (Dumps is marked as coming soon), and Settings at the bottom next to
+  Today and Now, and Settings at the bottom next to
   whether Vestigium is watching, paused or not running. It shows in English or Brazilian
   Portuguese, light or dark, and in one of four colour themes (Red, Graphite, Slate, Indigo),
   following Windows until you choose otherwise. When watching is paused, a banner offers to resume
@@ -118,6 +118,14 @@ How to use this file:
 - A full scan, on the Health page, reads what Windows shows only with administrator permission,
   such as what slows startup, after Windows asks for that permission once. It only reads and
   changes nothing.
+- Dumps, in the navigation pane, lists the files Windows keeps after a blue screen, a video reset
+  it recovered from, or an app that closed by itself, grouped by kind, with the space they take.
+  "Read the dumps" asks Windows for permission once and reads each one on the PC, with Windows' own
+  debugger engine and without the internet: the stop code in plain words, the driver or module it
+  most likely points at and how sure that is, and what to do. Dumps can be ticked and deleted after
+  a confirmation; what each one said stays. The page also says whether Windows is set to write a
+  dump at all. A fall's report shows the dump of that fall, and the Health point about a blue
+  screen leaving no dump leads to the setting.
 
 ### Changed
 

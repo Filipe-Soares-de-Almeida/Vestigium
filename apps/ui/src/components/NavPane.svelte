@@ -1,13 +1,16 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
+  import { dumps } from "../lib/dumps.svelte";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
+  import { formatBytes } from "../screens/occurrence/format";
   import ConcernMark from "./ConcernMark.svelte";
   import Icon from "./Icon.svelte";
 
   const open = $derived(health.dto?.open.length ?? 0);
+  const space = $derived(dumps.dto?.space_bytes ?? 0);
   const status = $derived(
     app.link === null
       ? { tone: "off", key: "ui.shell.status.connecting" }
@@ -54,9 +57,10 @@
       </span>
     {/if}
   </a>
-  <span class="nav soon-item">
-    <Icon name="dumps" />{t("ui.shell.nav.dumps")}<span class="soon">{t("ui.shell.nav.soon")}</span>
-  </span>
+  <a class="nav" href={href.dumps()} aria-current={router.section === "dumps" ? "page" : undefined}>
+    <Icon name="dumps" />{t("ui.shell.nav.dumps")}
+    {#if space}<span class="size">{formatBytes(space)}</span>{/if}
+  </a>
   <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
   <a
     class="nav"
@@ -109,16 +113,10 @@
     border-radius: 2px;
     background: var(--accent);
   }
-  .soon-item {
-    color: var(--ink3);
-  }
-  .soon {
+  .size {
     margin-left: auto;
-    padding: 0 7px;
-    border-radius: 9px;
-    background: var(--stroke2);
     color: var(--ink2);
-    font: 400 11px/18px var(--f);
+    font: 400 12px/18px var(--f);
     white-space: nowrap;
   }
   .count {
@@ -178,9 +176,6 @@
     .foot i.off {
       background: Canvas;
       border-color: CanvasText;
-    }
-    .soon-item {
-      color: GrayText;
     }
     .count {
       border: 1px solid CanvasText;

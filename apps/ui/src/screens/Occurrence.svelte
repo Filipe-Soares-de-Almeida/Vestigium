@@ -7,6 +7,7 @@
   import Segmented from "../components/Segmented.svelte";
   import { occurrence } from "../lib/api";
   import { app } from "../lib/app.svelte";
+  import { dumps } from "../lib/dumps.svelte";
   import { errorText } from "../lib/errors";
   import { t } from "../lib/i18n.svelte";
   import { href } from "../lib/router.svelte";
@@ -15,6 +16,8 @@
   import { copyText, loadDone, saveDone } from "./occurrence/browser";
   import { chartView } from "./occurrence/chart";
   import { coveredLine } from "./capture/words";
+  import { culpritView, dumpOfFall, fileName, hex } from "./dumps/words";
+  import { formatBytes } from "./occurrence/format";
   import { buildReport, type Line, reportMarkdown } from "./occurrence/report";
   import TechTables from "./occurrence/TechTables.svelte";
   import WindowChart from "./occurrence/WindowChart.svelte";
@@ -35,6 +38,12 @@
   const chart = $derived(dto && view ? chartView(dto, level, view.cause) : null);
   /** A fall keeps only what came before it, and its chart says so. */
   const fall = $derived(dto?.kind === "PostMortem" ? ".PostMortem" : "");
+  /** The dump Windows wrote for a blue screen, once the dumps are read. */
+  const fallDump = $derived.by(() => {
+    const crash = dto?.triggers.flatMap((tr) => ("Crash" in tr ? [tr.Crash] : []))[0];
+    if (!crash || typeof crash.kind !== "object" || !dumps.dto) return null;
+    return dumpOfFall(dumps.dto, crash.down_ms, crash.kind.BlueScreen.code);
+  });
 
   async function load(): Promise<void> {
     failure = null;
@@ -185,6 +194,31 @@
         {/if}
       </section>
 
+      {#if fallDump}
+        {@const fault = fallDump.fault && "BugCheck" in fallDump.fault ? fallDump.fault.BugCheck : null}
+        {@const culprit = fallDump.culprit ? culpritView(fallDump, fallDump.culprit, level) : null}
+        <section class="card" aria-labelledby="occ-dump">
+          <h2 id="occ-dump" class="sub">{t("ui.occurrence.dump.title")}</h2>
+          <div class="cause dump">
+            <span class="icochip" style:background="var(--freeze-t)" style:color="var(--freeze)">
+              <Icon name={culprit?.icon ?? "power"} />
+            </span>
+            <div>
+              {#if fallDump.analyzed_ms === null}
+                <b>{t("ui.occurrence.dump.unread")}</b>
+                <small>{fileName(fallDump.path)} · {formatBytes(fallDump.size_bytes)}</small>
+              {:else}
+                <b>{culprit?.name ?? t("ui.dumps.culprit.none")}</b>
+                <small>{[fault ? hex(fault.code) : "", culprit?.confidence ?? ""].filter(Boolean).join(" · ")}</small>
+              {/if}
+            </div>
+          </div>
+          <a class="more" href={href.dumps(fallDump.id)}>
+            {t(fallDump.analyzed_ms === null ? "ui.occurrence.dump.read" : "ui.occurrence.dump.open")}
+          </a>
+        </section>
+      {/if}
+
       <section class="card" aria-labelledby="occ-seq">
         <h2 id="occ-seq" class="sub">{t("ui.occurrence.seq.title")}</h2>
         {#if view.facts.length}
@@ -303,6 +337,14 @@
   .cause small {
     color: var(--ink2);
     font-size: 13px;
+  }
+  .cause.dump {
+    margin-bottom: 10px;
+  }
+  .more {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
   }
   .summary {
     margin: 0 0 14px;

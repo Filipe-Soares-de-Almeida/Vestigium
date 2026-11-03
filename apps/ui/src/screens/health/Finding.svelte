@@ -4,6 +4,7 @@
   import ConcernMark from "../../components/ConcernMark.svelte";
   import Icon from "../../components/Icon.svelte";
   import { t } from "../../lib/i18n.svelte";
+  import { href } from "../../lib/router.svelte";
   import type { DetailLevel, FindingDto } from "../../lib/types";
   import { loadDone, saveDone } from "../occurrence/browser";
   import { areaOf } from "./areas";
@@ -93,6 +94,9 @@
         </div>
       {:else}
         <p class="muted none">{t("ui.health.todo.none")}</p>
+      {/if}
+      {#if finding.kind === "NoCrashDump"}
+        <p class="secure"><Icon name="dumps" /><a href={href.dumps()}>{t("ui.health.see_dump_setting")}</a></p>
       {/if}
       {#if view.security}
         <p class="secure"><Icon name="shield" /><span>{t("ui.health.secure")}</span></p>

@@ -25,6 +25,8 @@
     power: [20, '<path d="M10 3v6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6 5.6a6 6 0 108 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'],
     clock: [20, '<circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 6v4.2l2.8 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'],
     info: [20, '<circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.5M10 6.6v.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'],
+    live: [20, '<rect x="2.5" y="4" width="15" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 17h6M10 14v3M6 9.5h2l1.2-2.5 1.6 5 1.2-2.5H14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'],
+    trash: [16, '<path d="M2.5 4h11M6.3 4V2.6h3.4V4M4.3 4l.7 9.5h6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'],
   } as const satisfies Record<string, readonly [number, string]>;
 
   export type IconName = keyof typeof ICONS;

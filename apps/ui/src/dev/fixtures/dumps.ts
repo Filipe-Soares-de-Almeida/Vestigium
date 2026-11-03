@@ -1,4 +1,5 @@
 // Dumps page data. URL: ?dumps=none|unread|full (default full) &dump-ms=<wait> &dump-fail=1
+// The blue screen of today at 7:12 is the fall of ?fall=1.
 // Every name, path and code here is invented; nothing was read from a real PC.
 import type { DeleteFinished, DumpDto, DumpScanFinished, DumpsDto } from "../../lib/types";
 import type { Handler } from "../mock";
@@ -8,16 +9,19 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const MB = 1024 * 1024;
 const now = Date.now();
+const midnight = new Date();
+midnight.setHours(0, 0, 0, 0);
+const fall = midnight.getTime() + (7 * 60 + 12) * 60_000 + 30_000;
 
 const kernelMemory: DumpDto = {
   id: 1,
   path: "C:\\Windows\\MEMORY.DMP",
   kind: "KernelMemory",
-  crash_ms: now - 2 * DAY - 5 * HOUR,
-  file_ms: now - 2 * DAY - 5 * HOUR + 6 * 60_000,
+  crash_ms: fall,
+  file_ms: fall + 6 * 60_000,
   size_bytes: 1_980 * MB,
-  found_ms: now - 2 * DAY,
-  analyzed_ms: now - 2 * DAY,
+  found_ms: fall + 7 * 60_000,
+  analyzed_ms: now - 10 * 60_000,
   deleted_ms: null,
   fault: {
     BugCheck: {
