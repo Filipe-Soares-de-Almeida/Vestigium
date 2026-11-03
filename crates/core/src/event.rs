@@ -45,6 +45,8 @@ pub enum EventMeaning {
     ServiceCrash,
     /// Windows could not set up the crash dump, so a blue screen leaves no dump behind.
     NoCrashDump,
+    /// A run of the Windows Memory Diagnostic ended.
+    MemoryDiagnostic,
 }
 
 /// One kind of event worth keeping: always a provider and an id, since ids repeat across providers.
@@ -144,6 +146,12 @@ pub const CURATED: &[CuratedEvent] = &[
         &["volmgr"],
         &[46],
         EventMeaning::NoCrashDump,
+    ),
+    curated(
+        Channel::System,
+        &["Microsoft-Windows-MemoryDiagnostics-Results"],
+        &[1101, 1102, 1103, 1104, 1201, 1202],
+        EventMeaning::MemoryDiagnostic,
     ),
 ];
 

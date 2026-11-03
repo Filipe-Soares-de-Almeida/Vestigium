@@ -186,6 +186,10 @@ pub enum NextStep {
     ReviewStartupApps,
     WaitForShutdown,
     MoveWindowsToSsd,
+    RunMemoryDiagnostic,
+    RunMemTest86,
+    /// Let Windows repair the file system; Vestigium only checks it.
+    RepairVolume,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

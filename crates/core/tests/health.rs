@@ -4,6 +4,9 @@ use vestigium_core::health::{
     SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_health,
     reconcile, smart_attributes,
 };
+use vestigium_core::hwtest::{
+    MemoryQuick, Outcome, SurfaceAggregator, TestData, TestRun, VolumeCheck, VolumeResult,
+};
 use vestigium_core::{Channel, DiskInfo, EventMeaning, MachineInfo, Media, NextStep, WinEvent};
 
 const DAY: i64 = 24 * 60 * 60_000;
@@ -41,6 +44,7 @@ fn healthy() -> HealthInputs {
         events: Vec::new(),
         antivirus: Some(vec![product("Built-in antivirus", true)]),
         boot: None,
+        tests: Vec::new(),
         open: Vec::new(),
     }
 }
@@ -737,4 +741,170 @@ fn boot_events_fold_into_a_report() {
             (DelayKind::Phase, "PreShellInit", false, 21_117),
         ]
     );
+}
+
+fn memdiag_event(days_ago: i64, id: u16, bad_pages: u64) -> WinEvent {
+    let data = format!(
+        "<UserData><Results><NumPagesTested>1000</NumPagesTested>\
+         <NumPagesUnTested>0</NumPagesUnTested><NumBadPages>{bad_pages}</NumBadPages>\
+         </Results></UserData>"
+    );
+    event(
+        days_ago,
+        "Microsoft-Windows-MemoryDiagnostics-Results",
+        id,
+        EventMeaning::MemoryDiagnostic,
+        &data,
+    )
+}
+
+fn test_run(days_ago: i64, subject: Subject, data: TestData) -> TestRun {
+    TestRun {
+        subject,
+        started_ms: NOW - days_ago * DAY - 60_000,
+        ended_ms: NOW - days_ago * DAY,
+        outcome: Outcome::Clean,
+        data,
+    }
+}
+
+fn quick(errors: u64) -> TestData {
+    TestData::MemoryQuick(MemoryQuick {
+        total_bytes: 32 * GB,
+        tested_bytes: 4 * GB,
+        rounds: 2,
+        error_count: errors,
+        errors: Vec::new(),
+        failure: None,
+    })
+}
+
+fn surface(media: Media, slow_ms: &[f32], unreadable: u64) -> TestData {
+    let disk = 1u64 << 40;
+    let mut scan = SurfaceAggregator::new(1, media, disk, 512, 0);
+    for (i, ms) in slow_ms.iter().enumerate() {
+        scan.block(i as u64 * (1 << 20), *ms);
+    }
+    for i in 0..unreadable {
+        scan.unreadable(i * (1 << 30), &[i * (1 << 30)]);
+    }
+    TestData::DiskSurface(scan.finish(disk, None))
+}
+
+fn of_kind(found: &[Finding], kind: FindingKind) -> Vec<&Finding> {
+    found.iter().filter(|f| f.kind == kind).collect()
+}
+
+#[test]
+fn memory_errors_come_from_the_diagnostic_and_the_quick_test() {
+    let mut inputs = healthy();
+    inputs.events.push(memdiag_event(10, 1102, 4));
+    inputs.tests.push(test_run(5, Subject::Pc, quick(2)));
+    let found = evaluate(&inputs);
+    let memory = of_kind(&found, FindingKind::MemoryTestErrors);
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0].concern, Concern::Critical);
+    assert_eq!(memory[0].value, Measure::Count(6));
+    assert_eq!(memory[0].evidence.len(), 2);
+}
+
+#[test]
+fn clean_memory_diagnostic_closes_the_finding() {
+    let mut inputs = healthy();
+    inputs.events.push(memdiag_event(10, 1102, 4));
+    inputs.tests.push(test_run(8, Subject::Pc, quick(1)));
+    inputs.events.push(memdiag_event(2, 1101, 0));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::MemoryTestErrors).is_empty());
+
+    inputs.tests.push(test_run(1, Subject::Pc, quick(0)));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::MemoryTestErrors).is_empty());
+}
+
+#[test]
+fn unreadable_sector_is_critical() {
+    let mut inputs = healthy();
+    let disk = Subject::Disk("1 D:".into());
+    inputs
+        .tests
+        .push(test_run(3, disk.clone(), surface(Media::Ssd, &[1.0], 2)));
+    let found = evaluate(&inputs);
+    let unreadable = of_kind(&found, FindingKind::DiskUnreadable);
+    assert_eq!(unreadable.len(), 1);
+    assert_eq!(unreadable[0].subject, disk);
+    assert_eq!(unreadable[0].concern, Concern::Critical);
+    assert_eq!(unreadable[0].value, Measure::Count(2));
+    assert_eq!(
+        unreadable[0].next_steps,
+        [NextStep::BackUpNow, NextStep::ReplaceDisk]
+    );
+}
+
+#[test]
+fn slow_regions_count_only_on_hdd() {
+    let slow = [700.0; 12];
+    let mut inputs = healthy();
+    inputs.tests.push(test_run(
+        3,
+        Subject::Disk("1 D:".into()),
+        surface(Media::Hdd, &slow, 0),
+    ));
+    inputs.tests.push(test_run(
+        3,
+        Subject::Disk("0 C:".into()),
+        surface(Media::Ssd, &slow, 0),
+    ));
+    let found = evaluate(&inputs);
+    let flagged = of_kind(&found, FindingKind::DiskUnreadable);
+    assert_eq!(flagged.len(), 1);
+    assert_eq!(flagged[0].subject, Subject::Disk("1 D:".into()));
+    assert_eq!(flagged[0].concern, Concern::Attention);
+}
+
+#[test]
+fn a_later_clean_scan_closes_the_disk_finding() {
+    let mut inputs = healthy();
+    let disk = Subject::Disk("1 D:".into());
+    inputs
+        .tests
+        .push(test_run(9, disk.clone(), surface(Media::Hdd, &[1.0], 3)));
+    inputs
+        .tests
+        .push(test_run(1, disk, surface(Media::Hdd, &[1.0], 0)));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::DiskUnreadable).is_empty());
+}
+
+#[test]
+fn volume_errors_follow_the_last_check() {
+    let check = |result| {
+        TestData::VolumeCheck(VolumeCheck {
+            volume: r"D:\".into(),
+            exit_code: Some(3),
+            result,
+            output: String::new(),
+        })
+    };
+    let volume = Subject::Volume(r"D:\".into());
+    let mut inputs = healthy();
+    inputs.tests.push(test_run(
+        4,
+        volume.clone(),
+        check(VolumeResult::ProblemsFound),
+    ));
+    let found = evaluate(&inputs);
+    let errors = of_kind(&found, FindingKind::VolumeErrors);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].concern, Concern::Attention);
+    assert_eq!(errors[0].next_steps[0], NextStep::RepairVolume);
+
+    inputs
+        .tests
+        .push(test_run(1, volume, check(VolumeResult::NoProblems)));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::VolumeErrors).is_empty());
+}
+
+#[test]
+fn test_runs_past_the_reach_are_ignored() {
+    let mut inputs = healthy();
+    inputs.tests.push(test_run(120, Subject::Pc, quick(5)));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::MemoryTestErrors).is_empty());
 }

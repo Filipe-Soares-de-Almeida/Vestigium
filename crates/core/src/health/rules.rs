@@ -1,3 +1,7 @@
+use crate::hwtest::{
+    DiagnosticResult, TEST_REACH_DAYS, TestData, TestRun, VolumeResult, combined_surface,
+    memory_diagnostics,
+};
 use crate::shutdown::{SHUTTING_DOWN, power_loss_detail};
 use crate::{EventMeaning, Media, NextStep, WinEvent};
 
@@ -25,6 +29,8 @@ const HEALTHY_BOOT_S: f32 = 60.0;
 const DIRTY_RESTARTS: u32 = 2;
 const UNFINISHED_SHUTDOWNS: u32 = 2;
 const FAILURE_FLOOR: u32 = 3;
+/// Blocks of an HDD slow twice in a row, from which its surface asks for attention.
+const SLOW_BLOCKS: u64 = 10;
 const TREND_DAYS: i64 = 35;
 /// Events shown as evidence of one finding, newest first.
 const EVENTS_SHOWN: usize = 10;
@@ -47,6 +53,9 @@ pub fn evaluate(inputs: &HealthInputs) -> Vec<Finding> {
     found.extend(shutdown_unfinished(inputs));
     found.extend(failures_rising(inputs));
     found.extend(no_crash_dump(inputs));
+    found.extend(memory_test_errors(inputs));
+    found.extend(disk_unreadable(inputs));
+    found.extend(volume_errors(inputs));
     found.sort_by_key(|f| std::cmp::Reverse(f.concern));
     found
 }
@@ -508,4 +517,146 @@ fn no_crash_dump(inputs: &HealthInputs) -> Option<Finding> {
         None,
         vec![NextStep::LetWindowsManagePageFile],
     )
+}
+
+fn recent_tests(inputs: &HealthInputs) -> impl Iterator<Item = &TestRun> {
+    let from = inputs.now_ms - TEST_REACH_DAYS * DAY_MS;
+    inputs.tests.iter().filter(move |r| r.ended_ms >= from)
+}
+
+fn memory_test_errors(inputs: &HealthInputs) -> Option<Finding> {
+    let diagnostics = memory_diagnostics(&inputs.events);
+    let last_clean = diagnostics
+        .iter()
+        .filter(|d| d.result == DiagnosticResult::Pass)
+        .map(|d| d.ts_ms)
+        .max();
+    let after_clean = |ts_ms: i64| last_clean.is_none_or(|clean| ts_ms > clean);
+    let mut evidence = Vec::new();
+    let mut errors = 0u64;
+    for run in diagnostics
+        .iter()
+        .filter(|d| d.result == DiagnosticResult::Errors && after_clean(d.ts_ms))
+    {
+        let bad_pages = run.detail.map(|d| d.bad_pages);
+        errors += bad_pages.unwrap_or(1).max(1);
+        evidence.push(HealthFact::MemoryDiagnostic {
+            ts_ms: run.ts_ms,
+            bad_pages,
+        });
+    }
+    for run in recent_tests(inputs).filter(|r| after_clean(r.ended_ms)) {
+        if let TestData::MemoryQuick(quick) = &run.data
+            && quick.error_count > 0
+        {
+            errors += quick.error_count;
+            evidence.push(HealthFact::MemoryQuickTest {
+                ts_ms: run.ended_ms,
+                errors: quick.error_count,
+                tested_bytes: quick.tested_bytes,
+            });
+        }
+    }
+    if evidence.is_empty() {
+        return None;
+    }
+    Some(finding(
+        FindingKind::MemoryTestErrors,
+        Subject::Pc,
+        Concern::Critical,
+        Measure::Count(u32::try_from(errors).unwrap_or(u32::MAX)),
+        Reference::AtMost(Measure::Count(0)),
+        evidence,
+        vec![NextStep::CheckHardwareStability, NextStep::RunMemTest86],
+    ))
+}
+
+/// Runs grouped by subject, each group oldest first, groups in the order they first appear.
+fn by_subject<'a>(runs: impl Iterator<Item = &'a TestRun>) -> Vec<(Subject, Vec<&'a TestRun>)> {
+    let mut groups: Vec<(Subject, Vec<&TestRun>)> = Vec::new();
+    for run in runs {
+        match groups.iter_mut().find(|(s, _)| *s == run.subject) {
+            Some((_, group)) => group.push(run),
+            None => groups.push((run.subject.clone(), vec![run])),
+        }
+    }
+    for (_, group) in &mut groups {
+        group.sort_by_key(|r| r.started_ms);
+    }
+    groups
+}
+
+fn disk_unreadable(inputs: &HealthInputs) -> Vec<Finding> {
+    let scans = recent_tests(inputs).filter(|r| matches!(r.data, TestData::DiskSurface(_)));
+    let mut found = Vec::new();
+    for (subject, runs) in by_subject(scans) {
+        let ended_ms = runs.last().map_or(0, |r| r.ended_ms);
+        let surfaces: Vec<_> = runs
+            .iter()
+            .filter_map(|r| match &r.data {
+                TestData::DiskSurface(scan) => Some(scan.clone()),
+                _ => None,
+            })
+            .collect();
+        let Some(scan) = combined_surface(&surfaces) else {
+            continue;
+        };
+        let slow = scan.slow_blocks();
+        let (concern, value, next_steps) = if scan.unreadable_blocks > 0 {
+            (
+                Concern::Critical,
+                scan.unreadable_blocks,
+                vec![NextStep::BackUpNow, NextStep::ReplaceDisk],
+            )
+        } else if scan.media == Media::Hdd && slow >= SLOW_BLOCKS {
+            (
+                Concern::Attention,
+                slow,
+                vec![NextStep::BackUpNow, NextStep::CheckDiskCable],
+            )
+        } else {
+            continue;
+        };
+        found.push(finding(
+            FindingKind::DiskUnreadable,
+            subject,
+            concern,
+            Measure::Count(u32::try_from(value).unwrap_or(u32::MAX)),
+            Reference::AtMost(Measure::Count(0)),
+            vec![HealthFact::SurfaceScan {
+                ts_ms: ended_ms,
+                unreadable_blocks: scan.unreadable_blocks,
+                slow_blocks: slow,
+                whole_disk: scan.whole_disk(),
+            }],
+            next_steps,
+        ));
+    }
+    found
+}
+
+fn volume_errors(inputs: &HealthInputs) -> Vec<Finding> {
+    let checks = recent_tests(inputs).filter(|r| matches!(r.data, TestData::VolumeCheck(_)));
+    by_subject(checks)
+        .into_iter()
+        .filter_map(|(subject, runs)| {
+            let last = runs.last()?;
+            let TestData::VolumeCheck(check) = &last.data else {
+                return None;
+            };
+            (check.result == VolumeResult::ProblemsFound).then(|| {
+                finding(
+                    FindingKind::VolumeErrors,
+                    subject,
+                    Concern::Attention,
+                    Measure::Count(1),
+                    Reference::AtMost(Measure::Count(0)),
+                    vec![HealthFact::VolumeCheck {
+                        ts_ms: last.ended_ms,
+                    }],
+                    vec![NextStep::RepairVolume, NextStep::BackUpNow],
+                )
+            })
+        })
+        .collect()
 }

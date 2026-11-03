@@ -99,6 +99,7 @@ impl<S: HealthSource> HealthPass<S> {
             events: store.events(now.ts_ms - EVENT_DAYS * DAY_MS, now.ts_ms)?,
             antivirus: self.antivirus.clone(),
             boot: store.last_scan()?.and_then(|scan| scan.boot),
+            tests: Vec::new(),
             open: open
                 .iter()
                 .map(|s| (s.finding.kind, s.finding.subject.clone()))

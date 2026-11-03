@@ -10,6 +10,7 @@ mod freeze;
 mod gate;
 mod hang;
 pub mod health;
+pub mod hwtest;
 mod machine;
 mod minute;
 mod occurrence;

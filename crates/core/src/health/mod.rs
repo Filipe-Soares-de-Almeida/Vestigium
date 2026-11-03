@@ -5,6 +5,7 @@ mod smart;
 
 use serde::{Deserialize, Serialize};
 
+use crate::hwtest::TestRun;
 use crate::{EventMeaning, MachineInfo, Media, NextStep, WinEvent};
 
 pub(crate) use boot::is_security;
@@ -41,6 +42,9 @@ pub enum FindingKind {
     ShutdownUnfinished,
     FailuresRising,
     NoCrashDump,
+    MemoryTestErrors,
+    DiskUnreadable,
+    VolumeErrors,
 }
 
 /// What a finding is about: one disk or volume, or the whole PC.
@@ -175,6 +179,8 @@ pub struct HealthInputs {
     pub events: Vec<WinEvent>,
     pub antivirus: Option<Vec<SecurityProduct>>,
     pub boot: Option<BootReport>,
+    /// Test runs of the last `TEST_REACH_DAYS`, oldest first.
+    pub tests: Vec<TestRun>,
     /// Findings already open, which stay open until their value is clearly back in range.
     pub open: Vec<(FindingKind, Subject)>,
 }
@@ -224,6 +230,24 @@ pub enum HealthFact {
     SystemDisk {
         disk: String,
         media: Media,
+    },
+    MemoryDiagnostic {
+        ts_ms: i64,
+        bad_pages: Option<u64>,
+    },
+    MemoryQuickTest {
+        ts_ms: i64,
+        errors: u64,
+        tested_bytes: u64,
+    },
+    SurfaceScan {
+        ts_ms: i64,
+        unreadable_blocks: u64,
+        slow_blocks: u64,
+        whole_disk: bool,
+    },
+    VolumeCheck {
+        ts_ms: i64,
     },
 }
 

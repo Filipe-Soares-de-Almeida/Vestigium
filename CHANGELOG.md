@@ -137,6 +137,8 @@ How to use this file:
   Security software, Windows Update and the page file are never offered, and a startup app is
   only ever turned off, never removed. Health points and the Dumps page link to the tweak that
   answers them.
+- The background watcher keeps the results of the Windows Memory Diagnostic, and Health shows a
+  critical point when it found memory errors, until a later run comes out clean.
 
 ### Changed
 
