@@ -33,13 +33,14 @@ opens. It watches the one PC it is installed on.
 > CPU, memory or disk pressure, and falls of the whole PC such as a blue screen;
 > the health checks, which watch disks, free space, memory, shutdowns, startup,
 > hardware and antivirus every hour; the deep capture, the full health scan,
-> the reading and cleanup of crash dumps and the Windows tweaks, which ask for
-> administrator permission once when they need it; and the window, with the
-> day's timeline, a report for each freeze or fall with its likely cause and the
-> evidence, the health of the PC by area with what to do about each point, the
-> crash dumps with what each one says, the tweaks this PC shows a sign for, each
-> one undone in a click, the captures and what each one found, the live view of
-> the last ten minutes, and the settings.
+> the reading and cleanup of crash dumps, the Windows tweaks and the disk tests,
+> which ask for administrator permission once when they need it; and the window,
+> with the day's timeline, a report for each freeze or fall with its likely cause
+> and the evidence, the health of the PC by area with what to do about each
+> point, the crash dumps with what each one says, the tweaks this PC shows a
+> sign for, each one undone in a click, the memory and disk tests with what each
+> one covered, the captures and what each one found, the live view of the last
+> ten minutes, and the settings.
 
 ## Highlights
 
@@ -67,9 +68,13 @@ opens. It watches the one PC it is installed on.
   whether it helped.
 - **Health checks, tests and reversible fixes.** It flags what in the system is
   a risk — a failing disk, hardware errors, storage resets, throttling, a
-  nearly full system drive — and runs RAM and disk tests. When the evidence
-  supports it, it suggests Windows settings to change, each applied and undone
-  in one click; security features stay as they are.
+  nearly full system drive — and tests the memory and the disks without
+  changing them: the Windows memory test at the next restart, a quick memory
+  test while you work, a read of each whole disk that finds the parts that do
+  not read, a file system check and a short speed measurement. Each result says
+  what it covered. When the evidence supports it, it suggests Windows settings
+  to change, each applied and undone in one click; security features stay as
+  they are.
 - **Light, local, no account.** The agent runs as your user from the tray and
   the app exits when its window closes. Tasks that need administrator rights —
   the driver capture, dump cleanup, some health checks, fixes and tests — ask
