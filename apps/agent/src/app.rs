@@ -22,7 +22,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
-use crate::import::{import_captures, import_dumps, import_scans, import_tweaks};
+use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -107,6 +107,8 @@ pub struct Shared {
     pub dumps_dir: PathBuf,
     /// Where the helper leaves the results of elevated tweaks.
     pub tweaks_dir: PathBuf,
+    /// Where the window and the helper leave the results of hardware tests.
+    pub tests_dir: PathBuf,
     /// Set after a scan was stored; the sampler runs a health pass on its next tick.
     pub health_due: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
@@ -237,12 +239,17 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             }
             let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
             let tweaks = import_tweaks(&shared.tweaks_dir, store);
+            let tests = import_tests(&shared.tests_dir, store);
+            if !tests.is_empty() {
+                shared.health_due.store(true, Ordering::Release);
+            }
             Response::Imported {
                 captures,
                 scans,
                 dumps,
                 deleted,
                 tweaks,
+                tests,
             }
         }
         Request::ApplyUserTweak { item } => {
@@ -299,6 +306,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         scans_dir: data_dir.join("scans"),
         dumps_dir: data_dir.join("dumps"),
         tweaks_dir: data_dir.join("tweaks"),
+        tests_dir: data_dir.join("tests"),
         health_due: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
@@ -308,6 +316,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         &shared.scans_dir,
         &shared.dumps_dir,
         &shared.tweaks_dir,
+        &shared.tests_dir,
     ] {
         if let Err(err) = fs::create_dir_all(dir) {
             lock(&shared.status).last_error = Some(err.to_string());
@@ -366,6 +375,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             import_scans(&shared.scans_dir, store);
             import_dumps(&shared.dumps_dir, store);
             import_tweaks(&shared.tweaks_dir, store);
+            import_tests(&shared.tests_dir, store);
         }
         thread::Builder::new()
             .name("pipe".to_string())
@@ -545,6 +555,7 @@ mod tests {
             scans_dir: PathBuf::from("scans"),
             dumps_dir: PathBuf::from("dumps"),
             tweaks_dir: PathBuf::from("tweaks"),
+            tests_dir: PathBuf::from("tests"),
             health_due: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
@@ -762,6 +773,7 @@ mod tests {
                 dumps: Vec::new(),
                 deleted: 0,
                 tweaks: Vec::new(),
+                tests: Vec::new(),
             }
         );
         assert!(!shared.health_due.load(Ordering::Acquire));
@@ -781,6 +793,7 @@ mod tests {
                 dumps: Vec::new(),
                 deleted: 0,
                 tweaks: Vec::new(),
+                tests: Vec::new(),
             }
         );
         assert!(

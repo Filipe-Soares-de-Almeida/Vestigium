@@ -5,7 +5,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -68,6 +68,7 @@ pub enum Response {
         dumps: Vec<i64>,
         deleted: u32,
         tweaks: Vec<i64>,
+        tests: Vec<i64>,
     },
     /// A user tweak was carried out; `id` is its history row.
     TweakApplied {

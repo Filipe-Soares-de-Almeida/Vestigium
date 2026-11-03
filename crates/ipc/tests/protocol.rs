@@ -112,6 +112,7 @@ fn every_response_roundtrips_as_json() {
             dumps: vec![6],
             deleted: 1,
             tweaks: vec![7],
+            tests: vec![9],
         },
         Response::TweakApplied {
             id: 8,

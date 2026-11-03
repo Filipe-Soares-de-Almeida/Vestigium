@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use vestigium_core::health::{SCAN_VERSION, ScanResult};
+use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
+use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, disk_subject};
 use vestigium_core::{
     Applier, CAPTURE_VERSION, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION, DeepCapture, DumpDeletion,
     DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
@@ -107,6 +108,46 @@ pub fn import_tweaks(dir: &Path, store: &mut Store) -> Vec<i64> {
         ids.extend(stored);
         let _ = fs::remove_file(path.with_extension("plan"));
         let _ = fs::remove_file(&path);
+    }
+    ids
+}
+
+/// Larger than any test result; such a file is not one and stays where it is.
+const MAX_TEST_FILE: u64 = 1 << 20;
+/// What the window (`.test`) and the helper (`.surface`, `.chkdsk`) write when a test ends.
+const TEST_FILES: [&str; 3] = ["test", "surface", "chkdsk"];
+
+/// Stores the test results of `dir` and deletes them, with what a disk scan left beside its
+/// result; a disk known by number gets the name the disk counters give it. Returns the ids.
+pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
+    let disks = store
+        .machine()
+        .ok()
+        .flatten()
+        .map(|m| m.disks)
+        .unwrap_or_default();
+    let mut ids = Vec::new();
+    for extension in TEST_FILES {
+        for path in numbered_files(dir, extension) {
+            if fs::metadata(&path).map_or(true, |m| m.len() > MAX_TEST_FILE) {
+                continue;
+            }
+            let Some(mut run) = read_versioned::<TestRun>(&path, TEST_RUN_VERSION) else {
+                continue;
+            };
+            if let Subject::Disk(name) = &run.subject
+                && let Ok(number) = name.parse::<u32>()
+            {
+                run.subject = disk_subject(number, &disks);
+            }
+            let Ok(id) = store.record_test_run(&run) else {
+                continue;
+            };
+            ids.push(id);
+            let _ = fs::remove_file(path.with_extension("progress"));
+            let _ = fs::remove_file(path.with_extension("stop"));
+            let _ = fs::remove_file(&path);
+        }
     }
     ids
 }
@@ -383,5 +424,65 @@ mod tests {
         let mut store = store(dir.path());
 
         assert!(import_captures(&dir.path().join("missing"), &[], &mut store).is_empty());
+    }
+
+    fn surface_run(disk: u32) -> TestRun {
+        let scan = vestigium_core::hwtest::SurfaceAggregator::new(
+            disk,
+            vestigium_core::Media::Hdd,
+            1 << 30,
+            512,
+            0,
+        )
+        .finish(1 << 30, None);
+        TestRun {
+            subject: Subject::Disk(disk.to_string()),
+            started_ms: 10,
+            ended_ms: 20,
+            outcome: vestigium_core::hwtest::Outcome::Clean,
+            data: vestigium_core::hwtest::TestData::DiskSurface(scan),
+        }
+    }
+
+    #[test]
+    fn imports_test_results_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        store
+            .set_machine(&vestigium_core::MachineInfo {
+                logical_cpus: 8,
+                mem_total_bytes: 16 << 30,
+                disks: vec![vestigium_core::DiskInfo {
+                    name: "1 D:".into(),
+                    media: vestigium_core::Media::Hdd,
+                }],
+            })
+            .unwrap();
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        write_versioned(&tests.join("40.surface"), TEST_RUN_VERSION, &surface_run(1));
+        fs::write(tests.join("40.stop"), b"").unwrap();
+        fs::write(tests.join("41.chkdsk"), [99u8, 1, 2]).unwrap();
+        fs::write(tests.join("note.test"), [TEST_RUN_VERSION]).unwrap();
+
+        assert_eq!(import_tests(&tests, &mut store), vec![1]);
+        assert!(import_tests(&tests, &mut store).is_empty());
+        assert!(!tests.join("40.surface").exists() && !tests.join("40.stop").exists());
+        assert!(tests.join("41.chkdsk").exists(), "another version stays");
+        let runs = store.test_runs(0, 100).unwrap();
+        assert_eq!(runs[0].run.subject, Subject::Disk("1 D:".into()));
+    }
+
+    #[test]
+    fn a_test_file_too_large_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        let mut bytes = vec![TEST_RUN_VERSION];
+        bytes.resize(MAX_TEST_FILE as usize + 1, 0);
+        fs::write(tests.join("50.test"), bytes).unwrap();
+        assert!(import_tests(&tests, &mut store).is_empty());
+        assert!(tests.join("50.test").exists());
     }
 }

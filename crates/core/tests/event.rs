@@ -102,3 +102,25 @@ fn query_xml_escapes_xml_characters() {
     assert!(xml.contains("@Name='R&amp;D &lt;Tools&gt;'"));
     assert!(xml.contains("<Select Path=\"Application\">"));
 }
+
+#[test]
+fn memory_diagnostic_event_is_curated() {
+    for id in [1101, 1102, 1103, 1104, 1201, 1202] {
+        assert_eq!(
+            classify(
+                Channel::System,
+                "Microsoft-Windows-MemoryDiagnostics-Results",
+                id
+            ),
+            Some(EventMeaning::MemoryDiagnostic)
+        );
+    }
+    assert_eq!(
+        classify(
+            Channel::System,
+            "Microsoft-Windows-MemoryDiagnostics-Results",
+            2001
+        ),
+        None
+    );
+}

@@ -4,6 +4,7 @@ use vestigium_collect::{HealthSource, physical_drive};
 use vestigium_core::health::{
     Concern, DiskHealth, HealthInputs, SecurityProduct, evaluate, reconcile,
 };
+use vestigium_core::hwtest::TEST_REACH_DAYS;
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
 use vestigium_store::{Store, StoreError};
 
@@ -99,7 +100,11 @@ impl<S: HealthSource> HealthPass<S> {
             events: store.events(now.ts_ms - EVENT_DAYS * DAY_MS, now.ts_ms)?,
             antivirus: self.antivirus.clone(),
             boot: store.last_scan()?.and_then(|scan| scan.boot),
-            tests: Vec::new(),
+            tests: store
+                .test_runs(now.ts_ms - TEST_REACH_DAYS * DAY_MS, now.ts_ms)?
+                .into_iter()
+                .map(|row| row.run)
+                .collect(),
             open: open
                 .iter()
                 .map(|s| (s.finding.kind, s.finding.subject.clone()))
