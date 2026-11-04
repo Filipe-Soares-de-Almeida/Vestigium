@@ -217,6 +217,11 @@ How to use this file:
   do the same. The breadcrumb they had before is gone.
 - The side menu groups its screens by what you want to do: Follow (Today, Now), Look after the PC
   (Health, Tests, Optimizations) and Investigate (Dumps, Captures).
+- The interface uses the words Windows uses: switches read On and Off (Ativado and Desativado in
+  Portuguese), a program that starts by itself is a startup app, a tweak that needs an
+  administrator says so, and Optimizations groups tweaks as Recommended for this PC, No sign on
+  this PC and Nothing to change. Descriptions say what a setting does and leave its state to the
+  Now and After rows.
 
 ### Fixed
 
