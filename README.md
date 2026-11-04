@@ -5,8 +5,7 @@
 <h1 align="center">Vestigium</h1>
 
 <p align="center">
-  <b>All-in-one freeze diagnostics for Windows PCs.</b><br>
-  A tray agent in Rust, a Tauri app, one SQLite file. Windows 10 and 11.
+  <b>All-in-one freeze diagnostics for Windows PCs.</b>
 </p>
 
 <p align="center">
