@@ -915,7 +915,7 @@
   "ui.settings.appearance.color.hint": "O Vermelho é o da marca. Os outros mudam só as cores; o ícone do app na barra de tarefas continua vermelho.",
   "ui.settings.appearance.color.default": "{name} (padrão)",
   "ui.settings.reports.detail.label": "Nível de detalhe padrão",
-  "ui.settings.reports.detail.hint": "Quanto o laudo explica. No laudo, o mesmo seletor troca na hora e passa a valer aqui.",
+  "ui.settings.reports.detail.hint": "Quanto cada tela explica: os laudos, a Saúde, os Dumps, as Otimizações, os Testes e as capturas.",
   "ui.settings.watching.autostart": "Iniciar com o Windows",
   "ui.settings.watching.autostart.hint": "Começa a observar quando você entra no Windows, sem pedir administrador.",
   "ui.settings.watching.autostart.unknown": "Desconhecido",

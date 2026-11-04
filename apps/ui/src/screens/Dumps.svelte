@@ -5,30 +5,24 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
-  import Segmented from "../components/Segmented.svelte";
   import { app } from "../lib/app.svelte";
   import { dumps } from "../lib/dumps.svelte";
-  import { errorText } from "../lib/errors";
   import { t, tn } from "../lib/i18n.svelte";
   import { href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, tweaks } from "../lib/tweaks.svelte";
-  import type { DetailLevel } from "../lib/types";
   import Row from "./dumps/Row.svelte";
   import { at, entries, type Entry, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, TONE } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
 
   let { id }: { id: number | null } = $props();
 
-  const LEVELS: DetailLevel[] = ["Simple", "Detailed", "Technical"];
 
-  /** The level picked here, until the saved setting catches up with it. */
-  let picked = $state<DetailLevel | null>(null);
   /** The entry shown open; the dump the address names opens first. */
   let opened = $state<string | null>(null);
   let dialog = $state<HTMLDialogElement>();
 
-  const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const list = $derived(dumps.dto ? entries(dumps.dto) : []);
   const shown = $derived(list.filter(present));
   const gone = $derived(list.filter((e) => !present(e)));
@@ -55,17 +49,6 @@
     void settle().then(() => document.getElementById(`dump-${entry.key}`)?.scrollIntoView({ block: "center" }));
   });
 
-  /** Shows the level at once and saves it as the default while the watcher can write settings. */
-  async function pickLevel(next: DetailLevel): Promise<void> {
-    picked = next;
-    const saved = app.settings?.settings;
-    if (!app.editable || !saved || saved.detail_level === next) return;
-    try {
-      await app.saveSettings({ ...saved, detail_level: next });
-    } catch (error) {
-      toast.show(errorText(error));
-    }
-  }
 
   function toggle(entry: Entry): void {
     opened = opened === entry.key ? "" : entry.key;
@@ -99,16 +82,6 @@
 
 <div class="top">
   <h1>{t("ui.dumps.title")}</h1>
-  <Segmented
-    label={t("ui.common.detail.label")}
-    options={LEVELS.map((value) => ({
-      value,
-      label: t(`ui.common.detail.${value}`),
-      hint: t(`ui.common.detail.${value}.hint`),
-    }))}
-    value={level}
-    onchange={pickLevel}
-  />
 </div>
 
 {#if dumps.dto === null && dumps.error !== null}

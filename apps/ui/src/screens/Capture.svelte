@@ -4,16 +4,14 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
-  import Segmented from "../components/Segmented.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
-  import { errorText } from "../lib/errors";
   import { formatDuration, formatTime } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import { go, href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
-  import type { CaptureDto, DetailLevel, OccurrenceSummary } from "../lib/types";
+  import type { CaptureDto, OccurrenceSummary } from "../lib/types";
   import { copyText, loadDone, saveDone } from "./occurrence/browser";
   import Alignment from "./capture/Alignment.svelte";
   import Apps from "./capture/Apps.svelte";
@@ -24,18 +22,16 @@
 
   let { id }: { id: number } = $props();
 
-  const LEVELS: DetailLevel[] = ["Simple", "Detailed", "Technical"];
   const SCOPE = "capture";
 
   /** `undefined` while it loads, `null` when the history no longer has it. */
   let dto = $state<CaptureDto | null | undefined>(undefined);
   let failure = $state<unknown>(null);
-  let picked = $state<DetailLevel | null>(null);
   let done = $state<string[]>([]);
   /** Reports from the minutes this capture ran. */
   let during = $state<OccurrenceSummary[]>([]);
 
-  const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const view = $derived(dto ? buildResult(dto, level) : null);
   const canStart = $derived(app.running && captures.run === null && !captures.asking);
 
@@ -59,17 +55,6 @@
     void load();
   });
 
-  /** Shows the level at once and saves it as the default while the watcher can write settings. */
-  async function pickLevel(next: DetailLevel): Promise<void> {
-    picked = next;
-    const saved = app.settings?.settings;
-    if (!app.editable || !saved || saved.detail_level === next) return;
-    try {
-      await app.saveSettings({ ...saved, detail_level: next });
-    } catch (error) {
-      toast.show(errorText(error));
-    }
-  }
 
   function tick(key: string, on: boolean): void {
     done = on ? [...done, key] : done.filter((k) => k !== key);
@@ -114,16 +99,6 @@
       <h1>{view.title}</h1>
       <p class="meta">{view.meta}</p>
       <div class="tools">
-        <Segmented
-          label={t("ui.common.detail.label")}
-          options={LEVELS.map((value) => ({
-            value,
-            label: t(`ui.common.detail.${value}`),
-            hint: t(`ui.common.detail.${value}.hint`),
-          }))}
-          value={level}
-          onchange={pickLevel}
-        />
         <button type="button" class="btn" onclick={copy}><Icon name="copy" />{t("ui.captures.copy")}</button>
       </div>
     </div>

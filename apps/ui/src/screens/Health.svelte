@@ -3,14 +3,10 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
-  import Segmented from "../components/Segmented.svelte";
   import { app } from "../lib/app.svelte";
-  import { errorText } from "../lib/errors";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { href } from "../lib/router.svelte";
-  import { toast } from "../lib/toast.svelte";
-  import type { DetailLevel } from "../lib/types";
   import { AREAS, areaState, findArea } from "./health/areas";
   import Finding from "./health/Finding.svelte";
   import Scan from "./health/Scan.svelte";
@@ -18,49 +14,20 @@
 
   let { area: areaId }: { area: string | null } = $props();
 
-  const LEVELS: DetailLevel[] = ["Simple", "Detailed", "Technical"];
 
-  /** The level picked here, until the saved setting catches up with it. */
-  let picked = $state<DetailLevel | null>(null);
 
-  const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const area = $derived(findArea(areaId));
   const states = $derived(health.dto ? AREAS.map((a) => areaState(a, health.dto!)) : []);
   const current = $derived(area && health.dto ? areaState(area, health.dto) : null);
   const checks = $derived(states.reduce((n, s) => n + s.checks.filter((c) => c.mark === "Ok").length, 0));
 
-  /** Shows the level at once and saves it as the default while the watcher can write settings. */
-  async function pickLevel(next: DetailLevel): Promise<void> {
-    picked = next;
-    const saved = app.settings?.settings;
-    if (!app.editable || !saved || saved.detail_level === next) return;
-    try {
-      await app.saveSettings({ ...saved, detail_level: next });
-    } catch (error) {
-      toast.show(errorText(error));
-    }
-  }
 
   function retry(): void {
     health.error = null;
     void health.load();
   }
 </script>
-
-{#snippet levels()}
-  <div class="tools">
-    <Segmented
-      label={t("ui.common.detail.label")}
-      options={LEVELS.map((value) => ({
-        value,
-        label: t(`ui.common.detail.${value}`),
-        hint: t(`ui.common.detail.${value}.hint`),
-      }))}
-      value={level}
-      onchange={pickLevel}
-    />
-  </div>
-{/snippet}
 
 {#if area}
   <nav class="crumb" aria-label={t("ui.occurrence.path")}>
@@ -78,7 +45,6 @@
 {:else if health.dto === null}
   <Loading />
 {:else if current}
-  {@render levels()}
   {#each current.open as finding (finding.id)}
     <Finding {finding} {level} />
   {/each}
@@ -173,9 +139,6 @@
     width: 16px;
     height: 16px;
     color: var(--ink3);
-  }
-  .tools {
-    margin-top: 14px;
   }
   .gap {
     margin-top: 14px;

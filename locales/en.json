@@ -915,7 +915,7 @@
   "ui.settings.appearance.color.hint": "Red is the brand's own. The others change only the colors; the app icon on the taskbar stays red.",
   "ui.settings.appearance.color.default": "{name} (default)",
   "ui.settings.reports.detail.label": "Default detail level",
-  "ui.settings.reports.detail.hint": "How much a report explains. Changing it in a report applies here too.",
+  "ui.settings.reports.detail.hint": "How much every screen explains: the reports, Health, Dumps, Optimizations, Tests and captures.",
   "ui.settings.watching.autostart": "Start with Windows",
   "ui.settings.watching.autostart.hint": "Starts watching when you sign in to Windows, without asking for administrator rights.",
   "ui.settings.watching.autostart.unknown": "Unknown",

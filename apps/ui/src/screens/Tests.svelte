@@ -13,7 +13,7 @@
   import { go, href } from "../lib/router.svelte";
   import { hwtests, type Started } from "../lib/tests.svelte";
   import { toast } from "../lib/toast.svelte";
-  import type { BenchMode, DetailLevel, DiskDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
+  import type { BenchMode, DiskDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
   import { at } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
   import DiskMap from "./tests/DiskMap.svelte";
@@ -48,7 +48,6 @@
 
   let { device }: { device: string | null } = $props();
 
-  const LEVELS: DetailLevel[] = ["Simple", "Detailed", "Technical"];
   const DIAG_ASKED = "vestigium.tests.diagnostic_asked";
 
   /** When the Windows diagnostic was last asked for; kept in this window's storage only. */
@@ -61,7 +60,6 @@
     }
   }
 
-  let picked = $state<DetailLevel | null>(null);
   let minutes = $state(5);
   let now = $state(Date.now());
   let report = $state<HTMLElement>();
@@ -69,7 +67,7 @@
   let asking = $state<{ kind: "bench"; volume: VolumeDto } | { kind: "smart"; disk: DiskDto } | null>(null);
   let asked = $state<number | null>(recallAsked());
 
-  const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const dto = $derived(hwtests.dto);
   const chosen = $derived<Device>(device === null || device === "memory" ? "memory" : Number(device));
   const disk = $derived(chosen === "memory" ? null : (dto?.disks.find((d) => d.number === chosen) ?? null));
@@ -99,16 +97,6 @@
     }
   }
 
-  async function pickLevel(next: DetailLevel): Promise<void> {
-    picked = next;
-    const saved = app.settings?.settings;
-    if (!app.editable || !saved || saved.detail_level === next) return;
-    try {
-      await app.saveSettings({ ...saved, detail_level: next });
-    } catch (error) {
-      toast.show(errorText(error));
-    }
-  }
 
   function retry(): void {
     hwtests.error = null;
@@ -553,12 +541,6 @@
 <div class="screen-in">
   <div class="top">
     <h1>{t("ui.tests.title")}</h1>
-    <Segmented
-      label={t("ui.common.detail.label")}
-      options={LEVELS.map((value) => ({ value, label: t(`ui.common.detail.${value}`), hint: t(`ui.common.detail.${value}.hint`) }))}
-      value={level}
-      onchange={pickLevel}
-    />
   </div>
 
   {#if dto === null && hwtests.error !== null}

@@ -3,14 +3,12 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
-  import Segmented from "../components/Segmented.svelte";
   import { app } from "../lib/app.svelte";
-  import { errorText } from "../lib/errors";
   import { t, tn } from "../lib/i18n.svelte";
   import { go, href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, type Outcome, tweaks } from "../lib/tweaks.svelte";
-  import type { Advice, DetailLevel, TweakPick, TweakRow } from "../lib/types";
+  import type { Advice, TweakPick, TweakRow } from "../lib/types";
   import { at } from "./dumps/words";
   import {
     changeOf,
@@ -34,7 +32,6 @@
 
   let { key }: { key: string | null } = $props();
 
-  const LEVELS: DetailLevel[] = ["Simple", "Detailed", "Technical"];
   const MARK: Record<Shown, "Attention" | "Unknown" | "Ok" | "Closed"> = {
     signal: "Attention",
     quiet: "Unknown",
@@ -44,8 +41,6 @@
     protected: "Closed",
   };
 
-  /** The level picked here, until the saved setting catches up with it. */
-  let picked = $state<DetailLevel | null>(null);
   let dialog = $state<HTMLDialogElement>();
   /** What the dialog asks: to apply these, to go on without a restore point, or to undo a row. */
   let asking = $state<
@@ -55,7 +50,7 @@
     | null
   >(null);
 
-  const level = $derived(picked ?? app.settings?.settings.detail_level ?? "Simple");
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const advice = $derived(tweaks.dto?.advice ?? []);
   const history = $derived(tweaks.dto?.history ?? []);
   const stateOf = (a: Advice) => shown(a, history);
@@ -68,17 +63,6 @@
   const chosen = $derived(advice.filter((a) => tweaks.chosen.includes(keyOf(a))));
   const blocked = $derived(!app.running);
 
-  /** Shows the level at once and saves it as the default while the watcher can write settings. */
-  async function pickLevel(next: DetailLevel): Promise<void> {
-    picked = next;
-    const saved = app.settings?.settings;
-    if (!app.editable || !saved || saved.detail_level === next) return;
-    try {
-      await app.saveSettings({ ...saved, detail_level: next });
-    } catch (error) {
-      toast.show(errorText(error));
-    }
-  }
 
   function retry(): void {
     tweaks.error = null;
@@ -196,16 +180,6 @@
 
 <div class="top">
   <h1>{t("ui.tweaks.title")}</h1>
-  <Segmented
-    label={t("ui.common.detail.label")}
-    options={LEVELS.map((value) => ({
-      value,
-      label: t(`ui.common.detail.${value}`),
-      hint: t(`ui.common.detail.${value}.hint`),
-    }))}
-    value={level}
-    onchange={pickLevel}
-  />
 </div>
 
 {#if tweaks.dto === null && tweaks.error !== null}

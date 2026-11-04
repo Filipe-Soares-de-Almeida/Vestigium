@@ -191,6 +191,9 @@ How to use this file:
   ("1.008 ms"), which looked like one millisecond in Portuguese.
 - Moving to the chart around an occurrence with the keyboard shows the reading at the moment it
   happened instead of a ring around the chart.
+- The detail level (Simple, Detailed, Technical) is set in one place, Settings, and applies to
+  every screen. Reports, Health, Dumps, Optimizations, Tests and captures no longer carry their
+  own switch.
 
 ### Fixed
 
