@@ -116,4 +116,28 @@ mod tests {
             .collect();
         assert_eq!(granted, registered());
     }
+
+    #[test]
+    fn the_app_version_comes_from_the_workspace_only() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(
+            config.get("version").is_none(),
+            "tauri.conf.json must not set its own version"
+        );
+    }
+
+    #[test]
+    fn a_released_version_has_its_changelog_section() {
+        let version = env!("CARGO_PKG_VERSION");
+        if version == "0.0.0" {
+            return;
+        }
+        let changelog = include_str!("../../../../CHANGELOG.md");
+        let heading = format!("## [{version}] - ");
+        assert!(
+            changelog.contains(&heading),
+            "CHANGELOG.md has no '{heading}' section"
+        );
+    }
 }

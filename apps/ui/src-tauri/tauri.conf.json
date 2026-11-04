@@ -2,7 +2,6 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Vestigium",
   "mainBinaryName": "Vestigium.Window",
-  "version": "0.0.0",
   "identifier": "app.vestigium",
   "build": {
     "frontendDist": "../dist",
