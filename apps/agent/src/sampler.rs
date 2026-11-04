@@ -1023,9 +1023,14 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), listed, "each program once");
-        let all = programs.expect("the full list comes with the ranking").entries;
+        let all = programs
+            .expect("the full list comes with the ranking")
+            .entries;
         assert!(all.len() >= listed && all.len() <= PROGRAMS_LISTED);
-        assert!(all.windows(2).all(|w| w[0].cpu_pct >= w[1].cpu_pct), "busiest first");
+        assert!(
+            all.windows(2).all(|w| w[0].cpu_pct >= w[1].cpu_pct),
+            "busiest first"
+        );
     }
 
     #[test]
