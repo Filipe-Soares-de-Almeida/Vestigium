@@ -281,3 +281,6 @@ How to use this file:
   memory to spare: hard faults now count only while more than 85% of memory is in use.
 
 [Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
+- Tests no longer calls a disk or the memory fine while Health has an open point about it: the
+  device shows the Health point first, with a link to it. Steps that send you to Tests or Now end
+  with a link that opens that screen.

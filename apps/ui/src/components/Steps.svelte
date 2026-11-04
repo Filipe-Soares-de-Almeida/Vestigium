@@ -1,11 +1,30 @@
 <script lang="ts">
-  /** What to do, in order: a numbered list, nothing to tick. */
-  let { steps }: { steps: { key: string; text: string }[] } = $props();
+  import { t } from "../lib/i18n.svelte";
+  import { href } from "../lib/router.svelte";
+
+  /** What to do, in order: a numbered list, nothing to tick; a step that names a screen links to it. */
+  let { steps }: { steps: { key: string; text: string; href?: string }[] } = $props();
+
+  const PLACE: Record<string, { href: () => string; name: string }> = {
+    RunDiskTest: { href: () => href.tests(), name: "ui.shell.nav.tests" },
+    RunMemoryDiagnostic: { href: () => href.tests("memory"), name: "ui.shell.nav.tests" },
+    FindDiskHeavyApp: { href: () => href.now(), name: "ui.shell.nav.now" },
+  };
+  const placeOf = (step: { key: string; href?: string }) => {
+    const place = PLACE[step.key.split(":")[0]];
+    return place ? { href: step.href ?? place.href(), name: t(place.name) } : null;
+  };
 </script>
 
 <ol class="steps">
   {#each steps as step (step.key)}
-    <li>{step.text}</li>
+    {@const place = placeOf(step)}
+    <li>
+      <span>
+        {step.text}
+        {#if place}<a class="go" href={place.href}>{t("ui.steps.open", { place: place.name })}</a>{/if}
+      </span>
+    </li>
   {/each}
 </ol>
 
@@ -25,6 +44,12 @@
     align-items: baseline;
     line-height: 1.45;
     counter-increment: step;
+  }
+  .go {
+    margin-left: 4px;
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
   }
   .steps li::before {
     content: counter(step) ".";

@@ -143,7 +143,7 @@
     <div>
       <h3>{t("ui.occurrence.todo.title")}</h3>
       {#if view.steps.length}
-        <Steps steps={view.steps} />
+        <Steps steps={view.steps.map((s) => (s.key === "RunDiskTest" && test ? { ...s, href: test } : s))} />
       {:else}
         <p class="muted none">{t("ui.health.todo.none")}</p>
       {/if}

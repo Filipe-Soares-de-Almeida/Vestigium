@@ -1,21 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import ConcernMark from "../components/ConcernMark.svelte";
+  import ConcernMark, { type MarkKind } from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon, { type IconName } from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import Segmented from "../components/Segmented.svelte";
   import { app } from "../lib/app.svelte";
+  import { health } from "../lib/health.svelte";
   import { errorText } from "../lib/errors";
   import { formatNumber, formatPercent } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
   import { go, href } from "../lib/router.svelte";
   import { hwtests, type Started } from "../lib/tests.svelte";
   import { toast } from "../lib/toast.svelte";
-  import type { BenchMode, DiskDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
+  import type { BenchMode, DiskDto, FindingDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
   import { at } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
+  import { areaOf } from "./health/areas";
+  import { findingTitle } from "./health/words";
   import DiskMap from "./tests/DiskMap.svelte";
   import {
     attrName,
@@ -79,6 +82,7 @@
   const waiting = $derived(asked !== null && !(diag && diag.ts_ms > asked));
 
   onMount(() => {
+    if (health.dto === null) void health.load();
     void hwtests.load().then(readQuickDetails);
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
@@ -209,6 +213,22 @@
     return { strong: t("ui.tests.lede.clean"), rest: t("ui.tests.lede.clean.tail") };
   });
 
+  const RANK: Record<string, number> = { Attention: 2, Critical: 3 };
+  /** The open Health point about a device, the worst first; the tests never contradict it. */
+  function healthPoint(id: Device): FindingDto | null {
+    const mine = (health.dto?.open ?? []).filter((f) =>
+      id === "memory"
+        ? f.kind === "HardwareErrors" || f.kind === "MemoryTestErrors"
+        : typeof f.subject === "object" && "Disk" in f.subject && Number(f.subject.Disk.split(" ")[0]) === id,
+    );
+    return mine.sort((a, b) => (RANK[b.concern] ?? 0) - (RANK[a.concern] ?? 0))[0] ?? null;
+  }
+  function withHealth(id: Device, s: { mark: MarkKind; line: string }): { mark: MarkKind; line: string } {
+    const point = healthPoint(id);
+    if (!point || s.mark === "Running" || (RANK[point.concern] ?? 0) <= (RANK[s.mark] ?? 0)) return s;
+    return { mark: point.concern as MarkKind, line: t("ui.tests.health_says", { what: findingTitle(point, level) }) };
+  }
+
   const historyOf = (d: Device) =>
     [
       ...(dto?.runs ?? [])
@@ -234,7 +254,7 @@
 </script>
 
 {#snippet devRow(id: Device, icon: IconName, name: string, sub: string)}
-  {@const s = id === "memory" ? memoryState(dto!, runDev === "memory") : diskState(dto!, dto!.disks.find((d) => d.number === id)!, hwtests.details[id as number] ?? null, runDev === id)}
+  {@const s = withHealth(id, id === "memory" ? memoryState(dto!, runDev === "memory") : diskState(dto!, dto!.disks.find((d) => d.number === id)!, hwtests.details[id as number] ?? null, runDev === id))}
   <button type="button" class="dev" aria-current={chosen === id ? "true" : undefined} onclick={() => go(href.tests(deviceKey(id)))}>
     <span class="icochip"><Icon name={icon} /></span>
     <span><b>{name}</b><small>{sub}</small><small class="st"><ConcernMark mark={s.mark} word={false} />{s.line}</small></span>
@@ -295,7 +315,8 @@
 {/snippet}
 
 {#snippet memoryReport()}
-  {@const s = memoryState(dto!, runDev === "memory")}
+  {@const s = withHealth("memory", memoryState(dto!, runDev === "memory"))}
+  {@const point = healthPoint("memory")}
   {@const quick = lastQuick(dto!)}
   {@const q = quick ? quickOf(quick) : null}
   <header class="rh">
@@ -306,6 +327,9 @@
     </div>
   </header>
   <p class="state"><ConcernMark mark={s.mark} word={false} />{s.line}</p>
+  {#if point}
+    <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
+  {/if}
 
   <div class="blk">
     <h3><Icon name="windows" />{t("ui.tests.diag.title")}<span class="sub">{t("ui.tests.diag.when")}</span></h3>
@@ -383,7 +407,8 @@
 {/snippet}
 
 {#snippet diskReport(d: DiskDto)}
-  {@const s = diskState(dto!, d, hwtests.details[d.number] ?? null, runDev === d.number)}
+  {@const s = withHealth(d.number, diskState(dto!, d, hwtests.details[d.number] ?? null, runDev === d.number))}
+  {@const point = healthPoint(d.number)}
   {@const detail = hwtests.details[d.number] ?? null}
   {@const scanRun = lastSurface(dto!, d)}
   {@const scan = scanRun ? surfaceOf(scanRun) : null}
@@ -396,6 +421,9 @@
     </div>
   </header>
   <p class="state"><ConcernMark mark={s.mark} word={false} />{s.line}</p>
+  {#if point}
+    <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
+  {/if}
 
   <div class="blk">
     <h3><Icon name="smart" />{t("ui.tests.smart.title")}<span class="sub">{t(d.media === "Hdd" ? "ui.tests.smart.when.hdd" : "ui.tests.smart.when")}</span></h3>
@@ -700,6 +728,12 @@
   }
   .report:focus-visible {
     box-shadow: 0 0 0 2px var(--ink);
+  }
+  .health-link {
+    align-self: start;
+    color: var(--accent);
+    font-size: 13.5px;
+    font-weight: 600;
   }
   .rh {
     display: grid;
