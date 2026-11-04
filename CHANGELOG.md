@@ -166,6 +166,9 @@ How to use this file:
 - A Health finding compares the value now with the one it had when it opened ("Now: 24 damaged
   sectors · 4 days ago: 16 damaged sectors"), so you can see whether it is growing. A finding
   about a disk that was read in full also shows the sector map of that read.
+- The installer carries everything Vestigium runs: the window, the background watcher, the helper
+  that does the tasks needing administrator permission, and the PresentMon console the deep
+  capture uses, with its licence.
 
 ### Changed
 
