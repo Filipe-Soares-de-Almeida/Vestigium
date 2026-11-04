@@ -3,6 +3,7 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import PickAll from "../components/PickAll.svelte";
   import { app } from "../lib/app.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { go, href } from "../lib/router.svelte";
@@ -179,7 +180,18 @@
 
 {#snippet group(title: string, list: Advice[])}
   {#if list.length}
-    <h2>{title}</h2>
+    {@const pickable = list.filter((a) => a.status === "Ready").map(keyOf)}
+    <div class="ghead">
+      {#if pickable.length}
+        <PickAll
+          ids={pickable}
+          chosen={tweaks.chosen}
+          label={t("ui.tweaks.pick_all", { group: title })}
+          onchange={(on) => tweaks.chooseAll(pickable, on)}
+        />
+      {/if}
+      <h2>{title}</h2>
+    </div>
     {#each list as a (keyOf(a))}
       {@render item(a)}
     {/each}
@@ -438,9 +450,14 @@
   .list {
     padding: 6px;
   }
+  .ghead {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 10px 4px;
+  }
   .list h2 {
     margin: 0;
-    padding: 10px 10px 4px;
     color: var(--ink2);
     font: 600 13px/1.3 var(--f);
   }

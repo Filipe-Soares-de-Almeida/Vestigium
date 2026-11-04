@@ -51,6 +51,11 @@ class Dumps {
     this.chosen = on ? [...new Set([...this.chosen, id])] : this.chosen.filter((x) => x !== id);
   }
 
+  /** Ticks or clears every dump in `ids` at once. */
+  chooseAll(ids: number[], on: boolean): void {
+    this.chosen = on ? [...new Set([...this.chosen, ...ids])] : this.chosen.filter((x) => !ids.includes(x));
+  }
+
   /** Asks Windows for permission, reads every dump in the helper and shows what they say. */
   async read(): Promise<void> {
     if (this.reading === "running") return;

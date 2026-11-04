@@ -157,6 +157,9 @@ How to use this file:
 - The chart around an occurrence shows each second's values under the pointer, as the Now chart
   does, and zooms the same way: Ctrl and the wheel, + and −, dragging, and a button to see it all
   again.
+- Dumps and Optimizations have a box at the top of each group that chooses every item in it at
+  once, and shows a dash while only some are chosen. The bar below still says how many and how
+  much before anything is deleted or applied.
 
 ### Changed
 

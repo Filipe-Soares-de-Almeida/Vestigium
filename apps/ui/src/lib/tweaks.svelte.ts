@@ -49,6 +49,11 @@ class Tweaks {
     this.chosen = on ? [...new Set([...this.chosen, key])] : this.chosen.filter((k) => k !== key);
   }
 
+  /** Ticks or clears every tweak in `keys` at once. */
+  chooseAll(keys: string[], on: boolean): void {
+    this.chosen = on ? [...new Set([...this.chosen, ...keys])] : this.chosen.filter((k) => !keys.includes(k));
+  }
+
   apply(picks: TweakPick[], withoutRestorePoint: boolean): Promise<Outcome> {
     return this.#run(() => applyTweaks(picks, withoutRestorePoint));
   }

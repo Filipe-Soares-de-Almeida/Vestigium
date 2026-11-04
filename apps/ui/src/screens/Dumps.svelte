@@ -5,6 +5,7 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import PickAll from "../components/PickAll.svelte";
   import { app } from "../lib/app.svelte";
   import { dumps } from "../lib/dumps.svelte";
   import { t, tn } from "../lib/i18n.svelte";
@@ -97,8 +98,19 @@
       {#each GROUPS as group (group)}
         {@const members = shown.filter((e) => e.group === group)}
         {#if members.length}
+          {@const pickable = members.flatMap((e) => (e.dump && e.dump.deleted_ms === null ? [e.dump.id] : []))}
           <section class="card list" aria-labelledby="group-{group}">
-            <h2 id="group-{group}">{groupLabel(group)}</h2>
+            <div class="ghead">
+              {#if pickable.length}
+                <PickAll
+                  ids={pickable}
+                  chosen={dumps.chosen}
+                  label={t("ui.dumps.pick_all", { group: groupLabel(group) })}
+                  onchange={(on) => dumps.chooseAll(pickable, on)}
+                />
+              {/if}
+              <h2 id="group-{group}">{groupLabel(group)}</h2>
+            </div>
             {@render rows(members)}
           </section>
         {/if}
@@ -249,9 +261,14 @@
   .list {
     padding: 6px;
   }
+  .ghead {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 10px 4px;
+  }
   .list h2 {
     margin: 0;
-    padding: 8px 10px 4px;
     font: 600 15px/1.3 var(--f);
   }
   .empty {
