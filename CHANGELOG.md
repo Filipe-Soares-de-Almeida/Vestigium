@@ -186,6 +186,8 @@ How to use this file:
 
 ### Fixed
 
+- The Health, Dumps, Optimizations and Tests screens open with their data instead of "Something
+  went wrong", and the counts beside them in the side menu show again.
 - A program with a long name no longer pushes "Using the most" on the Now screen past the edge of
   its box. The name ends in "…" and shows in full on hover; the process and event tables of a
   slowdown report and the app and driver tables of a capture do the same.

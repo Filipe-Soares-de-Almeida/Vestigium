@@ -73,3 +73,47 @@ fn main() {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    /// Command names registered with the invoke handler.
+    fn registered() -> BTreeSet<String> {
+        let source = include_str!("main.rs");
+        let (_, rest) = source.split_once("generate_handler![").unwrap();
+        let (list, _) = rest.split_once("])").unwrap();
+        list.split(',')
+            .filter_map(|path| path.trim().rsplit("::").next())
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn every_registered_command_is_in_the_app_manifest() {
+        let build = include_str!("../build.rs");
+        let (_, rest) = build.split_once("COMMANDS: &[&str] = &[").unwrap();
+        let (list, _) = rest.split_once("];").unwrap();
+        let manifest: BTreeSet<String> = list
+            .split(',')
+            .map(|name| name.trim().trim_matches('"').to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        assert_eq!(manifest, registered());
+    }
+
+    #[test]
+    fn every_registered_command_is_granted_to_the_window() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let granted: BTreeSet<String> = capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|permission| permission.as_str()?.strip_prefix("allow-"))
+            .map(|name| name.replace('-', "_"))
+            .collect();
+        assert_eq!(granted, registered());
+    }
+}

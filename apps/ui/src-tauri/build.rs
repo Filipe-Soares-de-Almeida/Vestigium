@@ -20,6 +20,23 @@ const COMMANDS: &[&str] = &[
     "import_captures",
     "captures",
     "capture",
+    "health",
+    "start_scan",
+    "dumps",
+    "start_dump_scan",
+    "delete_dumps",
+    "tweaks",
+    "apply_tweaks",
+    "undo_tweak",
+    "tests",
+    "disk_detail",
+    "open_memory_diagnostic",
+    "start_memory_test",
+    "start_benchmark",
+    "start_surface_scan",
+    "start_volume_check",
+    "stop_test",
+    "test_running",
 ];
 
 fn main() {

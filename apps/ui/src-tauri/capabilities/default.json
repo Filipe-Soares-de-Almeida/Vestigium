@@ -28,6 +28,23 @@
     "allow-capture-run",
     "allow-import-captures",
     "allow-captures",
-    "allow-capture"
+    "allow-capture",
+    "allow-health",
+    "allow-start-scan",
+    "allow-dumps",
+    "allow-start-dump-scan",
+    "allow-delete-dumps",
+    "allow-tweaks",
+    "allow-apply-tweaks",
+    "allow-undo-tweak",
+    "allow-tests",
+    "allow-disk-detail",
+    "allow-open-memory-diagnostic",
+    "allow-start-memory-test",
+    "allow-start-benchmark",
+    "allow-start-surface-scan",
+    "allow-start-volume-check",
+    "allow-stop-test",
+    "allow-test-running"
   ]
 }
