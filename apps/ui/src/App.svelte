@@ -187,7 +187,7 @@
   }
   /* A screen that scrolls inside its own panel holds the page still. */
   .content:has(main.still) {
-    overflow: hidden;
+    overflow: clip;
   }
   main.still {
     box-sizing: border-box;

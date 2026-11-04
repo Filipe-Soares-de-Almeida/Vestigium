@@ -284,3 +284,5 @@ How to use this file:
 - Tests no longer calls a disk or the memory fine while Health has an open point about it: the
   device shows the Health point first, with a link to it. Steps that send you to Tests or Now end
   with a link that opens that screen.
+- The window itself never scrolls any more: on Tests, Dumps and Optimizations a hidden label could
+  push the page down and take the title bar and its buttons off screen.

@@ -135,9 +135,10 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* The window never scrolls, not even from script; its panes do. */
+  overflow: clip;
 }
 body {
-  overflow: hidden;
   background: var(--base);
   color: var(--ink);
   font: 400 15px/1.5 var(--f);
@@ -344,6 +345,7 @@ main.still .panes {
   min-height: 0;
 }
 main.still .panes > .scrolls {
+  position: relative;
   max-height: 100%;
   min-height: 0;
   overflow: auto;
