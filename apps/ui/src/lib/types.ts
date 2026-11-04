@@ -669,6 +669,8 @@ export interface FindingDto {
   reference: Reference;
   evidence: HealthFact[];
   next_steps: NextStep[];
+  /** What it measured when it opened; `null` for one opened before that was kept. */
+  first_value: Measure | null;
 }
 
 /** The health page: open findings (critical first), those closed in 30 days, the last scan. */

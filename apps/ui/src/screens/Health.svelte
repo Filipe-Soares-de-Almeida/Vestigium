@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import ConcernMark from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
@@ -8,6 +10,7 @@
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { href } from "../lib/router.svelte";
+  import { hwtests } from "../lib/tests.svelte";
   import { AREAS, areaState, findArea } from "./health/areas";
   import Finding from "./health/Finding.svelte";
   import Scan from "./health/Scan.svelte";
@@ -23,6 +26,10 @@
   const current = $derived(area && health.dto ? areaState(area, health.dto) : null);
   const checks = $derived(states.reduce((n, s) => n + s.checks.filter((c) => c.mark === "Ok").length, 0));
 
+  // A disk point shows the last full read of that disk, kept by the Tests page.
+  onMount(() => {
+    if (hwtests.dto === null) void hwtests.load();
+  });
 
   function retry(): void {
     health.error = null;

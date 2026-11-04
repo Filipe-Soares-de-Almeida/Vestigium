@@ -13,6 +13,8 @@ pub struct FindingRecord {
     pub updated_ms: i64,
     pub closed_ms: Option<i64>,
     pub finding: Finding,
+    /// The finding as it opened; `None` for one opened before it was kept.
+    pub first: Option<Finding>,
 }
 
 impl Store {
@@ -48,8 +50,9 @@ impl Store {
             match change {
                 FindingChange::Open(finding) => {
                     tx.execute(
-                        "INSERT INTO finding (version, opened_ms, updated_ms, closed_ms, data)
-                         VALUES (?1, ?2, ?2, NULL, ?3)",
+                        "INSERT INTO finding
+                         (version, opened_ms, updated_ms, closed_ms, data, first_version, first_data)
+                         VALUES (?1, ?2, ?2, NULL, ?3, ?1, ?3)",
                         params![
                             i64::from(FINDING_VERSION),
                             now_ms,
@@ -114,8 +117,8 @@ impl Store {
         args: impl rusqlite::Params,
     ) -> Result<Vec<FindingRecord>, StoreError> {
         let mut query = self.conn.prepare(&format!(
-            "SELECT id, opened_ms, updated_ms, closed_ms, version, data FROM finding {filter}
-             ORDER BY opened_ms, id"
+            "SELECT id, opened_ms, updated_ms, closed_ms, version, data, first_version, first_data
+             FROM finding {filter} ORDER BY opened_ms, id"
         ))?;
         let rows = query.query_map(args, |row: &Row| {
             Ok((
@@ -125,16 +128,27 @@ impl Store {
                 row.get::<_, Option<i64>>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, Vec<u8>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<Vec<u8>>>(7)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, opened_ms, updated_ms, closed_ms, version, data) = row?;
+            let (id, opened_ms, updated_ms, closed_ms, version, data, first_version, first_data) =
+                row?;
+            // A first value written at another layout is left out rather than failing the row.
+            let first = match (first_version, first_data) {
+                (Some(v), Some(bytes)) if v == i64::from(FINDING_VERSION) => {
+                    Some(one(v, FINDING_VERSION, "finding version", &bytes)?)
+                }
+                _ => None,
+            };
             Ok(FindingRecord {
                 id,
                 opened_ms,
                 updated_ms,
                 closed_ms,
                 finding: one(version, FINDING_VERSION, "finding version", &data)?,
+                first,
             })
         })
         .collect()

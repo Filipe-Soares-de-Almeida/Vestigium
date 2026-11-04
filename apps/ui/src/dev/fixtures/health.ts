@@ -10,13 +10,14 @@ let lastScan: number | null = query.get("scan-never") === "1" ? null : now - 3 *
 
 const failingDisk: FindingDto = {
   id: 1,
-  opened_ms: now - 2 * HOUR,
+  opened_ms: now - 4 * DAY,
   updated_ms: now - HOUR,
   closed_ms: null,
   kind: "DiskSmart",
   subject: { Disk: "1 D:" },
   concern: "Critical",
   value: { Count: 24 },
+  first_value: { Count: 16 },
   reference: { AtMost: { Count: 0 } },
   evidence: [
     "PredictFailure",
@@ -35,6 +36,7 @@ const unfinishedShutdowns: FindingDto = {
   subject: "Pc",
   concern: "Attention",
   value: { Count: 7 },
+  first_value: { Count: 3 },
   reference: { AtMost: { Count: 0 } },
   evidence: [1, 4, 8, 13, 17].map((days) => ({
     Event: {
@@ -56,6 +58,7 @@ const lowSpace: FindingDto = {
   subject: { Volume: "C:\\" },
   concern: "Attention",
   value: { Percent: 7.4 },
+  first_value: { Percent: 9.1 },
   reference: { AtLeast: { Percent: 10 } },
   evidence: [{ Space: { free_bytes: 66 * 2 ** 30, total_bytes: 893 * 2 ** 30 } }],
   next_steps: ["FreeDiskSpace"],
@@ -70,6 +73,7 @@ const slowBoot: FindingDto = {
   subject: "Pc",
   concern: "Attention",
   value: { Seconds: 108.5 },
+  first_value: null,
   reference: { AtMost: { Seconds: 60 } },
   evidence: [
     { Boot: { ts_ms: now - 12 * DAY, boot_ms: 108_457, main_path_ms: 68_757, post_boot_ms: 39_700 } },

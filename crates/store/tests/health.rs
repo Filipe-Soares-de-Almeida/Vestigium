@@ -81,6 +81,11 @@ fn findings_open_update_and_close() {
     let history = store.findings(0, 20 * DAY).unwrap();
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].updated_ms, 12 * DAY);
+    assert_eq!(
+        history[0].first.as_ref().map(|f| &f.value),
+        Some(&Measure::Days(3)),
+        "an update keeps what it measured when it opened"
+    );
     assert_eq!(history[1].closed_ms, Some(12 * DAY));
     assert_eq!(
         store.findings(13 * DAY, 20 * DAY).unwrap().len(),

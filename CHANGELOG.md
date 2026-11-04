@@ -163,6 +163,9 @@ How to use this file:
 - "Who is using the most" on the Now screen has a "See all" button that opens every program
   running, live, up to 100 at a time: sort by any column, find one by name, hold Ctrl to pause it,
   and close it with Esc or a click outside.
+- A Health finding compares the value now with the one it had when it opened ("Now: 24 damaged
+  sectors · 4 days ago: 16 damaged sectors"), so you can see whether it is growing. A finding
+  about a disk that was read in full also shows the sector map of that read.
 
 ### Changed
 
@@ -232,6 +235,10 @@ How to use this file:
   longer makes the page lay itself out again.
 - A Health finding no longer draws a bar under its text: it says the value now and what a healthy
   PC shows, in one line ("Now: 1 damaged area · Healthy: none").
+- In Portuguese, the parts of a disk are called setores (sectors) everywhere, as the reports,
+  SMART and Tests have them, and the map's squares are regions. The worn-disk finding has a
+  shorter description, and the line under a finding no longer explains the button beside it; a
+  test button only shows when no step already links to Tests.
 
 ### Fixed
 

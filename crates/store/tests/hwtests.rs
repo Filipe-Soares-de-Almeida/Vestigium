@@ -38,6 +38,9 @@ fn migrates_v6_to_v7() {
             "CREATE TABLE gap (id INTEGER PRIMARY KEY, start_ms INTEGER NOT NULL,
                  end_ms INTEGER NOT NULL, reason INTEGER NOT NULL);
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
+             CREATE TABLE finding (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 opened_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL, closed_ms INTEGER,
+                 data BLOB NOT NULL);
              PRAGMA user_version = 6;",
         )
         .unwrap();

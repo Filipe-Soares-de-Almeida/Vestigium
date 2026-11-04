@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use vestigium_core::health::{BootReport, Finding, Subject};
+use vestigium_core::health::{BootReport, Finding, Measure, Subject};
 use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
     CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap,
@@ -134,6 +134,8 @@ pub struct FindingDto {
     pub closed_ms: Option<i64>,
     #[serde(flatten)]
     pub finding: Finding,
+    /// What it measured when it opened; `None` for one opened before that was kept.
+    pub first_value: Option<Measure>,
 }
 
 impl From<FindingRecord> for FindingDto {
@@ -144,6 +146,7 @@ impl From<FindingRecord> for FindingDto {
             updated_ms: record.updated_ms,
             closed_ms: record.closed_ms,
             finding: record.finding,
+            first_value: record.first.map(|f| f.value),
         }
     }
 }

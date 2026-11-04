@@ -2,12 +2,16 @@
   import ConcernMark from "../../components/ConcernMark.svelte";
   import Icon from "../../components/Icon.svelte";
   import Steps from "../../components/Steps.svelte";
-  import { t } from "../../lib/i18n.svelte";
+  import { formatDayShort } from "../occurrence/format";
+  import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
+  import { hwtests } from "../../lib/tests.svelte";
   import { keyOf, tweaks } from "../../lib/tweaks.svelte";
   import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
+  import DiskMap from "../tests/DiskMap.svelte";
+  import { lastSurface, surfaceOf } from "../tests/words";
   import { areaOf } from "./areas";
-  import { findingView } from "./words";
+  import { findingView, valueText } from "./words";
 
   let { finding, level }: { finding: FindingDto; level: DetailLevel } = $props();
 
@@ -35,25 +39,36 @@
   });
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
-  /** Where the point can be acted on elsewhere, each with a line on what that screen does. */
+  const DAY_MS = 86_400_000;
+  /** What the point measured when it opened, to compare with now; none while it opened today. */
+  const then = $derived.by(() => {
+    const days = Math.floor((Date.now() - finding.opened_ms) / DAY_MS);
+    if (!finding.first_value || days < 1) return null;
+    return {
+      label: tn("ui.health.then", days, { date: formatDayShort(finding.opened_ms) }),
+      value: valueText(finding.kind, finding.first_value),
+    };
+  });
+  /** The last read of the whole disk this point is about, when one covered all of it. */
+  const map = $derived.by(() => {
+    const s = finding.subject;
+    const number = typeof s === "object" && "Disk" in s ? Number(s.Disk.split(" ")[0]) : NaN;
+    const disk = hwtests.dto?.disks.find((d) => d.number === number);
+    const run = disk && hwtests.dto ? lastSurface(hwtests.dto, disk) : null;
+    const scan = run ? surfaceOf(run) : null;
+    return scan && scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? { scan, name: disk!.name } : null;
+  });
+  /** Steps already link to Tests, so a test needs no button of its own. */
+  const linked = $derived(view.steps.some((s) => s.key === "RunDiskTest" || s.key === "RunMemoryDiagnostic"));
+  /** Where the point can be acted on elsewhere, when no step already leads there. */
   const actions = $derived.by(() => {
-    const out: { key: string; hint: string; label: string; href: string; icon: "tweaks" | "tests" | "dumps" }[] = [];
-    if (tweak) {
-      out.push({ key: "tweak", hint: t("ui.health.foot.tweak"), label: t("ui.health.see_tweak"), href: href.tweaks(keyOf(tweak)), icon: "tweaks" });
-    }
-    if (test) {
+    const out: { key: string; label: string; href: string; icon: "tweaks" | "tests" | "dumps" }[] = [];
+    if (tweak) out.push({ key: "tweak", label: t("ui.health.see_tweak"), href: href.tweaks(keyOf(tweak)), icon: "tweaks" });
+    if (test && !linked) {
       const memory = finding.kind === "HardwareErrors" || finding.kind === "MemoryTestErrors";
-      out.push({
-        key: "test",
-        hint: t(memory ? "ui.health.foot.test.memory" : "ui.health.foot.test.disk"),
-        label: t(memory ? "ui.health.see_test.memory" : "ui.health.see_test.disk"),
-        href: test,
-        icon: "tests",
-      });
+      out.push({ key: "test", label: t(memory ? "ui.health.see_test.memory" : "ui.health.see_test.disk"), href: test, icon: "tests" });
     }
-    if (finding.kind === "NoCrashDump") {
-      out.push({ key: "dump", hint: t("ui.health.foot.dump"), label: t("ui.health.see_dump_setting"), href: href.dumps(), icon: "dumps" });
-    }
+    if (finding.kind === "NoCrashDump") out.push({ key: "dump", label: t("ui.health.see_dump_setting"), href: href.dumps(), icon: "dumps" });
     return out;
   });
 </script>
@@ -69,8 +84,11 @@
   <p class="why">{view.why}</p>
   <p class="lab">
     <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
-    <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
+    {#if then}<span>{then.label} <b>{then.value}</b></span>{/if}
   </p>
+  {#if map}
+    <DiskMap scan={map.scan} diskBytes={map.scan.disk_bytes} name={map.name} {level} />
+  {/if}
   <div class="two">
     <div>
       <h3>{t("ui.health.evidence")}</h3>
@@ -98,10 +116,7 @@
   {#if actions.length}
     <div class="foot">
       {#each actions as action (action.key)}
-        <div class="act">
-          <p>{action.hint}</p>
-          <a class="btn" href={action.href}><Icon name={action.icon} />{action.label}</a>
-        </div>
+        <a class="btn" href={action.href}><Icon name={action.icon} />{action.label}</a>
       {/each}
     </div>
   {/if}
@@ -210,26 +225,15 @@
     height: 16px;
   }
   .foot {
-    display: grid;
+    display: flex;
+    flex-wrap: wrap;
     gap: 10px;
+    justify-content: flex-end;
     margin: 0 -18px -16px;
     padding: 12px 18px;
     border-top: 1px solid var(--stroke2);
     border-radius: 0 0 14px 14px;
     background: color-mix(in srgb, var(--card2) 55%, transparent);
-  }
-  .act {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 16px;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .act p {
-    margin: 0;
-    color: var(--ink2);
-    font-size: 13.5px;
-    line-height: 1.45;
   }
   @container content (max-width: 720px) {
     .two {
