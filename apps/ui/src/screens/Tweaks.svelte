@@ -41,8 +41,8 @@
     detail?.scrollTo(0, 0);
   });
 
-  const MARK: Record<Shown, "Attention" | "Unknown" | "Ok" | "Closed"> = {
-    signal: "Attention",
+  const MARK: Record<Shown, "Recommended" | "Unknown" | "Ok" | "Closed"> = {
+    signal: "Recommended",
     quiet: "Unknown",
     applied: "Ok",
     set: "Ok",
@@ -261,7 +261,7 @@
           </span>
           <div>
             <h2 id="tweak-title">{name(current, level)}</h2>
-            <p class="meta"><ConcernMark mark={MARK[s]} word={false} /><span>{t(`ui.tweaks.status.${s}`)}</span></p>
+            <p class="meta"><ConcernMark mark={MARK[s]} word={false} silent /><span>{t(`ui.tweaks.status.${s}`)}</span></p>
           </div>
         </div>
         <p class="about">{what(current, level)}</p>
@@ -338,7 +338,7 @@
                   {#each lines as c, i (i)}<span class="chg">{c.from} → {c.to}</span>{/each}
                 </p>
                 <div class="hstate">
-                  <span class="meta"><ConcernMark mark={st.mark} word={false} /><span>{st.text}</span></span>
+                  <span class="meta"><ConcernMark mark={st.mark} word={false} silent /><span>{st.text}</span></span>
                   {#if holding && r.id === holding.id}
                     <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "undo", row: r, advice: current })}>
                       <Icon name="undo" />{t("ui.tweaks.undo")}

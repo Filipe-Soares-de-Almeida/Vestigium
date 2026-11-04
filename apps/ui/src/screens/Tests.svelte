@@ -257,7 +257,7 @@
   {@const s = withHealth(id, id === "memory" ? memoryState(dto!, runDev === "memory") : diskState(dto!, dto!.disks.find((d) => d.number === id)!, hwtests.details[id as number] ?? null, runDev === id))}
   <button type="button" class="dev" aria-current={chosen === id ? "true" : undefined} onclick={() => go(href.tests(deviceKey(id)))}>
     <span class="icochip"><Icon name={icon} /></span>
-    <span><b>{name}</b><small>{sub}</small><small class="st"><ConcernMark mark={s.mark} word={false} />{s.line}</small></span>
+    <span><b>{name}</b><small>{sub}</small><small class="st"><ConcernMark mark={s.mark} word={false} silent />{s.line}</small></span>
   </button>
 {/snippet}
 
@@ -326,7 +326,7 @@
       <p>{t("ui.tests.memory.sub", { total: formatBytes(dto!.memory.total_bytes), free: formatBytes(dto!.memory.available_bytes) })}</p>
     </div>
   </header>
-  <p class="state"><ConcernMark mark={s.mark} word={false} />{s.line}</p>
+  <p class="state"><ConcernMark mark={s.mark} word={false} silent />{s.line}</p>
   {#if point}
     <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
   {/if}
@@ -420,7 +420,7 @@
       <p>{t("ui.tests.disk.sub", { n: d.number, bus: t(`ui.tests.bus.${d.bus}`), volumes: d.volumes.map(vol).join(", ") || "—" })}</p>
     </div>
   </header>
-  <p class="state"><ConcernMark mark={s.mark} word={false} />{s.line}</p>
+  <p class="state"><ConcernMark mark={s.mark} word={false} silent />{s.line}</p>
   {#if point}
     <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
   {/if}

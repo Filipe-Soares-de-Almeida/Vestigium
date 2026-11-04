@@ -1723,6 +1723,7 @@
   "ui.shell.nav.tests.running": "a test is running",
   "ui.health.mark.Partial": "Partly",
   "ui.health.mark.Running": "Running",
+  "ui.health.mark.Recommended": "Recommended",
   "ui.tests.health_says": "Health says: {what}",
   "ui.tests.health_open": "See it in Health",
   "ui.steps.open": "Open {place} ›",

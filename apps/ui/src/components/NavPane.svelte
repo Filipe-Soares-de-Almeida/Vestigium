@@ -46,7 +46,7 @@
       <Icon name="health" />{t("ui.shell.nav.health")}
       {#if open}
         <span class="count">
-          {#if health.critical}<ConcernMark mark="Critical" word={false} />{/if}
+          {#if health.critical}<ConcernMark mark="Critical" word={false} silent />{/if}
           <span aria-hidden="true">{open}</span>
           <span class="sr">
             {tn("ui.shell.nav.health.open", open)}{health.critical
@@ -59,7 +59,7 @@
     <a class="nav" href={href.tests()} aria-current={router.section === "tests" ? "page" : undefined}>
       <Icon name="tests" />{t("ui.shell.nav.tests")}
       {#if hwtests.running || hwtests.dto?.scan}
-        <span class="count"><ConcernMark mark="Running" word={false} /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
+        <span class="count"><ConcernMark mark="Running" word={false} silent /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
       {/if}
     </a>
     <a class="nav" href={href.tweaks()} aria-current={router.section === "tweaks" ? "page" : undefined}>

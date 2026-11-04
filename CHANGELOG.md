@@ -286,3 +286,6 @@ How to use this file:
   with a link that opens that screen.
 - The window itself never scrolls any more: on Tests, Dumps and Optimizations a hidden label could
   push the page down and take the title bar and its buttons off screen.
+- A recommended tweak has a mark of its own instead of Health's warning triangle, and a screen
+  reader no longer hears two states in a row ("Attention Recommended") on Optimizations, Tests and
+  the side menu.
