@@ -6,9 +6,9 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DISPLAYCHANGE,
-    WM_ENDSESSION, WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WNDCLASSW,
-    WS_OVERLAPPED,
+    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE,
+    WM_DISPLAYCHANGE, WM_ENDSESSION, WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    WNDCLASSW, WS_OVERLAPPED,
 };
 use windows::core::w;
 
@@ -106,6 +106,11 @@ unsafe extern "system" fn session_proc(
 ) -> LRESULT {
     match msg {
         WM_QUERYENDSESSION => LRESULT(1),
+        // A close request ends the loop as the tray's Exit does; the window lives until the process ends.
+        WM_CLOSE => {
+            quit();
+            LRESULT(0)
+        }
         WM_ENDSESSION => {
             if wparam.0 != 0
                 && let Some(on_end) = ON_END_SESSION.get()
@@ -126,5 +131,32 @@ unsafe extern "system" fn session_proc(
         }
         // SAFETY: forwards everything else unchanged.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn a_close_request_ends_the_message_loop() {
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            let window = watch_session_end(|| {}).unwrap();
+            // SAFETY: posts a message carrying no pointers to the window this thread just made.
+            unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.unwrap();
+            pump(|| {});
+            let _ = done.send(());
+        });
+        assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    #[test]
+    fn the_installer_closes_the_window_this_module_makes() {
+        let hooks = include_str!("../../ui/src-tauri/windows/hooks.nsh");
+        assert!(hooks.contains("FindWindow $0 \"VestigiumAgentSession\""));
     }
 }

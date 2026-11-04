@@ -169,6 +169,9 @@ How to use this file:
 - The installer carries everything Vestigium runs: the window, the background watcher, the helper
   that does the tasks needing administrator permission, and the PresentMon console the deep
   capture uses, with its licence.
+- Installing Vestigium over itself, or uninstalling it, while the background watcher runs closes the
+  watcher first and lets it save what it holds; after an install it starts again. Choosing to delete
+  the app data when uninstalling also deletes the history.
 
 ### Changed
 
