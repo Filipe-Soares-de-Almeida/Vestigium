@@ -11,16 +11,21 @@
 
   const LENGTHS = [2, 5, 10] as const;
   const MIN_MINUTES = 1;
-  const MAX_MINUTES = 60;
+  /** A whole day, the longest capture the helper runs. */
+  const MAX_MINUTES = 24 * 60;
 
   let choice = $state<(typeof LENGTHS)[number] | "custom">(5);
-  /** What the number field holds; `null` while it is empty or not a number. */
-  let custom = $state<number | null>(15);
+  /** What the two number fields hold; `null` while one is empty or not a number. */
+  let hours = $state<number | null>(0);
+  let mins = $state<number | null>(15);
   let field = $state<HTMLInputElement>();
 
-  const customValid = $derived(
-    custom !== null && Number.isInteger(custom) && custom >= MIN_MINUTES && custom <= MAX_MINUTES,
+  const custom = $derived(
+    hours !== null && mins !== null && Number.isInteger(hours) && Number.isInteger(mins) && hours >= 0 && mins >= 0 && mins < 60
+      ? hours * 60 + mins
+      : null,
   );
+  const customValid = $derived(custom !== null && custom >= MIN_MINUTES && custom <= MAX_MINUTES);
   const minutes = $derived(choice === "custom" ? custom : choice);
   const ready = $derived(choice !== "custom" || customValid);
 
@@ -81,22 +86,40 @@
       </button>
     </div>
     {#if choice === "custom"}
-      <div class="custom">
-        <label for="dur-custom">{t("ui.captures.dur.custom.label")}</label>
-        <div class="entry">
-          <input
-            id="dur-custom"
-            type="number"
-            inputmode="numeric"
-            min={MIN_MINUTES}
-            max={MAX_MINUTES}
-            step="1"
-            bind:value={custom}
-            bind:this={field}
-            aria-invalid={!customValid}
-            aria-describedby={customValid ? "dur-custom-help" : "dur-custom-help dur-custom-error"}
-          />
-          <span>{t("ui.captures.dur.custom.unit")}</span>
+      <div class="custom" role="group" aria-labelledby="dur-custom-label">
+        <p class="label" id="dur-custom-label">{t("ui.captures.dur.custom.label")}</p>
+        <div class="entries">
+          <div class="entry">
+            <input
+              id="dur-custom-hours"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              max="24"
+              step="1"
+              bind:value={hours}
+              bind:this={field}
+              aria-label={t("ui.captures.dur.custom.hours")}
+              aria-invalid={!customValid}
+              aria-describedby={customValid ? "dur-custom-help" : "dur-custom-help dur-custom-error"}
+            />
+            <span aria-hidden="true">{t("ui.captures.dur.custom.unit.h")}</span>
+          </div>
+          <div class="entry">
+            <input
+              id="dur-custom-minutes"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              max="59"
+              step="1"
+              bind:value={mins}
+              aria-label={t("ui.captures.dur.custom.minutes")}
+              aria-invalid={!customValid}
+              aria-describedby={customValid ? "dur-custom-help" : "dur-custom-help dur-custom-error"}
+            />
+            <span aria-hidden="true">{t("ui.captures.dur.custom.unit")}</span>
+          </div>
         </div>
         <p class="hint" id="dur-custom-help">{t("ui.captures.dur.custom.help")}</p>
         {#if !customValid}
@@ -179,9 +202,15 @@
     gap: 6px;
     margin-top: 12px;
   }
-  .custom label {
+  .custom .label {
+    margin: 0;
     color: var(--ink2);
     font: 600 13px/1.5 var(--f);
+  }
+  .entries {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
   }
   .entry {
     display: flex;
@@ -190,7 +219,7 @@
     color: var(--ink2);
   }
   .entry input {
-    width: 96px;
+    width: 80px;
     padding: 7px 10px;
     border: 1px solid var(--stroke);
     border-radius: 8px;

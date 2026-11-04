@@ -94,7 +94,7 @@
       </div>
     </div>
     <p class="figure">
-      {t("ui.captures.dur.name", { minutes: view.minutes })}
+      {view.minutes < 60 ? t("ui.captures.dur.name", { minutes: view.minutes }) : formatDuration(view.minutes * 60_000)}
       <small>{t("ui.captures.figure.caption")}</small>
     </p>
   </div>

@@ -13,7 +13,7 @@ use windows::core::{PCWSTR, w};
 use crate::agent::UiError;
 
 /// Capture lengths the window accepts, in minutes.
-pub const CAPTURE_MINUTES: std::ops::RangeInclusive<u64> = 1..=60;
+pub const CAPTURE_MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 
 /// A deep capture under way: when it started and when it should end, Unix epoch milliseconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

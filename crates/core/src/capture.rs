@@ -13,6 +13,8 @@ pub const BUCKET_BOUNDS_US: [u32; 12] = [1, 2, 3, 4, 5, 10, 25, 50, 100, 250, 50
 pub const BUCKETS: usize = 13;
 /// Individual DPC and ISR routines kept, longest first.
 pub const LONGEST_KEPT: usize = 50;
+/// The longest deep capture anyone can ask for, in minutes: a whole day.
+pub const CAPTURE_MINUTES_MAX: u64 = 24 * 60;
 /// A frame over this many times the app's median...
 pub const HITCH_FACTOR: f32 = 2.5;
 /// ...and at least this long, in milliseconds, is a hitch.
@@ -268,10 +270,65 @@ impl RoutineAggregator {
     }
 }
 
+/// Frame times are counted in hundredths of a millisecond, so a day of frames takes kilobytes.
+const BINS_PER_MS: f32 = 100.0;
+
+fn bin_of(frame_ms: f32) -> u32 {
+    (frame_ms.max(0.0) * BINS_PER_MS).round() as u32
+}
+
+fn ms_of(bin: u32) -> f32 {
+    bin as f32 / BINS_PER_MS
+}
+
+/// One of an app's longest frames: its length, then the earlier frame first among equals.
+type Long = (u32, Reverse<i64>, u32);
+
+/// What one (app, pid) drew: a count per frame length and its longest frames that could be hitches.
+#[derive(Debug, Default)]
+struct AppTrack {
+    frames: u32,
+    worst_ms: f32,
+    bins: BTreeMap<u32, u32>,
+    /// The `HITCHES_KEPT` longest frames of at least `HITCH_MIN_MS`, shortest on top.
+    longest: BinaryHeap<Reverse<Long>>,
+}
+
+impl AppTrack {
+    fn add(&mut self, ts_ms: i64, frame_ms: f32) {
+        let bin = bin_of(frame_ms);
+        self.frames += 1;
+        self.worst_ms = self.worst_ms.max(frame_ms);
+        *self.bins.entry(bin).or_default() += 1;
+        if ms_of(bin) < HITCH_MIN_MS {
+            return;
+        }
+        let long = (bin, Reverse(ts_ms), frame_ms.to_bits());
+        if self.longest.len() < HITCHES_KEPT {
+            self.longest.push(Reverse(long));
+        } else if self.longest.peek().is_some_and(|Reverse(min)| *min < long) {
+            self.longest.pop();
+            self.longest.push(Reverse(long));
+        }
+    }
+
+    /// The frame length at `index` of all the frames sorted from shortest to longest.
+    fn at(&self, index: u32) -> f32 {
+        let mut seen = 0;
+        for (&bin, &count) in &self.bins {
+            seen += count;
+            if seen > index {
+                return ms_of(bin);
+            }
+        }
+        self.worst_ms
+    }
+}
+
 /// Frame times per (app, pid); hitches by `HITCH_FACTOR` times the median and `HITCH_MIN_MS`.
 #[derive(Debug, Default)]
 pub struct FrameAggregator {
-    frames: HashMap<(String, u32), Vec<(i64, f32)>>,
+    apps: HashMap<(String, u32), AppTrack>,
 }
 
 impl FrameAggregator {
@@ -280,49 +337,51 @@ impl FrameAggregator {
     }
 
     pub fn add(&mut self, app: &str, pid: u32, ts_ms: i64, frame_ms: f32) {
-        self.frames
+        self.apps
             .entry((app.to_string(), pid))
             .or_default()
-            .push((ts_ms, frame_ms));
+            .add(ts_ms, frame_ms);
     }
 
     /// Apps with at least 60 frames, most hitches first then most frames, and the worst hitches in time order.
     pub fn finish(self) -> (Vec<AppFrames>, Vec<FrameHitch>) {
         let mut apps = Vec::new();
         let mut hitches = Vec::new();
-        for ((name, pid), frames) in self.frames {
-            if frames.len() < MIN_FRAMES {
+        for ((name, pid), track) in self.apps {
+            if (track.frames as usize) < MIN_FRAMES {
                 continue;
             }
-            let mut sorted: Vec<f32> = frames.iter().map(|(_, ms)| *ms).collect();
-            sorted.sort_by(f32::total_cmp);
-            let median_ms = sorted[sorted.len() / 2];
-            let p99_rank = (sorted.len() * 99).div_ceil(100);
-            let mut count = 0;
-            for (ts_ms, frame_ms) in &frames {
-                if *frame_ms > HITCH_FACTOR * median_ms && *frame_ms >= HITCH_MIN_MS {
-                    count += 1;
-                    hitches.push(FrameHitch {
-                        ts_ms: *ts_ms,
-                        app: name.clone(),
-                        pid,
-                        frame_ms: *frame_ms,
-                        median_ms,
-                    });
-                }
-            }
+            let median_ms = track.at(track.frames / 2);
+            let p99_rank = (track.frames as usize * 99).div_ceil(100) as u32;
+            let hitch = |ms: f32| ms > HITCH_FACTOR * median_ms && ms >= HITCH_MIN_MS;
+            let count = track
+                .bins
+                .iter()
+                .filter(|(bin, _)| hitch(ms_of(**bin)))
+                .map(|(_, count)| *count)
+                .sum();
             let app = AppFrames {
                 name,
                 pid,
-                frames: frames.len() as u32,
+                frames: track.frames,
                 median_ms,
-                p99_ms: sorted[p99_rank - 1],
-                worst_ms: sorted[sorted.len() - 1],
+                p99_ms: track.at(p99_rank - 1),
+                worst_ms: track.worst_ms,
                 hitches: count,
             };
             if !renders_steadily(&app) {
-                hitches.retain(|h| h.app != app.name || h.pid != app.pid);
                 continue;
+            }
+            for Reverse((bin, Reverse(ts_ms), bits)) in track.longest {
+                if hitch(ms_of(bin)) {
+                    hitches.push(FrameHitch {
+                        ts_ms,
+                        app: app.name.clone(),
+                        pid,
+                        frame_ms: f32::from_bits(bits),
+                        median_ms,
+                    });
+                }
             }
             apps.push(app);
         }
@@ -944,6 +1003,25 @@ mod tests {
         let fast = apps.iter().find(|a| a.name == "fast").expect("fast");
         assert_eq!((fast.hitches, fast.frames, fast.median_ms), (0, 101, 4.0));
         assert_eq!(fast.worst_ms, 15.0);
+    }
+
+    #[test]
+    fn a_day_of_frames_keeps_counts_not_frames() {
+        let mut track = AppTrack::default();
+        for i in 0..2_000_000i64 {
+            track.add(
+                i * 7,
+                if i % 1_000 == 0 {
+                    60.0
+                } else {
+                    6.9 + (i % 10) as f32 * 0.01
+                },
+            );
+        }
+        assert_eq!(track.frames, 2_000_000);
+        assert!(track.bins.len() <= 11, "one count per frame length");
+        assert_eq!(track.longest.len(), HITCHES_KEPT);
+        assert!((track.at(track.frames / 2) - 6.95).abs() < 0.011);
     }
 
     #[test]

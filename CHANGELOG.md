@@ -201,6 +201,10 @@ How to use this file:
   of boxes to tick.
 - On Optimizations and Dumps the page holds still: the long list and the detail each scroll inside
   their own column, as on Tests, so the title and the action bar stay in view.
+- A custom capture can run from one minute to 24 hours, set in hours and minutes, instead of at
+  most 60 minutes. A long capture keeps a count of frame times rather than every frame, so a day
+  of capturing stays light on memory; the numbers it reports are the same to a hundredth of a
+  millisecond.
 
 ### Fixed
 
