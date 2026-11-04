@@ -222,6 +222,9 @@ How to use this file:
   administrator says so, and Optimizations groups tweaks as Recommended for this PC, No sign on
   this PC and Nothing to change. Descriptions say what a setting does and leave its state to the
   Now and After rows.
+- On Optimizations only the recommended tweaks can be chosen together; a tweak with no sign on
+  this PC is applied on its own, from its detail. While some are chosen, the detail's button
+  becomes a plain "Apply only this one", so one main Apply shows at a time.
 
 ### Fixed
 

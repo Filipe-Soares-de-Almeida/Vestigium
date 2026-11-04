@@ -1501,6 +1501,7 @@
   "ui.tweaks.applier.Elevated": "Pede permissão de administrador",
   "ui.tweaks.applying": "Aplicando…",
   "ui.tweaks.apply_one": "Aplicar este",
+  "ui.tweaks.apply_only": "Aplicar só este",
   "ui.tweaks.quiet_hint": "Nada aqui indica que ajude; aplicar fica a seu critério.",
   "ui.tweaks.blocked": "Mudar o Windows precisa do vigia rodando.",
   "ui.tweaks.history": "Histórico deste ajuste",

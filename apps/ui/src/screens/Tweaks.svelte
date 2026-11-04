@@ -66,6 +66,14 @@
   const withSignal = $derived(advice.filter((a) => stateOf(a) === "signal"));
   const quiet = $derived(advice.filter((a) => stateOf(a) === "quiet"));
   const settled = $derived(advice.filter((a) => !["signal", "quiet"].includes(stateOf(a))));
+  /** Only a tweak with a sign on this PC can be chosen with others; the rest apply one at a time. */
+  const choosable = (a: Advice) => a.status === "Ready" && stateOf(a) === "signal";
+
+  // A choice that lost its sign leaves the bar.
+  $effect(() => {
+    const allowed = new Set(withSignal.filter((a) => a.status === "Ready").map(keyOf));
+    if (tweaks.chosen.some((k) => !allowed.has(k))) tweaks.chosen = tweaks.chosen.filter((k) => allowed.has(k));
+  });
   const current = $derived(
     advice.find((a) => keyOf(a) === key) ?? withSignal[0] ?? quiet[0] ?? advice[0] ?? null,
   );
@@ -148,7 +156,7 @@
   {@const s = stateOf(a)}
   {@const tone = TONE[GROUP[a.tweak]]}
   <div class="row" class:current={current && keyOf(a) === keyOf(current)}>
-    {#if a.status === "Ready"}
+    {#if choosable(a)}
       <input
         type="checkbox"
         class="pick"
@@ -180,7 +188,7 @@
 
 {#snippet group(title: string, list: Advice[])}
   {#if list.length}
-    {@const pickable = list.filter((a) => a.status === "Ready").map(keyOf)}
+    {@const pickable = list.filter(choosable).map(keyOf)}
     <div class="ghead">
       {#if pickable.length}
         <PickAll
@@ -305,11 +313,13 @@
             <button
               type="button"
               class="btn"
-              class:accent={s === "signal"}
+              class:accent={s === "signal" && tweaks.chosen.length === 0}
               disabled={blocked || tweaks.busy}
               onclick={() => ask({ kind: "apply", items: [current] })}
             >
-              <Icon name="tweaks" />{t(tweaks.busy ? "ui.tweaks.applying" : "ui.tweaks.apply_one")}
+              <Icon name="tweaks" />{t(
+                tweaks.busy ? "ui.tweaks.applying" : tweaks.chosen.length ? "ui.tweaks.apply_only" : "ui.tweaks.apply_one",
+              )}
             </button>
             {#if s === "quiet"}<span class="hint">{t("ui.tweaks.quiet_hint")}</span>{/if}
             {#if blocked}<span class="hint">{t("ui.tweaks.blocked")}</span>{/if}

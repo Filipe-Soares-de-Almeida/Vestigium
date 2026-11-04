@@ -1501,6 +1501,7 @@
   "ui.tweaks.applier.Elevated": "Asks for administrator permission",
   "ui.tweaks.applying": "Applying…",
   "ui.tweaks.apply_one": "Apply this",
+  "ui.tweaks.apply_only": "Apply only this one",
   "ui.tweaks.quiet_hint": "Nothing here says it would help; applying is up to you.",
   "ui.tweaks.blocked": "Changing Windows needs the watcher running.",
   "ui.tweaks.history": "History of this tweak",
