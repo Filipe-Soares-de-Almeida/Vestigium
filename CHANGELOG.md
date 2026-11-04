@@ -233,8 +233,7 @@ How to use this file:
   its own.
 - The progress bar of a running test slides its fill instead of resizing it, so updating it no
   longer makes the page lay itself out again.
-- A Health finding no longer draws a bar under its text: it says the value now and what a healthy
-  PC shows, in one line ("Now: 1 damaged area · Healthy: none").
+- A Health finding no longer draws a bar under its text.
 - In Portuguese, the parts of a disk are called setores (sectors) everywhere, as the reports,
   SMART and Tests have them, and the map's squares are regions. The worn-disk finding has a
   shorter description, and the line under a finding no longer explains the button beside it; a
@@ -298,7 +297,5 @@ How to use this file:
 - A recommended tweak has a mark of its own instead of Health's warning triangle, and a screen
   reader no longer hears two states in a row ("Attention Recommended") on Optimizations, Tests and
   the side menu.
-- A Health finding no longer reads "Healthy: none", which looked like a disk with no good part
-  left: it says what a healthy PC shows in the finding's own words ("On a healthy PC: no damaged
-  area"). Counts that named nothing ("7 in 30 days") now name what they count, and the crash dump
-  setting reads "No dump" instead of a bare "None".
+- Counts on Health that named nothing ("7 in 30 days") now name what they count, and the crash
+  dump setting reads "No dump" instead of a bare "None".
