@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/ui/src-tauri/icons/128x128@2x.png" alt="Vestigium logo, a red V cut like a gemstone" width="128" height="128">
+</p>
+
 <h1 align="center">Vestigium</h1>
 
 <p align="center">
@@ -28,19 +32,8 @@ opens. It watches the one PC it is installed on.
 
 > [!WARNING]
 > Vestigium is in early development and there is no build to install yet.
-> What works today, built from source: the background watcher, which records
-> freezes, stutters in sensitive mode, apps that stop responding, stretches of
-> CPU, memory or disk pressure, and falls of the whole PC such as a blue screen;
-> the health checks, which watch disks, free space, memory, shutdowns, startup,
-> hardware and antivirus every hour; the deep capture, the full health scan,
-> the reading and cleanup of crash dumps, the Windows tweaks and the disk tests,
-> which ask for administrator permission once when they need it; and the window,
-> with the day's timeline, a report for each freeze or fall with its likely cause
-> and the evidence, the health of the PC by area with what to do about each
-> point, the crash dumps with what each one says, the tweaks this PC shows a
-> sign for, each one undone in a click, the memory and disk tests with what each
-> one covered, the captures and what each one found, the live view of the last
-> ten minutes, and the settings.
+> Built from source, everything on this page works: the background watcher,
+> the tray icon and every screen of the window.
 
 ## Highlights
 
@@ -52,35 +45,124 @@ opens. It watches the one PC it is installed on.
   of the whole PC — a blue screen, the power button held down, a power cut —
   gets a report too, with what the PC was doing in the two minutes before.
 - **The minutes before are already stored.** The agent keeps a rolling
-  window of system load, the busiest processes and Windows events, so a report
+  window of system load, the busiest programs and Windows events, so a report
   covers what led up to a stop of a fraction of a second or a full minute, and
   a sensitive mode also catches the short hitches that break games, audio and
   video. A daily timeline marks each freeze and each long stretch of pressure,
-  such as memory above 85% for twelve minutes and the process that held it.
+  such as memory above 85% for twelve minutes and the program that held it.
 - **Crash dumps, read for you.** It lists the blue-screen and app crash dumps
   Windows keeps, explains each one in plain language — the stop code and the
   driver or module most likely at fault — and deletes the ones you no longer
   need once you confirm.
-- **The driver behind the lag.** A deep capture of two to ten minutes measures
-  how long each driver holds the processor and the frame times of the apps on
-  screen, so stutter and audio crackle point to a driver or an app by name. Each
-  capture stays in a history, so a second one after a driver update shows
-  whether it helped.
+- **The driver behind the lag.** A deep capture, from a minute to a whole day,
+  measures how long each driver holds the processor and the frame times of the
+  apps on screen, so stutter and audio crackle point to a driver or an app by
+  name. Each capture stays in a history, so a second one after a driver update
+  shows whether it helped.
 - **Health checks, tests and reversible fixes.** It flags what in the system is
   a risk — a failing disk, hardware errors, storage resets, throttling, a
-  nearly full system drive — and tests the memory and the disks without
-  changing them: the Windows memory test at the next restart, a quick memory
-  test while you work, a read of each whole disk that finds the parts that do
-  not read, a file system check and a short speed measurement. Each result says
-  what it covered. When the evidence supports it, it suggests Windows settings
-  to change, each applied and undone in one click; security features stay as
-  they are.
+  nearly full system drive — and shows whether each point grew since it
+  opened. It tests the memory and the disks without changing them, and each
+  result says what it covered. When the evidence supports it, it suggests
+  Windows settings to change, each applied and undone in one click; security
+  features stay as they are.
 - **Light, local, no account.** The agent runs as your user from the tray and
   the app exits when its window closes. Tasks that need administrator rights —
   the driver capture, dump cleanup, some health checks, fixes and tests — ask
-  for them one at a time. No telemetry: everything it stores stays in one file
-  in your user profile. The project aims to keep the watcher as light as
+  for them one at a time. No telemetry: everything it stores stays in one
+  folder in your user profile. The project aims to keep the watcher as light as
   possible.
+
+---
+
+## The window
+
+"Open Vestigium" in the tray menu opens it. The side menu groups the screens by what you want to
+do, with Settings at the bottom beside whether Vestigium is watching. Every
+screen shows in English or Brazilian Portuguese, light or dark, in one of four
+colour themes, and at the detail level set in Settings: Simple, Detailed or
+Technical.
+
+### Follow
+
+- **Today** — a sentence sums up the day, and a timeline of the PC's states
+  since midnight (calm, busy, under pressure, asleep) marks each freeze. Point
+  at a stretch to see what the processor, memory, disk and graphics card were
+  doing, zoom with Ctrl and the mouse wheel, and click a freeze to open its
+  report. Below come the day's freezes and stretches of pressure, and the
+  freezes of each of the last 14 days.
+- **Reports** — each freeze, app that stopped responding or fall of the PC
+  opens as a report: how long it lasted, the probable cause with the evidence
+  beside it, the steps to try, the sequence of what happened, and a chart of
+  the minute before and the half minute after. "Copy report" puts it on the
+  clipboard as Markdown, ready to paste into a forum or an issue.
+- **Now** — what weighs on the PC at this moment: the last ten minutes of
+  processor, memory, disk and graphics card, and the programs using the most,
+  each with all its processes added up. "See all" lists every program running,
+  sorted by any column and searchable by name. Hold Ctrl to pause the screen on
+  one second, as in Task Manager.
+
+### Look after the PC
+
+- **Health** — the PC by area (disks, falls and shutdowns, memory, startup,
+  hardware and graphics, protection), checked every hour, each area with its
+  worst mark. An area opens its points: the value now beside the one it had
+  when it opened, why it matters and what to do. A full scan, after one
+  administrator prompt, reads what Windows shows only to an administrator, such
+  as what slows startup.
+- **Tests** — the memory and each disk, checked without changing anything on
+  them: the Windows Memory Diagnostic at the next restart, a quick test of the
+  free memory for 1, 5 or 15 minutes, what each disk says about itself (SMART
+  or the NVMe health log), a read of the whole disk that maps how long each
+  region takes and finds the sectors that cannot be read, a file system check
+  of each NTFS volume, and a short speed measurement. A running test shows its
+  progress and can be stopped.
+- **Optimizations** — a fixed set of Windows settings, such as fast startup,
+  hibernation, search indexing and the apps that open at sign-in, each with
+  what it holds now. A tweak is recommended only when Vestigium saw a sign on
+  this PC that it would help. Every change keeps the value from before, so it
+  can be undone in one click, and shows whether it helped by the same sign
+  counted before and after. Security software, Windows Update and the page file
+  are never offered.
+
+### Investigate
+
+- **Dumps** — the files Windows keeps after a blue screen, a video reset it
+  recovered from, or an app that closed by itself, grouped by kind with the
+  space they take. "Read the dumps" explains each one on the PC, without the
+  internet: the stop code in plain words and the driver or module it most
+  likely points at. Chosen dumps are deleted after a confirmation, and what
+  each one said stays.
+- **Captures** — "Investigate stutters" measures every driver and app for 2, 5
+  or 10 minutes, or any length up to 24 hours, and names the driver or app
+  behind the stutters. Each capture stays in a history.
+
+### Settings
+
+Appearance, the default detail level, watching (start with Windows, sensitive
+mode, pause), how long each kind of history is kept, the language, and privacy
+and data: the space the history takes, a button that opens its folder and one
+that deletes it.
+
+## The tray
+
+The Vestigium icon sits in the notification area. Its menu opens the window,
+pauses watching, turns on sensitive mode for 30 minutes, starts Vestigium with
+Windows, and exits. A badge in the icon's corner tells the state by its shape:
+a ring when the last 24 hours held slowdowns or a critical health point is
+open, a solid dot after a severe freeze, two bars while watching is paused, and
+a dashed ring while sensitive mode is on. The tooltip says the same in words.
+
+## Where the data lives
+
+| Path | What it is |
+|---|---|
+| `%LOCALAPPDATA%\Vestigium\data\vestigium.db` | The history and the settings: the timeline, reports, health points, tests, captures, dumps read and tweaks changed. |
+| `%LOCALAPPDATA%\Vestigium\data\blackbox.ring` | The last seconds before a fall of the PC, read at the next start. |
+| The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of administrator tasks, read into the history. |
+
+Settings › Privacy and data opens this folder, and deletes the history after a
+confirmation.
 
 ---
 
