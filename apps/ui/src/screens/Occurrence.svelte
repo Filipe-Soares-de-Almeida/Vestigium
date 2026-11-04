@@ -4,6 +4,7 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import Steps from "../components/Steps.svelte";
   import { occurrence } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { dumps } from "../lib/dumps.svelte";
@@ -11,7 +12,7 @@
   import { href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import type { OccurrenceDto } from "../lib/types";
-  import { copyText, loadDone, saveDone } from "./occurrence/browser";
+  import { copyText } from "./occurrence/browser";
   import { chartView } from "./occurrence/chart";
   import { coveredLine } from "./capture/words";
   import { culpritView, dumpOfFall, fileName, hex } from "./dumps/words";
@@ -22,11 +23,9 @@
 
   let { id }: { id: number } = $props();
 
-
   /** `undefined` while it loads, `null` when the history no longer has it. */
   let dto = $state<OccurrenceDto | null | undefined>(undefined);
   let failure = $state<unknown>(null);
-  let done = $state<string[]>([]);
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const view = $derived(dto ? buildReport(dto, level) : null);
@@ -51,15 +50,8 @@
   }
 
   onMount(() => {
-    done = loadDone(id);
     void load();
   });
-
-
-  function tick(key: string, on: boolean): void {
-    done = on ? [...done, key] : done.filter((k) => k !== key);
-    saveDone(id, done);
-  }
 
   async function copy(): Promise<void> {
     if (!dto) return;
@@ -154,18 +146,7 @@
       <section class="card" aria-labelledby="occ-todo">
         <h2 id="occ-todo" class="sub">{t("ui.occurrence.todo.title")}</h2>
         {#if view.steps.length}
-          <div class="todo">
-            {#each view.steps as step (step.key)}
-              <label class="chk">
-                <input
-                  type="checkbox"
-                  checked={done.includes(step.key)}
-                  onchange={(event) => tick(step.key, event.currentTarget.checked)}
-                />
-                <span>{step.text}</span>
-              </label>
-            {/each}
-          </div>
+          <Steps steps={view.steps} />
         {:else}
           <p class="muted none">{t("ui.occurrence.todo.none")}</p>
         {/if}
@@ -406,46 +387,6 @@
   .also[open] summary {
     margin-bottom: 4px;
   }
-  .todo {
-    display: grid;
-    gap: 10px;
-  }
-  .chk {
-    display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    line-height: 1.45;
-    cursor: pointer;
-  }
-  .chk input {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 1px 0 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .chk input:checked {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .chk input:checked::after {
-    content: "";
-    width: 9px;
-    height: 5px;
-    border-bottom: 2px solid var(--on-accent);
-    border-left: 2px solid var(--on-accent);
-    transform: rotate(-45deg) translate(1px, -1px);
-  }
-  .chk input:checked + span {
-    color: var(--ink3);
-    text-decoration: line-through;
-  }
   .seq {
     margin: 0;
     padding: 0;
@@ -522,11 +463,6 @@
     .seq li.mark > span::before {
       forced-color-adjust: none;
       background: CanvasText;
-    }
-    .chk input:checked {
-      forced-color-adjust: none;
-      background: Highlight;
-      border-color: Highlight;
     }
   }
 </style>

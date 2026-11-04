@@ -1,11 +1,11 @@
 <script lang="ts">
   import Icon from "../../components/Icon.svelte";
+  import Steps from "../../components/Steps.svelte";
   import { marks } from "../../lib/api";
   import { dumps } from "../../lib/dumps.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { DetailLevel } from "../../lib/types";
-  import { loadDone, saveDone } from "../occurrence/browser";
   import { formatBytes } from "../occurrence/format";
   import {
     at,
@@ -36,13 +36,11 @@
   const todo = $derived(d && isRead(entry) ? steps(d) : []);
   const id = $derived(`dump-${entry.key}`);
 
-  let done = $state<string[]>([]);
   /** The post-mortem report of the fall this dump belongs to, once looked up. */
   let fall = $state<number | null>(null);
 
   $effect(() => {
     if (!open || !d) return;
-    done = loadDone(d.id, "dump");
     if (d.kind !== "KernelMemory" && d.kind !== "KernelMini") return;
     const around = d.crash_ms;
     void marks(around - FALL_LOOK_MS, around + FALL_LOOK_MS)
@@ -51,12 +49,6 @@
       })
       .catch(() => (fall = null));
   });
-
-  function tick(key: string, on: boolean): void {
-    if (!d) return;
-    done = on ? [...done, key] : done.filter((k) => k !== key);
-    saveDone(d.id, done, "dump");
-  }
 </script>
 
 <div class="dblock">
@@ -126,18 +118,7 @@
           </div>
           <div>
             <h3>{t("ui.occurrence.todo.title")}</h3>
-            <div class="todo">
-              {#each todo as step (step.key)}
-                <label class="chk">
-                  <input
-                    type="checkbox"
-                    checked={done.includes(step.key)}
-                    onchange={(event) => tick(step.key, event.currentTarget.checked)}
-                  />
-                  <span>{step.text}</span>
-                </label>
-              {/each}
-            </div>
+            <Steps steps={todo} />
           </div>
         </div>
       {/if}
@@ -238,13 +219,11 @@
     appearance: none;
     cursor: pointer;
   }
-  .pick:checked,
-  .chk input:checked {
+  .pick:checked {
     border-color: var(--accent);
     background: var(--accent);
   }
-  .pick:checked::after,
-  .chk input:checked::after {
+  .pick:checked::after {
     content: "";
     width: 9px;
     height: 5px;
@@ -319,34 +298,6 @@
   .bullet.first {
     background: var(--accent);
   }
-  .todo {
-    display: grid;
-    gap: 10px;
-  }
-  .chk {
-    display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    line-height: 1.45;
-    cursor: pointer;
-  }
-  .chk input {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 1px 0 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .chk input:checked + span {
-    color: var(--ink3);
-    text-decoration: line-through;
-  }
   .fall {
     display: flex;
     gap: 8px;
@@ -395,8 +346,7 @@
       forced-color-adjust: none;
       background: CanvasText;
     }
-    .pick:checked,
-    .chk input:checked {
+    .pick:checked {
       forced-color-adjust: none;
       background: Highlight;
       border-color: Highlight;

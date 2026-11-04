@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-
   import ConcernMark from "../../components/ConcernMark.svelte";
   import Icon from "../../components/Icon.svelte";
+  import Steps from "../../components/Steps.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import { keyOf, tweaks } from "../../lib/tweaks.svelte";
   import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
-  import { loadDone, saveDone } from "../occurrence/browser";
   import { areaOf } from "./areas";
   import { findingView } from "./words";
 
@@ -38,18 +36,6 @@
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
   const pct = (x: number, max: number) => Math.max(0, Math.min(100, (x / max) * 100));
-
-  // The ticks belong to this finding while it stays open; a new one starts with none.
-  let done = $state<string[]>([]);
-
-  onMount(() => {
-    done = loadDone(finding.id, "finding");
-  });
-
-  function tick(key: string, on: boolean): void {
-    done = on ? [...done, key] : done.filter((k) => k !== key);
-    saveDone(finding.id, done, "finding");
-  }
 </script>
 
 <section class="card finding" aria-labelledby="finding-{finding.id}">
@@ -102,18 +88,7 @@
     <div>
       <h3>{t("ui.occurrence.todo.title")}</h3>
       {#if view.steps.length}
-        <div class="todo">
-          {#each view.steps as step (step.key)}
-            <label class="chk">
-              <input
-                type="checkbox"
-                checked={done.includes(step.key)}
-                onchange={(event) => tick(step.key, event.currentTarget.checked)}
-              />
-              <span>{step.text}</span>
-            </label>
-          {/each}
-        </div>
+        <Steps steps={view.steps} />
       {:else}
         <p class="muted none">{t("ui.health.todo.none")}</p>
       {/if}
@@ -246,46 +221,6 @@
   .bullet.first {
     background: var(--accent);
   }
-  .todo {
-    display: grid;
-    gap: 10px;
-  }
-  .chk {
-    display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    line-height: 1.45;
-    cursor: pointer;
-  }
-  .chk input {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 1px 0 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .chk input:checked {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .chk input:checked::after {
-    content: "";
-    width: 9px;
-    height: 5px;
-    border-bottom: 2px solid var(--on-accent);
-    border-left: 2px solid var(--on-accent);
-    transform: rotate(-45deg) translate(1px, -1px);
-  }
-  .chk input:checked + span {
-    color: var(--ink3);
-    text-decoration: line-through;
-  }
   .none {
     margin: 0;
   }
@@ -323,11 +258,6 @@
     .bar .val,
     .bullet {
       background: CanvasText;
-    }
-    .chk input:checked {
-      forced-color-adjust: none;
-      background: Highlight;
-      border-color: Highlight;
     }
   }
 </style>

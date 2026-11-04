@@ -194,6 +194,8 @@ How to use this file:
 - The detail level (Simple, Detailed, Technical) is set in one place, Settings, and applies to
   every screen. Reports, Health, Dumps, Optimizations, Tests and captures no longer carry their
   own switch.
+- "What to do" in reports, captures, Health findings and dumps is a numbered list of steps instead
+  of boxes to tick.
 
 ### Fixed
 

@@ -4,6 +4,7 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import Steps from "../components/Steps.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
@@ -12,7 +13,7 @@
   import { go, href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import type { CaptureDto, OccurrenceSummary } from "../lib/types";
-  import { copyText, loadDone, saveDone } from "./occurrence/browser";
+  import { copyText } from "./occurrence/browser";
   import Alignment from "./capture/Alignment.svelte";
   import Apps from "./capture/Apps.svelte";
   import Drivers from "./capture/Drivers.svelte";
@@ -22,12 +23,9 @@
 
   let { id }: { id: number } = $props();
 
-  const SCOPE = "capture";
-
   /** `undefined` while it loads, `null` when the history no longer has it. */
   let dto = $state<CaptureDto | null | undefined>(undefined);
   let failure = $state<unknown>(null);
-  let done = $state<string[]>([]);
   /** Reports from the minutes this capture ran. */
   let during = $state<OccurrenceSummary[]>([]);
 
@@ -51,15 +49,8 @@
   }
 
   onMount(() => {
-    done = loadDone(id, SCOPE);
     void load();
   });
-
-
-  function tick(key: string, on: boolean): void {
-    done = on ? [...done, key] : done.filter((k) => k !== key);
-    saveDone(id, done, SCOPE);
-  }
 
   async function copy(): Promise<void> {
     if (!dto) return;
@@ -168,18 +159,7 @@
       <section class="card" aria-labelledby="cap-todo">
         <h2 id="cap-todo" class="sub">{t("ui.captures.todo.title")}</h2>
         {#if view.steps.length}
-          <div class="todo">
-            {#each view.steps as step (step.key)}
-              <label class="chk">
-                <input
-                  type="checkbox"
-                  checked={done.includes(step.key)}
-                  onchange={(event) => tick(step.key, event.currentTarget.checked)}
-                />
-                <span>{step.text}</span>
-              </label>
-            {/each}
-          </div>
+          <Steps steps={view.steps} />
         {:else}
           <p class="muted">{t("ui.captures.todo.none")}</p>
         {/if}
@@ -393,46 +373,6 @@
     color: var(--ink2);
     font-size: 13px;
   }
-  .todo {
-    display: grid;
-    gap: 10px;
-  }
-  .chk {
-    display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    line-height: 1.45;
-    cursor: pointer;
-  }
-  .chk input {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 1px 0 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .chk input:checked {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .chk input:checked::after {
-    content: "";
-    width: 9px;
-    height: 5px;
-    border-bottom: 2px solid var(--on-accent);
-    border-left: 2px solid var(--on-accent);
-    transform: rotate(-45deg) translate(1px, -1px);
-  }
-  .chk input:checked + span {
-    color: var(--ink3);
-    text-decoration: line-through;
-  }
   .list {
     padding: 10px;
   }
@@ -518,11 +458,6 @@
     .bullet {
       forced-color-adjust: none;
       background: CanvasText;
-    }
-    .chk input:checked {
-      forced-color-adjust: none;
-      background: Highlight;
-      border-color: Highlight;
     }
   }
 </style>
