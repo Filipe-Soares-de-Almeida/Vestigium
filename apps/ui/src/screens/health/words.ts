@@ -31,21 +31,12 @@ function byConcern(key: string, concern: Concern, args?: Args): string {
   return text === specific ? k(key, args) : text;
 }
 
-/** A scale from zero past the value and the healthy limit, with the healthy stretch marked. */
-export interface Ruler {
-  max: number;
-  value: number;
-  okFrom: number;
-  okTo: number;
-}
-
 export interface FindingView {
   title: string;
   since: string;
   why: string;
   value: string;
   reference: string;
-  ruler: Ruler | null;
   evidence: Line[];
   steps: { key: string; text: string }[];
   /** A security product slowed the boot: the page says it is never offered for removal. */
@@ -82,7 +73,6 @@ export function findingView(f: FindingDto, level: DetailLevel): FindingView {
     why: level === "Technical" ? k(`kind.${f.kind}.rule`) : byConcern(`kind.${f.kind}.why`, f.concern),
     value: valueText(f.kind, f.value),
     reference: referenceText(f.kind, f.reference),
-    ruler: rulerOf(f.value, f.reference),
     evidence: evidenceTexts(f).map((texts) => lineFor(level, texts)),
     steps: f.next_steps.map((step) => ({ key: step, text: stepText(step, subject) })),
     security: f.evidence.some((fact) => typeof fact === "object" && "Delay" in fact && fact.Delay.security),
@@ -126,27 +116,6 @@ function plainMeasure(m: Measure): string {
   if ("Seconds" in m) return formatDuration(m.Seconds * 1000);
   if ("Bytes" in m) return formatBytes(m.Bytes);
   return k(`media.${m.Media}`);
-}
-
-function amount(m: Measure): number | null {
-  if ("Count" in m) return m.Count;
-  if ("Percent" in m) return m.Percent;
-  if ("Days" in m) return m.Days;
-  if ("Seconds" in m) return m.Seconds;
-  if ("Bytes" in m) return m.Bytes;
-  return null;
-}
-
-function rulerOf(value: Measure, reference: Reference): Ruler | null {
-  const v = amount(value);
-  const limit = "AtMost" in reference ? reference.AtMost : "AtLeast" in reference ? reference.AtLeast : null;
-  const r = limit ? amount(limit) : null;
-  if (v === null || r === null) return null;
-  let max = Math.max(v, r, 1) * 1.6;
-  if ("Percent" in value) max = Math.min(100, Math.max(max, r * 2));
-  return "AtMost" in reference
-    ? { max, value: v, okFrom: 0, okTo: r }
-    : { max, value: v, okFrom: r, okTo: max };
 }
 
 type EventFact = Extract<HealthFact, { Event: unknown }>["Event"];

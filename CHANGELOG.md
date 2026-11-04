@@ -232,6 +232,8 @@ How to use this file:
   its own.
 - The progress bar of a running test slides its fill instead of resizing it, so updating it no
   longer makes the page lay itself out again.
+- A Health finding no longer draws a bar: it says the value now and what a healthy PC shows, in
+  one line ("Now: 1 damaged area · Healthy: none").
 
 ### Fixed
 

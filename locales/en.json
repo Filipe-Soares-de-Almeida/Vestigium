@@ -995,8 +995,6 @@
   "ui.health.ref.at_least": "{value} or more",
   "ui.health.ruler.now": "Now:",
   "ui.health.ruler.healthy": "Healthy:",
-  "ui.health.ruler.label": "Now {value}; healthy: {reference}",
-  "ui.health.ruler.outside": "Outside healthy",
   "ui.health.foot.test.disk": "Reading the whole disk shows whether other stretches fail to read.",
   "ui.health.foot.test.memory": "The memory test shows whether the memory has errors.",
   "ui.health.foot.tweak": "There is a Windows tweak for this, with what it changes and how to undo it.",

@@ -35,35 +35,6 @@
   });
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
-  const clamp = (x: number) => Math.max(0, Math.min(100, x));
-  /** The healthy stretch never takes less of the bar than this, in percent, so it can be seen. */
-  const MIN_ZONE = 12;
-  /** The bar in two named stretches, healthy and not, and where the value sits on it. */
-  const scale = $derived.by(() => {
-    const r = view.ruler;
-    if (!r) return null;
-    const raw = (x: number) => (x / r.max) * 100;
-    const span = (from: number, to: number) => Math.max(1e-9, to - from);
-    if (r.okFrom === 0) {
-      const end = Math.min(Math.max(raw(r.okTo), MIN_ZONE), 100 - MIN_ZONE);
-      const at =
-        r.value <= r.okTo
-          ? (r.value / span(0, r.okTo)) * end
-          : end + ((r.value - r.okTo) / span(r.okTo, r.max)) * (100 - end);
-      return { healthyFirst: true, cut: end, marker: clamp(at) };
-    }
-    const start = Math.max(Math.min(raw(r.okFrom), 100 - MIN_ZONE), MIN_ZONE);
-    const at =
-      r.value >= r.okFrom
-        ? start + ((r.value - r.okFrom) / span(r.okFrom, r.max)) * (100 - start)
-        : (r.value / span(0, r.okFrom)) * start;
-    return { healthyFirst: false, cut: start, marker: clamp(at) };
-  });
-  const outsideWord = $derived(
-    finding.concern === "Attention" || finding.concern === "Critical"
-      ? t(`ui.health.mark.${finding.concern}`)
-      : t("ui.health.ruler.outside"),
-  );
   /** Where the point can be acted on elsewhere, each with a line on what that screen does. */
   const actions = $derived.by(() => {
     const out: { key: string; hint: string; label: string; href: string; icon: "tweaks" | "tests" | "dumps" }[] = [];
@@ -96,38 +67,10 @@
     </div>
   </div>
   <p class="why">{view.why}</p>
-  {#if scale}
-    {@const healthy = scale.healthyFirst ? { left: 0, width: scale.cut } : { left: scale.cut, width: 100 - scale.cut }}
-    {@const outside = scale.healthyFirst ? { left: scale.cut, width: 100 - scale.cut } : { left: 0, width: scale.cut }}
-    <div
-      class="ruler"
-      role="img"
-      aria-label={t("ui.health.ruler.label", { value: view.value, reference: view.reference })}
-    >
-      <p class="lab now" aria-hidden="true">{t("ui.health.ruler.now")} <b>{view.value}</b></p>
-      <div class="bar" aria-hidden="true">
-        <i class="zone ok" class:first={healthy.left === 0} style:left="{healthy.left}%" style:width="{healthy.width}%"></i>
-        <i class="zone out {tone}" class:first={outside.left === 0} style:left="{outside.left}%" style:width="{outside.width}%"></i>
-        <i class="val" style:left="{scale.marker}%"></i>
-      </div>
-      <div class="zones" aria-hidden="true" style:grid-template-columns={scale.healthyFirst
-          ? `minmax(max-content, ${healthy.width}fr) ${outside.width}fr`
-          : `${outside.width}fr minmax(max-content, ${healthy.width}fr)`}>
-        {#if scale.healthyFirst}
-          <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
-          <span>{outsideWord}</span>
-        {:else}
-          <span>{outsideWord}</span>
-          <span class="end">{t("ui.health.ruler.healthy")} {view.reference}</span>
-        {/if}
-      </div>
-    </div>
-  {:else}
-    <p class="lab plain">
-      <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
-      <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
-    </p>
-  {/if}
+  <p class="lab">
+    <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
+    <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
+  </p>
   <div class="two">
     <div>
       <h3>{t("ui.health.evidence")}</h3>
@@ -195,80 +138,13 @@
     font-size: 15px;
     line-height: 1.55;
   }
-  .ruler {
-    display: grid;
-    gap: 6px;
-  }
-  .bar {
-    position: relative;
-    height: 10px;
-    overflow: hidden;
-    border: 1px solid var(--stroke2);
-    border-radius: 999px;
-    background: var(--card2);
-  }
-  .bar i {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-  }
-  .bar {
-    overflow: visible;
-  }
-  .bar .zone {
-    border-radius: 0 999px 999px 0;
-  }
-  .bar .zone.first {
-    border-radius: 999px 0 0 999px;
-  }
-  .bar .zone.ok {
-    background: color-mix(in srgb, var(--ink3) 35%, transparent);
-  }
-  .bar .zone.out.press {
-    background: color-mix(in srgb, var(--press) 45%, transparent);
-  }
-  .bar .zone.out.freeze {
-    background: color-mix(in srgb, var(--freeze) 65%, transparent);
-  }
-  .bar .val {
-    top: -4px;
-    bottom: -4px;
-    width: 4px;
-    margin-left: -2px;
-    border-radius: 2px;
-    background: var(--ink);
-    box-shadow: 0 0 0 2px var(--card);
-  }
-  .zones {
-    display: grid;
-    color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .zones span {
-    white-space: nowrap;
-  }
-  .zones span + span {
-    padding-left: 12px;
-  }
-  .zones .end {
-    text-align: right;
-  }
-  .lab.now {
-    display: block;
-    margin: 0;
-  }
   .lab {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 4px 12px;
-    color: var(--ink2);
-    font-size: 13px;
-  }
-  .lab.plain {
-    justify-content: start;
     gap: 4px 24px;
     margin: 0;
+    color: var(--ink2);
+    font-size: 13px;
   }
   .lab b {
     color: var(--ink);
@@ -361,16 +237,8 @@
     }
   }
   @media (forced-colors: active) {
-    .bar .ok,
-    .bar .val,
     .bullet {
       forced-color-adjust: none;
-    }
-    .bar .ok {
-      background: GrayText;
-    }
-    .bar .val,
-    .bullet {
       background: CanvasText;
     }
   }
