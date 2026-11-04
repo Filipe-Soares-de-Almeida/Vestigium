@@ -1,9 +1,13 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import uPlot from "uplot";
   import "uplot/dist/uPlot.min.css";
 
+  import ChartTip from "../../components/ChartTip.svelte";
+  import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
+  import { wheelZoom, Zoom } from "../../lib/zoom.svelte";
   import type { ChartView, Lane } from "./chart";
   import { formatOffset } from "./format";
 
@@ -11,29 +15,47 @@
 
   const PLOT_H = 52;
   /** Axis steps in seconds, and the room one label needs before the next step is used. */
-  const TICK_STEPS = [15, 30, 60];
+  const TICK_STEPS = [5, 10, 15, 30, 60];
   const TICK_ROOM_PX = 56;
+  const MIN_VIEW_S = 10;
   const uid = `occ-chart-${Math.random().toString(36).slice(2, 8)}`;
 
-  let wrap: HTMLDivElement;
+  let wrap = $state<HTMLDivElement>();
   let nodes = $state<HTMLDivElement[]>([]);
   /** The point the readout shows, from the mouse or the keyboard; the slider speaks it. */
   let cursor = $state<number | null>(null);
-  let plots: uPlot[] = [];
+  /** Pixels from the left of the plots to the point under the readout. */
+  let cursorLeft = $state(0);
+  let plots = $state.raw<uPlot[]>([]);
   let width = $state(0);
 
   const first = $derived(view.x[0] ?? 0);
   const last = $derived(view.x.at(-1) ?? 0);
+  const zoom = new Zoom({
+    bounds: () => ({ from: first, to: last }),
+    width: () => width,
+    minSpan: MIN_VIEW_S,
+  });
+  /** The stretch on screen, in seconds from the start of the occurrence. */
+  const lo = $derived(zoom.view?.from ?? first);
+  const hi = $derived(zoom.view?.to ?? last);
   /** The first point at or after the start of the occurrence, where the keyboard starts. */
   const moment = $derived(Math.max(0, view.x.findIndex((s) => s >= 0)));
-  const pct = (s: number) => ((s - first) / Math.max(1, last - first)) * 100;
+  const pct = (s: number) => ((s - lo) / Math.max(1, hi - lo)) * 100;
+  /** A stretch's place on the axis, cut to what is on screen; `null` when none of it is. */
+  const place = (from: number, to: number) => {
+    const left = Math.max(0, pct(from));
+    const right = Math.min(100, pct(to));
+    return right <= 0 || left >= 100 ? null : { left, width: Math.max(0.8, right - left) };
+  };
   const ticks = $derived.by(() => {
-    const perSecond = width / Math.max(1, last - first);
+    const perSecond = width / Math.max(1, hi - lo);
     const step = TICK_STEPS.find((s) => s * perSecond >= TICK_ROOM_PX) ?? TICK_STEPS.at(-1)!;
     const out: number[] = [];
-    for (let s = Math.ceil(first / step) * step; s <= last; s += step) out.push(s);
+    for (let s = Math.ceil(lo / step) * step; s <= hi; s += step) out.push(s);
     return out;
   });
+  const range = $derived(t("ui.zoom.range", { from: formatOffset(lo), to: formatOffset(hi) }));
 
   function token(name: string): string {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -86,6 +108,7 @@
         setCursor: [
           (u) => {
             cursor = u.cursor.idx ?? null;
+            cursorLeft = u.cursor.left ?? 0;
           },
         ],
       },
@@ -97,39 +120,49 @@
     const { lanes, x } = view;
     const targets = nodes.slice(0, lanes.length);
     if (targets.length < lanes.length || targets.some((node) => !node)) return;
-    const initial = Math.max(1, wrap.clientWidth);
+    const host = wrap;
+    if (!host) return;
+    const initial = Math.max(1, host.clientWidth);
     width = initial;
-    plots = lanes.map((lane, i) => {
+    const made = lanes.map((lane, i) => {
       const values = lane.log ? lane.values.map((v) => (v === null ? null : Math.max(1, v))) : lane.values;
       return new uPlot(options(lane, initial, x[0] ?? 0, x.at(-1) ?? 1), [x, values], targets[i]);
     });
+    plots = made;
     const resized = new ResizeObserver(() => {
-      const now = Math.max(1, wrap.clientWidth);
+      const now = Math.max(1, host.clientWidth);
       width = now;
-      for (const u of plots) u.setSize({ width: now, height: PLOT_H });
+      for (const u of made) u.setSize({ width: now, height: PLOT_H });
     });
-    resized.observe(wrap);
+    resized.observe(host);
     const themed = new MutationObserver(() => {
-      for (const u of plots) u.redraw(false);
+      for (const u of made) u.redraw(false);
     });
     themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-scheme"] });
     return () => {
       resized.disconnect();
       themed.disconnect();
-      for (const u of plots) u.destroy();
+      for (const u of made) u.destroy();
       plots = [];
       cursor = null;
     };
   });
 
+  // Every lane shows the zoomed stretch; the readout moves with the point it reads.
+  $effect(() => {
+    const [min, max] = [lo, hi];
+    for (const u of plots) u.setScale("x", { min, max });
+    // uPlot applies a new scale in a microtask; read the position after it.
+    queueMicrotask(() =>
+      untrack(() => {
+        if (cursor !== null) show(cursor);
+      }),
+    );
+  });
+
   function readout(i: number): string {
-    const s = view.x[i];
-    const when = `${formatOffset(s)} · ${formatClock(view.originMs + s * 1000)}`;
-    const values = view.lanes.map((lane) => {
-      const v = lane.values[i];
-      return `${lane.name} ${v === null || v === undefined ? t("ui.occurrence.chart.none") : lane.format(v)}`;
-    });
-    return `${when} — ${values.join(" · ")}`;
+    const values = view.lanes.map((lane) => `${lane.name} ${value(lane, i)}`);
+    return `${heading(i)} — ${values.join(" · ")}`;
   }
 
   function show(i: number | null): void {
@@ -137,11 +170,27 @@
       u.setCursor(i === null ? { left: -10, top: -10 } : { left: u.valToPos(view.x[i], "x"), top: PLOT_H / 2 });
     }
     cursor = i;
+    if (i !== null && plots[0]) cursorLeft = plots[0].valToPos(view.x[i], "x");
   }
 
+  function heading(i: number): string {
+    const s = view.x[i];
+    return `${formatOffset(s)} · ${formatClock(view.originMs + s * 1000)}`;
+  }
+
+  function value(lane: Lane, i: number): string {
+    const v = lane.values[i];
+    return v === null || v === undefined ? t("ui.occurrence.chart.none") : lane.format(v);
+  }
+
+  // Arrows step a second (Shift: ten), Home and End jump, + − and 0 zoom, Esc takes the readout away.
   function onkeydown(event: KeyboardEvent): void {
     const n = view.x.length;
     if (!n) return;
+    if (zoom.key(event.key, cursor === null ? width / 2 : cursorLeft)) {
+      event.preventDefault();
+      return;
+    }
     const step = event.shiftKey ? 10 : 1;
     const at = cursor;
     let next: number | null;
@@ -152,6 +201,7 @@
     else if (event.key === "Escape") next = null;
     else return;
     event.preventDefault();
+    if (next !== null) zoom.reveal(view.x[next]);
     show(next);
   }
 </script>
@@ -159,7 +209,18 @@
 <div class="chart">
   <div
     class="plots"
+    class:pan={zoom.view !== null}
     bind:this={wrap}
+    use:wheelZoom={zoom}
+    onpointerdown={(event) => wrap && zoom.press(event, wrap)}
+    onpointerup={() => zoom.release()}
+    onpointermove={(event) => {
+      if (zoom.drag(event)) show(null);
+    }}
+    onfocus={() => {
+      if (wrap?.matches(":focus-visible") && cursor === null) show(moment);
+    }}
+    onblur={() => show(null)}
     tabindex="0"
     role="slider"
     aria-label={t("ui.occurrence.chart.label")}
@@ -171,11 +232,10 @@
     {onkeydown}
   >
     {#each view.bands as band, i (i)}
-      <span
-        class="band {band.tone}"
-        style:left="{pct(band.from)}%"
-        style:width="{Math.max(0.8, pct(band.to) - pct(band.from))}%"
-      ></span>
+      {@const at = place(band.from, band.to)}
+      {#if at}
+        <span class="band {band.tone}" style:left="{at.left}%" style:width="{at.width}%"></span>
+      {/if}
     {/each}
     {#each view.lanes as lane, i (lane.key)}
       <div class="lane">
@@ -187,28 +247,44 @@
       </div>
     {/each}
     {#each view.markers as marker, i (i)}
-      <span class="marker" style:left="{pct(marker.at)}%" title={marker.label}></span>
+      {#if pct(marker.at) >= 0 && pct(marker.at) <= 100}
+        <span class="marker" style:left="{pct(marker.at)}%" title={marker.label}></span>
+      {/if}
     {/each}
+    {#if cursor !== null}
+      {@const at = cursor}
+      <ChartTip
+        left={cursorLeft}
+        bound={width}
+        heading={heading(at)}
+        top={22}
+        rows={view.lanes.map((lane) => ({
+          key: lane.key,
+          label: lane.name,
+          value: value(lane, at),
+          dot: `var(--${lane.tone})`,
+        }))}
+      />
+    {/if}
   </div>
   <div class="axis" aria-hidden="true">
     {#each ticks as s (s)}
-      <span style:left="{pct(s)}%" class:start={s === first} class:end={s === last}>{formatOffset(s)}</span>
+      <span style:left="{pct(s)}%" class:start={pct(s) < 4} class:end={pct(s) > 96}>{formatOffset(s)}</span>
     {/each}
   </div>
   {#if view.bands.length}
     <div class="bandlabels" aria-hidden="true">
       {#each view.bands as band, i (i)}
-        {#if pct(band.from) > 60}
-          <span class="flip" style:right="{100 - pct(band.to)}%">{band.label}</span>
-        {:else}
-          <span style:left="{pct(band.from)}%">{band.label}</span>
+        {@const at = place(band.from, band.to)}
+        {#if at && at.left > 60}
+          <span class="flip" style:right="{100 - at.left - at.width}%">{band.label}</span>
+        {:else if at}
+          <span style:left="{at.left}%">{band.label}</span>
         {/if}
       {/each}
     </div>
   {/if}
-  <p class="readout" aria-hidden="true">
-    {cursor === null ? t("ui.occurrence.chart.hint") : readout(cursor)}
-  </p>
+  <ZoomBar {zoom} {range} plot={wrap} hint={t("ui.occurrence.chart.hint")} />
   <ul class="sr" id="{uid}-summary">
     {#each view.summary as line, i (i)}
       <li>{line}</li>
@@ -224,10 +300,16 @@
     gap: 14px;
     padding-bottom: 10px;
     border-radius: 8px;
-    outline-offset: 6px;
   }
+  /* Keyboard focus shows as the readout at the moment, not as a ring. */
   .plots:focus-visible {
-    outline: 2px solid var(--ink);
+    outline: none;
+  }
+  .plots.pan {
+    cursor: grab;
+  }
+  .plots.pan:active {
+    cursor: grabbing;
   }
   .lane {
     position: relative;
@@ -308,12 +390,6 @@
     margin-top: 2px;
     color: var(--ink2);
     font-weight: 600;
-  }
-  .readout {
-    margin: 10px 0 0;
-    min-height: 1.4em;
-    color: var(--ink2);
-    font-size: 13px;
   }
   @media (forced-colors: active) {
     .band {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import ChartTip from "../../components/ChartTip.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
@@ -32,7 +33,6 @@
   let cursor = $state<{ idx: number; left: number } | null>(null);
   let plot = $state<HTMLElement>();
   let plotWidth = $state(0);
-  let tipWidth = $state(0);
 
   const built = $derived(build(points));
   /** The stretch on screen, in seconds; a zoomed view keeps its place while new seconds arrive. */
@@ -74,14 +74,6 @@
     if (!row || xs.length === 0) return null;
     return { row, ago: Math.round(xs[xs.length - 1] - xs[cursor.idx]), left: cursor.left };
   });
-
-  const tipLeft = $derived(
-    readout
-      ? readout.left + 14 + tipWidth > plotWidth
-        ? readout.left - 14 - tipWidth
-        : readout.left + 14
-      : 0,
-  );
 
   const summary = $derived(
     LANES.map((lane) => {
@@ -212,21 +204,17 @@
     >
       <div class="canvas" style:height="{HEIGHT}px" bind:this={host}></div>
       {#if readout}
-        <div class="tip" style:left="{tipLeft}px" bind:clientWidth={tipWidth}>
-          <b>{ago(readout.ago)}</b>
-          <div class="rows">
-            {#each LANES as lane (lane.key)}
-              <span>
-                <span
-                  class="state-dot"
-                  style:background="var(--{STATE_TOKEN[readout.row.lanes[lane.key]]})"
-                ></span>
-                {t(`ui.now.lane.${lane.key}`)}
-                <b>{value(readout.row, lane)}</b>
-              </span>
-            {/each}
-          </div>
-        </div>
+        <ChartTip
+          left={readout.left}
+          bound={plotWidth}
+          heading={ago(readout.ago)}
+          rows={LANES.map((lane) => ({
+            key: lane.key,
+            label: t(`ui.now.lane.${lane.key}`),
+            value: value(readout.row, lane),
+            dot: `var(--${STATE_TOKEN[readout.row.lanes[lane.key]]})`,
+          }))}
+        />
       {/if}
       <div class="axis" style:margin-right="{RIGHT}px" aria-hidden="true">
         {#if zoom.view}
@@ -338,34 +326,6 @@
   .canvas :global(.u-cursor-x) {
     border-right: 1px solid var(--ink3);
   }
-  .tip {
-    position: absolute;
-    top: 4px;
-    z-index: 3;
-    min-width: 210px;
-    max-width: 340px;
-    padding: 10px 12px;
-    background: var(--card);
-    border: 1px solid var(--stroke);
-    border-radius: 12px;
-    box-shadow: var(--shadow-float);
-    font-size: 13px;
-    pointer-events: none;
-  }
-  .tip > b {
-    font: 600 15px/1.3 var(--f);
-  }
-  .rows {
-    display: grid;
-    gap: 4px;
-    margin-top: 6px;
-    color: var(--ink2);
-  }
-  .rows b {
-    margin-left: 2px;
-    color: var(--ink);
-    font-weight: 600;
-  }
   .axis {
     position: relative;
     height: 22px;
@@ -410,9 +370,6 @@
   @media (forced-colors: active) {
     .live i {
       forced-color-adjust: none;
-    }
-    .tip {
-      border-color: CanvasText;
     }
   }
 </style>

@@ -472,7 +472,7 @@
   "ui.occurrence.chart.summary.event": "{event} at {time}.",
   "ui.occurrence.chart.label": "Chart of the window around the occurrence",
   "ui.occurrence.chart.keys": "Arrow keys move one second, with Shift ten; Home and End go to the ends; Esc clears.",
-  "ui.occurrence.chart.hint": "Hover or use the arrow keys to read each second.",
+  "ui.occurrence.chart.hint": "Hover or use the arrow keys to read each second · Ctrl + wheel to zoom · drag to move",
   "ui.occurrence.chart.none": "no reading",
   "ui.occurrence.lane.cpu": "Processor",
   "ui.occurrence.lane.mem": "Memory in use",

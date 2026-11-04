@@ -472,7 +472,7 @@
   "ui.occurrence.chart.summary.event": "{event} às {time}.",
   "ui.occurrence.chart.label": "Gráfico da janela em volta da ocorrência",
   "ui.occurrence.chart.keys": "As setas andam um segundo, com Shift dez; Home e End vão às pontas; Esc limpa.",
-  "ui.occurrence.chart.hint": "Passe o mouse ou use as setas para ler cada segundo.",
+  "ui.occurrence.chart.hint": "Passe o mouse ou use as setas para ler cada segundo · Ctrl + roda para dar zoom · arraste para mover",
   "ui.occurrence.chart.none": "sem leitura",
   "ui.occurrence.lane.cpu": "Processador",
   "ui.occurrence.lane.mem": "Memória em uso",

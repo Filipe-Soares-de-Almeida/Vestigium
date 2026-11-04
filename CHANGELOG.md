@@ -154,6 +154,9 @@ How to use this file:
 - Holding Ctrl on the Now screen pauses it on the second it was pressed, like Task Manager: the
   chart, its readings and the program list stay still while you look, and letting go returns to
   live without losing a second. Switching to another window also lets go.
+- The chart around an occurrence shows each second's values under the pointer, as the Now chart
+  does, and zooms the same way: Ctrl and the wheel, + and −, dragging, and a button to see it all
+  again.
 
 ### Changed
 
@@ -186,6 +189,8 @@ How to use this file:
   everything again. A zoomed live chart stays where it is while new seconds arrive.
 - Durations of a second or more now read in seconds ("1,01 s") instead of thousands of milliseconds
   ("1.008 ms"), which looked like one millisecond in Portuguese.
+- Moving to the chart around an occurrence with the keyboard shows the reading at the moment it
+  happened instead of a ring around the chart.
 
 ### Fixed
 
