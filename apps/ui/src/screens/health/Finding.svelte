@@ -40,9 +40,10 @@
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
   const DAY_MS = 86_400_000;
+  const midnight = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
   /** What the point measured when it opened, to compare with now; none while it opened today. */
   const then = $derived.by(() => {
-    const days = Math.floor((Date.now() - finding.opened_ms) / DAY_MS);
+    const days = Math.round((midnight(Date.now()) - midnight(finding.opened_ms)) / DAY_MS);
     if (!finding.first_value || days < 1) return null;
     return {
       label: tn("ui.health.then", days, { date: formatDayShort(finding.opened_ms) }),
