@@ -17,6 +17,8 @@
 
   "ui.common.loading": "Carregando…",
   "ui.common.retry": "Tentar de novo",
+  "ui.common.back_to": "Voltar para {place}",
+  "ui.common.back_to.tip": "Voltar para {place} (Alt+←)",
   "ui.common.error.title": "Algo deu errado",
   "ui.common.error.agent_stopped": "O Vestigium não está em execução.",
   "ui.common.error.mismatch": "Esta janela e o Vestigium em execução são de versões diferentes.",

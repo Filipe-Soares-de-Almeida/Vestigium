@@ -3,6 +3,7 @@
 
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
+  import LevelHead from "../components/LevelHead.svelte";
   import Loading from "../components/Loading.svelte";
   import Steps from "../components/Steps.svelte";
   import { marks } from "../lib/api";
@@ -65,11 +66,11 @@
   }
 </script>
 
-<nav class="crumb" aria-label={t("ui.captures.path")}>
-  <a href={href.captures()}>{t("ui.shell.nav.captures")}</a>
-  <Icon name="chevron" />
-  <span aria-current="page">{view?.crumb ?? t("ui.captures.crumb")}</span>
-</nav>
+<LevelHead
+  parent={{ href: href.captures(), name: t("ui.shell.nav.captures") }}
+  current={view?.crumb ?? t("ui.captures.crumb")}
+  label={t("ui.captures.path")}
+/>
 
 {#if failure !== null}
   <div class="failure">
@@ -210,26 +211,6 @@
 {/if}
 
 <style>
-  .crumb {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font: 600 28px/1.25 var(--fd);
-    letter-spacing: -0.005em;
-  }
-  .crumb a {
-    color: var(--ink2);
-    text-decoration: none;
-  }
-  .crumb a:hover {
-    color: var(--ink);
-  }
-  .crumb :global(svg) {
-    width: 16px;
-    height: 16px;
-    color: var(--ink3);
-  }
   .head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

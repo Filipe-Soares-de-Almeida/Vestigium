@@ -2,6 +2,7 @@
   import ConcernMark from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
+  import LevelHead from "../components/LevelHead.svelte";
   import Loading from "../components/Loading.svelte";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
@@ -30,11 +31,11 @@
 </script>
 
 {#if area}
-  <nav class="crumb" aria-label={t("ui.occurrence.path")}>
-    <a href={href.health()}>{t("ui.health.title")}</a>
-    <Icon name="chevron" />
-    <span aria-current="page">{t(`ui.health.area.${area.id}`)}</span>
-  </nav>
+  <LevelHead
+    parent={{ href: href.health(), name: t("ui.health.title") }}
+    current={t(`ui.health.area.${area.id}`)}
+    label={t("ui.occurrence.path")}
+  />
   <h1 class="sr">{t(`ui.health.area.${area.id}`)}</h1>
 {:else}
   <h1>{t("ui.health.title")}</h1>
@@ -120,26 +121,6 @@
 {/if}
 
 <style>
-  .crumb {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font: 600 28px/1.25 var(--fd);
-    letter-spacing: -0.005em;
-  }
-  .crumb a {
-    color: var(--ink2);
-    text-decoration: none;
-  }
-  .crumb a:hover {
-    color: var(--ink);
-  }
-  .crumb :global(svg) {
-    width: 16px;
-    height: 16px;
-    color: var(--ink3);
-  }
   .gap {
     margin-top: 14px;
   }

@@ -3,6 +3,7 @@
 
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
+  import LevelHead from "../components/LevelHead.svelte";
   import Loading from "../components/Loading.svelte";
   import Steps from "../components/Steps.svelte";
   import { occurrence } from "../lib/api";
@@ -71,11 +72,11 @@
   </ul>
 {/snippet}
 
-<nav class="crumb" aria-label={t("ui.occurrence.path")}>
-  <a href={href.today()}>{t("ui.shell.nav.today")}</a>
-  <Icon name="chevron" />
-  <span aria-current="page">{view?.crumb ?? t("ui.occurrence.crumb")}</span>
-</nav>
+<LevelHead
+  parent={{ href: href.today(), name: t("ui.shell.nav.today") }}
+  current={view?.crumb ?? t("ui.occurrence.crumb")}
+  label={t("ui.occurrence.path")}
+/>
 
 {#if failure !== null}
   <div class="failure">
@@ -223,26 +224,6 @@
   }
   .test-note :global(svg) {
     flex: none;
-  }
-  .crumb {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    font: 600 28px/1.25 var(--fd);
-    letter-spacing: -0.005em;
-  }
-  .crumb a {
-    color: var(--ink2);
-    text-decoration: none;
-  }
-  .crumb a:hover {
-    color: var(--ink);
-  }
-  .crumb :global(svg) {
-    width: 16px;
-    height: 16px;
-    color: var(--ink3);
   }
   .head {
     display: grid;

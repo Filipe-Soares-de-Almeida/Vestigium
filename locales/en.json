@@ -17,6 +17,8 @@
 
   "ui.common.loading": "Loading…",
   "ui.common.retry": "Try again",
+  "ui.common.back_to": "Back to {place}",
+  "ui.common.back_to.tip": "Back to {place} (Alt+←)",
   "ui.common.error.title": "Something went wrong",
   "ui.common.error.agent_stopped": "Vestigium is not running.",
   "ui.common.error.mismatch": "This window and the running Vestigium are different versions.",
