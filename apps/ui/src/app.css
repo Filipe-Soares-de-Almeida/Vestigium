@@ -337,6 +337,32 @@ th.fill {
   }
 }
 
+/* On a screen that holds still, `.panes` fills the height and each `.scrolls` pane scrolls inside. */
+main.still .panes {
+  flex: 1 1 auto;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+main.still .panes > .scrolls {
+  max-height: 100%;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+@container content (max-width: 720px) {
+  main.still > .screen {
+    overflow: auto;
+  }
+  main.still .panes {
+    flex: none;
+    grid-template-rows: none;
+  }
+  main.still .panes > .scrolls {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 .screen {
   animation: enter 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
 }

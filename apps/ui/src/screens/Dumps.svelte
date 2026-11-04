@@ -92,8 +92,8 @@
   <p class="lede">
     {#each lede(list, dumps.dto, level) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
   </p>
-  <div class="split">
-    <div class="stack">
+  <div class="split panes">
+    <div class="stack scrolls">
       {#each GROUPS as group (group)}
         {@const members = shown.filter((e) => e.group === group)}
         {#if members.length}
@@ -118,7 +118,7 @@
       {/if}
     </div>
 
-    <div class="stack">
+    <div class="stack scrolls">
       {#if parts.length}
         <section class="card space" aria-labelledby="space-title">
           <h2 id="space-title" class="sr">{t("ui.dumps.space.title")}</h2>

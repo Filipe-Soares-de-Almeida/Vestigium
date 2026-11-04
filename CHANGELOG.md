@@ -196,6 +196,8 @@ How to use this file:
   own switch.
 - "What to do" in reports, captures, Health findings and dumps is a numbered list of steps instead
   of boxes to tick.
+- On Optimizations and Dumps the page holds still: the long list and the detail each scroll inside
+  their own column, as on Tests, so the title and the action bar stay in view.
 
 ### Fixed
 

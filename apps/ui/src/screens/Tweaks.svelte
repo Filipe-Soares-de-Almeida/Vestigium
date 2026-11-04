@@ -32,6 +32,14 @@
 
   let { key }: { key: string | null } = $props();
 
+  let detail = $state<HTMLElement>();
+
+  // Another tweak opens at the top of its detail.
+  $effect(() => {
+    void key;
+    detail?.scrollTo(0, 0);
+  });
+
   const MARK: Record<Shown, "Attention" | "Unknown" | "Ok" | "Closed"> = {
     signal: "Attention",
     quiet: "Unknown",
@@ -199,8 +207,8 @@
     {/if}
   </p>
 
-  <div class="pane2">
-    <div class="stack">
+  <div class="pane2 panes">
+    <div class="stack scrolls">
       <section class="card list" aria-label={t("ui.tweaks.list")}>
         {@render group(t("ui.tweaks.group.signal"), withSignal)}
         {@render group(t("ui.tweaks.group.quiet"), quiet)}
@@ -222,7 +230,7 @@
       {@const change = changeOf(current, current.changes, level)}
       {@const rows = rowsOf(current)}
       {@const holding = inPlace(current, history)}
-      <section class="card detail" aria-labelledby="tweak-title">
+      <section class="card detail scrolls" aria-labelledby="tweak-title" bind:this={detail}>
         <div class="head">
           <span
             class="icochip"

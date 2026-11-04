@@ -29,6 +29,9 @@
   import Tweaks from "./screens/Tweaks.svelte";
 
   let content: HTMLElement;
+  /** Screens whose page holds still while their panes scroll inside. */
+  const STILL = new Set(["tests", "tweaks", "dumps"]);
+
   let main: HTMLElement;
   let shown = "";
 
@@ -102,7 +105,7 @@
   </header>
   <NavPane />
   <div class="content" bind:this={content}>
-    <main id="main" tabindex="-1" bind:this={main} class:still={router.current.screen === "tests"}>
+    <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
       {#if app.failure !== null}
         <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
       {:else if app.loading}
