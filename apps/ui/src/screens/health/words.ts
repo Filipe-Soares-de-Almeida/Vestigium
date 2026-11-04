@@ -99,13 +99,17 @@ export function valueText(kind: FindingKind, value: Measure): string {
   return plainMeasure(value);
 }
 
+/** What a healthy PC shows, named in the finding's own words: "no damaged area", "up to 60 s". */
 function referenceText(kind: FindingKind, reference: Reference): string {
   if ("AtMost" in reference) {
     const limit = reference.AtMost;
-    if ("Count" in limit && limit.Count === 0) return k("ref.none");
+    if ("Count" in limit && limit.Count === 0) return valueText(kind, limit);
     return k("ref.at_most", { value: "Count" in limit ? valueText(kind, limit) : plainMeasure(limit) });
   }
-  if ("AtLeast" in reference) return k("ref.at_least", { value: plainMeasure(reference.AtLeast) });
+  if ("AtLeast" in reference) {
+    const limit = reference.AtLeast;
+    return k("ref.at_least", { value: "Count" in limit ? valueText(kind, limit) : plainMeasure(limit) });
+  }
   return plainMeasure(reference.Is);
 }
 

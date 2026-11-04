@@ -291,3 +291,7 @@ How to use this file:
 - A recommended tweak has a mark of its own instead of Health's warning triangle, and a screen
   reader no longer hears two states in a row ("Attention Recommended") on Optimizations, Tests and
   the side menu.
+- A Health finding no longer reads "Healthy: none", which looked like a disk with no good part
+  left: it says what a healthy PC shows in the finding's own words ("On a healthy PC: no damaged
+  area"). Counts that named nothing ("7 in 30 days") now name what they count, and the crash dump
+  setting reads "No dump" instead of a bare "None".
