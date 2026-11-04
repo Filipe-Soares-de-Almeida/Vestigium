@@ -230,6 +230,8 @@ How to use this file:
   scheduling the memory diagnostic, reading a whole disk and checking a volume. The permission
   reads the same everywhere, "Asks for administrator permission", and "Read only" has an eye of
   its own.
+- The progress bar of a running test slides its fill instead of resizing it, so updating it no
+  longer makes the page lay itself out again.
 
 ### Fixed
 

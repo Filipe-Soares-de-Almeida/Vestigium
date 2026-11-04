@@ -274,7 +274,7 @@
         {/if}
       </div>
       <div class="prog" class:indeterminate={live.frac === null} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={live.frac === null ? undefined : Math.round(live.frac * 100)}>
-        <i style:width="{(live.frac ?? 0.3) * 100}%"></i>
+        <i style:transform={live.frac === null ? undefined : `translateX(${(live.frac - 1) * 100}%)`}></i>
       </div>
       {#if live.facts.length}
         <p class="facts-line" class:bad={live.bad}>{#each live.facts as f, i (i)}<span>{f}</span>{/each}</p>
@@ -580,7 +580,7 @@
     {#if live && runDev !== null && runDev !== chosen}
       <button type="button" class="strip" onclick={() => go(href.tests(deviceKey(runDev)))}>
         <ConcernMark mark="Running" word={false} /><b>{live.title}</b>
-        <span class="prog"><i style:width="{(live.frac ?? 0.3) * 100}%"></i></span>
+        <span class="prog"><i style:transform="translateX({((live.frac ?? 0.3) - 1) * 100}%)"></i></span>
         <span>{live.frac === null ? "" : formatPercent(live.frac * 100)}</span>
         <span class="go">{t("ui.tests.strip.open")}<Icon name="chevron" /></span>
       </button>
@@ -875,11 +875,14 @@
   .prog {
     height: 10px;
   }
+  /* The fill is the whole track slid in from the left, so progress moves without relayout. */
   .prog i {
+    width: 100%;
     background: var(--accent);
-    transition: width 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+    transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
   .prog.indeterminate i {
+    width: 30%;
     animation: slide 1.4s ease-in-out infinite;
   }
   @keyframes slide {
