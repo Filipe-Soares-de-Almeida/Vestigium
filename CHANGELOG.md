@@ -208,10 +208,8 @@ How to use this file:
   most 60 minutes. A long capture keeps a count of frame times rather than every frame, so a day
   of capturing stays light on memory; the numbers it reports are the same to a hundredth of a
   millisecond.
-- The bar on a Health finding names its stretches: the healthy one, and the one the value is in
-  (Attention or Critical), with a marker where the value sits. The link to Tests, Optimizations or
-  Dumps moved out of "What to do" into a row at the foot of the card that says what that screen
-  will show.
+- On a Health finding, the link to Tests, Optimizations or Dumps moved out of "What to do" into a
+  row at the foot of the card that says what that screen will show.
 - A Health area, an occurrence report and a capture report open with an arrow before their name
   that goes back to the level above (Health, Today or Captures); Alt+← and the mouse's back button
   do the same. The breadcrumb they had before is gone.
@@ -232,8 +230,8 @@ How to use this file:
   its own.
 - The progress bar of a running test slides its fill instead of resizing it, so updating it no
   longer makes the page lay itself out again.
-- A Health finding no longer draws a bar: it says the value now and what a healthy PC shows, in
-  one line ("Now: 1 damaged area · Healthy: none").
+- A Health finding no longer draws a bar under its text: it says the value now and what a healthy
+  PC shows, in one line ("Now: 1 damaged area · Healthy: none").
 
 ### Fixed
 
