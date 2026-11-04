@@ -241,7 +241,7 @@
     <div class="acts">
       <button type="button" class="btn" onclick={() => dialog?.close()}>{t("ui.dumps.delete.cancel")}</button>
       <button type="button" class="btn danger" onclick={() => void remove()}>
-        <Icon name="trash" />{t("ui.dumps.delete.confirm")}
+        <Icon name="shield" />{t("ui.dumps.delete.confirm")}
       </button>
     </div>
   </dialog>

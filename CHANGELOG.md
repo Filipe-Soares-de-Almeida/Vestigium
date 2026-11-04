@@ -225,6 +225,11 @@ How to use this file:
 - On Optimizations only the recommended tweaks can be chosen together; a tweak with no sign on
   this PC is applied on its own, from its detail. While some are chosen, the detail's button
   becomes a plain "Apply only this one", so one main Apply shows at a time.
+- The shield marks every button that opens the Windows permission prompt, and only those: the full
+  scan, reading and deleting dumps, applying or undoing a tweak that needs an administrator,
+  scheduling the memory diagnostic, reading a whole disk and checking a volume. The permission
+  reads the same everywhere, "Asks for administrator permission", and "Read only" has an eye of
+  its own.
 
 ### Fixed
 

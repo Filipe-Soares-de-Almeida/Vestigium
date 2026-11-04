@@ -1789,7 +1789,7 @@
   "ui.tests.result.clean": "No error",
   "ui.tests.result.failed": "Could not run",
   "ui.tests.result.stopped": "Stopped before the end",
-  "ui.tests.pill.permission": "Asks for permission",
+  "ui.tests.pill.permission": "Asks for administrator permission",
   "ui.tests.pill.restart": "Runs at restart",
   "ui.tests.pill.read_only": "Only reads",
   "ui.tests.diag.title": "Full Windows test",

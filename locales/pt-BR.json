@@ -1789,7 +1789,7 @@
   "ui.tests.result.clean": "Sem erro",
   "ui.tests.result.failed": "Não deu para rodar",
   "ui.tests.result.stopped": "Parado antes do fim",
-  "ui.tests.pill.permission": "Pede permissão",
+  "ui.tests.pill.permission": "Pede permissão de administrador",
   "ui.tests.pill.restart": "Roda no reinício",
   "ui.tests.pill.read_only": "Só lê",
   "ui.tests.diag.title": "Teste completo do Windows",

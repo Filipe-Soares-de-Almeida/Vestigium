@@ -14,7 +14,7 @@
 </script>
 
 <section class="card scan" aria-labelledby="scan-title">
-  <span class="icochip"><Icon name="shield" /></span>
+  <span class="icochip"><Icon name="health" /></span>
   <div class="body">
     <h2 id="scan-title">{t("ui.health.scan.title")}</h2>
     {#if health.phase === "running"}
@@ -39,6 +39,7 @@
           disabled={blocked}
           onclick={() => void health.scan()}
         >
+          <Icon name="shield" />
           {health.phase === "declined" || health.phase === "failed"
             ? t("ui.health.scan.again")
             : t("ui.health.scan.start")}

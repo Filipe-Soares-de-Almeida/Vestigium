@@ -323,9 +323,9 @@
     {/if}
     <div class="acts">
       <button type="button" class="btn" class:accent={!diag && !waiting && quick !== null} disabled={busy} onclick={() => void diagnostic()}>
-        <Icon name="restart" />{t(diag || waiting ? "ui.tests.diag.again" : "ui.tests.diag.start")}
+        <Icon name="shield" />{t(diag || waiting ? "ui.tests.diag.again" : "ui.tests.diag.start")}
       </button>
-      <span class="pills">{@render pills([["lock", t("ui.tests.pill.permission")], ["restart", t("ui.tests.pill.restart")]])}</span>
+      <span class="pills">{@render pills([["shield", t("ui.tests.pill.permission")], ["restart", t("ui.tests.pill.restart")]])}</span>
     </div>
   </div>
 
@@ -469,13 +469,13 @@
     <div class="acts">
       {#if resumable && scan}
         <button type="button" class="btn accent" disabled={busy} onclick={() => void hwtests.surface(d.number, Math.floor(scan.to_bytes / 1048576)).then(started)}>
-          <Icon name="resume" />{t("ui.tests.surface.resume", { share: shareOf(scan.to_bytes, scan.disk_bytes) })}
+          <Icon name="shield" />{t("ui.tests.surface.resume", { share: shareOf(scan.to_bytes, scan.disk_bytes) })}
         </button>
       {/if}
       <button type="button" class="btn" class:accent={!scanRun} disabled={busy} onclick={() => void hwtests.surface(d.number, 0).then(started)}>
-        <Icon name="scan" />{t(resumable ? "ui.tests.surface.restart" : "ui.tests.surface.start")}
+        <Icon name="shield" />{t(resumable ? "ui.tests.surface.restart" : "ui.tests.surface.start")}
       </button>
-      <span class="pills">{@render pills([["clock", surfaceEstimate(d)], ["lock", t("ui.tests.pill.permission")], ["shield", t("ui.tests.pill.read_only")]])}</span>
+      <span class="pills">{@render pills([["clock", surfaceEstimate(d)], ["shield", t("ui.tests.pill.permission")], ["eye", t("ui.tests.pill.read_only")]])}</span>
     </div>
   </div>
 
@@ -497,8 +497,8 @@
           <p class="muted">{t("ui.tests.check.never")}</p>
         {/if}
         <div class="acts">
-          <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="fsck" />{t("ui.tests.check.start")}</button>
-          <span class="pills">{@render pills([["clock", t("ui.tests.check.length")], ["lock", t("ui.tests.pill.permission")]])}</span>
+          <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="shield" />{t("ui.tests.check.start")}</button>
+          <span class="pills">{@render pills([["clock", t("ui.tests.check.length")], ["shield", t("ui.tests.pill.permission")]])}</span>
         </div>
       {/if}
     </div>

@@ -301,7 +301,7 @@
               <dt>{t("ui.tweaks.fact.when")}</dt>
               <dd><span class="pill2"><Icon name={current.takes === "Now" ? "clock" : "restart"} />{t(`ui.tweaks.takes.${current.takes}`)}</span></dd>
               <dt>{t("ui.tweaks.fact.permission")}</dt>
-              <dd><span class="pill2"><Icon name={current.applier === "Elevated" ? "lock" : "person"} />{t(`ui.tweaks.applier.${current.applier}`)}</span></dd>
+              <dd><span class="pill2"><Icon name={current.applier === "Elevated" ? "shield" : "person"} />{t(`ui.tweaks.applier.${current.applier}`)}</span></dd>
               <dt>{t("ui.tweaks.fact.cost")}</dt>
               <dd>{risk(current)}</dd>
             {/if}
@@ -408,7 +408,7 @@
             <b>{name(a, "Simple")}</b>
             {#if c}<span class="chg">{c.from} → {c.to}</span>{/if}
             <span class="pills">
-              <span class="pill2"><Icon name={a.applier === "Elevated" ? "lock" : "person"} />{t(`ui.tweaks.applier.${a.applier}`)}</span>
+              <span class="pill2"><Icon name={a.applier === "Elevated" ? "shield" : "person"} />{t(`ui.tweaks.applier.${a.applier}`)}</span>
               <span class="pill2"><Icon name={a.takes === "Now" ? "clock" : "restart"} />{t(`ui.tweaks.takes.${a.takes}`)}</span>
             </span>
           </li>
@@ -417,7 +417,7 @@
       <p>{admin ? `${t("ui.tweaks.ask.point")} ` : ""}{t("ui.tweaks.ask.kept")}{admin ? ` ${t("ui.tweaks.ask.prompt")}` : ""}</p>
       <div class="acts">
         <button type="button" class="btn" onclick={close}>{t("ui.tweaks.cancel")}</button>
-        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name="tweaks" />{t("ui.tweaks.bar.apply")}</button>
+        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name={admin ? "shield" : "tweaks"} />{t("ui.tweaks.bar.apply")}</button>
       </div>
     {:else if asking?.kind === "no_point"}
       <h2 id="ask-title">{t("ui.tweaks.no_point.title")}</h2>
@@ -434,7 +434,7 @@
       </p>
       <div class="acts">
         <button type="button" class="btn" onclick={close}>{t("ui.tweaks.cancel")}</button>
-        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name="undo" />{t("ui.tweaks.undo")}</button>
+        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name={asking.row.applier === "Elevated" ? "shield" : "undo"} />{t("ui.tweaks.undo")}</button>
       </div>
     {/if}
   </dialog>
