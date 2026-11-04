@@ -10,6 +10,7 @@
   import { t } from "../lib/i18n.svelte";
   import type { LivePoint, NowFrame, UiError } from "../lib/types";
   import { whileVisible } from "../lib/visibility";
+  import AllPrograms from "./now/AllPrograms.svelte";
   import HungWindows from "./now/HungWindows.svelte";
   import LastOccurrence from "./now/LastOccurrence.svelte";
   import { Live, type Hung } from "./now/live.svelte";
@@ -30,6 +31,7 @@
     nowMs: number;
   } | null>(null);
   const view = $derived(frozen ?? live);
+  let listing = $state(false);
   let failure = $state<unknown>(null);
   let attempt = $state(0);
   /** What the polite live region last said. */
@@ -112,10 +114,17 @@
   <p class="sr" aria-live="polite">{said}</p>
   <TenMinutes points={view.points} paused={frozen !== null} onsay={(text) => (said = text)} />
   <div class="split">
-    <TopPrograms top={view.frame?.top ?? null} />
+    <TopPrograms
+      top={view.frame?.top ?? null}
+      total={view.frame?.programs?.entries.length ?? 0}
+      onopen={() => (listing = true)}
+    />
     <div class="stack">
       <HungWindows hung={view.hung} nowMs={view.nowMs} />
       <LastOccurrence latest={view.frame?.latest ?? null} {since} />
     </div>
   </div>
+  {#if listing}
+    <AllPrograms programs={view.frame?.programs ?? null} paused={frozen !== null} onclose={() => (listing = false)} />
+  {/if}
 {/if}

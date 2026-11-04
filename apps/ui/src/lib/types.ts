@@ -411,6 +411,8 @@ export interface NowFrame {
   sample: Sample | null;
   /** The busiest programs, each summing its processes under the pid of the busiest one. */
   top: ProcessTop | null;
+  /** Every program running, summed the same way, busiest on the processor first. */
+  programs: ProcessTop | null;
   hung: HungWindow[];
   latest: OccurrenceSummary | null;
   /** CPU, disk and memory pressure episodes under way; hints are left out. */

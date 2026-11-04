@@ -4,14 +4,19 @@
   import type { ProcessTop } from "../../lib/types";
   import { formatBytes, formatRate } from "./lanes";
 
-  let { top }: { top: ProcessTop | null } = $props();
+  let { top, total, onopen }: { top: ProcessTop | null; total: number; onopen: () => void } = $props();
 
   // The watcher ranks the busiest programs by processor, each summing its processes; five show.
   const rows = $derived(top?.entries.slice(0, 5) ?? []);
 </script>
 
 <section class="card top" aria-labelledby="top-title">
-  <h2 id="top-title">{t("ui.now.top.title")}</h2>
+  <div class="head">
+    <h2 id="top-title">{t("ui.now.top.title")}</h2>
+    {#if total > 0}
+      <button type="button" class="more" onclick={onopen}>{t("ui.now.top.all", { count: total })}</button>
+    {/if}
+  </div>
   {#if rows.length === 0}
     <p class="muted">{t("ui.now.top.waiting")}</p>
   {:else}
@@ -42,9 +47,30 @@
   .top {
     container: top / inline-size;
   }
+  .head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 0 8px;
+  }
   h2 {
     font: 600 15px/1.3 var(--f);
-    margin: 0 0 8px;
+    margin: 0;
+  }
+  .more {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    background: var(--card);
+    color: var(--ink);
+    font: 600 13px/1 var(--f);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .more:hover {
+    background: var(--card2);
   }
   p {
     margin: 0;

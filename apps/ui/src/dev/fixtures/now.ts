@@ -127,6 +127,17 @@ function top(): ProcessSample[] {
   return programs(list);
 }
 
+/** Every program, as the watcher lists them for the full table: the ranking plus a long quiet tail. */
+const QUIET = ["svchost.exe", "RuntimeBroker.exe", "dllhost.exe", "conhost.exe", "SearchHost.exe", "sihost.exe",
+  "ctfmon.exe", "audiodg.exe", "fontdrvhost.exe", "WmiPrvSE.exe", "TextInputHost.exe", "Widgets.exe",
+  "OneDrive.exe", "Spotify.exe", "Code.exe", "node.exe", "python.exe", "git.exe", "WindowsTerminal.exe", "Notepad.exe"];
+function everything(ranking: ProcessSample[]): ProcessSample[] {
+  const tail = Array.from({ length: 140 }, (_, i) =>
+    process(20_000 + i * 4, i < QUIET.length ? QUIET[i] : `helper${i}.exe`, 0.3 / (i + 1), 0.4 / (i + 2), i % 9 === 0 ? 0.05 : 0),
+  );
+  return [...ranking, ...tail].sort((a, b) => b.cpu_pct - a.cpu_pct);
+}
+
 /** The watcher's rule, restated for the mock: one row per program, its processes summed. */
 function programs(list: ProcessSample[]): ProcessSample[] {
   const byName = new Map<string, ProcessSample>();
@@ -225,6 +236,7 @@ export const handlers: Record<string, Handler> = {
           ],
         },
         top: ticks < 3 && firstUse ? null : { ts_ms: now, entries: ranking ?? [] },
+        programs: ticks < 3 && firstUse ? null : { ts_ms: now, entries: everything(ranking ?? []) },
         hung: scenario === "hung" && ticks >= 3 ? [{ pid: 8812, name: "Discord.exe" }] : [],
         latest,
         pressure,

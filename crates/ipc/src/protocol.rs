@@ -5,7 +5,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -126,6 +126,8 @@ pub struct NowFrame {
     pub sample: Option<Sample>,
     /// The busiest programs, each summing its processes under the pid of the busiest one.
     pub top: Option<ProcessTop>,
+    /// Every program running, summed the same way, busiest on the processor first.
+    pub programs: Option<ProcessTop>,
     /// Processes with a window not responding at the last check.
     pub hung: Vec<HungWindow>,
     /// The most recent occurrence stored.

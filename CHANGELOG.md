@@ -160,6 +160,9 @@ How to use this file:
 - Dumps and Optimizations have a box at the top of each group that chooses every item in it at
   once, and shows a dash while only some are chosen. The bar below still says how many and how
   much before anything is deleted or applied.
+- "Who is using the most" on the Now screen has a "See all" button that opens every program
+  running, live, up to 100 at a time: sort by any column, find one by name, hold Ctrl to pause it,
+  and close it with Esc or a click outside.
 
 ### Changed
 

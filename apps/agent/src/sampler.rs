@@ -39,6 +39,8 @@ const TOP_EVERY: usize = 5;
 /// Seconds between two checks for windows that stopped responding.
 const HANG_EVERY: usize = 2;
 const TOP_PER_METRIC: usize = 5;
+/// Programs the live screen can list in full, busiest first.
+const PROGRAMS_LISTED: usize = 300;
 const SNAPSHOT_BUFFER: usize = 512 * 1024;
 /// Ticks after a start or a resume before idle pages are handed back to Windows.
 const TRIM_AFTER_TICKS: usize = 10;
@@ -470,10 +472,20 @@ impl Sampler {
                 &self.gpu_by_pid,
             );
             // The live screen ranks programs; detection and history keep each process.
-            lock(&self.now).top = Some(ProcessTop {
-                ts_ms,
-                entries: heaviest(programs(&rates), TOP_PER_METRIC),
-            });
+            let mut all = programs(&rates);
+            {
+                let mut now = lock(&self.now);
+                now.top = Some(ProcessTop {
+                    ts_ms,
+                    entries: heaviest(all.clone(), TOP_PER_METRIC),
+                });
+                all.sort_by(|a, b| b.cpu_pct.total_cmp(&a.cpu_pct));
+                all.truncate(PROGRAMS_LISTED);
+                now.programs = Some(ProcessTop {
+                    ts_ms,
+                    entries: all,
+                });
+            }
             let top = ProcessTop {
                 ts_ms,
                 entries: heaviest(rates, TOP_PER_METRIC),
@@ -999,7 +1011,10 @@ mod tests {
         let running = start(dir.path(), NEVER_DUE);
 
         let ranked = wait_until(PATIENCE, || lock(&running.now).top.is_some());
-        let top = lock(&running.now).top.clone();
+        let (top, programs) = {
+            let now = lock(&running.now);
+            (now.top.clone(), now.programs.clone())
+        };
         stop(&running);
 
         assert!(ranked, "no ranking within the patience");
@@ -1008,6 +1023,9 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), listed, "each program once");
+        let all = programs.expect("the full list comes with the ranking").entries;
+        assert!(all.len() >= listed && all.len() <= PROGRAMS_LISTED);
+        assert!(all.windows(2).all(|w| w[0].cpu_pct >= w[1].cpu_pct), "busiest first");
     }
 
     #[test]
