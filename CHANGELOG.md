@@ -215,6 +215,8 @@ How to use this file:
 - A Health area, an occurrence report and a capture report open with an arrow before their name
   that goes back to the level above (Health, Today or Captures); Alt+← and the mouse's back button
   do the same. The breadcrumb they had before is gone.
+- The side menu groups its screens by what you want to do: Follow (Today, Now), Look after the PC
+  (Health, Tests, Optimizations) and Investigate (Dumps, Captures).
 
 ### Fixed
 

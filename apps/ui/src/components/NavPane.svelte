@@ -31,53 +31,61 @@
 </script>
 
 <nav class="pane" aria-label={t("ui.shell.nav.label")}>
-  <a class="nav" href={href.today()} aria-current={router.section === "today" ? "page" : undefined}>
-    <Icon name="today" />{t("ui.shell.nav.today")}
-  </a>
-  <a class="nav" href={href.now()} aria-current={router.section === "now" ? "page" : undefined}>
-    <Icon name="now" />{t("ui.shell.nav.now")}
-  </a>
-  <div class="sep" role="separator"></div>
-  <a
-    class="nav"
-    href={href.captures()}
-    aria-current={router.section === "captures" ? "page" : undefined}
-  >
-    <Icon name="captures" />{t("ui.shell.nav.captures")}
-  </a>
-  <a class="nav" href={href.health()} aria-current={router.section === "health" ? "page" : undefined}>
-    <Icon name="health" />{t("ui.shell.nav.health")}
-    {#if open}
-      <span class="count">
-        {#if health.critical}<ConcernMark mark="Critical" word={false} />{/if}
-        <span aria-hidden="true">{open}</span>
-        <span class="sr">
-          {tn("ui.shell.nav.health.open", open)}{health.critical
-            ? `, ${tn("ui.shell.nav.health.critical", health.critical)}`
-            : ""}
+  <div class="group" role="group" aria-labelledby="nav-follow">
+    <p class="head" id="nav-follow">{t("ui.shell.nav.group.follow")}</p>
+    <a class="nav" href={href.today()} aria-current={router.section === "today" ? "page" : undefined}>
+      <Icon name="today" />{t("ui.shell.nav.today")}
+    </a>
+    <a class="nav" href={href.now()} aria-current={router.section === "now" ? "page" : undefined}>
+      <Icon name="now" />{t("ui.shell.nav.now")}
+    </a>
+  </div>
+  <div class="group" role="group" aria-labelledby="nav-care">
+    <p class="head" id="nav-care">{t("ui.shell.nav.group.care")}</p>
+    <a class="nav" href={href.health()} aria-current={router.section === "health" ? "page" : undefined}>
+      <Icon name="health" />{t("ui.shell.nav.health")}
+      {#if open}
+        <span class="count">
+          {#if health.critical}<ConcernMark mark="Critical" word={false} />{/if}
+          <span aria-hidden="true">{open}</span>
+          <span class="sr">
+            {tn("ui.shell.nav.health.open", open)}{health.critical
+              ? `, ${tn("ui.shell.nav.health.critical", health.critical)}`
+              : ""}
+          </span>
         </span>
-      </span>
-    {/if}
-  </a>
-  <a class="nav" href={href.dumps()} aria-current={router.section === "dumps" ? "page" : undefined}>
-    <Icon name="dumps" />{t("ui.shell.nav.dumps")}
-    {#if space}<span class="size">{formatBytes(space)}</span>{/if}
-  </a>
-  <a class="nav" href={href.tweaks()} aria-current={router.section === "tweaks" ? "page" : undefined}>
-    <Icon name="tweaks" />{t("ui.shell.nav.tweaks")}
-    {#if tweaks.recommended}
-      <span class="count">
-        <span aria-hidden="true">{tweaks.recommended}</span>
-        <span class="sr">{tn("ui.shell.nav.tweaks.signals", tweaks.recommended)}</span>
-      </span>
-    {/if}
-  </a>
-  <a class="nav" href={href.tests()} aria-current={router.section === "tests" ? "page" : undefined}>
-    <Icon name="tests" />{t("ui.shell.nav.tests")}
-    {#if hwtests.running || hwtests.dto?.scan}
-      <span class="count"><ConcernMark mark="Running" word={false} /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
-    {/if}
-  </a>
+      {/if}
+    </a>
+    <a class="nav" href={href.tests()} aria-current={router.section === "tests" ? "page" : undefined}>
+      <Icon name="tests" />{t("ui.shell.nav.tests")}
+      {#if hwtests.running || hwtests.dto?.scan}
+        <span class="count"><ConcernMark mark="Running" word={false} /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
+      {/if}
+    </a>
+    <a class="nav" href={href.tweaks()} aria-current={router.section === "tweaks" ? "page" : undefined}>
+      <Icon name="tweaks" />{t("ui.shell.nav.tweaks")}
+      {#if tweaks.recommended}
+        <span class="count">
+          <span aria-hidden="true">{tweaks.recommended}</span>
+          <span class="sr">{tn("ui.shell.nav.tweaks.signals", tweaks.recommended)}</span>
+        </span>
+      {/if}
+    </a>
+  </div>
+  <div class="group" role="group" aria-labelledby="nav-investigate">
+    <p class="head" id="nav-investigate">{t("ui.shell.nav.group.investigate")}</p>
+    <a class="nav" href={href.dumps()} aria-current={router.section === "dumps" ? "page" : undefined}>
+      <Icon name="dumps" />{t("ui.shell.nav.dumps")}
+      {#if space}<span class="size">{formatBytes(space)}</span>{/if}
+    </a>
+    <a
+      class="nav"
+      href={href.captures()}
+      aria-current={router.section === "captures" ? "page" : undefined}
+    >
+      <Icon name="captures" />{t("ui.shell.nav.captures")}
+    </a>
+  </div>
   <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
   <a
     class="nav"
@@ -154,10 +162,20 @@
     width: 12px;
     height: 12px;
   }
-  .sep {
+  .group {
+    display: flex;
     flex: none;
-    margin: 6px 10px;
-    border-top: 1px solid var(--stroke2);
+    flex-direction: column;
+    gap: 2px;
+  }
+  .group + .group {
+    margin-top: 10px;
+  }
+  .head {
+    margin: 0;
+    padding: 6px 12px 2px;
+    color: var(--ink3);
+    font: 600 12px/1.4 var(--f);
   }
   .foot {
     display: flex;

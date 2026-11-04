@@ -54,6 +54,9 @@
 
   "ui.shell.title": "Vestigium",
   "ui.shell.nav.label": "Navigation",
+  "ui.shell.nav.group.follow": "Follow",
+  "ui.shell.nav.group.care": "Look after the PC",
+  "ui.shell.nav.group.investigate": "Investigate",
   "ui.shell.nav.today": "Today",
   "ui.shell.nav.now": "Now",
   "ui.shell.nav.health": "Health",
