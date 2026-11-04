@@ -35,7 +35,56 @@
   });
   const icon = $derived(areaOf(finding.kind).icon);
   const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
-  const pct = (x: number, max: number) => Math.max(0, Math.min(100, (x / max) * 100));
+  const clamp = (x: number) => Math.max(0, Math.min(100, x));
+  /** The healthy stretch never takes less of the bar than this, in percent, so it can be seen. */
+  const MIN_ZONE = 12;
+  /** The bar in two named stretches, healthy and not, and where the value sits on it. */
+  const scale = $derived.by(() => {
+    const r = view.ruler;
+    if (!r) return null;
+    const raw = (x: number) => (x / r.max) * 100;
+    const span = (from: number, to: number) => Math.max(1e-9, to - from);
+    if (r.okFrom === 0) {
+      const end = Math.min(Math.max(raw(r.okTo), MIN_ZONE), 100 - MIN_ZONE);
+      const at =
+        r.value <= r.okTo
+          ? (r.value / span(0, r.okTo)) * end
+          : end + ((r.value - r.okTo) / span(r.okTo, r.max)) * (100 - end);
+      return { healthyFirst: true, cut: end, marker: clamp(at) };
+    }
+    const start = Math.max(Math.min(raw(r.okFrom), 100 - MIN_ZONE), MIN_ZONE);
+    const at =
+      r.value >= r.okFrom
+        ? start + ((r.value - r.okFrom) / span(r.okFrom, r.max)) * (100 - start)
+        : (r.value / span(0, r.okFrom)) * start;
+    return { healthyFirst: false, cut: start, marker: clamp(at) };
+  });
+  const outsideWord = $derived(
+    finding.concern === "Attention" || finding.concern === "Critical"
+      ? t(`ui.health.mark.${finding.concern}`)
+      : t("ui.health.ruler.outside"),
+  );
+  /** Where the point can be acted on elsewhere, each with a line on what that screen does. */
+  const actions = $derived.by(() => {
+    const out: { key: string; hint: string; label: string; href: string; icon: "tweaks" | "tests" | "dumps" }[] = [];
+    if (tweak) {
+      out.push({ key: "tweak", hint: t("ui.health.foot.tweak"), label: t("ui.health.see_tweak"), href: href.tweaks(keyOf(tweak)), icon: "tweaks" });
+    }
+    if (test) {
+      const memory = finding.kind === "HardwareErrors" || finding.kind === "MemoryTestErrors";
+      out.push({
+        key: "test",
+        hint: t(memory ? "ui.health.foot.test.memory" : "ui.health.foot.test.disk"),
+        label: t(memory ? "ui.health.see_test.memory" : "ui.health.see_test.disk"),
+        href: test,
+        icon: "tests",
+      });
+    }
+    if (finding.kind === "NoCrashDump") {
+      out.push({ key: "dump", hint: t("ui.health.foot.dump"), label: t("ui.health.see_dump_setting"), href: href.dumps(), icon: "dumps" });
+    }
+    return out;
+  });
 </script>
 
 <section class="card finding" aria-labelledby="finding-{finding.id}">
@@ -47,24 +96,30 @@
     </div>
   </div>
   <p class="why">{view.why}</p>
-  {#if view.ruler}
-    {@const r = view.ruler}
+  {#if scale}
+    {@const healthy = scale.healthyFirst ? { left: 0, width: scale.cut } : { left: scale.cut, width: 100 - scale.cut }}
+    {@const outside = scale.healthyFirst ? { left: scale.cut, width: 100 - scale.cut } : { left: 0, width: scale.cut }}
     <div
       class="ruler"
       role="img"
       aria-label={t("ui.health.ruler.label", { value: view.value, reference: view.reference })}
     >
-      <div class="bar">
-        <i
-          class="ok"
-          style:left="{pct(r.okFrom, r.max)}%"
-          style:width="{Math.max(pct(r.okTo, r.max) - pct(r.okFrom, r.max), 1.2)}%"
-        ></i>
-        <i class="val" style:left="{pct(r.value, r.max)}%"></i>
+      <p class="lab now" aria-hidden="true">{t("ui.health.ruler.now")} <b>{view.value}</b></p>
+      <div class="bar" aria-hidden="true">
+        <i class="zone ok" class:first={healthy.left === 0} style:left="{healthy.left}%" style:width="{healthy.width}%"></i>
+        <i class="zone out {tone}" class:first={outside.left === 0} style:left="{outside.left}%" style:width="{outside.width}%"></i>
+        <i class="val" style:left="{scale.marker}%"></i>
       </div>
-      <div class="lab" aria-hidden="true">
-        <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
-        <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
+      <div class="zones" aria-hidden="true" style:grid-template-columns={scale.healthyFirst
+          ? `minmax(max-content, ${healthy.width}fr) ${outside.width}fr`
+          : `${outside.width}fr minmax(max-content, ${healthy.width}fr)`}>
+        {#if scale.healthyFirst}
+          <span>{t("ui.health.ruler.healthy")} {view.reference}</span>
+          <span>{outsideWord}</span>
+        {:else}
+          <span>{outsideWord}</span>
+          <span class="end">{t("ui.health.ruler.healthy")} {view.reference}</span>
+        {/if}
       </div>
     </div>
   {:else}
@@ -92,20 +147,21 @@
       {:else}
         <p class="muted none">{t("ui.health.todo.none")}</p>
       {/if}
-      {#if tweak}
-        <p class="secure"><Icon name="tweaks" /><a href={href.tweaks(keyOf(tweak))}>{t("ui.health.see_tweak")}</a></p>
-      {/if}
-      {#if test}
-        <p class="secure"><Icon name="tests" /><a href={test}>{t(finding.kind === "HardwareErrors" || finding.kind === "MemoryTestErrors" ? "ui.health.see_test.memory" : "ui.health.see_test.disk")}</a></p>
-      {/if}
-      {#if finding.kind === "NoCrashDump"}
-        <p class="secure"><Icon name="dumps" /><a href={href.dumps()}>{t("ui.health.see_dump_setting")}</a></p>
-      {/if}
       {#if view.security}
         <p class="secure"><Icon name="shield" /><span>{t("ui.health.secure")}</span></p>
       {/if}
     </div>
   </div>
+  {#if actions.length}
+    <div class="foot">
+      {#each actions as action (action.key)}
+        <div class="act">
+          <p>{action.hint}</p>
+          <a class="btn" href={action.href}><Icon name={action.icon} />{action.label}</a>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -156,14 +212,50 @@
     top: 0;
     bottom: 0;
   }
-  .bar .ok {
-    background: color-mix(in srgb, var(--ink) 22%, transparent);
+  .bar {
+    overflow: visible;
+  }
+  .bar .zone {
+    border-radius: 0 999px 999px 0;
+  }
+  .bar .zone.first {
+    border-radius: 999px 0 0 999px;
+  }
+  .bar .zone.ok {
+    background: color-mix(in srgb, var(--ink3) 35%, transparent);
+  }
+  .bar .zone.out.press {
+    background: color-mix(in srgb, var(--press) 45%, transparent);
+  }
+  .bar .zone.out.freeze {
+    background: color-mix(in srgb, var(--freeze) 65%, transparent);
   }
   .bar .val {
+    top: -4px;
+    bottom: -4px;
     width: 4px;
     margin-left: -2px;
-    border-radius: 3px;
+    border-radius: 2px;
     background: var(--ink);
+    box-shadow: 0 0 0 2px var(--card);
+  }
+  .zones {
+    display: grid;
+    color: var(--ink2);
+    font-size: 12.5px;
+  }
+  .zones span {
+    white-space: nowrap;
+  }
+  .zones span + span {
+    padding-left: 12px;
+  }
+  .zones .end {
+    text-align: right;
+  }
+  .lab.now {
+    display: block;
+    margin: 0;
   }
   .lab {
     display: flex;
@@ -240,6 +332,28 @@
     flex: none;
     width: 16px;
     height: 16px;
+  }
+  .foot {
+    display: grid;
+    gap: 10px;
+    margin: 0 -18px -16px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--stroke2);
+    border-radius: 0 0 14px 14px;
+    background: color-mix(in srgb, var(--card2) 55%, transparent);
+  }
+  .act {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .act p {
+    margin: 0;
+    color: var(--ink2);
+    font-size: 13.5px;
+    line-height: 1.45;
   }
   @container content (max-width: 720px) {
     .two {

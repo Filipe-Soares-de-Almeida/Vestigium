@@ -205,6 +205,10 @@ How to use this file:
   most 60 minutes. A long capture keeps a count of frame times rather than every frame, so a day
   of capturing stays light on memory; the numbers it reports are the same to a hundredth of a
   millisecond.
+- The bar on a Health finding names its stretches: the healthy one, and the one the value is in
+  (Attention or Critical), with a marker where the value sits. The link to Tests, Optimizations or
+  Dumps moved out of "What to do" into a row at the foot of the card that says what that screen
+  will show.
 
 ### Fixed
 
