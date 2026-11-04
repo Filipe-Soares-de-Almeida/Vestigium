@@ -287,8 +287,6 @@ How to use this file:
   is blamed on the compiler rather than on a browser that used less CPU in total.
 - Starting programs or reading files no longer makes memory a suspect of a freeze on a PC with
   memory to spare: hard faults now count only while more than 85% of memory is in use.
-
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
 - Tests no longer calls a disk or the memory fine while Health has an open point about it: the
   device shows the Health point first, with a link to it. Steps that send you to Tests or Now end
   with a link that opens that screen.
@@ -299,3 +297,5 @@ How to use this file:
   the side menu.
 - Counts on Health that named nothing ("7 in 30 days") now name what they count, and the crash
   dump setting reads "No dump" instead of a bare "None".
+
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/commits/main
