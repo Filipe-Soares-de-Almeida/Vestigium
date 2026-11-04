@@ -9,7 +9,16 @@
   import { HEIGHT, RIGHT, SPAN_S, build, laneChart, type LaneChart } from "./chart";
   import { LANES, STATE_TOKEN, laneValue } from "./lanes";
 
-  let { points, onsay }: { points: LivePoint[]; onsay: (text: string) => void } = $props();
+  let {
+    points,
+    paused = false,
+    onsay,
+  }: {
+    points: LivePoint[];
+    /** Ctrl is held: the chart stays on the second it was pressed. */
+    paused?: boolean;
+    onsay: (text: string) => void;
+  } = $props();
 
   const AXIS = [10, 8, 6, 4, 2, 0];
   /** Below this plot width only the two ends of the axis are labelled. */
@@ -159,7 +168,9 @@
 <section class="card tenmin-card" aria-labelledby="tenmin-title">
   <div class="head">
     <h2 id="tenmin-title">{t("ui.now.tenmin.title")}</h2>
-    <span class="live"><i class:dim={beat}></i>{t("ui.now.tenmin.live")}</span>
+    <span class="live" class:paused>
+      <i class:dim={beat && !paused}></i>{t(paused ? "ui.now.tenmin.paused" : "ui.now.tenmin.live")}
+    </span>
   </div>
   <p class="caption">{t("ui.now.tenmin.caption")}</p>
   <div class="tenmin">
@@ -234,7 +245,7 @@
       </div>
     </div>
   </div>
-  <ZoomBar {zoom} {range} {plot} />
+  <ZoomBar {zoom} {range} {plot} hint={t("ui.now.tenmin.hint")} />
   <p class="sr" id="tenmin-summary">{summary}</p>
 </section>
 
@@ -269,6 +280,13 @@
   }
   .live i.dim {
     opacity: 0.45;
+  }
+  .live.paused {
+    color: var(--ink);
+  }
+  .live.paused i {
+    border-radius: 2px;
+    background: var(--ink2);
   }
   @media (prefers-reduced-motion: reduce) {
     .live i.dim {

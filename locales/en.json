@@ -590,6 +590,8 @@
   "ui.now.tech.episode.DiskBusy": "episode: disk {disk} saturated",
   "ui.now.tenmin.title": "The last 10 minutes",
   "ui.now.tenmin.live": "Live · updates every second",
+  "ui.now.tenmin.paused": "Paused · release Ctrl to go live",
+  "ui.now.tenmin.hint": "Hold Ctrl to pause · Ctrl + wheel to zoom · drag to move",
   "ui.now.tenmin.caption": "Vestigium always keeps the last 10 minutes in memory. The “before” of every freeze comes from here.",
   "ui.now.lane.cpu": "Processor",
   "ui.now.lane.memory": "Memory",

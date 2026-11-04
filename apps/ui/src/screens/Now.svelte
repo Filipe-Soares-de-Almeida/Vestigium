@@ -6,12 +6,13 @@
   import { liveStart } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { keepFocus } from "../lib/focus";
+  import { CtrlHold } from "../lib/hold.svelte";
   import { t } from "../lib/i18n.svelte";
-  import type { UiError } from "../lib/types";
+  import type { LivePoint, NowFrame, UiError } from "../lib/types";
   import { whileVisible } from "../lib/visibility";
   import HungWindows from "./now/HungWindows.svelte";
   import LastOccurrence from "./now/LastOccurrence.svelte";
-  import { Live } from "./now/live.svelte";
+  import { Live, type Hung } from "./now/live.svelte";
   import { momentKey, sentence } from "./now/sentence";
   import TenMinutes from "./now/TenMinutes.svelte";
   import TopPrograms from "./now/TopPrograms.svelte";
@@ -19,6 +20,16 @@
   const STOPPED: UiError = { kind: "agent_stopped", message: "" };
 
   const live = new Live();
+  const hold = new CtrlHold();
+  /** What the screen shows while Ctrl is held; the stream keeps filling `live` underneath. */
+  let frozen = $state.raw<{
+    points: LivePoint[];
+    point: LivePoint | null;
+    frame: NowFrame | null;
+    hung: Hung[];
+    nowMs: number;
+  } | null>(null);
+  const view = $derived(frozen ?? live);
   let failure = $state<unknown>(null);
   let attempt = $state(0);
   /** What the polite live region last said. */
@@ -27,8 +38,8 @@
   const watching = $derived(app.running && !app.paused);
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const moment = $derived(
-    live.point && live.frame
-      ? { point: live.point, frame: live.frame, hung: live.hung, nowMs: live.nowMs }
+    view.point && view.frame
+      ? { point: view.point, frame: view.frame, hung: view.hung, nowMs: view.nowMs }
       : null,
   );
   const lede = $derived(moment ? sentence(moment, level) : t("ui.now.lede.waiting"));
@@ -58,6 +69,19 @@
     else attempt++;
   }
 
+  $effect(() => hold.listen());
+
+  // Holding Ctrl keeps the screen on the second it was pressed; letting go returns to now.
+  $effect(() => {
+    const held = hold.held;
+    untrack(() => {
+      frozen =
+        held && live.started
+          ? { points: live.points, point: live.point, frame: live.frame, hung: live.hung, nowMs: live.nowMs }
+          : null;
+    });
+  });
+
   // The watcher stopped answering: ask the shell again so its banner shows at once.
   $effect(() => {
     if (live.ended) void untrack(() => app.refresh());
@@ -86,12 +110,12 @@
 {:else}
   <p class="lede">{lede}</p>
   <p class="sr" aria-live="polite">{said}</p>
-  <TenMinutes points={live.points} onsay={(text) => (said = text)} />
+  <TenMinutes points={view.points} paused={frozen !== null} onsay={(text) => (said = text)} />
   <div class="split">
-    <TopPrograms top={live.frame?.top ?? null} />
+    <TopPrograms top={view.frame?.top ?? null} />
     <div class="stack">
-      <HungWindows hung={live.hung} nowMs={live.nowMs} />
-      <LastOccurrence latest={live.frame?.latest ?? null} {since} />
+      <HungWindows hung={view.hung} nowMs={view.nowMs} />
+      <LastOccurrence latest={view.frame?.latest ?? null} {since} />
     </div>
   </div>
 {/if}

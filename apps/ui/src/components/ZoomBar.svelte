@@ -6,12 +6,15 @@
     zoom,
     range,
     plot,
+    hint,
   }: {
     zoom: Zoom;
     /** The stretch on screen, worded for the reader; shown while zoomed. */
     range: string;
     /** The chart's plot, which gets focus back when the button that had it goes away. */
     plot?: HTMLElement;
+    /** Replaces the usual hint, for a chart with more gestures. */
+    hint?: string;
   } = $props();
 
   function reset(): void {
@@ -21,7 +24,7 @@
 </script>
 
 <div class="zoombar">
-  <span class="hint" aria-hidden="true">{t("ui.zoom.hint")}</span>
+  <span class="hint" aria-hidden="true">{hint ?? t("ui.zoom.hint")}</span>
   {#if zoom.view}
     <span class="range">{range}</span>
     <button type="button" class="clear" onclick={reset}>{t("ui.zoom.reset")}</button>

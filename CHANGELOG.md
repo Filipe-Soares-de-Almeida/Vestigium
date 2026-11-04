@@ -151,6 +151,9 @@ How to use this file:
   covered and what it cannot see, a test that runs shows its progress and can be stopped, and
   the tests that need it ask Windows for permission. Health shows the errors these tests find
   and links to them; Today and the occurrence report say when a Vestigium test was running.
+- Holding Ctrl on the Now screen pauses it on the second it was pressed, like Task Manager: the
+  chart, its readings and the program list stay still while you look, and letting go returns to
+  live without losing a second. Switching to another window also lets go.
 
 ### Changed
 
