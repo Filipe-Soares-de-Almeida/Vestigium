@@ -275,7 +275,9 @@ How to use this file:
   (chkdsk), Speed test, Windows Memory Diagnostic, with "Requires administrator" and "Read-only".
   Optimizations describes each setting by what it does in Windows' own terms (kernel, PCIe
   link, Superfetch, minidump), states the downside in a few words, and labels its facts
-  Current, After, Takes effect, Permission and Downside.
+  Current, After, Takes effect, Permission and Downside. Dumps gives stop codes and app errors
+  their usual names (unhandled exception, access violation, IRQL, TDR, WHEA, heap corruption)
+  and calls apps that closed by themselves app crashes.
 
 ### Fixed
 
