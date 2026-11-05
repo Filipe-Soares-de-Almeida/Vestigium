@@ -273,6 +273,9 @@ How to use this file:
   (reallocated, pending, uncorrectable), WHEA, TDR and throttling, and says how many alerts
   each area has. Tests names its tests as they are known: SMART, Surface scan, File system
   (chkdsk), Speed test, Windows Memory Diagnostic, with "Requires administrator" and "Read-only".
+  Optimizations describes each setting by what it does in Windows' own terms (kernel, PCIe
+  link, Superfetch, minidump), states the downside in a few words, and labels its facts
+  Current, After, Takes effect, Permission and Downside.
 
 ### Fixed
 
