@@ -267,7 +267,9 @@ How to use this file:
   menu groups are Monitoring, Maintenance and Diagnostics; Health counts alerts; and the tray,
   the banners and the error messages say what happened in a few words. Today and Now name CPU,
   GPU and overload periods, give the likely cause plainly, and call a fall of the PC an
-  unexpected shutdown.
+  unexpected shutdown. Occurrence reports are reports, not "laudos" in Portuguese, and their
+  causes, evidence, sequence and steps use the usual terms (BSOD, page file, DPC/ISR latency,
+  surface scan, backup).
 
 ### Fixed
 
