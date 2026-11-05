@@ -1,8 +1,11 @@
 name: Release
 
+# A v* tag on main publishes the release. Run by hand, it builds and signs the installer and keeps it
+# as a workflow artifact, publishing nothing.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,6 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check that the tag is on main
+        if: github.event_name == 'push'
         shell: pwsh
         run: |
           git merge-base --is-ancestor $env:GITHUB_SHA origin/main
@@ -37,13 +41,24 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: ./tools/bundle.ps1
+        run: |
+          ./tools/bundle.ps1
+          if (-not (Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe.sig')) { throw "The installer was not signed." }
+
+      - name: Keep the signed installer
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: target/release/bundle/nsis/*-setup.exe*
 
       - name: Write the release notes and the update feed
+        if: github.event_name == 'push'
         shell: pwsh
         run: ./tools/release.ps1 -Version $env:VERSION -Out release
 
       - name: Publish the release
+        if: github.event_name == 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
