@@ -290,6 +290,8 @@ How to use this file:
 
 ### Fixed
 
+- In the day's list, an overload period caused by a Vestigium test shows that note on its own line
+  instead of running on from the program's name.
 - The Technical line of a memory overload period says "above 85%", the threshold Vestigium uses,
   instead of 90%.
 - Lines that put a drive letter before a colon no longer read "C::", as in the step to free up

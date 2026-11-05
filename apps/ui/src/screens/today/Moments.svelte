@@ -151,6 +151,7 @@
     line-height: 1.3;
   }
   small {
+    display: block;
     color: var(--ink2);
     font-size: 12.5px;
   }
