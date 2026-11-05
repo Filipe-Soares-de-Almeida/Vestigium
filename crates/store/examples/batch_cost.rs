@@ -1,5 +1,7 @@
 //! Writes synthetic samples the way the agent does, with a chosen batch interval and sync mode, to
-//! measure disk writes: `batch_cost --dir <dir> --batch-secs <s> --minutes <m> [--full]`.
+//! measure disk writes: `batch_cost --dir <dir> --batch-secs <s> --minutes <m> [--full] [--warm]`.
+//! `--warm` first fills the WAL past its checkpoint with past minutes, so the run measures the WAL
+//! at its settled size, then waits a minute.
 
 use std::path::PathBuf;
 use std::thread;
@@ -7,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 use vestigium_core::{CoreLoad, DiskLoad, ProcessSample, ProcessTop, Sample};
-use vestigium_store::{Batcher, Store};
+use vestigium_store::{Batcher, Segment, Store};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = PathBuf::from(arg("--dir").ok_or("--dir is required")?);
@@ -16,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(60);
     let minutes: u64 = arg("--minutes").and_then(|s| s.parse().ok()).unwrap_or(10);
     let full = std::env::args().any(|a| a == "--full");
+    let warm = std::env::args().any(|a| a == "--warm");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("batch-cost.db");
     drop(Store::open(&path)?);
@@ -29,9 +32,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut batcher = Batcher::new(Duration::from_secs(batch_secs));
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    if warm {
+        let begun = Instant::now();
+        let mut past_ms = now_ms() - 30 * 86_400_000;
+        for _ in 0..WARM_COMMITS {
+            for s in 0..60 {
+                batcher.push_sample(sample(past_ms + s * 1000, &mut seed));
+                if s % 5 == 0 {
+                    batcher.push_processes(top(past_ms + s * 1000, &mut seed));
+                }
+            }
+            past_ms += 60_000;
+            commit(&conn, &batcher.take())?;
+        }
+        println!(
+            "warmed with {WARM_COMMITS} commits in {:.1} s",
+            begun.elapsed().as_secs_f64()
+        );
+        thread::sleep(Duration::from_secs(60));
+    }
     let started = Instant::now();
     let mut commits = 0u32;
-    let mut seed = 0x2545_f491_4f6c_dd1du64;
     for tick in 0..minutes * 60 {
         let ts_ms = now_ms();
         batcher.push_sample(sample(ts_ms, &mut seed));
@@ -39,15 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             batcher.push_processes(top(ts_ms, &mut seed));
         }
         if batcher.due(ts_ms) {
-            let segments = batcher.take();
-            let tx = conn.unchecked_transaction()?;
-            for s in &segments {
-                tx.execute(
-                    "INSERT INTO segment (series, start_ms, end_ms, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![s.series as u8, s.start_ms, s.end_ms, s.data],
-                )?;
-            }
-            tx.commit()?;
+            commit(&conn, &batcher.take())?;
             commits += 1;
         }
         let next = Duration::from_secs(tick + 1);
@@ -58,6 +72,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         started.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+/// Past minutes written before a `--warm` run: enough to pass the 1000-page checkpoint.
+const WARM_COMMITS: i64 = 1500;
+
+fn commit(conn: &Connection, segments: &[Segment]) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for s in segments {
+        tx.execute(
+            "INSERT INTO segment (series, start_ms, end_ms, data) VALUES (?1, ?2, ?3, ?4)",
+            params![s.series as u8, s.start_ms, s.end_ms, s.data],
+        )?;
+    }
+    tx.commit()
 }
 
 fn arg(name: &str) -> Option<String> {
