@@ -294,6 +294,10 @@ How to use this file:
 
 ### Fixed
 
+- The file system check on the Tests screen no longer repairs anything: it runs
+  `chkdsk /scan /forceofflinefix`, which leaves every repair to Windows. A volume with problems
+  now reads "Problems found" instead of "Check failed", and a volume chkdsk could not check reads
+  "Check failed" instead of "Problems found".
 - Dates from an earlier year show the year, so a blue screen from May 2025 no longer reads as if it
   happened this May.
 - In the day's list, an overload period caused by a Vestigium test shows that note on its own line

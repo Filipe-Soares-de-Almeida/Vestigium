@@ -161,10 +161,23 @@ fn benchmark_reference_follows_the_bus() {
 
 #[test]
 fn chkdsk_exit_codes() {
-    assert_eq!(volume_result(0), VolumeResult::NoProblems);
-    assert_eq!(volume_result(2), VolumeResult::NoProblems);
-    assert_eq!(volume_result(3), VolumeResult::ProblemsFound);
-    assert_eq!(volume_result(7), VolumeResult::CouldNotCheck);
+    assert_eq!(volume_result(0, false), VolumeResult::NoProblems);
+    assert_eq!(volume_result(2, false), VolumeResult::NoProblems);
+    assert_eq!(volume_result(13, true), VolumeResult::ProblemsFound);
+    assert_eq!(volume_result(13, false), VolumeResult::ProblemsFound);
+    assert_eq!(volume_result(1, false), VolumeResult::ProblemsFound);
+    assert_eq!(
+        volume_result(5, false),
+        VolumeResult::ProblemsFound,
+        "fixed online"
+    );
+    assert_eq!(
+        volume_result(3, false),
+        VolumeResult::CouldNotCheck,
+        "access denied, no volume"
+    );
+    assert_eq!(volume_result(3, true), VolumeResult::ProblemsFound);
+    assert_eq!(volume_result(7, false), VolumeResult::CouldNotCheck);
 }
 
 #[test]

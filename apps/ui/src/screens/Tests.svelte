@@ -530,7 +530,7 @@
         <p class="muted">{t("ui.tests.check.not_ntfs", { fs: v.file_system ?? "?" })}</p>
       {:else}
         {#if check && c}
-          <p class="res"><ConcernMark mark={c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown"} word={false} /><b>{t(`ui.tests.check.${c.result}`)}</b><span class="when">{at(check.ended_ms)}{level === "Technical" && c.exit_code !== null ? ` · chkdsk ${v.root.slice(0, 2)} /scan · ${c.exit_code}` : ""}</span></p>
+          <p class="res"><ConcernMark mark={c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown"} word={false} /><b>{t(`ui.tests.check.${c.result}`)}</b><span class="when">{at(check.ended_ms)}{level === "Technical" && c.exit_code !== null ? ` · chkdsk ${v.root.slice(0, 2)} /scan /forceofflinefix · ${c.exit_code}` : ""}</span></p>
           {#if c.result === "ProblemsFound"}<p class="note">{t("ui.tests.check.repair", { volume: v.root.slice(0, 2) })}</p>{/if}
           {#if level === "Technical" && c.output}<pre class="out">{c.output}</pre>{/if}
         {:else}

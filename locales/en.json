@@ -1998,7 +1998,7 @@
   "ui.tests.map.unreadable_short": "Unreadable",
   "ui.tests.map.unread_short": "Not read",
   "ui.tests.check.title": "File system ({volume})",
-  "ui.tests.check.when": "chkdsk /scan, check only",
+  "ui.tests.check.when": "chkdsk /scan /forceofflinefix, check only",
   "ui.tests.check.never": "Never checked.",
   "ui.tests.check.start": "Check",
   "ui.tests.check.length": "a few minutes",

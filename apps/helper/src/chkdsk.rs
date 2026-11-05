@@ -7,8 +7,14 @@ use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
     Outcome, TestData, TestRun, VolumeCheck, VolumeResult, volume_result,
 };
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ};
 use windows::Win32::Globalization::{CP_OEMCP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS, MultiByteToWideChar};
-use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumeInformationW};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
+    GetVolumeInformationW, OPEN_EXISTING,
+};
+use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::Ioctl::{FSCTL_IS_VOLUME_DIRTY, VOLUME_IS_DIRTY};
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW};
 use windows::core::HSTRING;
@@ -38,12 +44,54 @@ fn system_directory() -> Option<PathBuf> {
     (len > 0 && len < dir.len()).then(|| PathBuf::from(String::from_utf16_lossy(&dir[..len])))
 }
 
-/// chkdsk from the system folder and its only arguments: the volume and an online, read-only scan.
-pub fn chkdsk_command(system: &Path, letter: char) -> (PathBuf, [String; 2]) {
+/// chkdsk from the system folder and its only arguments: the volume and an online scan that leaves
+/// every repair for later.
+pub fn chkdsk_command(system: &Path, letter: char) -> (PathBuf, [String; 3]) {
     (
         system.join("chkdsk.exe"),
-        [format!("{letter}:"), "/scan".to_string()],
+        [
+            format!("{letter}:"),
+            "/scan".to_string(),
+            "/forceofflinefix".to_string(),
+        ],
     )
+}
+
+/// Whether NTFS marks the volume as needing a full chkdsk; false when it cannot be asked.
+fn volume_dirty(letter: char) -> bool {
+    let path = HSTRING::from(format!(r"\\.\{letter}:"));
+    // SAFETY: opens the volume for reading only; the handle is closed below.
+    let Ok(handle) = (unsafe {
+        CreateFileW(
+            &path,
+            GENERIC_READ.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        )
+    }) else {
+        return false;
+    };
+    let mut flags = 0u32;
+    let mut returned = 0u32;
+    // SAFETY: the output is a live u32 of the size given.
+    let asked = unsafe {
+        DeviceIoControl(
+            handle,
+            FSCTL_IS_VOLUME_DIRTY,
+            None,
+            0,
+            Some((&raw mut flags).cast()),
+            size_of::<u32>() as u32,
+            Some(&mut returned),
+            None,
+        )
+    };
+    // SAFETY: the handle came from CreateFileW above and is closed once.
+    let _ = unsafe { CloseHandle(handle) };
+    asked.is_ok() && flags & VOLUME_IS_DIRTY != 0
 }
 
 fn oem_text(bytes: &[u8]) -> String {
@@ -84,8 +132,8 @@ fn volume_facts(letter: char) -> Result<(), String> {
     check_volume(drive_type, &String::from_utf16_lossy(&fs[..end]))
 }
 
-/// Runs `chkdsk <letter>: /scan` at below-normal priority, without a window, and keeps its exit code
-/// and the end of its text.
+/// Runs `chkdsk <letter>: /scan /forceofflinefix` at below-normal priority, without a window, and
+/// keeps its exit code and the end of its text.
 pub fn check(letter: char) -> (Outcome, VolumeCheck) {
     let mut found = VolumeCheck {
         volume: format!("{letter}:\\"),
@@ -119,7 +167,7 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
         return (Outcome::Failed, found);
     };
     found.exit_code = Some(code);
-    found.result = volume_result(code);
+    found.result = volume_result(code, volume_dirty(letter));
     let outcome = match found.result {
         VolumeResult::NoProblems => Outcome::Clean,
         VolumeResult::ProblemsFound => Outcome::Problems,
@@ -168,7 +216,7 @@ mod tests {
         let system = Path::new(r"C:\Windows\System32");
         let (exe, args) = chkdsk_command(system, 'D');
         assert_eq!(exe, PathBuf::from(r"C:\Windows\System32\chkdsk.exe"));
-        assert_eq!(args, ["D:".to_string(), "/scan".to_string()]);
+        assert_eq!(args, ["D:", "/scan", "/forceofflinefix"].map(String::from));
     }
 
     #[test]

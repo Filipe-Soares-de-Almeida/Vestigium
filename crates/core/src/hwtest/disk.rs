@@ -366,11 +366,13 @@ pub struct VolumeCheck {
     pub output: String,
 }
 
-/// chkdsk exit codes: 0 clean, 2 only cleanup left, 1 and 3 problems found.
-pub fn volume_result(exit_code: u32) -> VolumeResult {
+/// `chkdsk /scan` exit codes: 0 and 2 clean; 1, 5 and 13 problems found. 3 and any other code may
+/// mean "could not check", so they count as problems only on a dirty volume.
+pub fn volume_result(exit_code: u32, dirty: bool) -> VolumeResult {
     match exit_code {
         0 | 2 => VolumeResult::NoProblems,
-        1 | 3 => VolumeResult::ProblemsFound,
+        1 | 5 | 13 => VolumeResult::ProblemsFound,
+        _ if dirty => VolumeResult::ProblemsFound,
         _ => VolumeResult::CouldNotCheck,
     }
 }

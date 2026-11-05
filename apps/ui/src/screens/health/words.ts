@@ -257,7 +257,7 @@ function factTexts(fact: OtherFact): Texts {
     };
   }
   if ("VolumeCheck" in fact) {
-    return { plain: k("ev.volume", { date: when(fact.VolumeCheck.ts_ms) }), figures: null, tech: "chkdsk /scan" };
+    return { plain: k("ev.volume", { date: when(fact.VolumeCheck.ts_ms) }), figures: null, tech: "chkdsk /scan /forceofflinefix" };
   }
   const d = fact.SystemDisk;
   return {
