@@ -69,8 +69,9 @@ opens. It watches the one PC it is installed on.
   the app exits when its window closes. Tasks that need administrator rights —
   the driver capture, dump cleanup, some health checks, fixes and tests — ask
   for them one at a time. No telemetry: everything it stores stays in one
-  folder in your user profile. The project aims to keep the watcher as light as
-  possible.
+  folder in your user profile, and the only request that leaves the PC is the
+  update check, which the window asks about first. The project aims to keep the
+  watcher as light as possible.
 
 ---
 
@@ -139,9 +140,19 @@ Technical.
 ### Settings
 
 Appearance, the default detail level, watching (start with Windows, sensitive
-mode, pause), how long each kind of history is kept, the language, and privacy
+mode, pause), how long each kind of history is kept, the language, updates
+(checking on its own, "Check now" and what changed in each version), and privacy
 and data: the space the history takes, a button that opens its folder and one
 that deletes it.
+
+### Updates
+
+The first time the window opens it asks whether to check for updates on its own.
+With yes, it asks GitHub for the newest version when it opens, at most once a
+day; nothing Vestigium keeps goes along. A newer version opens a dialog with
+what changed in it, and "Update and restart" downloads and installs it, closing
+and reopening the window while watching goes on. After an update, the window
+shows once what changed since the version you had.
 
 ## The tray
 
@@ -159,6 +170,7 @@ a dashed ring while sensitive mode is on. The tooltip says the same in words.
 | `%LOCALAPPDATA%\Vestigium\data\vestigium.db` | The history and the settings: the timeline, reports, health points, tests, captures, dumps read and tweaks changed. |
 | `%LOCALAPPDATA%\Vestigium\data\blackbox.ring` | The last seconds before a fall of the PC, read at the next start. |
 | The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of administrator tasks, read into the history. |
+| `%LOCALAPPDATA%\app.vestigium\updates.json` | Whether to check for updates, when it last checked and the last version whose notes you saw. |
 
 Settings › Privacy and data opens this folder, and deletes the history after a
 confirmation.

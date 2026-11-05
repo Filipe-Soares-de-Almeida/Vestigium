@@ -37,6 +37,12 @@ const COMMANDS: &[&str] = &[
     "start_volume_check",
     "stop_test",
     "test_running",
+    "update_prefs",
+    "set_update_prefs",
+    "release_notes",
+    "update_check",
+    "update_install",
+    "update_cancel",
 ];
 
 fn main() {

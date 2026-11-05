@@ -7,6 +7,7 @@
   import Mark from "./components/Mark.svelte";
   import NavPane from "./components/NavPane.svelte";
   import Toast from "./components/Toast.svelte";
+  import UpdateDialog from "./components/UpdateDialog.svelte";
   import WindowControls from "./components/WindowControls.svelte";
   import { app } from "./lib/app.svelte";
   import { captures } from "./lib/capture.svelte";
@@ -17,6 +18,7 @@
   import { health } from "./lib/health.svelte";
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
+  import { updates } from "./lib/update.svelte";
   import Capture from "./screens/Capture.svelte";
   import Captures from "./screens/Captures.svelte";
   import Dumps from "./screens/Dumps.svelte";
@@ -37,6 +39,7 @@
 
   onMount(() => app.start());
   onMount(() => captures.watch());
+  onMount(() => void updates.start());
   onMount(() => void markFrame());
   onMount(() => health.watch());
   onMount(() => dumps.watch());
@@ -143,6 +146,7 @@
   <WindowControls />
 </div>
 <Toast />
+<UpdateDialog />
 
 <style>
   .win {

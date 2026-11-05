@@ -8,6 +8,7 @@ mod history;
 mod hwtests;
 mod live;
 mod tweaks;
+mod update;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -21,6 +22,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(commands::AppState::default())
+        .manage(update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             commands::timeline,
             commands::marks,
@@ -59,6 +61,12 @@ fn main() {
             commands::test_running,
             about::about,
             about::open_data_folder,
+            update::update_prefs,
+            update::set_update_prefs,
+            update::release_notes,
+            update::update_check,
+            update::update_install,
+            update::update_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("the interface failed to start");

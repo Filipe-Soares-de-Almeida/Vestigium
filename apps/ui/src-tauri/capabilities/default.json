@@ -45,6 +45,12 @@
     "allow-start-surface-scan",
     "allow-start-volume-check",
     "allow-stop-test",
-    "allow-test-running"
+    "allow-test-running",
+    "allow-update-prefs",
+    "allow-set-update-prefs",
+    "allow-release-notes",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-cancel"
   ]
 }

@@ -172,6 +172,13 @@ How to use this file:
 - Installing Vestigium over itself, or uninstalling it, while the background watcher runs closes the
   watcher first and lets it save what it holds; after an install it starts again. Choosing to delete
   the app data when uninstalling also deletes the history.
+- The window keeps Vestigium up to date. The first time it opens, it asks once whether to check
+  for updates on its own; with yes, it asks GitHub for the newest version when it opens, at most
+  once a day, and nothing Vestigium keeps goes along. A newer version opens a dialog with what
+  changed in it, and "Update and restart" downloads it with its progress and installs it, closing
+  and reopening the window while watching goes on. After an update, the window shows once what
+  changed since the version you had, in English or Portuguese. Settings › Updates has the switch,
+  "Check now" and the notes of every version.
 
 ### Changed
 
