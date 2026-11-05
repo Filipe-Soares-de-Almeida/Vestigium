@@ -39,6 +39,7 @@
     lastQuick,
     lastSurface,
     surfaceRuns,
+    unreadableText,
     memoryState,
     outcomeMark,
     quickCovered,
@@ -251,7 +252,7 @@
   function runLine(r: TestRunDto): { name: string; what: string } {
     const q = quickOf(r), s = surfaceOf(r), c = checkOf(r), b = benchOf(r);
     if (q) return { name: t("ui.tests.hist.quick"), what: `${formatBytes(q.tested_bytes)} / ${formatBytes(q.total_bytes)}${q.error_count ? ` · ${tn("ui.tests.quick.errors", q.error_count)}` : ""}` };
-    if (s) return { name: t("ui.tests.hist.surface"), what: s.unreadable_blocks ? tn("ui.tests.surface.unreadable", s.unreadable_blocks) : t("ui.tests.hist.read", { share: shareOf(s.to_bytes - s.from_bytes, s.disk_bytes) }) };
+    if (s) return { name: t("ui.tests.hist.surface"), what: s.unreadable_blocks ? unreadableText(s) : t("ui.tests.hist.read", { share: shareOf(s.to_bytes - s.from_bytes, s.disk_bytes) }) };
     if (c) return { name: t("ui.tests.hist.check", { volume: vol(c.volume) }), what: t(`ui.tests.check.${c.result}`) };
     const seq = b?.results.find((x) => x.mode === "SeqRead");
     return { name: t("ui.tests.hist.bench", { volume: vol(b?.volume ?? "") }), what: seq ? t("ui.tests.bench.seq", { value: formatNumber(seq.mb_per_s) }) : "" };

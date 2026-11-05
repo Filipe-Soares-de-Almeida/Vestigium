@@ -151,9 +151,20 @@ export function quickCovered(q: MemoryQuick, level: DetailLevel): string {
   return t("ui.tests.quick.covered.detailed", { ...args, passes: q.passes, rounds: q.rounds });
 }
 
+/** The sectors a read keeps at most; a list that reached it may have missed more. */
+const UNREADABLE_KEPT = 1000;
+
+/** "2 sectors could not be read", by sector when the read kept them, else by region. */
+export function unreadableText(s: SurfaceScan): string {
+  const sectors = s.unreadable.length;
+  if (!sectors) return tn("ui.tests.surface.unreadable", s.unreadable_blocks);
+  if (sectors >= UNREADABLE_KEPT) return t("ui.tests.surface.sectors_bad_least", { count: sectors });
+  return tn("ui.tests.surface.sectors_bad", sectors);
+}
+
 export function surfaceWord(r: TestRunDto, s: SurfaceScan, disk: DiskDto): { mark: MarkKind; text: string } {
   if (s.failure && s.to_bytes === s.from_bytes) return { mark: "Unknown", text: t("ui.tests.result.failed") };
-  if (s.unreadable_blocks) return { mark: "Critical", text: tn("ui.tests.surface.unreadable", s.unreadable_blocks) };
+  if (s.unreadable_blocks) return { mark: "Critical", text: unreadableText(s) };
   if (r.outcome === "Interrupted")
     return { mark: "Partial", text: t("ui.tests.surface.stopped", { share: formatPercent((s.to_bytes / Math.max(1, s.disk_bytes)) * 100) }) };
   if (disk.media === "Hdd" && s.bands[5] >= 10) return { mark: "Attention", text: tn("ui.tests.surface.slow", s.bands[5]) };

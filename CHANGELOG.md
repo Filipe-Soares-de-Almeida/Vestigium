@@ -259,6 +259,9 @@ How to use this file:
 - A disk's whole-disk read in Tests shows only the latest read. "Every read" opens a dialog
   listing each read of that disk, newest first, with its result, length and how much it covered;
   choosing one shows its map.
+- A disk read that found sectors it could not read counts the sectors, "2 sectors could not be
+  read", instead of the regions that hold them; when the read kept as many as it can, it says "at
+  least".
 
 ### Fixed
 
