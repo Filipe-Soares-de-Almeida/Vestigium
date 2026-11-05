@@ -327,16 +327,40 @@ fn hardware_errors(inputs: &HealthInputs) -> Option<Finding> {
     Some(found)
 }
 
+/// The N of the `\Device\HarddiskN` a disk event names.
+fn harddisk_number(data_xml: &str) -> Option<u32> {
+    const DEVICE: &str = r"\device\harddisk";
+    let lower = data_xml.to_ascii_lowercase();
+    let digits = &lower[lower.find(DEVICE)? + DEVICE.len()..];
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end].parse().ok()
+}
+
+/// Whether a storage event is about one of the PC's disks: it names none, or one the watcher
+/// measures. A virtual or unplugged disk is left out.
+fn on_pc_disk(inputs: &HealthInputs, event: &WinEvent) -> bool {
+    let Some(number) = harddisk_number(&event.data_xml) else {
+        return true;
+    };
+    let mut known = inputs
+        .machine
+        .disks
+        .iter()
+        .filter_map(|d| d.name.split_whitespace().next()?.parse::<u32>().ok())
+        .peekable();
+    known.peek().is_none() || known.any(|n| n == number)
+}
+
 fn storage_errors(inputs: &HealthInputs) -> Option<Finding> {
     let bad: Vec<&WinEvent> = matching(inputs, 30, EventMeaning::DiskBadBlock, &[])
         .chain(matching(inputs, 30, EventMeaning::PagingError, &[]))
+        .filter(|e| on_pc_disk(inputs, e))
         .collect();
-    let resets = matching(inputs, 30, EventMeaning::StorageReset, &[]).chain(matching(
-        inputs,
-        30,
-        EventMeaning::DiskRetry,
-        &[],
-    ));
+    let resets = matching(inputs, 30, EventMeaning::StorageReset, &[])
+        .chain(matching(inputs, 30, EventMeaning::DiskRetry, &[]))
+        .filter(|e| on_pc_disk(inputs, e));
     let critical = !bad.is_empty();
     let events: Vec<&WinEvent> = bad.into_iter().chain(resets).collect();
     let next_steps = if critical {

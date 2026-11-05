@@ -294,6 +294,8 @@ How to use this file:
 
 ### Fixed
 
+- Errors Windows logs for a disk that is not one of the PC's, such as a virtual disk that was
+  attached for a while, no longer raise a critical "storage errors" alert on the Health screen.
 - The file system check on the Tests screen no longer repairs anything: it runs
   `chkdsk /scan /forceofflinefix`, which leaves every repair to Windows. A volume with problems
   now reads "Problems found" instead of "Check failed", and a volume chkdsk could not check reads

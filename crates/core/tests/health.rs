@@ -401,6 +401,25 @@ fn hardware_and_storage_errors() {
 
     inputs.events = vec![event(40, "disk", 7, EventMeaning::DiskBadBlock, "")];
     assert_eq!(find(&evaluate(&inputs), FindingKind::StorageErrors), None);
+
+    let paging = |device: &str| {
+        let data = format!("<EventData><Data>{device}</Data><Binary>0300</Binary></EventData>");
+        event(1, "disk", 51, EventMeaning::PagingError, &data)
+    };
+    inputs.events = vec![
+        paging(r"\Device\Harddisk2\DR7"),
+        paging(r"\Device\Harddisk2\DR3"),
+    ];
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::StorageErrors),
+        None,
+        "a virtual disk that is gone"
+    );
+    inputs.events.push(paging(r"\Device\Harddisk1\DR1"));
+    let found = evaluate(&inputs);
+    let storage = find(&found, FindingKind::StorageErrors).unwrap();
+    assert_eq!(storage.concern, Concern::Critical);
+    assert_eq!(storage.evidence.len(), 1);
 }
 
 #[test]
