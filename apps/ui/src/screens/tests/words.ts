@@ -57,6 +57,9 @@ export const benchOf = (r: TestRunDto) => ("DiskBenchmark" in r.data ? r.data.Di
 
 export const lastQuick = (dto: TestsDto) => lastRun(dto, "MemoryQuick");
 export const lastSurface = (dto: TestsDto, disk: DiskDto) => lastRun(dto, "DiskSurface", (s) => isDisk(s, disk));
+/** Every read of a disk, the newest first. */
+export const surfaceRuns = (dto: TestsDto, disk: DiskDto) =>
+  dto.runs.filter((r) => kindOf(r) === "DiskSurface" && isDisk(r.subject, disk)).reverse();
 export const lastCheck = (dto: TestsDto, root: string) => lastRun(dto, "VolumeCheck", (s) => isVolume(s, root));
 export const lastBench = (dto: TestsDto, root: string) => lastRun(dto, "DiskBenchmark", (s) => isVolume(s, root));
 

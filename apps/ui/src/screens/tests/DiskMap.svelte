@@ -3,8 +3,9 @@
   import type { DetailLevel, Region, SurfaceScan } from "../../lib/types";
   import { formatBytes } from "../occurrence/format";
   import { formatNumber } from "../../lib/format";
+  import { mapView } from "./mapView.svelte";
 
-  // The disk in 1024 regions, in disk order, each toned by its slowest block; arrows move a cursor.
+  // The disk in 1024 regions, in disk order: what did not read stands out; response time is opt-in.
 
   let {
     scan = null,
@@ -21,6 +22,7 @@
     level: DetailLevel;
   } = $props();
 
+  const uid = $props.id();
   const COLUMNS = 64;
   const BOUNDS = [5, 20, 50, 150, 500];
 
@@ -34,9 +36,12 @@
     return (band === -1 ? 5 : band) as Cell;
   }
 
+  const speed = $derived(mapView.speed && scan !== null);
   const cells = $derived<Cell[]>(
     scan ? scan.regions.map(cellOf) : Array.from({ length: 1024 }, (_, i) => (read !== null && i < read * 1024 ? "r" : "x")),
   );
+  /** What each cell is drawn as: a read region is plain "r" unless response time is on. */
+  const shown = $derived(speed ? cells : cells.map((c) => (typeof c === "number" && c < 6 ? "r" : c)));
   const counts = $derived(scan ? [...scan.bands, scan.unreadable_blocks] : null);
 
   let at = $state(-1);
@@ -44,8 +49,8 @@
 
   function bandText(cell: Cell): string {
     if (cell === "x") return t("ui.tests.map.unread");
-    if (cell === "r") return t("ui.tests.map.read");
     if (cell === 6) return t("ui.tests.map.unreadable");
+    if (cell === "r" || !speed) return t("ui.tests.map.read");
     return t("ui.tests.map.slowest", { band: t(`ui.tests.band.${cell}`) });
   }
 
@@ -71,7 +76,7 @@
 
   function onfocus(): void {
     if (at >= 0) return;
-    const worst = cells.findIndex((c) => c === 6 || c === 5);
+    const worst = cells.findIndex((c) => c === 6 || (speed && c === 5));
     move(worst >= 0 ? worst : 0);
   }
 
@@ -86,7 +91,6 @@
     [3, "ui.tests.band.simple.slow"],
     [4, "ui.tests.band.simple.slower"],
     [5, "ui.tests.band.simple.slowest"],
-    [6, "ui.tests.band.simple.unreadable"],
   ];
 </script>
 
@@ -94,15 +98,18 @@
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="grid"
+    class:speed
     bind:this={grid}
     tabindex="0"
     role="application"
-    aria-label={t("ui.tests.map.label", {
-      name,
-      unreadable: formatNumber(scan?.unreadable_blocks ?? 0),
-      slow: formatNumber(scan?.bands[5] ?? 0),
-    })}
-    aria-describedby="map-readout"
+    aria-label={speed
+      ? t("ui.tests.map.label", {
+          name,
+          unreadable: formatNumber(scan?.unreadable_blocks ?? 0),
+          slow: formatNumber(scan?.bands[5] ?? 0),
+        })
+      : t("ui.tests.map.label_plain", { name, unreadable: formatNumber(scan?.unreadable_blocks ?? 0) })}
+    aria-describedby="map-readout-{uid}"
     {onkeydown}
     {onfocus}
     onpointermove={(event) => {
@@ -111,28 +118,39 @@
     }}
     onpointerleave={() => (at = -1)}
   >
-    {#each cells as cell, i (i)}
+    {#each shown as cell, i (i)}
       <i class="c{cell}" data-i={i}></i>
     {/each}
     {#if cursor}
       <b class="cur" style:left="{cursor.left - 2}px" style:top="{cursor.top - 2}px" style:width="{cursor.size + 4}px" style:height="{cursor.size + 4}px"></b>
     {/if}
   </div>
-  <div class="axis" aria-hidden="true">
-    <span>{t("ui.tests.map.start")}</span><span>{formatBytes(diskBytes / 2)}</span><span>{t("ui.tests.map.end", { size: formatBytes(diskBytes) })}</span>
-  </div>
-  <p class="readout" id="map-readout" aria-live="polite">{readout}</p>
-  <div class="legend">
-    {#if level === "Simple" || !counts}
-      {#each SIMPLE as [cell, key] (key)}
-        <span><i class="c{cell}"></i>{t(key)}</span>
-      {/each}
-    {:else}
-      {#each [0, 1, 2, 3, 4, 5, 6] as b (b)}
-        <span><i class="c{b}"></i>{t(b === 6 ? "ui.tests.map.unreadable_short" : `ui.tests.band.${b}`)} <b>{formatNumber(counts[b] ?? 0)}</b></span>
-      {/each}
+  <p class="readout" id="map-readout-{uid}" aria-live="polite">{readout}</p>
+  <div class="foot">
+    <div class="legend" class:speed>
+      {#if !speed}
+        <span><i class="cr"></i>{t("ui.tests.map.read_short")}</span>
+      {:else if level === "Simple" || !counts}
+        {#each SIMPLE as [cell, key] (key)}
+          <span><i class="c{cell}"></i>{t(key)}</span>
+        {/each}
+      {:else}
+        {#each [0, 1, 2, 3, 4, 5] as b (b)}
+          <span><i class="c{b}"></i>{t(`ui.tests.band.${b}`)} <b>{formatNumber(counts[b] ?? 0)}</b></span>
+        {/each}
+      {/if}
+      <span>
+        <i class="c6"></i>{t("ui.tests.map.unreadable_short")}
+        {#if level !== "Simple" && counts}<b>{formatNumber(counts[6] ?? 0)}</b>{/if}
+      </span>
+      <span><i class="cx"></i>{t("ui.tests.map.unread_short")}</span>
+    </div>
+    {#if scan}
+      <label class="opt">
+        <input type="checkbox" class="pick" checked={mapView.speed} onchange={(event) => mapView.setSpeed(event.currentTarget.checked)} />
+        {t("ui.tests.map.speed")}
+      </label>
     {/if}
-    <span><i class="cx"></i>{t("ui.tests.map.unread_short")}</span>
   </div>
 </div>
 
@@ -165,27 +183,30 @@
     height: 11px;
     border-radius: 2px;
   }
-  .c0 {
-    background: color-mix(in srgb, var(--ink) 16%, transparent) !important;
-  }
-  .c1,
   .cr {
     background: color-mix(in srgb, var(--ink) 30%, transparent) !important;
   }
+  /* Response time, from quick to slow, on one neutral ramp: only what does not read is red. */
+  .c0 {
+    background: color-mix(in srgb, var(--ink) 14%, transparent) !important;
+  }
+  .c1 {
+    background: color-mix(in srgb, var(--ink) 26%, transparent) !important;
+  }
   .c2 {
-    background: color-mix(in srgb, var(--ink) 52%, transparent) !important;
+    background: color-mix(in srgb, var(--ink) 40%, transparent) !important;
   }
   .c3 {
-    background: var(--busy) !important;
+    background: color-mix(in srgb, var(--ink) 56%, transparent) !important;
   }
   .c4 {
-    background: var(--press) !important;
+    background: color-mix(in srgb, var(--ink) 72%, transparent) !important;
   }
   .c5 {
-    background: var(--freeze) !important;
+    background: color-mix(in srgb, var(--ink) 90%, transparent) !important;
   }
   .c6 {
-    background: repeating-linear-gradient(45deg, var(--freeze) 0 2px, var(--ink) 2px 3.5px) !important;
+    background: var(--freeze) !important;
   }
   .cx {
     background: transparent !important;
@@ -199,17 +220,18 @@
       0 0 0 4px var(--layer);
     pointer-events: none;
   }
-  .axis {
-    display: flex;
-    justify-content: space-between;
-    color: var(--ink3);
-    font-size: 12px;
-  }
   .readout {
     min-height: 19px;
     margin: 0;
     color: var(--ink2);
     font-size: 13px;
+  }
+  .foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    align-items: center;
+    justify-content: space-between;
   }
   .legend {
     display: flex;
@@ -228,12 +250,50 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
+  .opt {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--ink2);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .pick {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    border: 1.5px solid var(--ink3);
+    border-radius: 5px;
+    background: var(--card);
+    appearance: none;
+    cursor: pointer;
+  }
+  .pick:checked {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .pick:checked::after {
+    content: "";
+    width: 8px;
+    height: 4px;
+    border-bottom: 2px solid var(--on-accent);
+    border-left: 2px solid var(--on-accent);
+    transform: rotate(-45deg) translate(1px, -1px);
+  }
   @media (forced-colors: active) {
     .grid i {
       forced-color-adjust: none;
     }
     .cur {
       box-shadow: 0 0 0 2px Highlight;
+    }
+    .pick:checked {
+      forced-color-adjust: none;
+      background: Highlight;
+      border-color: Highlight;
     }
   }
 </style>

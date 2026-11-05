@@ -251,6 +251,14 @@ How to use this file:
   SMART and Tests have them, and the map's squares are regions. The worn-disk finding has a
   shorter description, and the line under a finding no longer explains the button beside it; a
   test button only shows when no step already links to Tests.
+- The disk map, in Tests and on a Health finding, now marks only what did not read, in red; every
+  region that read is one plain colour, since a slow read is not a sign of wear. "Show the
+  response time" brings back how long each region took, on a grey scale from quick to slow,
+  with the slowest blocks and the note about SSDs, and the window remembers the choice. The
+  labels under the map that marked the start, middle and end of the disk are gone.
+- A disk's whole-disk read in Tests shows only the latest read. "Every read" opens a dialog
+  listing each read of that disk, newest first, with its result, length and how much it covered;
+  choosing one shows its map.
 
 ### Fixed
 

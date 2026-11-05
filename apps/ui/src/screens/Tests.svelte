@@ -20,6 +20,8 @@
   import { areaOf } from "./health/areas";
   import { findingTitle } from "./health/words";
   import DiskMap from "./tests/DiskMap.svelte";
+  import { mapView } from "./tests/mapView.svelte";
+  import ReadHistory from "./tests/ReadHistory.svelte";
   import {
     attrName,
     benchModeName,
@@ -36,6 +38,7 @@
     lastCheck,
     lastQuick,
     lastSurface,
+    surfaceRuns,
     memoryState,
     outcomeMark,
     quickCovered,
@@ -68,6 +71,8 @@
   let report = $state<HTMLElement>();
   let dialog = $state<HTMLDialogElement>();
   let asking = $state<{ kind: "bench"; volume: VolumeDto } | { kind: "smart"; disk: DiskDto } | null>(null);
+  /** The disk whose earlier reads are open in a dialog. */
+  let reading = $state<number | null>(null);
   let asked = $state<number | null>(recallAsked());
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
@@ -411,6 +416,7 @@
   {@const point = healthPoint(d.number)}
   {@const detail = hwtests.details[d.number] ?? null}
   {@const scanRun = lastSurface(dto!, d)}
+  {@const reads = surfaceRuns(dto!, d)}
   {@const scan = scanRun ? surfaceOf(scanRun) : null}
   {@const resumable = scanRun?.outcome === "Interrupted" && scan !== null && scan.to_bytes < scan.disk_bytes}
   <header class="rh">
@@ -479,7 +485,7 @@
       {@const w = surfaceWord(scanRun, scan, d)}
       <p class="res"><ConcernMark mark={w.mark} word={false} /><b>{w.text}</b><span class="when">{at(scanRun.ended_ms)} · {span(scanRun.ended_ms - scanRun.started_ms)}{scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? ` · ${t("ui.tests.surface.whole")}` : ""}</span></p>
       <DiskMap {scan} diskBytes={scan.disk_bytes} name={diskName(d)} {level} />
-      {#if level !== "Simple" && scan.worst.length}
+      {#if mapView.speed && level !== "Simple" && scan.worst.length}
         <h4>{t("ui.tests.surface.worst")}</h4>
         <ul class="worst">
           {#each scan.worst.slice(0, 5) as b, i (i)}
@@ -490,7 +496,7 @@
       {#if level === "Technical" && scan.unreadable.length}
         <p class="note mono">{t("ui.tests.surface.sectors", { list: scan.unreadable.slice(0, 20).map((o) => formatNumber(o / scan.sector_bytes)).join(", ") })}</p>
       {/if}
-      {#if d.media !== "Hdd"}<p class="honest">{t("ui.tests.surface.ssd")}</p>{/if}
+      {#if mapView.speed && d.media !== "Hdd"}<p class="honest">{t("ui.tests.surface.ssd")}</p>{/if}
     {:else}
       <p class="muted">{t("ui.tests.surface.never")}</p>
     {/if}
@@ -504,6 +510,11 @@
         <Icon name="shield" />{t(resumable ? "ui.tests.surface.restart" : "ui.tests.surface.start")}
       </button>
       <span class="pills">{@render pills([["clock", surfaceEstimate(d)], ["shield", t("ui.tests.pill.permission")], ["eye", t("ui.tests.pill.read_only")]])}</span>
+      {#if reads.length > 1}
+        <button type="button" class="btn earlier" onclick={() => (reading = d.number)}>
+          <Icon name="clock" />{t("ui.tests.reads.open", { count: reads.length })}
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -607,6 +618,10 @@
         {/if}
       </section>
     </div>
+    {@const readDisk = reading === null ? null : dto.disks.find((d) => d.number === reading)}
+    {#if readDisk}
+      <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
+    {/if}
   {/if}
 </div>
 
@@ -630,6 +645,9 @@
 </dialog>
 
 <style>
+  .acts .earlier {
+    margin-left: auto;
+  }
   .screen-in {
     display: flex;
     flex: 1 1 auto;

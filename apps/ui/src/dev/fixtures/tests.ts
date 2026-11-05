@@ -74,8 +74,15 @@ function run(id: number, daysAgo: number, minutes: number, partial: Omit<TestRun
   return { id, started_ms: ended - minutes * 60_000, ended_ms: ended, ...partial };
 }
 
+/** An earlier read of the same disk that was stopped at 40%. */
+function stoppedSurface(): SurfaceScan {
+  const scan = surface(false);
+  return { ...scan, to_bytes: scan.disk_bytes * 0.4, regions: regions([200], [], 410), worst: [] };
+}
+
 function runs(errors: boolean): TestRunDto[] {
   return [
+    run(20, 90, 110, { subject: { Disk: "1 D:" }, outcome: "Interrupted", data: { DiskSurface: stoppedSurface() } }),
     run(1, 40, 270, { subject: { Disk: "1 D:" }, outcome: errors ? "Problems" : "Clean", data: { DiskSurface: surface(errors) } }),
     run(2, 12, 1, {
       subject: { Volume: "C:\\" },
