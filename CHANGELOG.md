@@ -290,6 +290,8 @@ How to use this file:
 
 ### Fixed
 
+- Dates from an earlier year show the year, so a blue screen from May 2025 no longer reads as if it
+  happened this May.
 - In the day's list, an overload period caused by a Vestigium test shows that note on its own line
   instead of running on from the program's name.
 - The Technical line of a memory overload period says "above 85%", the threshold Vestigium uses,

@@ -34,9 +34,14 @@ export function formatDay(ms: number): string {
   return new Intl.DateTimeFormat(lang(), { weekday: "long", day: "numeric", month: "long" }).format(ms);
 }
 
-/** "1 de nov." in pt-BR, "Nov 1" in English. */
+/** "1 de nov." this year, "3 de mai. de 2025" for an earlier one; "Nov 1", "May 3, 2025" in English. */
 export function formatDayShort(ms: number): string {
-  return new Intl.DateTimeFormat(lang(), { day: "numeric", month: "short" }).format(ms);
+  const earlier = new Date(ms).getFullYear() !== new Date().getFullYear();
+  return new Intl.DateTimeFormat(lang(), {
+    day: "numeric",
+    month: "short",
+    ...(earlier ? { year: "numeric" } : {}),
+  }).format(ms);
 }
 
 /** The full date and time, year included, for a report read outside the app. */
