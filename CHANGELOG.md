@@ -279,7 +279,8 @@ How to use this file:
   their usual names (unhandled exception, access violation, IRQL, TDR, WHEA, heap corruption)
   and calls apps that closed by themselves app crashes. Captures speak of DPC/ISR latency, the CPU
   and slow frames, name Windows' own drivers by their usual names (Storport, NDIS, KMDF, xHCI),
-  and keep their notes and steps short.
+  and keep their notes and steps short. Settings and the update dialogs follow the same tone; the
+  categories read Reports, Monitoring and Data retention.
 
 ### Fixed
 
