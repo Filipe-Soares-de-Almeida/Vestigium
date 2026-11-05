@@ -33,11 +33,8 @@
 <nav class="pane" aria-label={t("ui.shell.nav.label")}>
   <div class="group" role="group" aria-labelledby="nav-follow">
     <p class="head" id="nav-follow">{t("ui.shell.nav.group.follow")}</p>
-    <a class="nav" href={href.today()} aria-current={router.section === "today" ? "page" : undefined}>
-      <Icon name="today" />{t("ui.shell.nav.today")}
-    </a>
-    <a class="nav" href={href.now()} aria-current={router.section === "now" ? "page" : undefined}>
-      <Icon name="now" />{t("ui.shell.nav.now")}
+    <a class="nav" href={href.activity()} aria-current={router.section === "activity" ? "page" : undefined}>
+      <Icon name="today" />{t("ui.shell.nav.activity")}
     </a>
   </div>
   <div class="group" role="group" aria-labelledby="nav-care">

@@ -67,7 +67,6 @@
   });
 </script>
 
-<h1>{t("ui.today.title")}</h1>
 {#if firstUse}
   <p class="lede">
     {startedAt !== null
@@ -75,7 +74,7 @@
       : t("ui.today.first_use.idle")}
   </p>
   <div class="actions">
-    <a class="btn accent" href={href.now()}>{t("ui.today.see_now")}</a>
+    <a class="btn accent" href={href.activity("now")}>{t("ui.today.see_now")}</a>
   </div>
 {:else if day}
   <p class="lede">

@@ -19,14 +19,13 @@
   import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
   import { updates } from "./lib/update.svelte";
+  import Activity from "./screens/Activity.svelte";
   import Capture from "./screens/Capture.svelte";
   import Captures from "./screens/Captures.svelte";
   import Dumps from "./screens/Dumps.svelte";
   import Health from "./screens/Health.svelte";
-  import Now from "./screens/Now.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
-  import Today from "./screens/Today.svelte";
   import Tests from "./screens/Tests.svelte";
   import Tweaks from "./screens/Tweaks.svelte";
 
@@ -131,12 +130,10 @@
               <Tweaks key={router.current.key} />
             {:else if router.current.screen === "tests"}
               <Tests device={router.current.device} />
-            {:else if router.current.screen === "now"}
-              <Now />
             {:else if router.current.screen === "settings"}
               <Settings />
             {:else}
-              <Today />
+              <Activity tab={router.current.tab} />
             {/if}
           </div>
         {/key}

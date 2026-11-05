@@ -73,7 +73,7 @@
 {/snippet}
 
 <LevelHead
-  parent={{ href: href.today(), name: t("ui.shell.nav.today") }}
+  parent={{ href: href.activity(), name: t("ui.shell.nav.activity") }}
   current={view?.crumb ?? t("ui.occurrence.crumb")}
   label={t("ui.occurrence.path")}
 />
@@ -89,7 +89,7 @@
   <section class="card missing">
     <h1>{t("ui.occurrence.missing.title")}</h1>
     <p>{t("ui.occurrence.missing.body")}</p>
-    <a class="btn" href={href.today()}>{t("ui.occurrence.missing.back")}</a>
+    <a class="btn" href={href.activity()}>{t("ui.occurrence.missing.back")}</a>
   </section>
 {:else}
   <div class="head">

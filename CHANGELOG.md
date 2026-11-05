@@ -182,6 +182,9 @@ How to use this file:
 
 ### Changed
 
+- Today and Now are one screen, Activity, with a tab for each. The side menu has one item for it,
+  and links that pointed to Now open its tab. Switching tabs does not add a step to Back.
+
 - On its first run the watcher reads the last 30 days of the Windows events it follows instead of
   the last 7, so the health checks that look back a month see the whole month from the start.
 - Sensitive mode now also catches hitches from 8 ms, where it caught only those of 50 ms and up,

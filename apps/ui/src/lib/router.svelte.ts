@@ -1,11 +1,12 @@
-// Screens are addressed by the URL hash: #/today, #/occurrence/<id>, #/now, #/captures[?for=<occurrence id>],
+// Screens are addressed by the URL hash: #/activity[?tab=now], #/occurrence/<id>, #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
-// #/settings[/<category>].
+// #/settings[/<category>]. #/today and #/now open those tabs of #/activity.
+
+export type ActivityTab = "today" | "now";
 
 export type Route =
-  | { screen: "today" }
+  | { screen: "activity"; tab: ActivityTab }
   | { screen: "occurrence"; id: number }
-  | { screen: "now" }
   | { screen: "captures"; forOccurrence: number | null }
   | { screen: "capture"; id: number }
   | { screen: "health"; area: string | null }
@@ -18,9 +19,8 @@ export type Route =
 export type Screen = Route["screen"];
 
 export const href = {
-  today: () => "#/today",
+  activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
   occurrence: (id: number) => `#/occurrence/${id}`,
-  now: () => "#/now",
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
@@ -36,7 +36,10 @@ export function parse(hash: string): Route {
   if (screen === "occurrence" && /^\d+$/.test(arg ?? "")) {
     return { screen: "occurrence", id: Number(arg) };
   }
-  if (screen === "now") return { screen: "now" };
+  if (screen === "now") return { screen: "activity", tab: "now" };
+  if (screen === "activity") {
+    return { screen: "activity", tab: new URLSearchParams(query).get("tab") === "now" ? "now" : "today" };
+  }
   if (screen === "capture" && /^\d+$/.test(arg ?? "")) return { screen: "capture", id: Number(arg) };
   if (screen === "captures") {
     const given = new URLSearchParams(query).get("for") ?? "";
@@ -47,13 +50,13 @@ export function parse(hash: string): Route {
   if (screen === "tweaks") return { screen: "tweaks", key: arg ? decodeURIComponent(arg) : null };
   if (screen === "tests") return { screen: "tests", device: arg === "memory" || /^\d+$/.test(arg ?? "") ? arg : null };
   if (screen === "settings") return { screen: "settings", category: arg || null };
-  return { screen: "today" };
+  return { screen: "activity", tab: "today" };
 }
 
 class Router {
   current = $state<Route>(parse(location.hash));
 
-  /** Changes only when the screen changes, not when a screen moves inside itself. */
+  /** Changes only when the screen changes, not when a screen moves inside itself or between its tabs. */
   get key(): string {
     const route = this.current;
     if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
@@ -62,9 +65,9 @@ class Router {
   }
 
   /** The navigation pane item a screen belongs to. */
-  get section(): "today" | "now" | "captures" | "health" | "dumps" | "tweaks" | "tests" | "settings" {
+  get section(): "activity" | "captures" | "health" | "dumps" | "tweaks" | "tests" | "settings" {
     const screen = this.current.screen;
-    return screen === "occurrence" ? "today" : screen === "capture" ? "captures" : screen;
+    return screen === "occurrence" ? "activity" : screen === "capture" ? "captures" : screen;
   }
 }
 
@@ -74,7 +77,7 @@ addEventListener("hashchange", () => {
   router.current = parse(location.hash);
 });
 
-/** Opens a screen, as in `go(href.now())`. */
+/** Opens a screen, as in `go(href.activity("now"))`. */
 export function go(path: string): void {
   location.hash = path;
 }

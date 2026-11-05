@@ -100,7 +100,6 @@
   });
 </script>
 
-<h1>{t("ui.now.title")}</h1>
 {#if !watching}
   <p class="lede">
     {t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}

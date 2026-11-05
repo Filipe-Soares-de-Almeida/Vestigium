@@ -85,7 +85,7 @@ Technical.
 
 ### Monitoring
 
-- **Today** — a sentence sums up the day, and a timeline of the PC's states
+- **Activity, Today tab** — a sentence sums up the day, and a timeline of the PC's states
   since midnight (Normal, High usage, Overloaded, Suspended) marks each freeze. Point
   at a period to see what the CPU, memory, disk and GPU were
   doing, zoom with Ctrl and the mouse wheel, and click a freeze to open its
@@ -96,7 +96,7 @@ Technical.
   beside it, the steps to try, the sequence of what happened, and a chart of
   the minute before and the half minute after. "Copy report" puts it on the
   clipboard as Markdown, ready to paste into a forum or an issue.
-- **Now** — what weighs on the PC at this moment: the last ten minutes of
+- **Activity, Now tab** — what weighs on the PC at this moment: the last ten minutes of
   CPU, memory, disk and GPU, and the top programs by usage,
   each with all its processes added up. "See all" lists every program running,
   sorted by any column and searchable by name. Hold Ctrl to pause the screen on
