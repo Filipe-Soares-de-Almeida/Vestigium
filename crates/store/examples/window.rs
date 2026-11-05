@@ -24,6 +24,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{} samples; probe max lag {lag:.1} ms; memory in use max {memory:.1}%; cpu max {cpu:.1}%",
         samples.len()
     );
+    let mut disks: Vec<(String, f32, f32, f32, f64, usize)> = Vec::new();
+    for d in samples.iter().flat_map(|s| &s.disks) {
+        let i = disks
+            .iter()
+            .position(|(n, ..)| *n == d.name)
+            .unwrap_or_else(|| {
+                disks.push((d.name.clone(), 0.0, 0.0, 0.0, 0.0, 0));
+                disks.len() - 1
+            });
+        let e = &mut disks[i];
+        (e.1, e.2, e.3) = (
+            e.1.max(d.active_pct),
+            e.2.max(d.latency_ms),
+            e.3.max(d.queue_len),
+        );
+        (e.4, e.5) = (e.4 + f64::from(d.active_pct), e.5 + 1);
+    }
+    for (name, active, latency, queue, sum, n) in disks {
+        let mean = sum / n.max(1) as f64;
+        println!(
+            "disk {name}: active max {active:.1}% mean {mean:.1}%; latency max {latency:.1} ms; queue max {queue:.1}"
+        );
+    }
     for e in store.episodes(from, to)? {
         println!(
             "episode {:?} {}..{} peak {}",
