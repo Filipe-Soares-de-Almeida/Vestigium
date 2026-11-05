@@ -3,6 +3,9 @@ use std::fmt::Write as _;
 const MB: f64 = 1024.0 * 1024.0;
 const DAY_MS: f64 = 86_400_000.0;
 const MINUTE_MS: f64 = 60_000.0;
+/// The start of a run the working set budget leaves out: the agent hands its idle pages back ~10 s
+/// after it starts.
+const SETTLE_MS: f64 = 30_000.0;
 
 /// One reading of the measured process.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,7 +43,10 @@ pub struct Report {
     pub cpu_avg_pct: f64,
     pub cpu_worst_minute_pct: f64,
     pub ws_avg_mb: f64,
+    /// Highest after the first `SETTLE_MS`, or over the whole run when it is shorter.
     pub ws_max_mb: f64,
+    /// Highest in the first `SETTLE_MS`.
+    pub ws_start_max_mb: f64,
     pub private_avg_mb: f64,
     pub private_max_mb: f64,
     pub context_switches_per_s: f64,
@@ -79,13 +85,21 @@ pub fn report(
         obs.iter().map(|o| f(o) as f64).sum::<f64>() / obs.len() as f64 / MB
     };
     let max = |f: fn(&Observation) -> u64| obs.iter().map(f).max().unwrap_or(0) as f64 / MB;
+    let settled = obs.partition_point(|o| o.at_ms < first.at_ms + SETTLE_MS);
+    let ws_max =
+        |part: &[Observation]| part.iter().map(|o| o.working_set).max().unwrap_or(0) as f64 / MB;
 
     Report {
         minutes: span_ms / MINUTE_MS,
         cpu_avg_pct: cpu_pct(first, last),
         cpu_worst_minute_pct: worst_minute(obs, cpu_pct),
         ws_avg_mb: mean(|o| o.working_set),
-        ws_max_mb: max(|o| o.working_set),
+        ws_max_mb: if settled < obs.len() {
+            ws_max(&obs[settled..])
+        } else {
+            ws_max(obs)
+        },
+        ws_start_max_mb: ws_max(&obs[..settled]),
         private_avg_mb: mean(|o| o.private_bytes),
         private_max_mb: max(|o| o.private_bytes),
         context_switches_per_s: if span_ms > 0.0 {
@@ -126,6 +140,7 @@ fn empty(endpoints: usize, budgets: &Budgets) -> Report {
         cpu_worst_minute_pct: 0.0,
         ws_avg_mb: 0.0,
         ws_max_mb: 0.0,
+        ws_start_max_mb: 0.0,
         private_avg_mb: 0.0,
         private_max_mb: 0.0,
         context_switches_per_s: 0.0,
@@ -176,9 +191,14 @@ impl Report {
                 String::new(),
             ),
             (
-                "Working set, max",
+                "Working set, max after the first 30 s",
                 format!("{:.1} MB", self.ws_max_mb),
                 format!("<= {} MB", b.working_set_mb),
+            ),
+            (
+                "Working set, max in the first 30 s",
+                format!("{:.1} MB", self.ws_start_max_mb),
+                String::new(),
             ),
             (
                 "Private bytes, average / max",
@@ -229,6 +249,30 @@ mod tests {
             write_bytes: 0,
             context_switches: 0,
         }
+    }
+
+    #[test]
+    fn the_start_peak_is_reported_apart_from_the_budget() {
+        let mut obs: Vec<Observation> = (0..=120).map(|s| at(f64::from(s))).collect();
+        obs[8].working_set = 20 * MIB;
+        obs[90].working_set = 9 * MIB;
+
+        let r = report(&obs, 8, 0, &AGENT);
+
+        assert_eq!(r.ws_start_max_mb, 20.0);
+        assert_eq!(r.ws_max_mb, 9.0);
+        assert!(!r.exceeded().contains(&"working set"));
+    }
+
+    #[test]
+    fn a_peak_after_the_start_counts() {
+        let mut obs: Vec<Observation> = (0..=120).map(|s| at(f64::from(s))).collect();
+        obs[60].working_set = 16 * MIB;
+
+        let r = report(&obs, 8, 0, &AGENT);
+
+        assert_eq!(r.ws_max_mb, 16.0);
+        assert!(r.exceeded().contains(&"working set"));
     }
 
     #[test]
