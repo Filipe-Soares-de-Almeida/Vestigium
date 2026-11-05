@@ -1,7 +1,8 @@
-//! Writes synthetic samples the way the agent does, with a chosen batch interval and sync mode, to
-//! measure disk writes: `batch_cost --dir <dir> --batch-secs <s> --minutes <m> [--full] [--warm]`.
-//! `--warm` first fills the WAL past its checkpoint with past minutes, so the run measures the WAL
-//! at its settled size, then waits a minute.
+//! Writes samples the way the agent does, with a chosen batch interval and sync mode, to measure
+//! disk writes: `batch_cost --dir <dir> --batch-secs <s> --minutes <m> [--full] [--warm]
+//! [--source <db>]`. `--warm` first fills the WAL past its checkpoint with past minutes, so the run
+//! measures the WAL at its settled size; `--source` replays the samples and rankings of a real
+//! history instead of synthetic ones.
 
 use std::path::PathBuf;
 use std::thread;
@@ -19,6 +20,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let minutes: u64 = arg("--minutes").and_then(|s| s.parse().ok()).unwrap_or(10);
     let full = std::env::args().any(|a| a == "--full");
     let warm = std::env::args().any(|a| a == "--warm");
+    let feed = match arg("--source") {
+        Some(source) => {
+            let store = Store::open_read_only(std::path::Path::new(&source))?;
+            Feed {
+                samples: store.samples(i64::MIN, i64::MAX)?,
+                tops: store.tops(i64::MIN, i64::MAX)?,
+                seed: 0,
+                at: 0,
+            }
+        }
+        None => Feed {
+            samples: Vec::new(),
+            tops: Vec::new(),
+            seed: 0x2545_f491_4f6c_dd1du64,
+            at: 0,
+        },
+    };
+    let mut feed = feed;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("batch-cost.db");
     drop(Store::open(&path)?);
@@ -32,15 +51,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut batcher = Batcher::new(Duration::from_secs(batch_secs));
-    let mut seed = 0x2545_f491_4f6c_dd1du64;
     if warm {
         let begun = Instant::now();
         let mut past_ms = now_ms() - 30 * 86_400_000;
         for _ in 0..WARM_COMMITS {
             for s in 0..60 {
-                batcher.push_sample(sample(past_ms + s * 1000, &mut seed));
+                batcher.push_sample(feed.sample(past_ms + s * 1000));
                 if s % 5 == 0 {
-                    batcher.push_processes(top(past_ms + s * 1000, &mut seed));
+                    batcher.push_processes(feed.top(past_ms + s * 1000));
                 }
             }
             past_ms += 60_000;
@@ -56,9 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut commits = 0u32;
     for tick in 0..minutes * 60 {
         let ts_ms = now_ms();
-        batcher.push_sample(sample(ts_ms, &mut seed));
+        batcher.push_sample(feed.sample(ts_ms));
         if tick % 5 == 0 {
-            batcher.push_processes(top(ts_ms, &mut seed));
+            batcher.push_processes(feed.top(ts_ms));
         }
         if batcher.due(ts_ms) {
             commit(&conn, &batcher.take())?;
@@ -72,6 +90,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         started.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+/// Where samples and rankings come from: a real history in turn, or synthetic ones.
+struct Feed {
+    samples: Vec<Sample>,
+    tops: Vec<ProcessTop>,
+    seed: u64,
+    at: usize,
+}
+
+impl Feed {
+    fn sample(&mut self, ts_ms: i64) -> Sample {
+        if self.samples.is_empty() {
+            return sample(ts_ms, &mut self.seed);
+        }
+        self.at += 1;
+        Sample {
+            ts_ms,
+            ..self.samples[self.at % self.samples.len()].clone()
+        }
+    }
+
+    fn top(&mut self, ts_ms: i64) -> ProcessTop {
+        if self.tops.is_empty() {
+            return top(ts_ms, &mut self.seed);
+        }
+        ProcessTop {
+            ts_ms,
+            ..self.tops[(self.at / 5) % self.tops.len()].clone()
+        }
+    }
 }
 
 /// Past minutes written before a `--warm` run: enough to pass the 1000-page checkpoint.

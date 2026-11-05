@@ -26,7 +26,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let last = segments
             .last()
             .map_or_else(|| "-".to_string(), |s| s.end_ms.to_string());
-        println!("{name}: {} segments, last end_ms {last}", segments.len());
+        let bytes: usize = segments.iter().map(|s| s.data.len()).sum();
+        let span_h = match (segments.first(), segments.last()) {
+            (Some(a), Some(b)) => (b.end_ms - a.start_ms) as f64 / 3_600_000.0,
+            _ => 0.0,
+        };
+        println!(
+            "{name}: {} segments, {bytes} bytes, {:.1} KB/h over {span_h:.1} h, last end_ms {last}",
+            segments.len(),
+            if span_h > 0.0 {
+                bytes as f64 / 1024.0 / span_h
+            } else {
+                0.0
+            }
+        );
     }
 
     let (all, max) = (i64::MIN, i64::MAX);
