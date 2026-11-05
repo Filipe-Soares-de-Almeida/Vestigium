@@ -19,6 +19,7 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::timeline,
@@ -139,5 +140,19 @@ mod tests {
             changelog.contains(&heading),
             "CHANGELOG.md has no '{heading}' section"
         );
+    }
+
+    #[test]
+    fn the_updater_checks_signed_releases_over_https() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater: tauri_plugin_updater::Config =
+            serde_json::from_value(config["plugins"]["updater"].clone()).unwrap();
+        assert!(!updater.endpoints.is_empty());
+        assert!(updater.endpoints.iter().all(|url| url.scheme() == "https"));
+        assert!(!updater.pubkey.is_empty());
+        assert!(!updater.dangerous_insecure_transport_protocol);
+        assert!(!updater.allow_downgrades);
+        assert!(updater.require_signed_version);
     }
 }

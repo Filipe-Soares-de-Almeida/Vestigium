@@ -17,12 +17,14 @@ tauri-build = { workspace = true }
 [dependencies]
 tauri = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
+tauri-plugin-updater = { workspace = true }
 vestigium-collect = { workspace = true }
 vestigium-core = { workspace = true }
 vestigium-ipc = { workspace = true }
 vestigium-store = { workspace = true }
 postcard = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dependencies.windows]
@@ -36,7 +38,6 @@ features = [
 ]
 
 [dev-dependencies]
-serde_json = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

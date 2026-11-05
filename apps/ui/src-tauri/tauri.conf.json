@@ -34,5 +34,17 @@
         "installerHooks": "./windows/hooks.nsh"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwMEUwQTFEQTMyMzc4NEEKUldSS2VDT2pIUW9PRUdXSis2dExxNXo5bGxleUpsYUIzOEhqNk5UaDZmKzVGamZrNlpqL3JqWTQK",
+      "endpoints": [
+        "https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

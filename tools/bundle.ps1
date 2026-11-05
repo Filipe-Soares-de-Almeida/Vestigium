@@ -31,11 +31,14 @@ try {
 
     Set-Location (Join-Path $root 'apps\ui')
     Invoke-Step 'npm ci' { npm ci --no-audit --no-fund }
-    Invoke-Step 'tauri build' { npm run tauri -- build --config src-tauri/tauri.bundle.conf.json }
+    # With a signing key in the environment, the installer also gets the signature the updater checks.
+    $configs = @('--config', 'src-tauri/tauri.bundle.conf.json')
+    if ($env:TAURI_SIGNING_PRIVATE_KEY) { $configs += @('--config', 'src-tauri/tauri.updater.conf.json') }
+    Invoke-Step 'tauri build' { npm run tauri -- build @configs }
 }
 finally {
     Pop-Location
 }
 
-Get-ChildItem (Join-Path $release 'bundle\nsis') -Filter '*-setup.exe' |
-    ForEach-Object { "Installer: $($_.FullName) ($([math]::Round($_.Length / 1MB, 1)) MB)" }
+Get-ChildItem (Join-Path $release 'bundle\nsis') -Filter '*-setup.exe*' |
+    ForEach-Object { "Built: $($_.FullName) ($([math]::Round($_.Length / 1MB, 1)) MB)" }
