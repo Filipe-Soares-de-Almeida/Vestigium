@@ -262,6 +262,10 @@ How to use this file:
 - A disk read that found sectors it could not read counts the sectors, "2 sectors could not be
   read", instead of the regions that hold them; when the read kept as many as it can, it says "at
   least".
+- The interface speaks in a neutral, direct tone with the PC terms people know. Vestigium now
+  monitors rather than watches; the PC states read Normal, High usage and Overloaded; the side
+  menu groups are Monitoring, Maintenance and Diagnostics; Health counts alerts; and the tray,
+  the banners and the error messages say what happened in a few words.
 
 ### Fixed
 
