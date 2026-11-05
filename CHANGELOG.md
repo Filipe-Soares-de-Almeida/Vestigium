@@ -265,10 +265,14 @@ How to use this file:
 - The interface speaks in a neutral, direct tone with the PC terms people know. Vestigium now
   monitors rather than watches; the PC states read Normal, High usage and Overloaded; the side
   menu groups are Monitoring, Maintenance and Diagnostics; Health counts alerts; and the tray,
-  the banners and the error messages say what happened in a few words.
+  the banners and the error messages say what happened in a few words. Today and Now name CPU,
+  GPU and overload periods, give the likely cause plainly, and call a fall of the PC an
+  unexpected shutdown.
 
 ### Fixed
 
+- The Technical line of a memory overload period says "above 85%", the threshold Vestigium uses,
+  instead of 90%.
 - The Health, Dumps, Optimizations and Tests screens open with their data instead of "Something
   went wrong", and the counts beside them in the side menu show again.
 - A program with a long name no longer pushes "Using the most" on the Now screen past the edge of
