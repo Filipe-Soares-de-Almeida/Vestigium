@@ -12,6 +12,7 @@
     "allow-timeline",
     "allow-marks",
     "allow-occurrence",
+    "allow-episode-detail",
     "allow-live-start",
     "allow-live-stop",
     "allow-agent-status",

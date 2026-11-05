@@ -5,17 +5,30 @@
 
   import ChartTip from "../../components/ChartTip.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
-  import { formatClock } from "../../lib/format";
+  import { formatClock, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { wheelZoom, Zoom } from "../../lib/zoom.svelte";
   import type { ChartView, Lane } from "./chart";
   import { formatOffset } from "./format";
 
-  let { view }: { view: ChartView } = $props();
+  let {
+    view,
+    clock = false,
+    label = t("ui.occurrence.chart.label"),
+    hint = t("ui.occurrence.chart.hint"),
+    keys = t("ui.occurrence.chart.keys"),
+  }: {
+    view: ChartView;
+    /** Labels the axis with the time of day instead of seconds from the origin. */
+    clock?: boolean;
+    label?: string;
+    hint?: string;
+    keys?: string;
+  } = $props();
 
   const PLOT_H = 52;
   /** Axis steps in seconds, and the room one label needs before the next step is used. */
-  const TICK_STEPS = [5, 10, 15, 30, 60];
+  const TICK_STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
   const TICK_ROOM_PX = 56;
   const MIN_VIEW_S = 10;
   const uid = `occ-chart-${Math.random().toString(36).slice(2, 8)}`;
@@ -48,14 +61,24 @@
     const right = Math.min(100, pct(to));
     return right <= 0 || left >= 100 ? null : { left, width: Math.max(0.8, right - left) };
   };
+  // Time-of-day ticks fall on whole minutes and seconds of the clock and need room for the seconds.
   const ticks = $derived.by(() => {
     const perSecond = width / Math.max(1, hi - lo);
-    const step = TICK_STEPS.find((s) => s * perSecond >= TICK_ROOM_PX) ?? TICK_STEPS.at(-1)!;
+    const room = clock ? TICK_ROOM_PX + 20 : TICK_ROOM_PX;
+    const step = TICK_STEPS.find((s) => s * perSecond >= room) ?? TICK_STEPS.at(-1)!;
+    const shift = clock ? (view.originMs / 1000) % step : 0;
     const out: number[] = [];
-    for (let s = Math.ceil(lo / step) * step; s <= hi; s += step) out.push(s);
+    for (let s = Math.ceil((lo + shift) / step) * step - shift; s <= hi; s += step) out.push(s);
     return out;
   });
-  const range = $derived(t("ui.zoom.range", { from: formatOffset(lo), to: formatOffset(hi) }));
+  const range = $derived(t("ui.zoom.range", { from: tickLabel(lo), to: tickLabel(hi) }));
+
+  /** A place on the axis: seconds from the origin, or the time of day, to the second while steps are short. */
+  function tickLabel(s: number): string {
+    if (!clock) return formatOffset(s);
+    const ms = view.originMs + s * 1000;
+    return (ticks[1] ?? Infinity) - (ticks[0] ?? 0) < 60 ? formatClock(ms) : formatTime(ms);
+  }
 
   function token(name: string): string {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -175,7 +198,8 @@
 
   function heading(i: number): string {
     const s = view.x[i];
-    return `${formatOffset(s)} · ${formatClock(view.originMs + s * 1000)}`;
+    const time = formatClock(view.originMs + s * 1000);
+    return clock ? time : `${formatOffset(s)} · ${time}`;
   }
 
   function value(lane: Lane, i: number): string {
@@ -183,7 +207,7 @@
     return v === null || v === undefined ? t("ui.occurrence.chart.none") : lane.format(v);
   }
 
-  // Arrows step a second (Shift: ten), Home and End jump, + − and 0 zoom, Esc takes the readout away.
+  // Arrows step a point (Shift: ten), Home and End jump, + − and 0 zoom, Esc takes the readout away.
   function onkeydown(event: KeyboardEvent): void {
     const n = view.x.length;
     if (!n) return;
@@ -223,12 +247,12 @@
     onblur={() => show(null)}
     tabindex="0"
     role="slider"
-    aria-label={t("ui.occurrence.chart.label")}
+    aria-label={label}
     aria-describedby="{uid}-summary {uid}-keys"
     aria-valuemin={0}
     aria-valuemax={Math.max(0, view.x.length - 1)}
     aria-valuenow={cursor ?? moment}
-    aria-valuetext={cursor === null ? t("ui.occurrence.chart.hint") : readout(cursor)}
+    aria-valuetext={cursor === null ? hint : readout(cursor)}
     {onkeydown}
   >
     {#each view.bands as band, i (i)}
@@ -269,7 +293,7 @@
   </div>
   <div class="axis" aria-hidden="true">
     {#each ticks as s (s)}
-      <span style:left="{pct(s)}%" class:start={pct(s) < 4} class:end={pct(s) > 96}>{formatOffset(s)}</span>
+      <span style:left="{pct(s)}%" class:start={pct(s) < 4} class:end={pct(s) > 96}>{tickLabel(s)}</span>
     {/each}
   </div>
   {#if view.bands.length}
@@ -284,13 +308,13 @@
       {/each}
     </div>
   {/if}
-  <ZoomBar {zoom} {range} plot={wrap} hint={t("ui.occurrence.chart.hint")} />
+  <ZoomBar {zoom} {range} plot={wrap} {hint} />
   <ul class="sr" id="{uid}-summary">
     {#each view.summary as line, i (i)}
       <li>{line}</li>
     {/each}
   </ul>
-  <p class="sr" id="{uid}-keys">{t("ui.occurrence.chart.keys")}</p>
+  <p class="sr" id="{uid}-keys">{keys}</p>
 </div>
 
 <style>

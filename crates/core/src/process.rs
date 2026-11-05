@@ -109,6 +109,49 @@ pub fn programs(samples: &[ProcessSample]) -> Vec<ProcessSample> {
     .collect()
 }
 
+/// Each program's use across `tops`: mean CPU, I/O and GPU and peak private memory, under the pid
+/// of its busiest moment; busiest by CPU first.
+pub fn usage(tops: &[ProcessTop]) -> Vec<ProcessSample> {
+    let mut used: HashMap<String, (f32, ProcessSample)> = HashMap::new();
+    for top in tops {
+        for p in programs(&top.entries) {
+            match used.entry(p.name.clone()) {
+                Entry::Vacant(slot) => {
+                    slot.insert((p.cpu_pct, p));
+                }
+                Entry::Occupied(mut slot) => {
+                    let (busiest, total) = slot.get_mut();
+                    if p.cpu_pct > *busiest {
+                        (*busiest, total.pid) = (p.cpu_pct, p.pid);
+                    }
+                    total.cpu_pct += p.cpu_pct;
+                    total.private_bytes = total.private_bytes.max(p.private_bytes);
+                    total.read_bps += p.read_bps;
+                    total.write_bps += p.write_bps;
+                    total.gpu_pct += p.gpu_pct;
+                }
+            }
+        }
+    }
+    let count = tops.len().max(1) as f32;
+    let mut out: Vec<ProcessSample> = used
+        .into_values()
+        .map(|(_, p)| ProcessSample {
+            cpu_pct: p.cpu_pct / count,
+            read_bps: p.read_bps / count,
+            write_bps: p.write_bps / count,
+            gpu_pct: p.gpu_pct / count,
+            ..p
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.cpu_pct
+            .total_cmp(&a.cpu_pct)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out
+}
+
 /// Merges `(pid, name, value)` per program name, keeping the pid of its heaviest by `weight`;
 /// heaviest first.
 fn merge_programs<T>(

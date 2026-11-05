@@ -9,6 +9,7 @@
     RunDiskTest: { href: () => href.tests(), name: "ui.shell.nav.tests" },
     RunMemoryDiagnostic: { href: () => href.tests("memory"), name: "ui.shell.nav.tests" },
     FindDiskHeavyApp: { href: () => href.activity("now"), name: "ui.activity.tab.now" },
+    SeeNow: { href: () => href.activity("now"), name: "ui.activity.tab.now" },
   };
   const placeOf = (step: { key: string; href?: string }) => {
     const place = PLACE[step.key.split(":")[0]];

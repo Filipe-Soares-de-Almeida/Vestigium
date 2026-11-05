@@ -3,6 +3,7 @@ const COMMANDS: &[&str] = &[
     "timeline",
     "marks",
     "occurrence",
+    "episode_detail",
     "live_start",
     "live_stop",
     "agent_status",

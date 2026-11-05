@@ -9,6 +9,8 @@ import type {
   DiskDetailDto,
   DumpScanFinished,
   DumpsDto,
+  Episode,
+  EpisodeDetailDto,
   HealthDto,
   LiveMessage,
   MarksDto,
@@ -37,6 +39,10 @@ export function marks(fromMs: number, toMs: number): Promise<MarksDto> {
 
 export function occurrence(id: number): Promise<OccurrenceDto | null> {
   return invoke("occurrence", { id });
+}
+
+export function episodeDetail(episode: Episode): Promise<EpisodeDetailDto> {
+  return invoke("episode_detail", { episode });
 }
 
 /** Streams the last ten minutes, then one second a second; resolves to the function that stops it. */

@@ -27,6 +27,7 @@ fn main() {
             commands::timeline,
             commands::marks,
             commands::occurrence,
+            commands::episode_detail,
             commands::live_start,
             commands::live_stop,
             commands::agent_status,

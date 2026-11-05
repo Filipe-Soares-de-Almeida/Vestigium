@@ -95,11 +95,13 @@ export function occurrenceTitle(o: OccurrenceSummary, level: DetailLevel): strin
   return `${kindName(o)} · ${exact}`;
 }
 
-function episodeKey(e: Episode): "CpuSaturated" | "MemoryHigh" | "DiskBusy" {
+/** The kind of a pressure episode, as catalog keys name it. */
+export function episodeKey(e: Episode): "CpuSaturated" | "MemoryHigh" | "DiskBusy" {
   return typeof e.kind === "string" ? (e.kind as "CpuSaturated" | "MemoryHigh") : "DiskBusy";
 }
 
-function episodeDisk(e: Episode): string {
+/** "C:" for a disk episode, empty otherwise. */
+export function episodeDisk(e: Episode): string {
   return typeof e.kind === "object" && "DiskBusy" in e.kind ? diskLabel(e.kind.DiskBusy.disk) : "";
 }
 

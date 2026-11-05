@@ -2,11 +2,13 @@
 // ?history=empty is the first use, ?fall=1 adds a fall at 7:12. Nothing here was measured on a real PC.
 import type {
   Episode,
+  EpisodeDetailDto,
   Gap,
   MarksDto,
   OccurrenceKind,
   OccurrenceSummary,
   PcState,
+  ProcessSample,
   Severity,
   TimelineDto,
 } from "../../lib/types";
@@ -246,4 +248,43 @@ function marks(args: Record<string, unknown>): MarksDto {
   };
 }
 
-export const handlers: Record<string, Handler> = { timeline, marks };
+function program(pid: number, name: string, cpu: number, memMb: number, ioMb: number): ProcessSample {
+  return { pid, name, cpu_pct: cpu, private_bytes: memMb * 2 ** 20, read_bps: ioMb * 2 ** 20, write_bps: 0, gpu_pct: 0 };
+}
+
+/** Who used what during each episode of the full day, by its start. */
+const PROGRAMS: Record<number, ProcessSample[]> = {
+  [at(10, 2)]: [program(4120, "Builder.exe", 88, 1200, 2), program(9031, "Browser.exe", 6, 1900, 0.2), program(4, "System", 2, 0, 1)],
+  [at(14, 31)]: [program(2208, "Indexer.exe", 3, 140, 61), program(1880, "svchost.exe", 1, 60, 6), program(3120, "Defender.exe", 6, 300, 3)],
+  [at(16, 10)]: [program(9031, "Browser.exe", 9, 5100, 1), program(5120, "Editor.exe", 3, 900, 0), program(7012, "Chatter.exe", 1, 600, 0)],
+};
+
+/** As the window's Rust side answers: the episode with context around it, seconds dipping a little. */
+function episode_detail(args: Record<string, unknown>): EpisodeDetailDto {
+  const e = args.episode as Episode;
+  const context = Math.min(30 * MINUTE, Math.max(MINUTE, (e.end_ms - e.start_ms) / 2));
+  const from = e.start_ms - context;
+  const to = Math.min(e.end_ms + context, Math.max(Date.now(), e.end_ms + SECOND));
+  const line = timeline({ fromMs: from, toMs: to, maxPoints: 600 });
+  const jitter = (v: number | null, i: number, ch: number) =>
+    v === null ? null : Math.max(0, v - noise(i, ch) * (v > 90 ? 2 : 6));
+  const { history, resolution, step_ms, ...chart } = line;
+  return {
+    history,
+    resolution,
+    step_ms,
+    from_ms: from,
+    to_ms: to,
+    chart: {
+      ...chart,
+      cpu: chart.cpu.map((v, i) => jitter(v, i, 21)),
+      mem_used_pct: chart.mem_used_pct.map((v, i) => jitter(v, i, 22)),
+      disk_active_max: chart.disk_active_max.map((v, i) => jitter(v, i, 23)),
+      disk_latency_max: chart.disk_latency_max.map((v, i) => (v === null ? null : v * (8 + 30 * noise(i, 24)))),
+    },
+    programs: PROGRAMS[e.start_ms] ?? [],
+    occurrences: occurrences.filter((o) => o.start_ms <= e.end_ms && o.end_ms >= e.start_ms),
+  };
+}
+
+export const handlers: Record<string, Handler> = { timeline, marks, episode_detail };

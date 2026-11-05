@@ -63,7 +63,7 @@ pub use postmortem::{POSTMORTEM_BEFORE_MS, POSTMORTEM_REACH_MS, postmortem};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
 pub use process::{
     ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1, heaviest, last_seen,
-    process_rates, programs,
+    process_rates, programs, usage,
 };
 pub use reading::{BUSY_ABOVE, PcState, Reading, pc_state};
 pub use ring::Ring;

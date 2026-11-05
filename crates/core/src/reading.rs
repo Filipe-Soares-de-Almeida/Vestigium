@@ -65,6 +65,26 @@ impl Reading {
         }
     }
 
+    /// Like `of_sample`, with the disk measures read from the disk named `disk` alone.
+    pub fn of_sample_on(sample: &Sample, disk: &str) -> Reading {
+        let found = sample.disks.iter().find(|d| d.name == disk);
+        Reading {
+            disk_active_pct: found.map_or(0.0, |d| d.active_pct),
+            disk_latency_ms: found.map_or(0.0, |d| d.latency_ms),
+            ..Reading::of_sample(sample)
+        }
+    }
+
+    /// Like `of_minute`, with the disk measures read from the disk named `disk` alone.
+    pub fn of_minute_on(minute: &MinuteSample, disk: &str) -> Reading {
+        let found = minute.disks.iter().find(|d| d.name == disk);
+        Reading {
+            disk_active_pct: found.map_or(0.0, |d| d.active_max),
+            disk_latency_ms: found.map_or(0.0, |d| d.latency_max_ms),
+            ..Reading::of_minute(minute)
+        }
+    }
+
     /// Keeps the higher value of each measure; the start stays this one's.
     pub fn peak(&mut self, other: &Reading) {
         self.cpu_pct = self.cpu_pct.max(other.cpu_pct);

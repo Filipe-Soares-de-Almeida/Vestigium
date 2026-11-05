@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
-use vestigium_core::Settings;
+use vestigium_core::{Episode, Settings};
 use vestigium_ipc::{Request, Response};
 
 use vestigium_store::CaptureSummary;
@@ -19,7 +19,8 @@ use crate::capture::{
     scan_args, scan_file, sibling_helper,
 };
 use crate::history::{
-    CaptureDto, CrashControlDto, DumpsDto, HealthDto, History, MarksDto, OccurrenceDto, TimelineDto,
+    CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
+    OccurrenceDto, TimelineDto,
 };
 use crate::hwtests::{
     DiskDetailDto, RUNS_SHOWN_MS, RunningTest, TestFinished, TestProgress, TestsDto, disk_list,
@@ -86,6 +87,15 @@ pub async fn occurrence(
 ) -> Result<Option<OccurrenceDto>, UiError> {
     let history = state.history.clone();
     blocking(move || Ok(lock(&history).occurrence(id)?)).await
+}
+
+#[tauri::command]
+pub async fn episode_detail(
+    state: State<'_, AppState>,
+    episode: Episode,
+) -> Result<EpisodeDetailDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || Ok(lock(&history).episode(&episode, now_ms())?)).await
 }
 
 /// Streams the last ten minutes, then one second a second; replaces any running stream.

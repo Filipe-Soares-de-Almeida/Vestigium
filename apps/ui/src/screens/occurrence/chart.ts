@@ -87,21 +87,23 @@ export function laneKeys(level: DetailLevel, cause: CauseKind): LaneKey[] {
 
 const isMs = (key: LaneKey) => key === "latency" || key === "lag";
 
-export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKind): ChartView {
-  const origin = dto.start_ms / 1000;
-  const x = dto.chart.t.map((s) => s - origin);
-  const rel = (ms: number) => ms / 1000 - origin;
+/** The lanes of `keys` that hold a reading, with a line each for screen readers; `names` renames lanes. */
+export function lanesOf(
+  chart: Columns,
+  keys: LaneKey[],
+  names: Partial<Record<LaneKey, string>> = {},
+): { lanes: Lane[]; summary: string[] } {
   const lanes: Lane[] = [];
   const summary: string[] = [];
-  for (const key of laneKeys(level, cause)) {
-    const values = dto.chart[COLUMN[key]];
+  for (const key of keys) {
+    const values = chart[COLUMN[key]];
     const known = values.flatMap((v, i) => (v === null ? [] : [[v, i] as const]));
     if (!known.length) continue;
     const format = isMs(key) ? (v: number) => formatMs(v) : (v: number) => formatPercent(v);
     const [max, at] = known.reduce((a, b) => (b[0] > a[0] ? b : a));
     const min = Math.min(...known.map(([v]) => v));
     const log = isMs(key);
-    const label = t(`ui.occurrence.lane.${key}`);
+    const label = names[key] ?? t(`ui.occurrence.lane.${key}`);
     lanes.push({
       key,
       name: label,
@@ -117,10 +119,18 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
         lane: label,
         min: format(min),
         max: format(max),
-        time: formatClock(dto.chart.t[at] * 1000),
+        time: formatClock(chart.t[at] * 1000),
       }),
     );
   }
+  return { lanes, summary };
+}
+
+export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKind): ChartView {
+  const origin = dto.start_ms / 1000;
+  const x = dto.chart.t.map((s) => s - origin);
+  const rel = (ms: number) => ms / 1000 - origin;
+  const { lanes, summary } = lanesOf(dto.chart, laneKeys(level, cause));
 
   const bands: Band[] = [];
   for (const f of freezes(dto)) {

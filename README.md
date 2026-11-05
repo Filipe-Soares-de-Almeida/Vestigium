@@ -90,7 +90,9 @@ Technical.
   at a period to see what the CPU, memory, disk and GPU were
   doing, zoom with Ctrl and the mouse wheel, and click a freeze to open its
   report. Below come the day's freezes and overload periods, and the
-  freezes of each of the last 14 days.
+  freezes of each of the last 14 days. An overload period opens in place: its
+  peak and average, a chart of the period with the minutes around it, the
+  programs that used the most during it, the freezes inside it and what to do.
 - **Reports** — each freeze, app that stopped responding or unexpected shutdown
   opens as a report: how long it lasted, the probable cause with the evidence
   beside it, the steps to try, the sequence of what happened, and a chart of

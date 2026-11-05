@@ -351,6 +351,21 @@ export interface Episode {
   truncated: boolean;
 }
 
+/** A pressure episode as its detail shows it: the stretch around it, who used what, what stalled in it. */
+export interface EpisodeDetailDto {
+  history: HistoryState;
+  resolution: Resolution;
+  step_ms: number;
+  /** The stretch drawn: the episode with context on each side, cut at now. */
+  from_ms: number;
+  to_ms: number;
+  /** For a disk episode the disk series read that disk alone. */
+  chart: Columns;
+  /** Each program's mean CPU, I/O and GPU and peak memory; empty once per-second history is gone. */
+  programs: ProcessSample[];
+  occurrences: OccurrenceSummary[];
+}
+
 export interface MarksDto {
   history: HistoryState;
   occurrences: OccurrenceSummary[];

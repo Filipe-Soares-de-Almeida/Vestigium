@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use vestigium_core::{
-    ProcessCounters, ProcessSample, heaviest, last_seen, process_rates, programs,
+    ProcessCounters, ProcessSample, ProcessTop, heaviest, last_seen, process_rates, programs, usage,
 };
 
 fn top_processes(
@@ -254,4 +254,41 @@ fn programs_rank_a_program_by_its_processes_together() {
         top[0].cpu_pct, 18.0,
         "six processes at 3% outweigh one at 10%"
     );
+}
+
+#[test]
+fn usage_averages_each_program_over_the_rankings() {
+    let tops = [
+        ProcessTop {
+            ts_ms: 0,
+            entries: vec![
+                sample(10, "build.exe", 40.0, 100, 1_000.0, 0.0),
+                sample(11, "build.exe", 20.0, 150, 0.0, 0.0),
+            ],
+        },
+        ProcessTop {
+            ts_ms: 5_000,
+            entries: vec![
+                sample(12, "build.exe", 30.0, 300, 0.0, 0.0),
+                sample(20, "editor.exe", 10.0, 400, 3_000.0, 4.0),
+            ],
+        },
+    ];
+
+    let used = usage(&tops);
+
+    let names: Vec<&str> = used.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["build.exe", "editor.exe"], "busiest by CPU first");
+    assert_eq!(used[0].cpu_pct, 45.0, "60% then 30%");
+    assert_eq!(used[0].pid, 10, "the pid of its busiest moment");
+    assert_eq!(used[0].private_bytes, 300 << 20, "the peak, not a sum");
+    assert_eq!(used[0].read_bps + used[0].write_bps, 500.0);
+    assert_eq!(used[1].cpu_pct, 5.0, "absent from a ranking counts as idle");
+    assert_eq!(used[1].read_bps + used[1].write_bps, 1_500.0);
+    assert_eq!(used[1].gpu_pct, 2.0);
+}
+
+#[test]
+fn usage_of_no_rankings_is_empty() {
+    assert!(usage(&[]).is_empty());
 }

@@ -179,6 +179,9 @@ How to use this file:
   and reopening the window while watching goes on. After an update, the window shows once what
   changed since the version you had, in English or Portuguese. Settings › Updates has the switch,
   "Check now" and the notes of every version.
+- An overload period in the day's list opens in place under its row: when it ran, its peak and
+  average, a chart of the period with the minutes around it, the programs that used the most CPU,
+  memory or disk during it, the freezes inside it with a link to each report, and what to do.
 
 ### Changed
 

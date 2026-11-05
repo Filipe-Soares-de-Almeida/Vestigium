@@ -70,9 +70,8 @@ fn memory_is_unknown_without_a_total() {
     assert_eq!(reading.disk_active_pct, 0.0);
 }
 
-#[test]
-fn reading_of_a_minute_takes_its_peaks() {
-    let minute = MinuteSample {
+fn two_disk_minute() -> MinuteSample {
+    MinuteSample {
         ts_ms: 120_000,
         samples: 60,
         cpu_avg: 12.0,
@@ -100,9 +99,12 @@ fn reading_of_a_minute_takes_its_peaks() {
                 bytes_avg: 0.0,
             },
         ],
-    };
+    }
+}
 
-    let reading = Reading::of_minute(&minute);
+#[test]
+fn reading_of_a_minute_takes_its_peaks() {
+    let reading = Reading::of_minute(&two_disk_minute());
 
     assert_eq!(reading.ts_ms, 120_000);
     assert_eq!(reading.cpu_pct, 64.0);
@@ -111,6 +113,33 @@ fn reading_of_a_minute_takes_its_peaks() {
     assert_eq!(reading.disk_latency_ms, 80.0);
     assert_eq!(reading.gpu_pct, None);
     assert_eq!(reading.probe_lag_ms, 900.0);
+}
+
+#[test]
+fn reading_on_a_disk_reads_that_disk_alone() {
+    let reading = Reading::of_sample_on(&sample(5_000), "0 C:");
+
+    assert_eq!(reading.disk_active_pct, 15.0);
+    assert_eq!(reading.disk_latency_ms, 2.0);
+    assert_eq!(reading.cpu_pct, 20.0, "the other measures stay");
+    assert_eq!(reading.mem_used_pct, Some(25.0));
+}
+
+#[test]
+fn reading_on_a_disk_of_a_minute_reads_that_disk_alone() {
+    let reading = Reading::of_minute_on(&two_disk_minute(), "1 D:");
+
+    assert_eq!(reading.disk_active_pct, 55.0);
+    assert_eq!(reading.disk_latency_ms, 4.0);
+    assert_eq!(reading.cpu_pct, 64.0);
+}
+
+#[test]
+fn reading_on_a_missing_disk_reads_no_disk() {
+    let reading = Reading::of_sample_on(&sample(0), "2 E:");
+
+    assert_eq!(reading.disk_active_pct, 0.0);
+    assert_eq!(reading.disk_latency_ms, 0.0);
 }
 
 #[test]

@@ -4,9 +4,10 @@ use serde::Serialize;
 use vestigium_core::health::{BootReport, Finding, Measure, Subject};
 use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
-    CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EventMeaning, Fault, Gap,
-    MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, Reading, Suspect, WinEvent,
-    bug_check_event, capture_findings, capture_suspects, dump_culprit, pc_state, steady_only,
+    CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Fault,
+    Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample, Reading,
+    Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit, heaviest,
+    pc_state, steady_only, usage,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
@@ -22,6 +23,11 @@ pub const SECONDS_UP_TO_MS: i64 = 6 * 3_600_000;
 const SECOND_MS: i64 = 1_000;
 /// Most points a chart gets, whatever the caller asks for.
 const MAX_POINTS: u32 = 10_000;
+/// Context drawn on each side of an episode: half its length, from a minute to half an hour.
+const EPISODE_CONTEXT_MS: (i64, i64) = (60_000, 30 * 60_000);
+const EPISODE_POINTS: u32 = 600;
+/// Programs an episode lists for each measure.
+const EPISODE_PROGRAMS: usize = 5;
 
 /// Whether the watcher has written any history yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -122,6 +128,23 @@ pub struct OccurrenceDto {
     pub capture: Option<CaptureNote>,
     /// Vestigium tests that ran during the window.
     pub tests: Vec<TestSpan>,
+}
+
+/// An episode as its detail shows it: the stretch around it, who used what, what stalled in it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EpisodeDetailDto {
+    pub history: HistoryState,
+    pub resolution: Resolution,
+    pub step_ms: i64,
+    /// The stretch drawn: the episode with context on each side, cut at now.
+    pub from_ms: i64,
+    pub to_ms: i64,
+    /// For a disk episode the disk series read that disk alone.
+    pub chart: Columns,
+    /// Each program's use during the episode; empty once per-second history is gone.
+    pub programs: Vec<ProcessSample>,
+    /// Occurrences that overlap the episode, oldest first.
+    pub occurrences: Vec<OccurrenceSummary>,
 }
 
 /// One finding as the health page lists it.
@@ -491,6 +514,82 @@ impl History {
         }))
     }
 
+    /// The detail of `episode`, read from per-second samples while they are kept, else minutes.
+    pub fn episode(
+        &mut self,
+        episode: &Episode,
+        now_ms: i64,
+    ) -> Result<EpisodeDetailDto, StoreError> {
+        let (least, most) = EPISODE_CONTEXT_MS;
+        let context = ((episode.end_ms - episode.start_ms) / 2).clamp(least, most);
+        let from_ms = episode.start_ms - context;
+        let to_ms = (episode.end_ms + context)
+            .min(now_ms)
+            .max(episode.end_ms + SECOND_MS);
+        let disk = match &episode.kind {
+            EpisodeKind::DiskBusy { disk } | EpisodeKind::DiskLatencyHint { disk } => {
+                Some(disk.as_str())
+            }
+            _ => None,
+        };
+        let found = self.read(|store| {
+            let last_ms = to_ms - 1;
+            let samples = store.samples(from_ms, last_ms)?;
+            let (resolution, readings): (Resolution, Vec<Reading>) = if samples.is_empty() {
+                let minutes = store.minutes(from_ms, last_ms)?;
+                let readings = minutes.iter().map(|m| match disk {
+                    Some(disk) => Reading::of_minute_on(m, disk),
+                    None => Reading::of_minute(m),
+                });
+                (Resolution::Minutes, readings.collect())
+            } else {
+                let readings = samples.iter().map(|s| match disk {
+                    Some(disk) => Reading::of_sample_on(s, disk),
+                    None => Reading::of_sample(s),
+                });
+                (Resolution::Seconds, readings.collect())
+            };
+            let pressure: Vec<(i64, i64)> = store
+                .episodes(from_ms, last_ms)?
+                .iter()
+                .filter(|e| !e.kind.is_hint())
+                .map(|e| (e.start_ms, e.end_ms))
+                .collect();
+            let tops = store.tops(episode.start_ms, episode.end_ms)?;
+            let occurrences = store.occurrences(episode.start_ms, episode.end_ms)?;
+            Ok((resolution, readings, pressure, tops, occurrences))
+        })?;
+        let Some((resolution, readings, pressure, tops, occurrences)) = found else {
+            return Ok(EpisodeDetailDto {
+                history: HistoryState::Empty,
+                resolution: Resolution::Seconds,
+                step_ms: SECOND_MS,
+                from_ms,
+                to_ms,
+                chart: Columns::default(),
+                programs: Vec::new(),
+                occurrences: Vec::new(),
+            });
+        };
+        let native_ms = match resolution {
+            Resolution::Seconds => SECOND_MS,
+            Resolution::Minutes => MINUTE_MS,
+        };
+        let start_ms = from_ms - from_ms.rem_euclid(native_ms);
+        let step_ms = step(to_ms - start_ms, native_ms, EPISODE_POINTS);
+        let buckets = bucket(&readings, start_ms, to_ms, step_ms);
+        Ok(EpisodeDetailDto {
+            history: HistoryState::Ready,
+            resolution,
+            step_ms,
+            from_ms,
+            to_ms,
+            chart: columns(&buckets, start_ms, step_ms, &pressure),
+            programs: heaviest(usage(&tops), EPISODE_PROGRAMS),
+            occurrences,
+        })
+    }
+
     /// Deep captures that overlap `[from_ms, to_ms]`, oldest first.
     pub fn captures(
         &mut self,
@@ -694,8 +793,8 @@ mod tests {
     use std::path::Path;
 
     use vestigium_core::{
-        Cause, Confidence, CoreLoad, DiskLoad, EpisodeKind, Evidence, MachineInfo, Metric,
-        MinuteSample, OccurrenceKind, Sample, Severity, Suspect, Trigger, Window,
+        Cause, Confidence, CoreLoad, DiskLoad, Evidence, MachineInfo, Metric, MinuteSample,
+        OccurrenceKind, ProcessTop, Sample, Severity, Suspect, Trigger, Window,
     };
     use vestigium_store::{Segment, Series, encode};
 
@@ -967,6 +1066,197 @@ mod tests {
             serde_json::json!(1_840.5)
         );
         assert_eq!(json["id"], serde_json::json!(id));
+    }
+
+    fn disk_sample(ts_ms: i64, c_active: f32, d_active: f32) -> Sample {
+        let disk = |name: &str, active_pct: f32, latency_ms: f32| DiskLoad {
+            name: name.to_string(),
+            active_pct,
+            latency_ms,
+            queue_len: 0.0,
+            bytes_per_s: 0.0,
+        };
+        Sample {
+            disks: vec![disk("0 C:", c_active, 2.0), disk("1 D:", d_active, 9.0)],
+            ..sample(ts_ms, 10.0)
+        }
+    }
+
+    fn top(ts_ms: i64, name: &str, cpu_pct: f32, io_bps: f32) -> ProcessTop {
+        ProcessTop {
+            ts_ms,
+            entries: vec![ProcessSample {
+                pid: 40,
+                name: name.to_string(),
+                cpu_pct,
+                private_bytes: 64 << 20,
+                read_bps: io_bps,
+                write_bps: 0.0,
+                gpu_pct: 0.0,
+            }],
+        }
+    }
+
+    fn disk_episode(start_ms: i64, end_ms: i64) -> Episode {
+        Episode {
+            kind: EpisodeKind::DiskBusy {
+                disk: "0 C:".to_string(),
+            },
+            start_ms,
+            end_ms,
+            peak: 100.0,
+            culprit: None,
+            truncated: false,
+        }
+    }
+
+    /// A short freeze at `start_ms` with an empty window.
+    fn freeze_at(start_ms: i64) -> Occurrence {
+        Occurrence {
+            kind: OccurrenceKind::Freeze,
+            start_ms,
+            end_ms: start_ms + 4_000,
+            severity: Severity::Medium,
+            triggers: Vec::new(),
+            window: Window {
+                from_ms: start_ms - 60_000,
+                to_ms: start_ms + 30_000,
+                samples: Vec::new(),
+                tops: Vec::new(),
+                events: Vec::new(),
+                hangs: Vec::new(),
+                gaps: Vec::new(),
+                machine: MachineInfo {
+                    logical_cpus: 2,
+                    mem_total_bytes: 16 << 30,
+                    disks: Vec::new(),
+                },
+            },
+            suspects: Vec::new(),
+            facts: Vec::new(),
+            sensitive: false,
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn episode_detail_draws_the_episode_disk_with_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + HOUR_MS;
+        let end_ms = start_ms + 120_000;
+        let samples: Vec<Sample> = (-30..180)
+            .map(|s| start_ms + s * SECOND_MS)
+            .map(|ts| {
+                let busy = ts >= start_ms && ts <= end_ms;
+                disk_sample(ts, if busy { 100.0 } else { 5.0 }, 60.0)
+            })
+            .collect();
+        write_samples(&mut store, &samples);
+        let tops: Vec<ProcessTop> = (0..=24)
+            .map(|i| top(start_ms + i * 5_000, "download.exe", 2.0, 40e6))
+            .collect();
+        store
+            .append(&[Segment {
+                series: Series::Processes,
+                start_ms,
+                end_ms,
+                data: encode(&tops),
+            }])
+            .unwrap();
+        let episode = disk_episode(start_ms, end_ms);
+        store.insert_episode(&episode).unwrap();
+
+        let detail = history.episode(&episode, end_ms + HOUR_MS).unwrap();
+
+        assert_eq!(detail.history, HistoryState::Ready);
+        assert_eq!(detail.resolution, Resolution::Seconds);
+        assert_eq!(
+            (detail.from_ms, detail.to_ms),
+            (start_ms - 60_000, end_ms + 60_000)
+        );
+        assert_eq!(detail.step_ms, SECOND_MS);
+        let disk = &detail.chart.disk_active_max;
+        assert_eq!(disk.len(), 240);
+        assert_eq!(disk[0], None, "nothing was watched a minute before");
+        assert_eq!(disk[40], Some(5.0), "C: alone, not the busier D:");
+        assert_eq!(disk[90], Some(100.0));
+        assert_eq!(detail.chart.state[90], PcState::Pressure);
+        assert_eq!(detail.programs[0].name, "download.exe");
+        assert_eq!(detail.programs[0].read_bps, 40e6);
+    }
+
+    #[test]
+    fn episode_detail_lists_what_stalled_inside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + HOUR_MS;
+        let end_ms = start_ms + 120_000;
+        write_samples(&mut store, &[disk_sample(start_ms, 100.0, 0.0)]);
+        for at in [start_ms + 30_000, end_ms + 600_000] {
+            store.insert_occurrence(&freeze_at(at)).unwrap();
+        }
+
+        let detail = history
+            .episode(&disk_episode(start_ms, end_ms), end_ms + HOUR_MS)
+            .unwrap();
+
+        let starts: Vec<i64> = detail.occurrences.iter().map(|o| o.start_ms).collect();
+        assert_eq!(starts, [start_ms + 30_000]);
+    }
+
+    #[test]
+    fn episode_detail_stops_at_now_and_falls_back_to_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + 2 * HOUR_MS;
+        let end_ms = start_ms + 2 * HOUR_MS;
+        let minutes: Vec<MinuteSample> = (0..5 * 60)
+            .map(|m| minute(DAY_START_MS + HOUR_MS + m * MINUTE_MS, 97.0))
+            .collect();
+        store
+            .append(&[Segment {
+                series: Series::Minutes,
+                start_ms: DAY_START_MS + HOUR_MS,
+                end_ms: DAY_START_MS + 6 * HOUR_MS,
+                data: encode(&minutes),
+            }])
+            .unwrap();
+        let episode = Episode {
+            kind: EpisodeKind::CpuSaturated,
+            start_ms,
+            end_ms,
+            peak: 100.0,
+            culprit: None,
+            truncated: false,
+        };
+
+        let detail = history.episode(&episode, end_ms + 10 * 60_000).unwrap();
+
+        assert_eq!(detail.resolution, Resolution::Minutes);
+        assert_eq!(
+            detail.from_ms,
+            start_ms - 30 * 60_000,
+            "half an hour at most"
+        );
+        assert_eq!(detail.to_ms, end_ms + 10 * 60_000, "never past now");
+        assert_eq!(detail.chart.cpu[31], Some(97.0));
+        assert!(
+            detail.programs.is_empty(),
+            "rankings are kept with the seconds"
+        );
+    }
+
+    #[test]
+    fn episode_detail_without_history_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut history = History::new(Some(dir.path().join("vestigium.db")));
+        let episode = disk_episode(DAY_START_MS, DAY_START_MS + 60_000);
+
+        let detail = history.episode(&episode, DAY_START_MS + HOUR_MS).unwrap();
+
+        assert_eq!(detail.history, HistoryState::Empty);
+        assert!(detail.chart.t.is_empty());
     }
 
     #[test]

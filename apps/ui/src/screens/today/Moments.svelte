@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
+
   import Icon from "../../components/Icon.svelte";
   import { formatDuration, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { DetailLevel } from "../../lib/types";
   import { type Item, toneOf } from "./day";
+  import Period from "./Period.svelte";
   import {
     causeIcon,
     causeName,
@@ -15,6 +18,15 @@
   } from "./text";
 
   let { items, level }: { items: Item[]; level: DetailLevel } = $props();
+
+  /** Episodes open in place, by row key, so the day's refresh keeps them open. */
+  const opened = new SvelteSet<string>();
+  const keyOf = (item: Item) => `${item.kind}-${item.start}`;
+
+  function toggle(key: string): void {
+    if (opened.has(key)) opened.delete(key);
+    else opened.add(key);
+  }
 </script>
 
 <section class="card list" aria-labelledby="moments-title">
@@ -23,7 +35,7 @@
     <p class="empty">{t("ui.today.moments.none")}</p>
   {:else}
     <ul>
-      {#each items as item (`${item.kind}-${item.start}`)}
+      {#each items as item (keyOf(item))}
         <li>
           {#if item.kind === "occurrence"}
             {@const o = item.occurrence}
@@ -42,14 +54,34 @@
             </a>
           {:else}
             {@const e = item.episode}
-            <div class="row">
-              <span class="icochip tone-press"><Icon name={episodeIcon(e)} /></span>
-              <span class="what">
-                <b>{episodeTitle(e, level)}</b>
-                <small>{episodeMeta(e)}</small>
-                {#if item.byTest}<small>{t("ui.today.episode.by_test")}</small>{/if}
-              </span>
-              <span class="when">{formatTime(e.start_ms)}<br />{formatDuration(e.end_ms - e.start_ms)}</span>
+            {@const key = keyOf(item)}
+            {@const open = opened.has(key)}
+            <div class="period" class:open>
+              <button
+                type="button"
+                class="row"
+                aria-expanded={open}
+                aria-controls={open ? `period-${key}` : undefined}
+                onclick={() => toggle(key)}
+              >
+                <span class="icochip tone-press"><Icon name={episodeIcon(e)} /></span>
+                <span class="what">
+                  <b>{episodeTitle(e, level)}</b>
+                  <small>{episodeMeta(e)}</small>
+                  {#if item.byTest}<small>{t("ui.today.episode.by_test")}</small>{/if}
+                </span>
+                <span class="when">{formatTime(e.start_ms)}<br />{formatDuration(e.end_ms - e.start_ms)}</span>
+                <span class="chev turn"><Icon name="chevron" /></span>
+              </button>
+              {#if open}
+                <Period
+                  episode={e}
+                  byTest={item.byTest}
+                  {level}
+                  id="period-{key}"
+                  label={episodeTitle(e, level)}
+                />
+              {/if}
             </div>
           {/if}
         </li>
@@ -80,8 +112,38 @@
     color: inherit;
     text-decoration: none;
   }
-  a.row:hover {
+  button.row {
+    width: 100%;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  a.row:hover,
+  button.row:hover {
     background: var(--card2);
+  }
+  /* An open episode is one card: its row is the header and the detail sits under it. */
+  .period.open {
+    margin: 2px 0 8px;
+    overflow: hidden;
+    border: 1px solid var(--stroke2);
+    border-radius: 10px;
+    background: var(--card2);
+  }
+  .period.open button.row {
+    border-radius: 0;
+  }
+  .period.open button.row:hover {
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+  }
+  .turn :global(svg) {
+    transform: rotate(90deg);
+    transition: transform 0.2s;
+  }
+  .open .turn :global(svg) {
+    transform: rotate(-90deg);
   }
   .what b {
     display: block;
@@ -121,7 +183,8 @@
     color: var(--ink2);
   }
   @media (forced-colors: active) {
-    a.row:hover {
+    a.row:hover,
+    button.row:hover {
       outline: 1px solid Highlight;
     }
   }
