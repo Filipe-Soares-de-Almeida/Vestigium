@@ -277,7 +277,9 @@ How to use this file:
   link, Superfetch, minidump), states the downside in a few words, and labels its facts
   Current, After, Takes effect, Permission and Downside. Dumps gives stop codes and app errors
   their usual names (unhandled exception, access violation, IRQL, TDR, WHEA, heap corruption)
-  and calls apps that closed by themselves app crashes.
+  and calls apps that closed by themselves app crashes. Captures speak of DPC/ISR latency, the CPU
+  and slow frames, name Windows' own drivers by their usual names (Storport, NDIS, KMDF, xHCI),
+  and keep their notes and steps short.
 
 ### Fixed
 
