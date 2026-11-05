@@ -14,11 +14,13 @@ use windows::core::HSTRING;
 
 use crate::CollectError;
 
-/// Records the ring holds: two minutes of seconds plus three processes every five seconds.
-pub const RING_RECORDS: usize = 240;
+/// Records the ring holds: five minutes of seconds plus three processes every five seconds, the
+/// longest the history can go unwritten.
+pub const RING_RECORDS: usize = 480;
 const RECORD: usize = 64;
 const HEADER: usize = 64;
-const RING_BYTES: usize = 16 * 1024;
+const RING_BYTES: usize = 32 * 1024;
+const _: () = assert!(HEADER + RING_RECORDS * RECORD <= RING_BYTES);
 const MAGIC: [u8; 4] = *b"VBXR";
 const VERSION: u8 = 1;
 const WATCHING: u8 = 0;
@@ -38,7 +40,7 @@ pub struct RingContents {
     pub tops: Vec<ProcessTop>,
 }
 
-/// The last two minutes in compact records, in a mapped file that outlives the process.
+/// The last five minutes in compact records, in a mapped file that outlives the process.
 /// Writes land in the page cache at once; `flush` puts them on disk.
 #[derive(Debug)]
 pub struct BlackboxRing {

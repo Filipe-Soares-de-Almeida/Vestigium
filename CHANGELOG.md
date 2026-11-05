@@ -185,6 +185,10 @@ How to use this file:
 
 ### Changed
 
+- The watcher writes its history every 5 minutes instead of every minute, which cuts what it writes
+  to disk by about two thirds. Activity's Today tab and the overload period detail still show the
+  latest minutes, read from the watcher's memory. The black box keeps the last 5 minutes instead of
+  2, so a crash loses none of the minutes not written yet.
 - Today and Now are one screen, Activity, with a tab for each. The side menu has one item for it,
   and links that pointed to Now open its tab. Switching tabs does not add a step to Back.
 

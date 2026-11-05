@@ -130,6 +130,41 @@ pub struct OccurrenceDto {
     pub tests: Vec<TestSpan>,
 }
 
+/// What the watcher holds in memory and has not written yet: its last minutes, a reading a second.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Recent {
+    pub readings: Vec<Reading>,
+    /// Pressure episodes of those minutes, ended or under way, as `(start_ms, end_ms)`.
+    pub pressure: Vec<(i64, i64)>,
+}
+
+impl Recent {
+    /// Adds the readings of `[from_ms, to_ms)` newer than the history's last one, and the pressure.
+    fn fill(
+        &self,
+        readings: &mut Vec<Reading>,
+        pressure: &mut Vec<(i64, i64)>,
+        from_ms: i64,
+        to_ms: i64,
+        native_ms: i64,
+    ) {
+        let stored_end = readings.last().map_or(from_ms, |r| r.ts_ms + native_ms);
+        let first_ms = stored_end.max(from_ms);
+        readings.extend(
+            self.readings
+                .iter()
+                .filter(|r| r.ts_ms >= first_ms && r.ts_ms < to_ms)
+                .copied(),
+        );
+        pressure.extend(
+            self.pressure
+                .iter()
+                .filter(|&&(start, end)| start < to_ms && end >= from_ms)
+                .copied(),
+        );
+    }
+}
+
 /// An episode as its detail shows it: the stretch around it, who used what, what stalled in it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct EpisodeDetailDto {
@@ -393,11 +428,13 @@ impl History {
     }
 
     /// Points of `[from_ms, to_ms)`, peaks kept, at most `max_points` of them.
+    /// `recent` fills what the watcher has not written yet.
     pub fn timeline(
         &mut self,
         from_ms: i64,
         to_ms: i64,
         max_points: u32,
+        recent: &Recent,
     ) -> Result<TimelineDto, StoreError> {
         let resolution = if to_ms - from_ms <= SECONDS_UP_TO_MS {
             Resolution::Seconds
@@ -432,7 +469,7 @@ impl History {
                 .collect();
             Ok((readings, pressure))
         })?;
-        let Some((readings, pressure)) = found else {
+        let Some((mut readings, mut pressure)) = found else {
             return Ok(TimelineDto {
                 history: HistoryState::Empty,
                 resolution,
@@ -440,6 +477,7 @@ impl History {
                 columns: Columns::default(),
             });
         };
+        recent.fill(&mut readings, &mut pressure, start_ms, to_ms, native_ms);
         let buckets = bucket(&readings, start_ms, to_ms, step_ms);
         Ok(TimelineDto {
             history: HistoryState::Ready,
@@ -514,11 +552,13 @@ impl History {
         }))
     }
 
-    /// The detail of `episode`, read from per-second samples while they are kept, else minutes.
+    /// The detail of `episode`, read from per-second samples while they are kept, else minutes;
+    /// `recent` fills what the watcher has not written yet.
     pub fn episode(
         &mut self,
         episode: &Episode,
         now_ms: i64,
+        recent: &Recent,
     ) -> Result<EpisodeDetailDto, StoreError> {
         let (least, most) = EPISODE_CONTEXT_MS;
         let context = ((episode.end_ms - episode.start_ms) / 2).clamp(least, most);
@@ -559,7 +599,7 @@ impl History {
             let occurrences = store.occurrences(episode.start_ms, episode.end_ms)?;
             Ok((resolution, readings, pressure, tops, occurrences))
         })?;
-        let Some((resolution, readings, pressure, tops, occurrences)) = found else {
+        let Some((resolution, mut readings, mut pressure, tops, occurrences)) = found else {
             return Ok(EpisodeDetailDto {
                 history: HistoryState::Empty,
                 resolution: Resolution::Seconds,
@@ -577,6 +617,7 @@ impl History {
         };
         let start_ms = from_ms - from_ms.rem_euclid(native_ms);
         let step_ms = step(to_ms - start_ms, native_ms, EPISODE_POINTS);
+        recent.fill(&mut readings, &mut pressure, start_ms, to_ms, native_ms);
         let buckets = bucket(&readings, start_ms, to_ms, step_ms);
         Ok(EpisodeDetailDto {
             history: HistoryState::Ready,
@@ -873,7 +914,12 @@ mod tests {
         write_samples(&mut store, &samples);
 
         let timeline = history
-            .timeline(DAY_START_MS, DAY_START_MS + 6 * HOUR_MS, 600)
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 6 * HOUR_MS,
+                600,
+                &Recent::default(),
+            )
             .unwrap();
 
         assert_eq!(timeline.resolution, Resolution::Seconds);
@@ -897,7 +943,12 @@ mod tests {
         write_samples(&mut store, &samples);
 
         let timeline = history
-            .timeline(DAY_START_MS, DAY_START_MS + 180_000, 1_000)
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 180_000,
+                1_000,
+                &Recent::default(),
+            )
             .unwrap();
 
         assert_eq!(timeline.step_ms, SECOND_MS);
@@ -947,7 +998,12 @@ mod tests {
             .unwrap();
 
         let timeline = history
-            .timeline(DAY_START_MS, DAY_START_MS + 24 * HOUR_MS, 2_000)
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 24 * HOUR_MS,
+                2_000,
+                &Recent::default(),
+            )
             .unwrap();
 
         assert_eq!(timeline.resolution, Resolution::Minutes);
@@ -970,7 +1026,12 @@ mod tests {
         let mut history = History::new(Some(dir.path().join("vestigium.db")));
 
         let timeline = history
-            .timeline(DAY_START_MS, DAY_START_MS + HOUR_MS, 500)
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + HOUR_MS,
+                500,
+                &Recent::default(),
+            )
             .unwrap();
         let marks = history.marks(DAY_START_MS, DAY_START_MS + HOUR_MS).unwrap();
 
@@ -993,7 +1054,7 @@ mod tests {
         write_samples(&mut store, &[sample(DAY_START_MS, 1.0)]);
 
         let timeline = history
-            .timeline(DAY_START_MS, DAY_START_MS + 60_000, 60)
+            .timeline(DAY_START_MS, DAY_START_MS + 60_000, 60, &Recent::default())
             .unwrap();
         assert_eq!(timeline.history, HistoryState::Ready);
         assert_eq!(timeline.columns.cpu[0], Some(1.0));
@@ -1167,7 +1228,9 @@ mod tests {
         let episode = disk_episode(start_ms, end_ms);
         store.insert_episode(&episode).unwrap();
 
-        let detail = history.episode(&episode, end_ms + HOUR_MS).unwrap();
+        let detail = history
+            .episode(&episode, end_ms + HOUR_MS, &Recent::default())
+            .unwrap();
 
         assert_eq!(detail.history, HistoryState::Ready);
         assert_eq!(detail.resolution, Resolution::Seconds);
@@ -1198,7 +1261,11 @@ mod tests {
         }
 
         let detail = history
-            .episode(&disk_episode(start_ms, end_ms), end_ms + HOUR_MS)
+            .episode(
+                &disk_episode(start_ms, end_ms),
+                end_ms + HOUR_MS,
+                &Recent::default(),
+            )
             .unwrap();
 
         let starts: Vec<i64> = detail.occurrences.iter().map(|o| o.start_ms).collect();
@@ -1231,7 +1298,9 @@ mod tests {
             truncated: false,
         };
 
-        let detail = history.episode(&episode, end_ms + 10 * 60_000).unwrap();
+        let detail = history
+            .episode(&episode, end_ms + 10 * 60_000, &Recent::default())
+            .unwrap();
 
         assert_eq!(detail.resolution, Resolution::Minutes);
         assert_eq!(
@@ -1253,10 +1322,47 @@ mod tests {
         let mut history = History::new(Some(dir.path().join("vestigium.db")));
         let episode = disk_episode(DAY_START_MS, DAY_START_MS + 60_000);
 
-        let detail = history.episode(&episode, DAY_START_MS + HOUR_MS).unwrap();
+        let detail = history
+            .episode(&episode, DAY_START_MS + HOUR_MS, &Recent::default())
+            .unwrap();
 
         assert_eq!(detail.history, HistoryState::Empty);
         assert!(detail.chart.t.is_empty());
+    }
+
+    #[test]
+    fn the_watchers_minutes_fill_what_is_not_written_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let written: Vec<Sample> = (0..120)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &written);
+        let recent = Recent {
+            readings: (60..300)
+                .map(|s| Reading {
+                    cpu_pct: 70.0,
+                    ..Reading::of_sample(&sample(DAY_START_MS + s * SECOND_MS, 0.0))
+                })
+                .collect(),
+            pressure: vec![(DAY_START_MS + 200_000, DAY_START_MS + 260_000)],
+        };
+
+        let timeline = history
+            .timeline(DAY_START_MS, DAY_START_MS + 300_000, 1_000, &recent)
+            .unwrap();
+
+        let cpu = &timeline.columns.cpu;
+        assert_eq!(cpu.len(), 300);
+        assert_eq!(
+            cpu[100],
+            Some(10.0),
+            "the history wins where it has the second"
+        );
+        assert_eq!(cpu[150], Some(70.0), "the watcher fills after it");
+        assert_eq!(cpu[299], Some(70.0));
+        assert_eq!(timeline.columns.state[230], PcState::Pressure);
+        assert_eq!(timeline.columns.state[150], PcState::Busy);
     }
 
     #[test]

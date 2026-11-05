@@ -20,7 +20,7 @@ use crate::capture::{
 };
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
-    OccurrenceDto, TimelineDto,
+    OccurrenceDto, Recent, TimelineDto,
 };
 use crate::hwtests::{
     DiskDetailDto, RUNS_SHOWN_MS, RunningTest, TestFinished, TestProgress, TestsDto, disk_list,
@@ -59,6 +59,26 @@ impl Default for AppState {
     }
 }
 
+/// How far back the watcher keeps its readings in memory.
+const RECENT_MS: i64 = 10 * 60_000;
+
+/// The watcher's last minutes, for a range that reaches into them; empty when it does not answer.
+fn recent(link: &Link, to_ms: i64, now_ms: i64) -> Recent {
+    if to_ms < now_ms - RECENT_MS {
+        return Recent::default();
+    }
+    match link.call(&Request::Recent) {
+        Ok(Response::Recent { readings, pressure }) => Recent {
+            readings,
+            pressure: pressure
+                .iter()
+                .map(|span| (span.start_ms, span.end_ms.unwrap_or(now_ms)))
+                .collect(),
+        },
+        _ => Recent::default(),
+    }
+}
+
 #[tauri::command]
 pub async fn timeline(
     state: State<'_, AppState>,
@@ -67,7 +87,12 @@ pub async fn timeline(
     max_points: u32,
 ) -> Result<TimelineDto, UiError> {
     let history = state.history.clone();
-    blocking(move || Ok(lock(&history).timeline(from_ms, to_ms, max_points)?)).await
+    let link = state.link.clone();
+    blocking(move || {
+        let recent = recent(&link, to_ms, now_ms());
+        Ok(lock(&history).timeline(from_ms, to_ms, max_points, &recent)?)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -95,7 +120,13 @@ pub async fn episode_detail(
     episode: Episode,
 ) -> Result<EpisodeDetailDto, UiError> {
     let history = state.history.clone();
-    blocking(move || Ok(lock(&history).episode(&episode, now_ms())?)).await
+    let link = state.link.clone();
+    blocking(move || {
+        let now = now_ms();
+        let recent = recent(&link, episode.end_ms + RECENT_MS, now);
+        Ok(lock(&history).episode(&episode, now, &recent)?)
+    })
+    .await
 }
 
 /// Streams the last ten minutes, then one second a second; replaces any running stream.

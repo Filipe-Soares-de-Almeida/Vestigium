@@ -28,7 +28,8 @@ use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
 use crate::{autostart, paths, power, shutdown};
 
-const DEFAULT_FLUSH: Duration = Duration::from_secs(60);
+/// How often the history is written to the database.
+const DEFAULT_FLUSH: Duration = Duration::from_secs(300);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 /// How far back the first run reads the curated Windows events.
@@ -513,9 +514,9 @@ mod tests {
     }
 
     #[test]
-    fn options_default_to_one_minute_batches() {
+    fn options_default_to_five_minute_batches() {
         let options = Options::parse(args(&[]));
-        assert_eq!(options.flush, Duration::from_secs(60));
+        assert_eq!(options.flush, Duration::from_secs(300));
         assert_eq!(options.data_dir, None);
         assert_eq!(options.sensitive_for, SENSITIVE_FOR);
     }

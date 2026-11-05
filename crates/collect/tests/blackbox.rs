@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use vestigium_collect::BlackboxRing;
+use vestigium_collect::{BlackboxRing, RING_RECORDS};
 use vestigium_core::{ProcessSample, ProcessTop, Sample};
 
 /// Set in the child process that writes a ring and dies without closing it.
@@ -113,12 +113,15 @@ fn the_ring_keeps_only_the_newest_records() {
     let path = dir.path().join("blackbox.ring");
     {
         let (mut ring, _) = BlackboxRing::open(&path).unwrap();
-        for i in 0..300 {
+        for i in 0..RING_RECORDS as i64 + 60 {
             ring.push_sample(&sample(i * 1000));
         }
     }
     let (_ring, held) = BlackboxRing::open(&path).unwrap();
-    assert_eq!(held.samples.len(), vestigium_collect::RING_RECORDS);
+    assert_eq!(held.samples.len(), RING_RECORDS);
     assert_eq!(held.samples.first().map(|s| s.ts_ms), Some(60_000));
-    assert_eq!(held.samples.last().map(|s| s.ts_ms), Some(299_000));
+    assert_eq!(
+        held.samples.last().map(|s| s.ts_ms),
+        Some((RING_RECORDS as i64 + 59) * 1000)
+    );
 }
