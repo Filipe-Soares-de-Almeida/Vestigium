@@ -256,9 +256,9 @@ How to use this file:
   response time" brings back how long each region took, on a grey scale from quick to slow,
   with the slowest blocks and the note about SSDs, and the window remembers the choice. The
   labels under the map that marked the start, middle and end of the disk are gone.
-- A disk's whole-disk read in Tests shows only the latest read. "Every read" opens a dialog
-  listing each read of that disk, newest first, with its result, length and how much it covered;
-  choosing one shows its map.
+- A disk's surface scan in Tests shows only the latest scan. "History" opens a dialog listing
+  each scan of that disk, newest first, with its result, length and how much it covered; choosing
+  one shows its map.
 - A disk read that found sectors it could not read counts the sectors, "2 sectors could not be
   read", instead of the regions that hold them; when the read kept as many as it can, it says "at
   least".
@@ -271,7 +271,8 @@ How to use this file:
   causes, evidence, sequence and steps use the usual terms (BSOD, page file, DPC/ISR latency,
   surface scan, backup). Health names its findings as alerts, uses the SMART names
   (reallocated, pending, uncorrectable), WHEA, TDR and throttling, and says how many alerts
-  each area has.
+  each area has. Tests names its tests as they are known: SMART, Surface scan, File system
+  (chkdsk), Speed test, Windows Memory Diagnostic, with "Requires administrator" and "Read-only".
 
 ### Fixed
 
