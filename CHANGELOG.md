@@ -269,12 +269,16 @@ How to use this file:
   GPU and overload periods, give the likely cause plainly, and call a fall of the PC an
   unexpected shutdown. Occurrence reports are reports, not "laudos" in Portuguese, and their
   causes, evidence, sequence and steps use the usual terms (BSOD, page file, DPC/ISR latency,
-  surface scan, backup).
+  surface scan, backup). Health names its findings as alerts, uses the SMART names
+  (reallocated, pending, uncorrectable), WHEA, TDR and throttling, and says how many alerts
+  each area has.
 
 ### Fixed
 
 - The Technical line of a memory overload period says "above 85%", the threshold Vestigium uses,
   instead of 90%.
+- Lines that put a drive letter before a colon no longer read "C::", as in the step to free up
+  space and the system disk line.
 - The Health, Dumps, Optimizations and Tests screens open with their data instead of "Something
   went wrong", and the counts beside them in the side menu show again.
 - A program with a long name no longer pushes "Using the most" on the Now screen past the edge of
