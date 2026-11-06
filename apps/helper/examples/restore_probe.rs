@@ -32,8 +32,13 @@ fn main() {
                 "WMI CreateRestorePoint: {code:?} ({:.0} ms)",
                 started.elapsed().as_secs_f64() * 1000.0
             );
-            sleep(Duration::from_secs(3));
+            sleep(Duration::from_secs(10));
             println!("last 8194 after: {:?}", last_8194());
+            println!(
+                "listed: {:?}; a made-up one: {:?}",
+                vestigium_helper::tweak::restore_point_listed("Vestigium test restore point"),
+                vestigium_helper::tweak::restore_point_listed("Vestigium no such point")
+            );
             continue;
         }
         let begin = set_point(BEGIN_SYSTEM_CHANGE, 0);

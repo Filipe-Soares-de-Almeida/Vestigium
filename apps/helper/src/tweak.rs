@@ -21,7 +21,9 @@ use windows::Win32::System::Restore::{BEGIN_SYSTEM_CHANGE, MODIFY_SETTINGS};
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Variant::{VARIANT, VT_BSTR, VT_I4, VariantClear};
 use windows::Win32::System::Wmi::{
-    IWbemClassObject, IWbemLocator, WBEM_FLAG_RETURN_WBEM_COMPLETE, WbemLocator,
+    IWbemClassObject, IWbemLocator, IWbemServices, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_FLAG_RETURN_WBEM_COMPLETE, WBEM_GENERIC_FLAG_TYPE,
+    WBEM_INFINITE, WbemLocator,
 };
 use windows::core::{BSTR, PCWSTR, w};
 
@@ -33,6 +35,8 @@ const MOST_ITEMS: usize = 32;
 pub const ERROR_REFUSED: u32 = 5;
 /// How long System Restore may take to log what it did with a point.
 const RESTORE_LOG_WAIT: Duration = Duration::from_secs(10);
+/// How long after "created" a point is looked for in the list: Windows drops a failed one within ~6 s.
+const RESTORE_SETTLE: Duration = Duration::from_secs(10);
 const DAY_MS: i64 = 24 * 60 * 60_000;
 
 /// Carries out a `.plan` of elevated tweaks and writes what happened to a `.tweaked` file beside it.
@@ -149,7 +153,13 @@ fn ask_restore_point() -> RestorePoint {
             .find(|e| e.ts_ms >= started - 1000 && e.description == description)
         {
             return match ours.id {
-                RESTORE_CREATED => RestorePoint::Created,
+                RESTORE_CREATED => {
+                    sleep(RESTORE_SETTLE);
+                    match restore_point_listed(&description) {
+                        Ok(false) => RestorePoint::Unconfirmed,
+                        _ => RestorePoint::Created,
+                    }
+                }
                 RESTORE_SKIPPED => RestorePoint::Reused {
                     at_ms: events
                         .iter()
@@ -185,10 +195,9 @@ fn text_variant(value: &str) -> VARIANT {
     v
 }
 
-/// Asks System Restore for a point through `SystemRestore.CreateRestorePoint` and returns its
-/// ReturnValue. SRSetRestorePointW from this process logs the point as created and drops it.
-pub fn create_restore_point(description: &str) -> windows::core::Result<u32> {
-    // SAFETY: COM calls on interfaces this function owns; every VARIANT is cleared after use.
+/// System Restore's WMI namespace, with the call security its methods need.
+fn restore_services() -> windows::core::Result<IWbemServices> {
+    // SAFETY: COM calls on interfaces this function owns.
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let _ = CoInitializeSecurity(
@@ -223,6 +232,35 @@ pub fn create_restore_point(description: &str) -> windows::core::Result<u32> {
             None,
             EOAC_NONE,
         )?;
+        Ok(services)
+    }
+}
+
+/// Whether System Restore lists a point with this description.
+pub fn restore_point_listed(description: &str) -> windows::core::Result<bool> {
+    let query =
+        format!("SELECT SequenceNumber FROM SystemRestore WHERE Description = '{description}'");
+    // SAFETY: COM calls on interfaces this function owns.
+    unsafe {
+        let found = restore_services()?.ExecQuery(
+            &BSTR::from("WQL"),
+            &BSTR::from(query),
+            WBEM_GENERIC_FLAG_TYPE(WBEM_FLAG_FORWARD_ONLY.0 | WBEM_FLAG_RETURN_IMMEDIATELY.0),
+            None,
+        )?;
+        let mut row = [None];
+        let mut returned = 0u32;
+        found.Next(WBEM_INFINITE, &mut row, &mut returned).ok()?;
+        Ok(returned > 0)
+    }
+}
+
+/// Asks System Restore for a point through `SystemRestore.CreateRestorePoint` and returns its
+/// ReturnValue. SRSetRestorePointW from this process logs the point as created and drops it.
+pub fn create_restore_point(description: &str) -> windows::core::Result<u32> {
+    let services = restore_services()?;
+    // SAFETY: COM calls on interfaces this function owns; every VARIANT is cleared after use.
+    unsafe {
         let class_name = BSTR::from("SystemRestore");
         let mut class: Option<IWbemClassObject> = None;
         services.GetObject(
