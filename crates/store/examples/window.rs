@@ -49,8 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     for e in store.episodes(from, to)? {
         println!(
-            "episode {:?} {}..{} peak {}",
-            e.kind, e.start_ms, e.end_ms, e.peak
+            "episode {:?} {}..{} peak {} culprit {:?}",
+            e.kind, e.start_ms, e.end_ms, e.peak, e.culprit
         );
     }
     for o in store.occurrences(from, to)? {
