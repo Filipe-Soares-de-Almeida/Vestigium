@@ -11,11 +11,19 @@ use vestigium_core::{
     Applier, PlanItem, RestorePoint, SettingResult, SettingStore, TWEAK_PLAN_VERSION, TweakChange,
     TweakPlan, TweakResults, carry_out, check_item,
 };
-use windows::Win32::Foundation::ERROR_SERVICE_DISABLED;
-use windows::Win32::System::Restore::{
-    BEGIN_SYSTEM_CHANGE, END_SYSTEM_CHANGE, MODIFY_SETTINGS, RESTOREPOINTINFO_EVENT_TYPE,
-    RESTOREPOINTINFOW, SRSetRestorePointW, STATEMGRSTATUS,
+use windows::Win32::Foundation::{E_FAIL, ERROR_SERVICE_DISABLED};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    CoInitializeSecurity, CoSetProxyBlanket, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
+    RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
+use windows::Win32::System::Restore::{BEGIN_SYSTEM_CHANGE, MODIFY_SETTINGS};
+use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
+use windows::Win32::System::Variant::{VARIANT, VT_BSTR, VT_I4, VariantClear};
+use windows::Win32::System::Wmi::{
+    IWbemClassObject, IWbemLocator, WBEM_FLAG_RETURN_WBEM_COMPLETE, WbemLocator,
+};
+use windows::core::{BSTR, PCWSTR, w};
 
 use crate::{job, output};
 
@@ -39,9 +47,7 @@ pub fn run(plan_path: &Path) -> ExitCode {
     else {
         return ExitCode::from(job::REFUSED);
     };
-    let mut point = SystemRestore::default();
-    let results = apply(&plan, &mut WindowsSettings, || point.begin());
-    point.end();
+    let results = apply(&plan, &mut WindowsSettings, ask_restore_point);
     let mut bytes = vec![TWEAK_PLAN_VERSION];
     match postcard::to_allocvec(&results) {
         Ok(body) => bytes.extend(body),
@@ -121,76 +127,153 @@ fn refused(item: &PlanItem, point: Option<RestorePoint>) -> TweakChange {
     }
 }
 
-/// One restore point around a batch of changes, told apart by its description.
-#[derive(Default)]
-struct SystemRestore {
-    sequence: Option<i64>,
-}
-
-impl SystemRestore {
-    fn begin(&mut self) -> RestorePoint {
-        let started = wall_ms();
-        let description = format!("Vestigium {started}");
-        let (ok, status, sequence) = set_point(BEGIN_SYSTEM_CHANGE, 0, &description);
-        if !ok {
-            return if status == ERROR_SERVICE_DISABLED.0 {
-                RestorePoint::Off
-            } else {
-                RestorePoint::Failed { error: status }
+/// One restore point before a batch of changes, told apart by its description.
+fn ask_restore_point() -> RestorePoint {
+    let started = wall_ms();
+    let description = format!("Vestigium {started}");
+    match create_restore_point(&description) {
+        Ok(0) => {}
+        Ok(code) if code == ERROR_SERVICE_DISABLED.0 => return RestorePoint::Off,
+        Ok(code) => return RestorePoint::Failed { error: code },
+        Err(err) => {
+            return RestorePoint::Failed {
+                error: err.code().0 as u32,
             };
         }
-        self.sequence = Some(sequence);
-        let waiting = Instant::now();
-        while waiting.elapsed() < RESTORE_LOG_WAIT {
-            let events = restore_events(started - 30 * DAY_MS).unwrap_or_default();
-            if let Some(ours) = events
-                .iter()
-                .find(|e| e.ts_ms >= started - 1000 && e.description == description)
-            {
-                return match ours.id {
-                    RESTORE_CREATED => RestorePoint::Created,
-                    RESTORE_SKIPPED => RestorePoint::Reused {
-                        at_ms: events
-                            .iter()
-                            .filter(|e| e.id == RESTORE_CREATED)
-                            .map(|e| e.ts_ms)
-                            .max(),
-                    },
-                    _ => RestorePoint::Unconfirmed,
-                };
-            }
-            sleep(Duration::from_millis(500));
-        }
-        RestorePoint::Unconfirmed
     }
-
-    fn end(&mut self) {
-        if let Some(sequence) = self.sequence.take() {
-            let _ = set_point(END_SYSTEM_CHANGE, sequence, "");
+    let waiting = Instant::now();
+    while waiting.elapsed() < RESTORE_LOG_WAIT {
+        let events = restore_events(started - 30 * DAY_MS).unwrap_or_default();
+        if let Some(ours) = events
+            .iter()
+            .find(|e| e.ts_ms >= started - 1000 && e.description == description)
+        {
+            return match ours.id {
+                RESTORE_CREATED => RestorePoint::Created,
+                RESTORE_SKIPPED => RestorePoint::Reused {
+                    at_ms: events
+                        .iter()
+                        .filter(|e| e.id == RESTORE_CREATED)
+                        .map(|e| e.ts_ms)
+                        .max(),
+                },
+                _ => RestorePoint::Unconfirmed,
+            };
         }
+        sleep(Duration::from_millis(500));
     }
+    RestorePoint::Unconfirmed
 }
 
-/// One SRSetRestorePointW call: whether it succeeded, its status and the sequence number it gave.
-fn set_point(
-    kind: RESTOREPOINTINFO_EVENT_TYPE,
-    sequence: i64,
-    description: &str,
-) -> (bool, u32, i64) {
-    let mut text = [0u16; 256];
-    for (slot, unit) in text.iter_mut().zip(description.encode_utf16().take(255)) {
-        *slot = unit;
+fn int_variant(value: i32) -> VARIANT {
+    let mut v = VARIANT::default();
+    // SAFETY: sets the tag and the member it names on a fresh VARIANT.
+    unsafe {
+        (*v.Anonymous.Anonymous).vt = VT_I4;
+        (*v.Anonymous.Anonymous).Anonymous.lVal = value;
     }
-    let info = RESTOREPOINTINFOW {
-        dwEventType: kind,
-        dwRestorePtType: MODIFY_SETTINGS,
-        llSequenceNumber: sequence,
-        szDescription: text,
-    };
-    let mut status = STATEMGRSTATUS::default();
-    // SAFETY: both structs are the ones the call reads and fills.
-    let ok = unsafe { SRSetRestorePointW(&info, &mut status) };
-    (ok.as_bool(), status.nStatus.0, status.llSequenceNumber)
+    v
+}
+
+fn text_variant(value: &str) -> VARIANT {
+    let mut v = VARIANT::default();
+    // SAFETY: sets the tag and the member it names on a fresh VARIANT; VariantClear frees it.
+    unsafe {
+        (*v.Anonymous.Anonymous).vt = VT_BSTR;
+        (*v.Anonymous.Anonymous).Anonymous.bstrVal = std::mem::ManuallyDrop::new(BSTR::from(value));
+    }
+    v
+}
+
+/// Asks System Restore for a point through `SystemRestore.CreateRestorePoint` and returns its
+/// ReturnValue. SRSetRestorePointW from this process logs the point as created and drops it.
+pub fn create_restore_point(description: &str) -> windows::core::Result<u32> {
+    // SAFETY: COM calls on interfaces this function owns; every VARIANT is cleared after use.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _ = CoInitializeSecurity(
+            None,
+            -1,
+            None,
+            None,
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+            None,
+        );
+        let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER)?;
+        let empty = BSTR::new();
+        let services = locator.ConnectServer(
+            &BSTR::from(r"ROOT\DEFAULT"),
+            &empty,
+            &empty,
+            &empty,
+            0,
+            &empty,
+            None,
+        )?;
+        CoSetProxyBlanket(
+            &services,
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            PCWSTR::null(),
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        )?;
+        let class_name = BSTR::from("SystemRestore");
+        let mut class: Option<IWbemClassObject> = None;
+        services.GetObject(
+            &class_name,
+            WBEM_FLAG_RETURN_WBEM_COMPLETE,
+            None,
+            Some(&mut class),
+            None,
+        )?;
+        let mut input: Option<IWbemClassObject> = None;
+        class.ok_or(E_FAIL)?.GetMethod(
+            w!("CreateRestorePoint"),
+            0,
+            &mut input,
+            std::ptr::null_mut(),
+        )?;
+        let params = input.ok_or(E_FAIL)?.SpawnInstance(0)?;
+        let mut text = text_variant(description);
+        let put = params.Put(w!("Description"), 0, &text, 0);
+        VariantClear(&mut text)?;
+        put?;
+        params.Put(
+            w!("RestorePointType"),
+            0,
+            &int_variant(MODIFY_SETTINGS.0 as i32),
+            0,
+        )?;
+        params.Put(
+            w!("EventType"),
+            0,
+            &int_variant(BEGIN_SYSTEM_CHANGE.0 as i32),
+            0,
+        )?;
+        let mut output: Option<IWbemClassObject> = None;
+        services.ExecMethod(
+            &class_name,
+            &BSTR::from("CreateRestorePoint"),
+            WBEM_FLAG_RETURN_WBEM_COMPLETE,
+            None,
+            &params,
+            Some(&mut output),
+            None,
+        )?;
+        let mut value = VARIANT::default();
+        output
+            .ok_or(E_FAIL)?
+            .Get(w!("ReturnValue"), 0, &mut value, None, None)?;
+        let code = (*value.Anonymous.Anonymous).Anonymous.lVal as u32;
+        VariantClear(&mut value)?;
+        Ok(code)
+    }
 }
 
 #[cfg(test)]

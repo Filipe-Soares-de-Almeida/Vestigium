@@ -294,6 +294,9 @@ How to use this file:
 
 ### Fixed
 
+- The restore point the Optimizations screen asks for before a change now really stays. Windows
+  logged it as created and then discarded it; Vestigium now asks for it the way Windows' own tools
+  do.
 - Errors Windows logs for a disk that is not one of the PC's, such as a virtual disk that was
   attached for a while, no longer raise a critical "storage errors" alert on the Health screen.
 - The file system check on the Tests screen no longer repairs anything: it runs

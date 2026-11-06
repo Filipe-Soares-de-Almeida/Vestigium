@@ -1,5 +1,5 @@
 //! Creates a test restore point the way the helper will before a batch of changes, and shows how to
-//! tell a new point from one Windows skipped: `restore_probe [--twice]`, from an elevated terminal.
+//! tell a new point from one Windows skipped: `restore_probe [--twice] [--wmi]`, elevated.
 
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -25,6 +25,17 @@ fn main() {
         let before = last_8194();
         println!("last 8194 before: {before:?}");
         let started = Instant::now();
+        if std::env::args().any(|a| a == "--wmi") {
+            let code =
+                vestigium_helper::tweak::create_restore_point("Vestigium test restore point");
+            println!(
+                "WMI CreateRestorePoint: {code:?} ({:.0} ms)",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            sleep(Duration::from_secs(3));
+            println!("last 8194 after: {:?}", last_8194());
+            continue;
+        }
         let begin = set_point(BEGIN_SYSTEM_CHANGE, 0);
         println!(
             "BEGIN: ok {}, status {}, sequence {} ({:.0} ms)",
