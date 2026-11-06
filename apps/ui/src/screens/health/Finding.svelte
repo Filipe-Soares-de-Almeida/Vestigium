@@ -9,7 +9,7 @@
   import { keyOf, tweaks } from "../../lib/tweaks.svelte";
   import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
   import DiskMap from "../tests/DiskMap.svelte";
-  import { lastSurface, surfaceOf } from "../tests/words";
+  import { diskSurface } from "../tests/words";
   import { areaOf } from "./areas";
   import { findingView, valueText } from "./words";
 
@@ -55,8 +55,7 @@
     const s = finding.subject;
     const number = typeof s === "object" && "Disk" in s ? Number(s.Disk.split(" ")[0]) : NaN;
     const disk = hwtests.dto?.disks.find((d) => d.number === number);
-    const run = disk && hwtests.dto ? lastSurface(hwtests.dto, disk) : null;
-    const scan = run ? surfaceOf(run) : null;
+    const scan = disk && hwtests.dto ? diskSurface(hwtests.dto, disk) : null;
     return scan && scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? { scan, name: disk!.name } : null;
   });
   /** Steps already link to Tests, so a test needs no button of its own. */

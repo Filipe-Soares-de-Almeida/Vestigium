@@ -8,6 +8,7 @@ import type {
   DiskDto,
   MemoryDiagnostic,
   MemoryQuick,
+  Region,
   RunningTest,
   Subject,
   SurfaceScan,
@@ -60,6 +61,33 @@ export const lastSurface = (dto: TestsDto, disk: DiskDto) => lastRun(dto, "DiskS
 /** Every read of a disk, the newest first. */
 export const surfaceRuns = (dto: TestsDto, disk: DiskDto) =>
   dto.runs.filter((r) => kindOf(r) === "DiskSurface" && isDisk(r.subject, disk)).reverse();
+const WORST_KEPT = 100;
+
+function mergeRegion(a: Region, b: Region): Region {
+  if (a === "Unreadable" || b === "Unreadable") return "Unreadable";
+  if (a === "Unread") return b;
+  if (b === "Unread") return a;
+  return { Read: { worst_ms: Math.max(a.Read.worst_ms, b.Read.worst_ms) } };
+}
+
+/** A disk's reads as one map, as the Health page sees them: the newest read, extended back by each
+ *  earlier one that stopped exactly where the next one started. */
+export function diskSurface(dto: TestsDto, disk: DiskDto): SurfaceScan | null {
+  const scans = surfaceRuns(dto, disk).map(surfaceOf).filter((s) => s !== null);
+  const [newest, ...earlier] = scans;
+  if (!newest) return null;
+  const view: SurfaceScan = { ...newest, bands: [...newest.bands], regions: [...newest.regions], worst: [...newest.worst], unreadable: [...newest.unreadable] };
+  for (const e of earlier) {
+    if (e.to_bytes !== view.from_bytes || e.disk_bytes !== view.disk_bytes) break;
+    view.from_bytes = e.from_bytes;
+    view.bands = view.bands.map((n, i) => n + (e.bands[i] ?? 0));
+    view.unreadable_blocks += e.unreadable_blocks;
+    view.regions = view.regions.map((r, i) => (i < e.regions.length ? mergeRegion(r, e.regions[i]) : r));
+    view.worst = [...view.worst, ...e.worst].sort((a, b) => b.ms - a.ms).slice(0, WORST_KEPT);
+    view.unreadable = [...view.unreadable, ...e.unreadable.slice(0, Math.max(0, UNREADABLE_KEPT - view.unreadable.length))];
+  }
+  return view;
+}
 export const lastCheck = (dto: TestsDto, root: string) => lastRun(dto, "VolumeCheck", (s) => isVolume(s, root));
 export const lastBench = (dto: TestsDto, root: string) => lastRun(dto, "DiskBenchmark", (s) => isVolume(s, root));
 
@@ -90,8 +118,7 @@ export function memoryState(dto: TestsDto, running: boolean): State {
 }
 
 export function diskState(dto: TestsDto, disk: DiskDto, detail: DiskDetailDto | null, running: boolean): State {
-  const scan = lastSurface(dto, disk);
-  const surface = scan ? surfaceOf(scan) : null;
+  const surface = diskSurface(dto, disk);
   const checks = disk.volumes.map((v) => lastCheck(dto, v)).filter((r) => r !== null);
   const flagged = (detail?.health?.attributes ?? []).some((a) => WATCHED.includes(a.id) && a.raw > 0) || detail?.health?.predict_failure;
   const slow = surface && disk.media === "Hdd" && surface.bands[5] >= 10;

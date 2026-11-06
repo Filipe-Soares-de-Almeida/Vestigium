@@ -37,6 +37,7 @@
     lastBench,
     lastCheck,
     lastQuick,
+    diskSurface,
     lastSurface,
     surfaceRuns,
     unreadableText,
@@ -418,7 +419,7 @@
   {@const detail = hwtests.details[d.number] ?? null}
   {@const scanRun = lastSurface(dto!, d)}
   {@const reads = surfaceRuns(dto!, d)}
-  {@const scan = scanRun ? surfaceOf(scanRun) : null}
+  {@const scan = diskSurface(dto!, d)}
   {@const resumable = scanRun?.outcome === "Interrupted" && scan !== null && scan.to_bytes < scan.disk_bytes}
   <header class="rh">
     <span class="icochip"><Icon name={diskIcon(d)} /></span>

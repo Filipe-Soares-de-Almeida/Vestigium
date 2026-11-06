@@ -294,6 +294,9 @@ How to use this file:
 
 ### Fixed
 
+- A surface check that was stopped and then continued shows on the Tests screen as one map of the
+  whole disk, as on the Health screen, instead of only the last part with the start marked as not
+  read.
 - The restore point the Optimizations screen asks for before a change now really stays. Windows
   logged it as created and then discarded it; Vestigium now asks for it the way Windows' own tools
   do, and says it was created only after finding it in Windows' list of restore points.
