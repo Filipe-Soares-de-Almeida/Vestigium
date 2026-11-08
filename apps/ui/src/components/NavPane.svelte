@@ -1,185 +1,158 @@
 <script lang="ts">
-  import { app } from "../lib/app.svelte";
-  import { captures } from "../lib/capture.svelte";
-  import { dumps } from "../lib/dumps.svelte";
-  import { hwtests } from "../lib/tests.svelte";
-  import { tweaks } from "../lib/tweaks.svelte";
-  import { health } from "../lib/health.svelte";
-  import { t, tn } from "../lib/i18n.svelte";
+  import { buildGroups, groupOf, itemHref } from "../lib/groups";
+  import { t } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
-  import { formatBytes } from "../screens/occurrence/format";
-  import ConcernMark from "./ConcernMark.svelte";
+  import { shellStatus } from "../lib/status";
+  import Finder from "./Finder.svelte";
   import Icon from "./Icon.svelte";
+  import StatusMark from "./StatusMark.svelte";
 
-  const open = $derived(health.dto?.open.length ?? 0);
-  const space = $derived(dumps.dto?.space_bytes ?? 0);
-  const status = $derived(
-    app.link === null
-      ? { tone: "off", key: "ui.shell.status.connecting" }
-      : app.paused
-        ? { tone: "paused", key: "ui.shell.status.paused" }
-        : captures.run !== null
-          ? { tone: "ok", key: "ui.shell.status.capturing" }
-          : app.running && app.link.link === "running" && app.link.sensitive_until_ms !== null
-            ? { tone: "ok", key: "ui.shell.status.sensitive" }
-            : app.running
-              ? { tone: "ok", key: "ui.shell.status.watching" }
-              : app.stopped
-                ? { tone: "off", key: "ui.shell.status.stopped" }
-                : { tone: "off", key: "ui.shell.status.unreachable" },
-  );
+  const status = $derived(shellStatus());
+  const group = $derived.by(() => {
+    const groups = buildGroups();
+    return { groups, current: groupOf(groups, router.current, router.group) };
+  });
 </script>
 
 <nav class="pane" aria-label={t("ui.shell.nav.label")}>
-  <div class="group" role="group" aria-labelledby="nav-follow">
-    <p class="head" id="nav-follow">{t("ui.shell.nav.group.follow")}</p>
-    <a class="nav" href={href.activity()} aria-current={router.section === "activity" ? "page" : undefined}>
-      <Icon name="today" />{t("ui.shell.nav.activity")}
-    </a>
-  </div>
-  <div class="group" role="group" aria-labelledby="nav-care">
-    <p class="head" id="nav-care">{t("ui.shell.nav.group.care")}</p>
-    <a class="nav" href={href.health()} aria-current={router.section === "health" ? "page" : undefined}>
-      <Icon name="health" />{t("ui.shell.nav.health")}
-      {#if open}
-        <span class="count">
-          {#if health.critical}<ConcernMark mark="Critical" word={false} silent />{/if}
-          <span aria-hidden="true">{open}</span>
-          <span class="sr">
-            {tn("ui.shell.nav.health.open", open)}{health.critical
-              ? `, ${tn("ui.shell.nav.health.critical", health.critical)}`
-              : ""}
-          </span>
-        </span>
-      {/if}
-    </a>
-    <a class="nav" href={href.tests()} aria-current={router.section === "tests" ? "page" : undefined}>
-      <Icon name="tests" />{t("ui.shell.nav.tests")}
-      {#if hwtests.running || hwtests.dto?.scan}
-        <span class="count"><ConcernMark mark="Running" word={false} silent /><span class="sr">{t("ui.shell.nav.tests.running")}</span></span>
-      {/if}
-    </a>
-    <a class="nav" href={href.tweaks()} aria-current={router.section === "tweaks" ? "page" : undefined}>
-      <Icon name="tweaks" />{t("ui.shell.nav.tweaks")}
-      {#if tweaks.recommended}
-        <span class="count">
-          <span aria-hidden="true">{tweaks.recommended}</span>
-          <span class="sr">{tn("ui.shell.nav.tweaks.signals", tweaks.recommended)}</span>
-        </span>
-      {/if}
-    </a>
-  </div>
-  <div class="group" role="group" aria-labelledby="nav-investigate">
-    <p class="head" id="nav-investigate">{t("ui.shell.nav.group.investigate")}</p>
-    <a class="nav" href={href.dumps()} aria-current={router.section === "dumps" ? "page" : undefined}>
-      <Icon name="dumps" />{t("ui.shell.nav.dumps")}
-      {#if space}<span class="size">{formatBytes(space)}</span>{/if}
-    </a>
-    <a
-      class="nav"
-      href={href.captures()}
-      aria-current={router.section === "captures" ? "page" : undefined}
-    >
-      <Icon name="captures" />{t("ui.shell.nav.captures")}
-    </a>
-  </div>
-  <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
-  <a
-    class="nav"
-    href={href.settings()}
-    aria-current={router.section === "settings" ? "page" : undefined}
-  >
-    <Icon name="settings" />{t("ui.shell.nav.settings")}
+  <a class="home" href={href.home()}>
+    <Icon name="home" />
+    <span>{t("ui.nav.home")}</span>
   </a>
+  <div class="find"><Finder id="side-find" /></div>
+  {#if group.current}
+    {@const current = group.current}
+    <h2 class="group" id="nav-group">{current.name}</h2>
+    <ul class="items" aria-labelledby="nav-group">
+      {#each current.items as item (item.href)}
+        <li>
+          <a
+            class="item"
+            data-reveal
+            href={itemHref(current, item)}
+            aria-current={item.match(router.current) ? "page" : undefined}
+          >
+            <Icon name={item.icon} />
+            <span class="label">{item.label}</span>
+            {#if item.status}<StatusMark kind={item.status} size={14} reveal />{/if}
+            {#if item.meta}<span class="meta">{item.meta}</span>{/if}
+          </a>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+  <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
 </nav>
 
 <style>
   .pane {
     display: flex;
     flex-direction: column;
-    gap: 2px;
     min-height: 0;
-    padding: 4px 6px 10px;
-    overflow: auto;
+    padding: 4px 0 0;
   }
-  .nav {
-    position: relative;
+  .home {
     display: flex;
     flex: none;
     align-items: center;
-    gap: 14px;
-    min-height: 38px;
+    gap: 16px;
+    height: 40px;
+    margin: 0 8px;
     padding: 0 12px;
     border-radius: 6px;
     color: var(--ink);
-    font: 400 14px/1.5 var(--f);
+    font-size: 14px;
     text-decoration: none;
   }
-  .nav :global(svg) {
+  .home:hover,
+  .item:hover {
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+  }
+  .home :global(svg),
+  .item :global(svg) {
     flex: none;
+    color: var(--ink2);
   }
-  a.nav:hover {
-    background: var(--stroke2);
+  .find {
+    flex: none;
+    padding: 10px 16px 0;
   }
-  .nav[aria-current="page"] {
-    background: var(--stroke2);
-    font-weight: 600;
+  .group {
+    flex: none;
+    margin: 20px 0 10px;
+    padding: 20px 20px 0;
+    border-top: 1px solid var(--rule);
+    font: 600 15px/1.3 var(--f);
   }
-  .nav[aria-current="page"]::before {
+  .items {
+    display: grid;
+    flex: 1;
+    align-content: start;
+    gap: 2px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 2px 12px 8px;
+    overflow: auto;
+    list-style: none;
+    scrollbar-gutter: stable;
+  }
+  .item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 40px;
+    padding: 0 10px 0 12px;
+    border-radius: 6px;
+    color: var(--ink);
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .item:active {
+    background: var(--row-press);
+  }
+  .item[aria-current="page"] {
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+  }
+  .item[aria-current="page"] :global(svg:first-child) {
+    color: var(--ink);
+  }
+  .item[aria-current="page"]::before {
     content: "";
     position: absolute;
+    top: 50%;
     left: 0;
-    top: 11px;
-    bottom: 11px;
     width: 3px;
+    height: 16px;
+    margin-top: -8px;
     border-radius: 2px;
     background: var(--accent);
   }
-  .size {
-    margin-left: auto;
-    color: var(--ink2);
-    font: 400 12px/18px var(--f);
+  .item:focus-visible,
+  .home:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
+  }
+  .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .count {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: auto;
-    padding: 0 7px;
-    border-radius: 9px;
-    background: var(--stroke2);
-    color: var(--ink);
-    font: 600 11px/18px var(--f);
-  }
-  .count :global(.cn) {
-    gap: 0;
-  }
-  .count :global(svg) {
-    width: 12px;
-    height: 12px;
-  }
-  .group {
-    display: flex;
+  .meta {
     flex: none;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .group + .group {
-    margin-top: 10px;
-  }
-  .head {
-    margin: 0;
-    padding: 6px 12px 2px;
     color: var(--ink3);
-    font: 600 12px/1.4 var(--f);
+    font-size: 12.5px;
   }
   .foot {
     display: flex;
+    flex: none;
     align-items: center;
     gap: 8px;
-    margin: auto 0 0;
-    padding: 10px 12px;
+    margin: 0;
+    padding: 12px 20px 14px;
+    border-top: 1px solid var(--stroke2);
     color: var(--ink2);
     font: 400 12.5px/1.35 var(--f);
   }
@@ -190,7 +163,7 @@
     border-radius: 50%;
   }
   .foot i.ok {
-    background: var(--ok);
+    background: var(--good);
   }
   .foot i.paused {
     background: var(--press);
@@ -209,10 +182,7 @@
       background: Canvas;
       border-color: CanvasText;
     }
-    .count {
-      border: 1px solid CanvasText;
-    }
-    .nav[aria-current="page"]::before {
+    .item[aria-current="page"]::before {
       forced-color-adjust: none;
       background: Highlight;
     }

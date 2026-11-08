@@ -23,6 +23,7 @@
   import Capture from "./screens/Capture.svelte";
   import Captures from "./screens/Captures.svelte";
   import Dumps from "./screens/Dumps.svelte";
+  import Home from "./screens/Home.svelte";
   import Health from "./screens/Health.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
@@ -31,7 +32,7 @@
 
   let content: HTMLElement;
   /** Screens whose page holds still while their panes scroll inside. */
-  const STILL = new Set(["tests", "tweaks", "dumps"]);
+  const STILL = new Set(["tests", "tweaks", "dumps", "home"]);
 
   let main: HTMLElement;
   let shown = "";
@@ -100,12 +101,12 @@
   });
 </script>
 
-<div class="win">
+<div class="win" class:home={router.current.screen === "home"}>
   <header class="titlebar" data-tauri-drag-region="deep">
     <Mark />
     <span>{t("ui.shell.title")}</span>
   </header>
-  <NavPane />
+  {#if router.current.screen !== "home"}<NavPane />{/if}
   <div class="content" bind:this={content}>
     <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
       {#if app.failure !== null}
@@ -116,7 +117,9 @@
         <Banner />
         {#key router.key}
           <div class="screen">
-            {#if router.current.screen === "occurrence"}
+            {#if router.current.screen === "home"}
+              <Home />
+            {:else if router.current.screen === "occurrence"}
               <Occurrence id={router.current.id} />
             {:else if router.current.screen === "capture"}
               <Capture id={router.current.id} />
@@ -148,9 +151,25 @@
 <style>
   .win {
     display: grid;
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: 280px minmax(0, 1fr);
     grid-template-rows: 44px minmax(0, 1fr);
     height: 100vh;
+  }
+  @media (min-width: 1280px) {
+    .win:not(.home) {
+      grid-template-columns: 320px minmax(0, 1fr);
+    }
+  }
+  .win.home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .win.home .content {
+    border-left: 1px solid var(--stroke2);
+    border-top-left-radius: 0;
+  }
+  .win.home main {
+    max-width: none;
+    padding: 0;
   }
   /* Windows 10 draws the side and bottom edges of a frameless window but not the top one. */
   :global(:root[data-frame="win10"]:not([data-maximized])) .win {

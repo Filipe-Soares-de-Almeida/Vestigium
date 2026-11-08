@@ -46,6 +46,8 @@
     start: [16, '<path d="M5 3.5l7.5 4.5L5 12.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'],
     stop: [16, '<rect x="4" y="4" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/>'],
     resume: [16, '<path d="M4 3.5v9M7.5 3.5l6 4.5-6 4.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'],
+    home: [16, '<path d="M2.5 7.2L8 2.5l5.5 4.7V13a.5.5 0 01-.5.5h-3V9.5H6v4H3a.5.5 0 01-.5-.5z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>'],
+    search: [16, '<circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 10.5l3.2 3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'],
     admin: [16, '<path d="M8 1.6l5.4 2v4.1c0 3.2-2.2 5.3-5.4 6.7-3.2-1.4-5.4-3.5-5.4-6.7V3.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5.2v3.3M8 10.4v.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'],
     write: [16, '<path d="M3 13l.8-3.2 6.6-6.6 2.4 2.4-6.6 6.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'],
   } as const satisfies Record<string, readonly [number, string]>;

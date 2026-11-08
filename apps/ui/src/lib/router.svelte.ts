@@ -1,10 +1,12 @@
-// Screens are addressed by the URL hash: #/activity[?tab=now], #/occurrence/<id>, #/captures[?for=<occurrence id>],
+// Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/occurrence/<id>, #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
-// #/settings[/<category>]. #/today and #/now open those tabs of #/activity.
+// #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
+// sidebar group an entry shared by two groups was opened from.
 
 export type ActivityTab = "today" | "now";
 
 export type Route =
+  | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
   | { screen: "occurrence"; id: number }
   | { screen: "captures"; forOccurrence: number | null }
@@ -19,6 +21,7 @@ export type Route =
 export type Screen = Route["screen"];
 
 export const href = {
+  home: () => "#/",
   activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
   occurrence: (id: number) => `#/occurrence/${id}`,
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
@@ -37,6 +40,7 @@ export function parse(hash: string): Route {
     return { screen: "occurrence", id: Number(arg) };
   }
   if (screen === "now") return { screen: "activity", tab: "now" };
+  if (screen === "today") return { screen: "activity", tab: "today" };
   if (screen === "activity") {
     return { screen: "activity", tab: new URLSearchParams(query).get("tab") === "now" ? "now" : "today" };
   }
@@ -50,11 +54,18 @@ export function parse(hash: string): Route {
   if (screen === "tweaks") return { screen: "tweaks", key: arg ? decodeURIComponent(arg) : null };
   if (screen === "tests") return { screen: "tests", device: arg === "memory" || /^\d+$/.test(arg ?? "") ? arg : null };
   if (screen === "settings") return { screen: "settings", category: arg || null };
-  return { screen: "activity", tab: "today" };
+  return { screen: "home" };
+}
+
+/** The sidebar group named by the `g` query, if any. */
+export function groupParam(hash: string): string | null {
+  return new URLSearchParams(hash.split("?")[1] ?? "").get("g");
 }
 
 class Router {
   current = $state<Route>(parse(location.hash));
+  /** The `g` query of the current address. */
+  group = $state<string | null>(groupParam(location.hash));
 
   /** Changes only when the screen changes, not when a screen moves inside itself or between its tabs. */
   get key(): string {
@@ -63,18 +74,13 @@ class Router {
     if (route.screen === "health") return `health/${route.area ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }
-
-  /** The navigation pane item a screen belongs to. */
-  get section(): "activity" | "captures" | "health" | "dumps" | "tweaks" | "tests" | "settings" {
-    const screen = this.current.screen;
-    return screen === "occurrence" ? "activity" : screen === "capture" ? "captures" : screen;
-  }
 }
 
 export const router = new Router();
 
 addEventListener("hashchange", () => {
   router.current = parse(location.hash);
+  router.group = groupParam(location.hash);
 });
 
 /** Opens a screen, as in `go(href.activity("now"))`. */

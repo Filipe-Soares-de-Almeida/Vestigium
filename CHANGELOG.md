@@ -24,6 +24,11 @@ How to use this file:
 
 ### Added
 
+- The window now opens on a home screen: the status of the watcher, three quick cards (Health, Activity,
+  Optimizations), a card for Settings, a search field and a grid of the ten subjects. Search finds
+  screens, optimizations and each Settings page, ignoring accents, and opens the match with Enter.
+- The navigation pane now follows the subject you are in: Home, search, the subject's pages and the
+  watcher status at the bottom. Disks and Memory gather the health alerts and tests of each.
 - A tray icon for the background watcher, with options to pause it, start it with Windows, and
   exit. Only one watcher runs per user; starting it again while it runs does nothing.
 - The background watcher samples CPU, per-core DPC and interrupt time, memory, physical disks, GPU
