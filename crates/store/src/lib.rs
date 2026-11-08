@@ -10,6 +10,7 @@ mod read;
 mod records;
 mod schema;
 mod segment;
+mod smart;
 mod tweaks;
 
 pub use batch::Batcher;
@@ -20,6 +21,7 @@ pub use hwtests::TestRunRow;
 pub use prune::PruneReport;
 pub use schema::{Batch, SCHEMA_VERSION, Store};
 pub use segment::{Segment, Series, decode, encode};
+pub use smart::SmartReading;
 pub use tweaks::TweakChangeRow;
 
 /// Why a history operation failed.

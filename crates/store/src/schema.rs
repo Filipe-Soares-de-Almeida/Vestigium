@@ -6,7 +6,7 @@ use vestigium_core::{Gap, WinEvent};
 use crate::records::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -138,6 +138,17 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE finding ADD COLUMN first_version INTEGER;
     ALTER TABLE finding ADD COLUMN first_data BLOB;
     UPDATE finding SET first_version = version, first_data = data WHERE updated_ms = opened_ms;",
+    // Each disk's SMART attributes, one reading a day, to show how they moved.
+    "CREATE TABLE smart_reading (
+        disk    TEXT    NOT NULL,
+        attr    INTEGER NOT NULL,
+        day     INTEGER NOT NULL,
+        read_ms INTEGER NOT NULL,
+        current INTEGER NOT NULL,
+        worst   INTEGER NOT NULL,
+        raw     INTEGER NOT NULL,
+        PRIMARY KEY (disk, attr, day)
+    ) WITHOUT ROWID;",
 ];
 
 /// What the agent writes in one transaction, every batch.

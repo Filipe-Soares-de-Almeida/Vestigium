@@ -21,6 +21,7 @@ pub struct PruneReport {
     pub dumps: usize,
     pub tweak_changes: usize,
     pub test_runs: usize,
+    pub smart_readings: usize,
 }
 
 impl Store {
@@ -89,6 +90,10 @@ impl Store {
                 "DELETE FROM test_run WHERE ended_ms < ?1",
                 params![records_cutoff],
             )?,
+            smart_readings: tx.execute(
+                "DELETE FROM smart_reading WHERE read_ms < ?1",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
@@ -109,6 +114,7 @@ impl Store {
             "scan",
             "dump",
             "test_run",
+            "smart_reading",
         ] {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }

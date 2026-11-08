@@ -1,7 +1,7 @@
 use vestigium_core::Retention;
 use vestigium_core::health::{
-    BootReport, BootTime, Concern, Finding, FindingChange, FindingKind, HealthFact, Measure,
-    Reference, ScanResult, Subject,
+    BootReport, BootTime, Concern, DiskHealth, Finding, FindingChange, FindingKind, HealthFact,
+    Measure, Reference, ScanResult, SmartAttribute, Subject,
 };
 use vestigium_store::{SCHEMA_VERSION, Store};
 
@@ -215,4 +215,73 @@ fn migration_from_v3_adds_findings_and_scans() {
         .unwrap();
     store.insert_scan(&scan(DAY, 90_000)).unwrap();
     assert_eq!(store.open_findings().unwrap().len(), 1);
+}
+
+fn disk_reading(read_ms: i64, raw: u64) -> DiskHealth {
+    DiskHealth {
+        name: "0 C:".to_string(),
+        read_ms,
+        predict_failure: false,
+        attributes: vec![
+            SmartAttribute {
+                id: 5,
+                current: 100,
+                worst: 100,
+                raw,
+            },
+            SmartAttribute {
+                id: 194,
+                current: 64,
+                worst: 51,
+                raw: 36,
+            },
+        ],
+        nvme: None,
+    }
+}
+
+#[test]
+fn smart_keeps_one_reading_a_day_per_attribute() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+
+    store
+        .record_smart(&disk_reading(10 * DAY + 1_000, 2))
+        .unwrap();
+    store
+        .record_smart(&disk_reading(10 * DAY + 5_000, 3))
+        .unwrap();
+    store.record_smart(&disk_reading(11 * DAY, 4)).unwrap();
+
+    let history = store.smart_history("0 C:", 5, 0).unwrap();
+    let raws: Vec<(i64, u64)> = history.iter().map(|r| (r.read_ms, r.raw)).collect();
+    assert_eq!(
+        raws,
+        [(10 * DAY + 5_000, 3), (11 * DAY, 4)],
+        "the day's last reading"
+    );
+    assert_eq!(store.smart_history("0 C:", 194, 11 * DAY).unwrap().len(), 1);
+    assert!(store.smart_history("1 D:", 5, 0).unwrap().is_empty());
+}
+
+#[test]
+fn smart_readings_follow_the_records_retention() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    store.record_smart(&disk_reading(DAY, 1)).unwrap();
+    store.record_smart(&disk_reading(400 * DAY, 2)).unwrap();
+
+    let report = store
+        .prune(
+            401 * DAY,
+            &Retention {
+                samples_hours: 48,
+                minutes_days: 90,
+                records_days: 365,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(report.smart_readings, 2, "both attributes of the old day");
+    assert_eq!(store.smart_history("0 C:", 5, 0).unwrap().len(), 1);
 }

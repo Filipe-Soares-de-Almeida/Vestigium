@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- The database keeps one reading a day of each SMART attribute of each disk, deleted with the records
+  retention and by Clear history.
 - A process in an occurrence's technical tables opens its own page with its peak CPU, memory and disk
   use and how its CPU and memory moved across the occurrence's window.
 - A Windows Memory Diagnostic run in the memory test history opens its own page: result, duration,
