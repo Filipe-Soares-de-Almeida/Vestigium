@@ -62,10 +62,19 @@ export function groupParam(hash: string): string | null {
   return new URLSearchParams(hash.split("?")[1] ?? "").get("g");
 }
 
+/** Called before a change of screen; returns true when it took over and will call `commit` itself. */
+export type NavigationHook = (next: Route, prev: Route, commit: () => void) => boolean;
+
 class Router {
   current = $state<Route>(parse(location.hash));
   /** The `g` query of the current address. */
   group = $state<string | null>(groupParam(location.hash));
+  hook: NavigationHook | null = null;
+
+  commit(next: Route, group: string | null): void {
+    this.current = next;
+    this.group = group;
+  }
 
   /** Changes only when the screen changes, not when a screen moves inside itself or between its tabs. */
   get key(): string {
@@ -79,8 +88,10 @@ class Router {
 export const router = new Router();
 
 addEventListener("hashchange", () => {
-  router.current = parse(location.hash);
-  router.group = groupParam(location.hash);
+  const next = parse(location.hash);
+  const group = groupParam(location.hash);
+  const commit = () => router.commit(next, group);
+  if (!router.hook?.(next, router.current, commit)) commit();
 });
 
 /** Opens a screen, as in `go(href.activity("now"))`. */

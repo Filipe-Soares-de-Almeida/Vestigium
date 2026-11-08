@@ -24,17 +24,18 @@
   import Captures from "./screens/Captures.svelte";
   import Dumps from "./screens/Dumps.svelte";
   import Home from "./screens/Home.svelte";
+  import { morph } from "./lib/morph.svelte";
   import Health from "./screens/Health.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
   import Tests from "./screens/Tests.svelte";
   import Tweaks from "./screens/Tweaks.svelte";
 
-  let content: HTMLElement;
+  let content: HTMLElement | undefined = $state();
   /** Screens whose page holds still while their panes scroll inside. */
-  const STILL = new Set(["tests", "tweaks", "dumps", "home"]);
+  const STILL = new Set(["tests", "tweaks", "dumps"]);
 
-  let main: HTMLElement;
+  let main: HTMLElement | undefined = $state();
   let shown = "";
 
   onMount(() => app.start());
@@ -95,53 +96,68 @@
     shown = key;
     if (first) return;
     void tick().then(() => {
-      content.scrollTo(0, 0);
-      main.focus({ preventScroll: true });
+      content?.scrollTo(0, 0);
+      main?.focus({ preventScroll: true });
     });
   });
 </script>
 
-<div class="win" class:home={router.current.screen === "home"}>
+<div class="win">
   <header class="titlebar" data-tauri-drag-region="deep">
     <Mark />
     <span>{t("ui.shell.title")}</span>
   </header>
-  {#if router.current.screen !== "home"}<NavPane />{/if}
-  <div class="content" bind:this={content}>
-    <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
-      {#if app.failure !== null}
-        <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
-      {:else if app.loading}
-        <Loading />
-      {:else}
-        <Banner />
-        {#key router.key}
-          <div class="screen">
-            {#if router.current.screen === "home"}
-              <Home />
-            {:else if router.current.screen === "occurrence"}
-              <Occurrence id={router.current.id} />
-            {:else if router.current.screen === "capture"}
-              <Capture id={router.current.id} />
-            {:else if router.current.screen === "captures"}
-              <Captures forOccurrence={router.current.forOccurrence} />
-            {:else if router.current.screen === "health"}
-              <Health area={router.current.area} />
-            {:else if router.current.screen === "dumps"}
-              <Dumps id={router.current.id} />
-            {:else if router.current.screen === "tweaks"}
-              <Tweaks key={router.current.key} />
-            {:else if router.current.screen === "tests"}
-              <Tests device={router.current.device} />
-            {:else if router.current.screen === "settings"}
-              <Settings />
+  <div class="stage" bind:this={morph.stage}>
+    {#if router.current.screen === "home" || morph.phase !== "idle"}
+      <div class="layer home" bind:this={morph.home} data-morph-base inert={morph.phase !== "idle"}>
+        {#if app.failure !== null}
+          <main class="plain"><ErrorView error={app.failure} heading="h1" onretry={() => app.load()} /></main>
+        {:else if app.loading}
+          <main class="plain"><Loading /></main>
+        {:else}
+          <Home />
+        {/if}
+      </div>
+    {/if}
+    {#if router.current.screen !== "home"}
+      <div class="layer page" bind:this={morph.page} inert={morph.phase !== "idle"}>
+        <NavPane />
+        <div class="content" bind:this={content}>
+          <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
+            {#if app.failure !== null}
+              <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
+            {:else if app.loading}
+              <Loading />
             {:else}
-              <Activity tab={router.current.tab} />
+              <Banner />
+              {#key router.key}
+                <div class="screen">
+                  {#if router.current.screen === "occurrence"}
+                    <Occurrence id={router.current.id} />
+                  {:else if router.current.screen === "capture"}
+                    <Capture id={router.current.id} />
+                  {:else if router.current.screen === "captures"}
+                    <Captures forOccurrence={router.current.forOccurrence} />
+                  {:else if router.current.screen === "health"}
+                    <Health area={router.current.area} />
+                  {:else if router.current.screen === "dumps"}
+                    <Dumps id={router.current.id} />
+                  {:else if router.current.screen === "tweaks"}
+                    <Tweaks key={router.current.key} />
+                  {:else if router.current.screen === "tests"}
+                    <Tests device={router.current.device} />
+                  {:else if router.current.screen === "settings"}
+                    <Settings />
+                  {:else if router.current.screen === "activity"}
+                    <Activity tab={router.current.tab} />
+                  {/if}
+                </div>
+              {/key}
             {/if}
-          </div>
-        {/key}
-      {/if}
-    </main>
+          </main>
+        </div>
+      </div>
+    {/if}
   </div>
   <WindowControls />
 </div>
@@ -151,25 +167,43 @@
 <style>
   .win {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 44px minmax(0, 1fr);
     height: 100vh;
   }
+  .stage {
+    position: relative;
+    grid-row: 2;
+    min-height: 0;
+  }
+  /* Each layer isolates its stacking, so a child's z-index never shows over the other layer. */
+  .layer {
+    position: absolute;
+    inset: 0;
+    isolation: isolate;
+  }
+  .layer.home {
+    overflow: hidden;
+    background: var(--layer);
+    border-top: 1px solid var(--stroke2);
+  }
+  .layer.page {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    background: var(--base);
+  }
   @media (min-width: 1280px) {
-    .win:not(.home) {
+    .layer.page {
       grid-template-columns: 320px minmax(0, 1fr);
     }
   }
-  .win.home {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .win.home .content {
-    border-left: 1px solid var(--stroke2);
-    border-top-left-radius: 0;
-  }
-  .win.home main {
-    max-width: none;
-    padding: 0;
+  :global(.morph) {
+    position: absolute;
+    z-index: 20;
+    margin: 0;
+    pointer-events: none;
+    transform-origin: 0 0;
+    will-change: transform, opacity;
   }
   /* Windows 10 draws the side and bottom edges of a frameless window but not the top one. */
   :global(:root[data-frame="win10"]:not([data-maximized])) .win {
@@ -177,7 +211,6 @@
   }
   .titlebar {
     grid-row: 1;
-    grid-column: 1 / -1;
     display: flex;
     align-items: center;
     gap: 12px;

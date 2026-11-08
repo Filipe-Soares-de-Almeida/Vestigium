@@ -6,6 +6,7 @@
   import { health } from "../lib/health.svelte";
   import { buildGroups, entryHref } from "../lib/groups";
   import { t, tn } from "../lib/i18n.svelte";
+  import { morph } from "../lib/morph.svelte";
   import { href } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
@@ -29,8 +30,8 @@
   const tweakKind: StatusKind = $derived(tweaks.recommended ? "attention" : "ok");
 </script>
 
-<div class="home">
-  <header class="band">
+<div class="home" data-morph-base>
+  <header class="band" data-morph-base>
     <div class="head">
       <div class="id">
         <span class="mark"><Mark /></span>
@@ -41,28 +42,28 @@
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>
         <li>
-          <a class="card" href={href.health()} aria-label="{t('ui.group.health')}: {healthLine}">
+          <a class="card" href={href.health()} data-morph="qs:health" onclick={() => morph.remember("qs:health")} aria-label="{t('ui.group.health')}: {healthLine}">
             <span class="ic"><Icon name="health" /><span class="dot"><StatusMark kind={healthKind} size={14} reveal /></span></span>
             <b>{t("ui.group.health")}</b>
             <small>{healthLine}</small>
           </a>
         </li>
         <li>
-          <a class="card" href={href.activity()}>
+          <a class="card" href={href.activity()} data-morph="qs:today" onclick={() => morph.remember("qs:today")}>
             <span class="ic"><Icon name="today" /></span>
             <b>{t("ui.group.activity")}</b>
             <small>{t("ui.home.activity")}</small>
           </a>
         </li>
         <li>
-          <a class="card" href={href.tweaks()} aria-label="{t('ui.group.tweaks')}: {tweakLine}">
+          <a class="card" href={href.tweaks()} data-morph="qs:tweaks" onclick={() => morph.remember("qs:tweaks")} aria-label="{t('ui.group.tweaks')}: {tweakLine}">
             <span class="ic"><Icon name="tweaks" /><span class="dot"><StatusMark kind={tweakKind} size={14} reveal /></span></span>
             <b>{t("ui.group.tweaks")}</b>
             <small>{tweakLine}</small>
           </a>
         </li>
         <li>
-          <a class="card settings" href={href.settings()}>
+          <a class="card settings" href={href.settings()} data-morph="qs:settings" onclick={() => morph.remember("qs:settings")}>
             <span class="ic"><Icon name="settings" /></span>
             <b>{t("ui.group.settings")}</b>
             <small>{t("ui.home.settings")}</small>
@@ -72,11 +73,11 @@
     </div>
   </header>
   <div class="find"><Finder id="home-find" big autofocus /></div>
-  <div class="grid">
+  <div class="grid" data-morph-base>
     <ul class="tiles">
       {#each tiles as group (group.key)}
         <li>
-          <a class="tile" href={entryHref(group)}>
+          <a class="tile" href={entryHref(group)} data-morph="g:{group.key}" onclick={() => morph.remember(`g:${group.key}`)}>
             <span class="tile-ic"><Icon name={group.icon} /></span>
             <span class="text"><b>{group.name}</b><small>{group.sub}</small></span>
           </a>

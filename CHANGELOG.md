@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- Opening a card on the home screen now grows it into its page, and going back shrinks the page into
+  the same card. The effect is skipped when Windows is set to reduce motion.
 - The window now opens on a home screen: the status of the watcher, three quick cards (Health, Activity,
   Optimizations), a card for Settings, a search field and a grid of the ten subjects. Search finds
   screens, optimizations and each Settings page, ignoring accents, and opens the match with Enter.
