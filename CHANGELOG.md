@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- A process in an occurrence's technical tables opens its own page with its peak CPU, memory and disk
+  use and how its CPU and memory moved across the occurrence's window.
 - A Windows Memory Diagnostic run in the memory test history opens its own page: result, duration,
   coverage, faulty pages and what to do when it found errors.
 - Each Windows Memory Diagnostic run read from the System log is named by the record of its first

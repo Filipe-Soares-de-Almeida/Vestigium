@@ -5,6 +5,7 @@
   import EventDetail from "./detail/EventDetail.svelte";
   import FindingDetail from "./detail/FindingDetail.svelte";
   import ProcessDetail from "./detail/ProcessDetail.svelte";
+  import ProcessMoment from "./detail/ProcessMoment.svelte";
   import SmartDetail from "./detail/SmartDetail.svelte";
   import TestDetail from "./detail/TestDetail.svelte";
 
@@ -25,6 +26,8 @@
   <DriverDetail captureId={num(0)} module={parts.slice(1).join("/")} />
 {:else if kind === "smart"}
   <SmartDetail disk={num(0)} attr={num(1)} />
+{:else if parts.length === 3 && Number.isFinite(num(1)) && Number.isFinite(num(2))}
+  <ProcessMoment name={parts[0]} occurrenceId={num(1)} pid={num(2)} />
 {:else}
   <ProcessDetail name={parts.join("/")} />
 {/if}

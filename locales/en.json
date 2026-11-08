@@ -2336,5 +2336,16 @@
   "ui.detail.process.sub": "Process {pid}",
   "ui.detail.process.now": "Now",
   "ui.detail.process.now_only": "These are the numbers of this second. There is no history per program yet.",
-  "ui.detail.process.gone": "This program is not running now."
+  "ui.detail.process.gone": "This program is not running now.",
+  "ui.detail.process.at": "During the occurrence at {time}",
+  "ui.detail.process.peak_cpu": "Peak CPU",
+  "ui.detail.process.peak_mem": "Peak memory",
+  "ui.detail.process.peak_disk": "Peak disk",
+  "ui.detail.process.pid": "PID",
+  "ui.detail.process.cpu_window": "CPU during the occurrence",
+  "ui.detail.process.mem_window": "Memory during the occurrence",
+  "ui.detail.process.cpu_of": "CPU of {name}",
+  "ui.detail.process.mem_of": "Memory of {name}",
+  "ui.detail.process.one_reading": "The rankings of this occurrence caught this process only once.",
+  "ui.detail.process.see_live": "See this program now, live"
 }

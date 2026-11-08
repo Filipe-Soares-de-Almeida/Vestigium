@@ -46,7 +46,9 @@
       <tbody>
         {#each rows as row (row.pid)}
           <tr>
-            <td class="nm" title={row.name}>{row.name}</td>
+            <td class="nm" title={row.name}>
+              <a class="row-a" href={href.detail("process", [row.name, dto.id, row.pid], { from: here(), label: t("ui.occurrence.crumb") })}>{row.name}</a>
+            </td>
             <td class="num">{formatPercent(row.cpu, 1)}</td>
             <td class="num">{formatBytes(row.mem)}</td>
             <td class="num">{formatRate(row.io)}</td>
