@@ -381,6 +381,8 @@ export type TrayState = "normal" | "attention" | "problem";
 
 export interface AgentStatus {
   paused: boolean;
+  /** When the pause ends by itself, while paused. */
+  paused_until_ms?: number | null;
   sensitive_until_ms: number | null;
   state: TrayState;
   started_at_ms: number;

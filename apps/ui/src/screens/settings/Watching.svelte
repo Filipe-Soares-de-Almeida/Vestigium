@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusMark from "../../components/StatusMark.svelte";
   import { setAutostart, setPaused, setSensitive } from "../../lib/api";
   import { app } from "../../lib/app.svelte";
   import { errorText } from "../../lib/errors";
@@ -14,6 +15,10 @@
     app.link?.link === "running" ? app.link.sensitive_until_ms : null,
   );
   let busy = $state(false);
+
+  /** Pause lengths in minutes; `restart` holds until resumed or until the PC restarts. */
+  const PAUSE_FOR = ["15", "60", "240", "restart"] as const;
+  let pauseFor = $state<(typeof PAUSE_FOR)[number]>("60");
 
   /** Runs one change at a time and toasts what failed; the controls stay focusable meanwhile. */
   async function run(change: () => Promise<void>): Promise<void> {
@@ -52,9 +57,14 @@
     const change = () =>
       run(async () => {
         if (!paused) return app.resume();
-        await setPaused(true);
+        const until = pauseFor === "restart" ? null : Date.now() + Number(pauseFor) * 60_000;
+        await setPaused(true, until);
         await app.refresh();
-        toast.show(t("ui.settings.watching.pause.done"));
+        toast.show(
+          until === null
+            ? t("ui.settings.watching.pause.done")
+            : t("ui.settings.watching.pause.done_until", { time: formatTime(until) }),
+        );
       });
     if (main) void keepFocus(main, change);
     else void change();
@@ -88,20 +98,25 @@
     onchange={changeSensitive}
   />
 </Row>
-<Row
-  id="pause"
-  title={t("ui.settings.watching.pause")}
-  hint={app.paused ? t("ui.settings.watching.pause.paused") : t("ui.settings.watching.pause.hint")}
->
+<Row id="pause" title={t("ui.settings.watching.pause")} hint={app.paused ? undefined : t("ui.settings.watching.pause.hint")}>
   {#if app.paused}
-    <button
-      type="button"
-      class="btn accent"
-      data-focus="pause"
-      aria-describedby="pause-hint"
-      onclick={() => changePaused(false)}>{t("ui.shell.paused.resume")}</button
+    <p class="state">
+      <StatusMark kind="attention" word={t("ui.settings.watching.pause.state")} />
+      <span>
+        {app.pausedUntil !== null
+          ? t("ui.settings.watching.pause.until", { time: formatTime(app.pausedUntil) })
+          : t("ui.settings.watching.pause.until_restart")}
+      </span>
+    </p>
+    <button type="button" class="btn accent" data-focus="pause" onclick={() => changePaused(false)}
+      >{t("ui.settings.watching.pause.resume")}</button
     >
   {:else}
+    <select bind:value={pauseFor} aria-label={t("ui.settings.watching.pause.for")} disabled={!app.running}>
+      {#each PAUSE_FOR as length (length)}
+        <option value={length}>{t(`ui.settings.watching.pause.for.${length}`)}</option>
+      {/each}
+    </select>
     <button
       type="button"
       class="btn"
@@ -114,6 +129,14 @@
 </Row>
 
 <style>
+  .state {
+    display: flex;
+    flex-basis: 100%;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 4px;
+    color: var(--ink2);
+  }
   .unknown {
     color: var(--ink2);
     font: 400 13px/1.4 var(--f);

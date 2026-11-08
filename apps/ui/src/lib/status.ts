@@ -1,6 +1,6 @@
 import { app } from "./app.svelte";
 import { captures } from "./capture.svelte";
-import { formatPercent } from "./format";
+import { formatPercent, formatTime } from "./format";
 import { t } from "./i18n.svelte";
 
 export type ShellTone = "ok" | "paused" | "off";
@@ -9,7 +9,13 @@ export type ShellTone = "ok" | "paused" | "off";
 export function shellStatus(): { tone: ShellTone; text: string } {
   const link = app.link;
   if (link === null) return { tone: "off", text: t("ui.shell.status.connecting") };
-  if (app.paused) return { tone: "paused", text: t("ui.shell.status.paused") };
+  if (app.paused) {
+    const until = app.pausedUntil;
+    return {
+      tone: "paused",
+      text: until === null ? t("ui.shell.status.paused") : t("ui.shell.status.paused_until", { time: formatTime(until) }),
+    };
+  }
   if (captures.run !== null) return { tone: "ok", text: t("ui.shell.status.capturing") };
   if (app.running && link.link === "running") {
     const state = t(link.sensitive_until_ms !== null ? "ui.shell.status.sensitive" : "ui.shell.status.watching");

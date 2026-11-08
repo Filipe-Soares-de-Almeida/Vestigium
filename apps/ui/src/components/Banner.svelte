@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
   import { errorText } from "../lib/errors";
+  import { formatTime } from "../lib/format";
   import { keepFocus } from "../lib/focus";
   import { t } from "../lib/i18n.svelte";
   import Icon from "./Icon.svelte";
@@ -22,7 +23,12 @@
   <div class="banner">
     <span class="icon"><Icon name={kind} /></span>
     <div class="text">
-      <p><b>{t(`ui.shell.${kind}.title`)}</b> {t(`ui.shell.${kind}.body`)}</p>
+      <p>
+        <b>{t(`ui.shell.${kind}.title`)}</b>
+        {kind === "paused" && app.pausedUntil !== null
+          ? t("ui.shell.paused.body_until", { time: formatTime(app.pausedUntil) })
+          : t(`ui.shell.${kind}.body`)}
+      </p>
       {#if kind === "stopped" && app.startError}
         <p class="note" role="status">{errorText(app.startError)}</p>
       {/if}

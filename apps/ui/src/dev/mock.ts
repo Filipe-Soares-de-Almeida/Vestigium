@@ -14,6 +14,7 @@ const failures = new Map(
 const state = {
   link: (query.get("link") ?? "running") as AgentLink["link"],
   paused: query.get("paused") === "1",
+  pausedUntil: null as number | null,
   sensitive: query.get("sensitive") === "1",
   history: query.get("history") === "empty" ? ("empty" as const) : ("ready" as const),
   settings: {
@@ -47,6 +48,7 @@ const base: Record<string, Handler> = {
       ? {
           link: "running",
           paused: state.paused,
+          paused_until_ms: state.paused ? state.pausedUntil : null,
           sensitive_until_ms: state.sensitive ? Date.now() + 1_800_000 : null,
           state: "normal",
           started_at_ms: startedAt,
@@ -72,7 +74,9 @@ const base: Record<string, Handler> = {
         resolve(null);
       }, 800),
     ),
-  set_paused: (args) => needsWatcher() ?? void (state.paused = args.paused as boolean),
+  set_paused: (args) =>
+    needsWatcher() ??
+    void ((state.paused = args.paused as boolean), (state.pausedUntil = (args.untilMs as number | null) ?? null)),
   set_sensitive: (args) => needsWatcher() ?? void (state.sensitive = args.on as boolean),
   set_autostart: (args) => needsWatcher() ?? void (state.autostart = args.on as boolean),
   set_settings: (args) => needsWatcher() ?? void (state.settings = args.settings as Settings),

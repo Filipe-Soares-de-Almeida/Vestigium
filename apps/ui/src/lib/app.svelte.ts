@@ -26,6 +26,8 @@ class App {
   loading = $derived(this.failure === null && (this.link === null || this.history === null));
   running = $derived(this.link?.link === "running");
   paused = $derived(this.link?.link === "running" && this.link.paused);
+  /** When the pause ends by itself; `null` for a pause held until resumed. */
+  pausedUntil = $derived(this.link?.link === "running" && this.link.paused ? (this.link.paused_until_ms ?? null) : null);
   stopped = $derived(this.link?.link === "stopped");
   /** A watcher answers on the pipe but not as this window expects. */
   unreachable = $derived(this.link?.link === "mismatch");

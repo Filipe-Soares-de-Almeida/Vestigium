@@ -62,8 +62,9 @@ export function startAgent(): Promise<void> {
   return invoke("start_agent");
 }
 
-export function setPaused(paused: boolean): Promise<void> {
-  return invoke("set_paused", { paused });
+/** Pauses or resumes watching; `untilMs` ends the pause by itself at that time. */
+export function setPaused(paused: boolean, untilMs: number | null = null): Promise<void> {
+  return invoke("set_paused", { paused, untilMs });
 }
 
 export function setSensitive(on: boolean): Promise<void> {

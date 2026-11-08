@@ -241,6 +241,8 @@ How to use this file:
 
 ### Changed
 
+- Pausing monitoring offers 15 min, 1 h, 4 h or until restart; a timed pause shows when it ends in the
+  status line, the banner and Monitoring settings, and resumes by itself.
 - The status line in the navigation pane, on the home screen and in Monitoring settings shows the
   watcher's own processor use, such as "Monitoring · 0.1% CPU".
 - The home screen and the navigation pane say more about this PC: the Freezes card counts today's
