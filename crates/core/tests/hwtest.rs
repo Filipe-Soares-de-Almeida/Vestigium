@@ -43,6 +43,11 @@ fn pairs_1101_and_1201_into_one_run() {
         memdiag(90 * 86_400_000, 50, 1103, ""),
     ]);
     assert_eq!(runs.len(), 2);
+    assert_eq!(
+        (runs[0].record_id, runs[1].record_id),
+        (10, 50),
+        "named by the first event"
+    );
     assert_eq!(runs[0].result, DiagnosticResult::Pass);
     let detail = runs[0].detail.expect("1101 carries the detail");
     assert_eq!(

@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- Each Windows Memory Diagnostic run read from the System log is named by the record of its first
+  event, so the same run is found again on every read.
 - A pause can carry an end time: the watcher then resumes by itself, and its status says when. The
   window and the watcher speak a new protocol version.
 - The watcher measures its own processor use over the last minute and reports it with its status.

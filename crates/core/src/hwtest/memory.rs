@@ -122,6 +122,8 @@ impl DiagnosticDetail {
 /// One run of the Windows Memory Diagnostic, read from the System log.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryDiagnostic {
+    /// The System log record of the run's first event, which names the run across reads.
+    pub record_id: u64,
     pub ts_ms: i64,
     pub result: DiagnosticResult,
     /// Absent when only the summary event was logged.
@@ -174,6 +176,7 @@ pub fn memory_diagnostics(events: &[WinEvent]) -> Vec<MemoryDiagnostic> {
                 last.detail = last.detail.or(detail);
             }
             _ => runs.push(MemoryDiagnostic {
+                record_id: event.record_id,
                 ts_ms: event.ts_ms,
                 result,
                 detail,
