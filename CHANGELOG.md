@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- Health has a new layout. The overview lists the areas of the PC as rows, with a status symbol only for
+  the areas that have alerts, and the full scan shows a badge that it asks for administrator permission.
+  Each area page puts every alert in its own section, with the checks that found nothing marked by a green
+  check mark and the alerts resolved in the last 30 days.
 - A Day's events screen lists every freeze, stutter, unresponsive program and overload of the day, with a
   filter by kind. Overload periods now open on a page of their own instead of expanding in the list, and
   freezes and overloads have a back link to the list or the History day they were opened from.

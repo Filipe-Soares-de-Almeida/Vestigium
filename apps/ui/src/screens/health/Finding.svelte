@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ConcernMark from "../../components/ConcernMark.svelte";
+  import StatusMark from "../../components/StatusMark.svelte";
   import Icon from "../../components/Icon.svelte";
   import Steps from "../../components/Steps.svelte";
   import { formatDayShort } from "../occurrence/format";
@@ -10,10 +10,9 @@
   import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
   import DiskMap from "../tests/DiskMap.svelte";
   import { diskSurface } from "../tests/words";
-  import { areaOf } from "./areas";
   import { findingView, valueText } from "./words";
 
-  let { finding, level }: { finding: FindingDto; level: DetailLevel } = $props();
+  let { finding, level, first = false }: { finding: FindingDto; level: DetailLevel; first?: boolean } = $props();
 
   const view = $derived(findingView(finding, level));
   /** The tweak that answers each kind of point, where one does. */
@@ -37,8 +36,6 @@
     const number = typeof s === "object" && "Disk" in s ? s.Disk.split(" ")[0] : null;
     return href.tests(number && /^\d+$/.test(number) ? number : undefined);
   });
-  const icon = $derived(areaOf(finding.kind).icon);
-  const tone = $derived(finding.concern === "Critical" ? "freeze" : "press");
   const DAY_MS = 86_400_000;
   const midnight = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
   /** What the point measured when it opened, to compare with now; none while it opened today. */
@@ -73,14 +70,14 @@
   });
 </script>
 
-<section class="card finding" aria-labelledby="finding-{finding.id}">
-  <div class="head">
-    <span class="icochip" style:background="var(--{tone}-t)" style:color="var(--{tone})"><Icon name={icon} /></span>
-    <div>
-      <h2 id="finding-{finding.id}">{view.title}</h2>
-      <p class="meta"><ConcernMark mark={finding.concern} /><span>{view.since}</span></p>
-    </div>
-  </div>
+<section class="finding" class:first aria-labelledby="finding-{finding.id}">
+  <header>
+    <h2 id="finding-{finding.id}">{view.title}</h2>
+    <p class="meta">
+      <StatusMark kind={finding.concern === "Critical" ? "critical" : "attention"} />
+      <span>{view.since}</span>
+    </p>
+  </header>
   <p class="why">{view.why}</p>
   <p class="lab">
     <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
@@ -126,17 +123,18 @@
   .finding {
     display: grid;
     gap: 14px;
-    margin-top: 14px;
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
   }
-  .head {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 14px;
-    align-items: center;
+  .finding.first {
+    margin-top: 24px;
+    padding-top: 0;
+    border-top: 0;
   }
   h2 {
     margin: 0;
-    font: 600 18px/1.3 var(--fd);
+    font: 400 20px/1.3 var(--fd);
   }
   .meta {
     display: flex;
@@ -228,12 +226,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    justify-content: flex-end;
-    margin: 0 -18px -16px;
-    padding: 12px 18px;
-    border-top: 1px solid var(--stroke2);
-    border-radius: 0 0 14px 14px;
-    background: color-mix(in srgb, var(--card2) 55%, transparent);
   }
   @container content (max-width: 720px) {
     .two {

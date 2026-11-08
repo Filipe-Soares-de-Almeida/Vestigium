@@ -1,4 +1,6 @@
 <script lang="ts">
+  import AdminPill from "../../components/AdminPill.svelte";
+  import Block from "../../components/Block.svelte";
   import Icon from "../../components/Icon.svelte";
   import { app } from "../../lib/app.svelte";
   import { health } from "../../lib/health.svelte";
@@ -13,10 +15,8 @@
   const blocked = $derived(!app.running);
 </script>
 
-<section class="card scan" aria-labelledby="scan-title">
-  <span class="icochip"><Icon name="health" /></span>
+<Block title={t("ui.health.scan.title")}>
   <div class="body">
-    <h2 id="scan-title">{t("ui.health.scan.title")}</h2>
     {#if health.phase === "running"}
       <p class="status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.health.scan.running")}</p>
     {:else}
@@ -32,6 +32,7 @@
       {/if}
       <p>{t(level === "Technical" ? "ui.health.scan.lede.tech" : "ui.health.scan.lede")}</p>
       <div class="line">
+        <AdminPill />
         <button
           type="button"
           class="btn"
@@ -54,27 +55,12 @@
       </div>
     {/if}
   </div>
-</section>
+</Block>
 
 <style>
-  .scan {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-    margin-top: 14px;
-  }
-  .icochip {
-    background: var(--card2);
-    color: var(--ink2);
-  }
   .body {
     display: grid;
     gap: 10px;
-  }
-  h2 {
-    margin: 8px 0 0;
-    font: 600 15px/1.3 var(--f);
   }
   p {
     max-width: 75ch;
