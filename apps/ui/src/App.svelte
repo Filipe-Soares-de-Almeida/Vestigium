@@ -232,6 +232,7 @@
   }
   .titlebar {
     grid-row: 1;
+    grid-column: 1;
     display: flex;
     align-items: center;
     gap: 12px;
