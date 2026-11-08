@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- A Day's events screen lists every freeze, stutter, unresponsive program and overload of the day, with a
+  filter by kind. Overload periods now open on a page of their own instead of expanding in the list, and
+  freezes and overloads have a back link to the list or the History day they were opened from.
+  The freeze report uses the same layout of titled sections.
 - Now, the live view, has its own place in the navigation pane, with a Programs screen: the full list of
   running programs, with a filter and sortable columns, that keeps updating every second. Now itself uses
   the new layout, and its top programs link to the full list instead of opening a pop-up.

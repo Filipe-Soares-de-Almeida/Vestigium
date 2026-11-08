@@ -27,7 +27,9 @@
   import { morph } from "./lib/morph.svelte";
   import Health from "./screens/Health.svelte";
   import History from "./screens/History.svelte";
+  import Events from "./screens/Events.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
+  import PeriodPage from "./screens/PeriodPage.svelte";
   import Programs from "./screens/Programs.svelte";
   import Settings from "./screens/Settings.svelte";
   import Tests from "./screens/Tests.svelte";
@@ -136,6 +138,10 @@
                 <div class="screen">
                   {#if router.current.screen === "occurrence"}
                     <Occurrence id={router.current.id} fromDay={router.current.fromDay} />
+                  {:else if router.current.screen === "events"}
+                    <Events />
+                  {:else if router.current.screen === "period"}
+                    <PeriodPage start={router.current.start} fromDay={router.current.fromDay} />
                   {:else if router.current.screen === "programs"}
                     <Programs />
                   {:else if router.current.screen === "history"}

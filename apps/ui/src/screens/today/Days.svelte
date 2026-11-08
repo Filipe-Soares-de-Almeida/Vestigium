@@ -1,6 +1,7 @@
 <script lang="ts">
   import Block from "../../components/Block.svelte";
   import { lang, t, tn } from "../../lib/i18n.svelte";
+  import { href } from "../../lib/router.svelte";
   import type { DayCount } from "./day";
 
   let { days }: { days: DayCount[] } = $props();
@@ -36,6 +37,7 @@
     {/each}
   </div>
   <p class="caption">{t("ui.today.days.caption")}</p>
+  <p class="more"><a href={href.history()}>{t("ui.today.days.history")}</a></p>
   <p class="sr">
     {total === 0 ? t("ui.today.days.summary.none") : tn("ui.today.days.summary", total)}
   </p>
@@ -82,6 +84,13 @@
   .day[aria-current="date"] i {
     background: var(--freeze);
     opacity: 1;
+  }
+  .more {
+    margin: 12px 0 0;
+    font-size: 14px;
+  }
+  .more a {
+    font-weight: 600;
   }
   .caption {
     margin: 10px 0 0;

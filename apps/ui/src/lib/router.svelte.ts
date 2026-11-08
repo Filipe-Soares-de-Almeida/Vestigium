@@ -1,5 +1,5 @@
 // Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
-// #/activity/programs, #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
+// #/activity/programs, #/activity/all, #/period/<start ms>[?day=YYYY-MM-DD], #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
 // #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
@@ -12,6 +12,9 @@ export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
   | { screen: "programs" }
+  | { screen: "events" }
+  /** `start` is the start of the episode in Unix milliseconds. */
+  | { screen: "period"; start: number; fromDay: string | null }
   | { screen: "history"; month: string | null; scope: HistoryScope; day: string | null }
   /** `fromDay` is set when the report was opened from a day of the History. */
   | { screen: "occurrence"; id: number; fromDay: string | null }
@@ -29,6 +32,8 @@ export type Screen = Route["screen"];
 export const href = {
   home: () => "#/",
   programs: () => "#/activity/programs",
+  events: () => "#/activity/all",
+  period: (start: number, fromDay?: string | null) => (fromDay ? `#/period/${start}?day=${fromDay}` : `#/period/${start}`),
   activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
   history: (opts: { month?: string | null; scope?: HistoryScope; day?: string | null } = {}) => {
     const query = new URLSearchParams();
@@ -61,6 +66,8 @@ export function parse(hash: string): Route {
     const given = params.get("p");
     return { screen: "history", month, scope: given === "week" || given === "2w" ? given : "month", day: dayParam("d") };
   }
+  if (screen === "events" || (screen === "activity" && arg === "all")) return { screen: "events" };
+  if (screen === "period" && /^\d+$/.test(arg ?? "")) return { screen: "period", start: Number(arg), fromDay: dayParam("day") };
   if (screen === "programs" || (screen === "activity" && arg === "programs")) return { screen: "programs" };
   if (screen === "now") return { screen: "activity", tab: "now" };
   if (screen === "today") return { screen: "activity", tab: "today" };
@@ -103,6 +110,7 @@ class Router {
   get key(): string {
     const route = this.current;
     if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
+    if (route.screen === "period") return `period/${route.start}`;
     if (route.screen === "health") return `health/${route.area ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }

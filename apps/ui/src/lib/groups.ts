@@ -64,7 +64,8 @@ const SETTINGS_ICONS: Record<(typeof SETTINGS_PAGES)[number], IconName> = {
 export const diskName = (d: DiskDto) => t(`ui.tests.disk.name.${d.media}`, { size: d.bytes ? formatBytes(d.bytes) : "" }).trim();
 
 const onActivity = (tab: "today" | "now") => (r: Route) => r.screen === "activity" && r.tab === tab;
-const onHistory = (r: Route) => r.screen === "history" || (r.screen === "occurrence" && r.fromDay !== null);
+const fromHistory = (r: Route) => (r.screen === "occurrence" || r.screen === "period") && r.fromDay !== null;
+const onHistory = (r: Route) => r.screen === "history" || fromHistory(r);
 const onHealth = (area: string | null) => (r: Route) => r.screen === "health" && (r.area ?? null) === area;
 const onTests = (device: string | null) => (r: Route) => r.screen === "tests" && (r.device ?? null) === device;
 const mark = (concern: "Critical" | "Attention" | "Ok" | "Unknown"): StatusKind | undefined =>
@@ -98,10 +99,10 @@ export function buildGroups(): Group[] {
     g("freezes", "wave", {
       items: [
         {
-          href: href.activity(),
+          href: href.events(),
           label: t("ui.item.events"),
           icon: "today",
-          match: (r) => r.screen === "occurrence" && r.fromDay === null,
+          match: (r) => r.screen === "events" || ((r.screen === "occurrence" || r.screen === "period") && r.fromDay === null),
         },
       ],
     }),
@@ -207,6 +208,8 @@ const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   activity: "activity",
   history: "activity",
   programs: "now",
+  events: "freezes",
+  period: "freezes",
   occurrence: "freezes",
   captures: "captures",
   capture: "captures",
@@ -224,7 +227,7 @@ export function groupOf(groups: Group[], route: Route, from: string | null): Gro
   const fallback =
     route.screen === "activity" && route.tab === "now"
       ? "now"
-      : route.screen === "occurrence" && route.fromDay !== null
+      : fromHistory(route)
         ? "activity"
         : DEFAULT_GROUP[route.screen];
   return groups.find((g) => g.key === fallback) ?? null;

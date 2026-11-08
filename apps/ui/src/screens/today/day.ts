@@ -145,10 +145,8 @@ export function diskLabel(name: string): string {
   return name.replace(/^\d+\s+/, "") || name;
 }
 
-/** Assembles the day from the timeline of today and the marks of the last 14 days. */
-export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto): Day {
-  const start = dayStart(now);
-  const runs = runsOf(timeline, start, now);
+/** The day's occurrences and pressure episodes, and the rows they make, oldest first. */
+export function itemsOf(start: number, now: number, marks: MarksDto): { occurrences: OccurrenceSummary[]; episodes: Episode[]; items: Item[] } {
   const occurrences = marks.occurrences
     .filter((o) => o.start_ms >= start && o.start_ms < now)
     .sort((a, b) => a.start_ms - b.start_ms);
@@ -161,6 +159,14 @@ export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto): D
     ...occurrences.map((occurrence) => ({ kind: "occurrence" as const, start: occurrence.start_ms, occurrence })),
     ...episodes.map((episode) => ({ kind: "episode" as const, start: episode.start_ms, episode, byTest: byTest.has(episode) })),
   ].sort((a, b) => a.start - b.start);
+  return { occurrences, episodes, items };
+}
+
+/** Assembles the day from the timeline of today and the marks of the last 14 days. */
+export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto): Day {
+  const start = dayStart(now);
+  const runs = runsOf(timeline, start, now);
+  const { occurrences, episodes, items } = itemsOf(start, now, marks);
   const days: DayCount[] = Array.from({ length: DAYS_SHOWN }, (_, i) => {
     const from = dayStart(now, i + 1 - DAYS_SHOWN);
     const to = dayStart(now, i + 2 - DAYS_SHOWN);

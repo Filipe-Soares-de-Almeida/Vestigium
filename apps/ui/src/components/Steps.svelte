@@ -32,31 +32,25 @@
 <style>
   .steps {
     display: grid;
-    gap: 10px;
+    gap: 12px;
+    max-width: 72ch;
     margin: 0;
-    padding: 0;
-    list-style: none;
-    counter-reset: step;
+    padding: 0 0 0 22px;
+    font-size: 14px;
+    line-height: 1.5;
+    list-style: decimal;
   }
   .steps li {
-    display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 10px;
-    align-items: baseline;
-    line-height: 1.45;
-    counter-increment: step;
+    padding-left: 6px;
+  }
+  .steps li::marker {
+    color: var(--ink2);
   }
   .go {
-    margin-left: 4px;
+    display: block;
+    width: fit-content;
+    margin-top: 4px;
     color: var(--accent);
     font-weight: 600;
-    white-space: nowrap;
-  }
-  .steps li::before {
-    content: counter(step) ".";
-    color: var(--ink3);
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
   }
 </style>

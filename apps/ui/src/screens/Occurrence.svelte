@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import BackLink from "../components/BackLink.svelte";
+  import Block from "../components/Block.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
-  import LevelHead from "../components/LevelHead.svelte";
   import Loading from "../components/Loading.svelte";
   import Steps from "../components/Steps.svelte";
   import { occurrence } from "../lib/api";
@@ -72,12 +73,9 @@
   </ul>
 {/snippet}
 
-<LevelHead
-  parent={fromDay
-    ? { href: href.history({ day: fromDay, month: fromDay.slice(0, 7) }), name: t("ui.item.history") }
-    : { href: href.activity(), name: t("ui.shell.nav.activity") }}
-  current={view?.crumb ?? t("ui.occurrence.crumb")}
-  label={t("ui.occurrence.path")}
+<BackLink
+  href={fromDay ? href.history({ day: fromDay, month: fromDay.slice(0, 7) }) : href.events()}
+  label={t("ui.common.back_to", { place: fromDay ? t("ui.item.history") : t("ui.item.events") })}
 />
 
 {#if failure !== null}
@@ -109,8 +107,7 @@
   </div>
 
   <div class="split">
-    <section class="card" aria-labelledby="occ-cause">
-      <h2 id="occ-cause" class="sub">{t("ui.occurrence.cause.title")}</h2>
+    <Block title={t("ui.occurrence.cause.title")}>
       <div class="cause">
         <span class="icochip" style:background="var(--{view.tone}-t)" style:color="var(--{view.tone})">
           <Icon name={view.main.icon} />
@@ -143,23 +140,21 @@
           {@render evidence(other.evidence, false)}
         </details>
       {/each}
-    </section>
+    </Block>
 
     <div class="stack">
-      <section class="card" aria-labelledby="occ-todo">
-        <h2 id="occ-todo" class="sub">{t("ui.occurrence.todo.title")}</h2>
+      <Block title={t("ui.occurrence.todo.title")}>
         {#if view.steps.length}
           <Steps steps={view.steps} />
         {:else}
           <p class="muted none">{t("ui.occurrence.todo.none")}</p>
         {/if}
-      </section>
+      </Block>
 
       {#if fallDump}
         {@const fault = fallDump.fault && "BugCheck" in fallDump.fault ? fallDump.fault.BugCheck : null}
         {@const culprit = fallDump.culprit ? culpritView(fallDump, fallDump.culprit, level) : null}
-        <section class="card" aria-labelledby="occ-dump">
-          <h2 id="occ-dump" class="sub">{t("ui.occurrence.dump.title")}</h2>
+        <Block title={t("ui.occurrence.dump.title")}>
           <div class="cause dump">
             <span class="icochip" style:background="var(--freeze-t)" style:color="var(--freeze)">
               <Icon name={culprit?.icon ?? "power"} />
@@ -177,11 +172,10 @@
           <a class="more" href={href.dumps(fallDump.id)}>
             {t(fallDump.analyzed_ms === null ? "ui.occurrence.dump.read" : "ui.occurrence.dump.open")}
           </a>
-        </section>
+        </Block>
       {/if}
 
-      <section class="card" aria-labelledby="occ-seq">
-        <h2 id="occ-seq" class="sub">{t("ui.occurrence.seq.title")}</h2>
+      <Block title={t("ui.occurrence.seq.title")}>
         {#if view.facts.length}
           <ol class="seq">
             {#each view.facts as fact, i (i)}
@@ -194,12 +188,11 @@
         {:else}
           <p class="muted none">{t("ui.occurrence.seq.empty")}</p>
         {/if}
-      </section>
+      </Block>
     </div>
   </div>
 
-  <section class="card chartcard" aria-labelledby="occ-chart">
-    <h2 id="occ-chart" class="sub">{t(`ui.occurrence.chart.title${fall}`)}</h2>
+  <Block title={t(`ui.occurrence.chart.title${fall}`)}>
     {#if dto.truncated}
       <p class="muted caption">{t(`ui.occurrence.chart.truncated${fall}`)}</p>
     {/if}
@@ -208,7 +201,7 @@
     {:else}
       <p class="muted none">{t("ui.occurrence.chart.empty")}</p>
     {/if}
-  </section>
+  </Block>
 
   {#if level === "Technical"}
     <TechTables {dto} />
@@ -268,10 +261,6 @@
     color: var(--ink2);
     font: 400 12.5px/1.35 var(--f);
     letter-spacing: 0;
-  }
-  .sub {
-    margin: 0 0 8px;
-    font: 600 15px/1.3 var(--f);
   }
   .cause {
     display: grid;
@@ -406,9 +395,6 @@
   }
   .seq li.mark small {
     font-weight: 400;
-  }
-  .chartcard {
-    margin-top: 14px;
   }
   .caption {
     margin: -2px 0 10px;

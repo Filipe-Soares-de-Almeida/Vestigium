@@ -1,17 +1,17 @@
 <script lang="ts">
   import { untrack } from "svelte";
 
+  import Block from "../../components/Block.svelte";
   import ErrorView from "../../components/ErrorView.svelte";
   import Loading from "../../components/Loading.svelte";
+  import RowList from "../../components/RowList.svelte";
   import Steps from "../../components/Steps.svelte";
   import { episodeDetail } from "../../lib/api";
-  import { formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
-  import { href } from "../../lib/router.svelte";
   import type { DetailLevel, Episode, EpisodeDetailDto } from "../../lib/types";
   import WindowChart from "../occurrence/WindowChart.svelte";
   import { periodPrograms, periodStats, periodSteps, periodView } from "./period";
-  import { occurrenceTitle } from "./text";
+  import OccurrenceRow from "./OccurrenceRow.svelte";
 
   let {
     episode,
@@ -19,7 +19,15 @@
     level,
     id,
     label,
-  }: { episode: Episode; byTest: boolean; level: DetailLevel; id: string; label: string } = $props();
+    fromDay = null,
+  }: {
+    episode: Episode;
+    byTest: boolean;
+    level: DetailLevel;
+    id: string;
+    label: string;
+    fromDay?: string | null;
+  } = $props();
 
   let dto = $state.raw<EpisodeDetailDto | null>(null);
   let error = $state<unknown>(null);
@@ -52,83 +60,80 @@
   {:else if !dto || !view || !programs}
     <Loading />
   {:else}
-    <dl class="stats">
-      {#each stats as stat (stat.label)}
-        <div>
-          <dt>{stat.label}</dt>
-          <dd>{stat.value}</dd>
-        </div>
-      {/each}
-    </dl>
-    {#if view.lanes.length}
-      <WindowChart
-        {view}
-        clock
-        label={t("ui.today.period.chart.label")}
-        hint={t("ui.today.period.chart.hint")}
-        keys={t("ui.today.period.chart.keys")}
-      />
-    {:else}
-      <p class="muted">{t("ui.today.period.chart.none")}</p>
-    {/if}
-
-    <h4>{t("ui.today.period.programs")}</h4>
-    {#if programs.rows.length}
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">{t("ui.today.period.col.program")}</th>
-            <th scope="col" class="n">{programs.columns[0]}</th>
-            <th scope="col" class="n">{programs.columns[1]}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each programs.rows as row (row.pid)}
-            <tr>
-              <th scope="row" title={row.name}>{row.name}</th>
-              <td class="n">{row.values[0]}</td>
-              <td class="n">{row.values[1]}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {:else}
-      <p class="muted">{t("ui.today.period.programs.none")}</p>
-    {/if}
-
-    {#if dto.occurrences.length}
-      <h4>{t("ui.today.period.freezes")}</h4>
-      <ul class="occ">
-        {#each dto.occurrences as o (o.id)}
-          <li>
-            <span class="dot" aria-hidden="true"></span>
-            <a href={href.occurrence(o.id)}>{formatTime(o.start_ms)} · {occurrenceTitle(o, level)}</a>
-          </li>
+    <Block title={t("ui.period.numbers")} first>
+      <dl class="stats">
+        {#each stats as stat (stat.label)}
+          <div>
+            <dt>{stat.label}</dt>
+            <dd>{stat.value}</dd>
+          </div>
         {/each}
-      </ul>
-    {/if}
-
-    <h4>{t("ui.today.period.steps")}</h4>
-    <Steps {steps} />
+      </dl>
+    </Block>
+    <Block title={t("ui.period.chart")}>
+      {#if view.lanes.length}
+        <WindowChart
+          {view}
+          clock
+          label={t("ui.today.period.chart.label")}
+          hint={t("ui.today.period.chart.hint")}
+          keys={t("ui.today.period.chart.keys")}
+        />
+      {:else}
+        <p class="muted">{t("ui.today.period.chart.none")}</p>
+      {/if}
+    </Block>
+    <div class="cols">
+      <Block title={t("ui.today.period.programs")}>
+        {#if programs.rows.length}
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("ui.today.period.col.program")}</th>
+                <th scope="col" class="n">{programs.columns[0]}</th>
+                <th scope="col" class="n">{programs.columns[1]}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each programs.rows as row (row.pid)}
+                <tr>
+                  <th scope="row" title={row.name}>{row.name}</th>
+                  <td class="n">{row.values[0]}</td>
+                  <td class="n">{row.values[1]}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="muted">{t("ui.today.period.programs.none")}</p>
+        {/if}
+      </Block>
+      <div>
+        <Block title={t("ui.today.period.freezes")}>
+          {#if dto.occurrences.length}
+            <RowList>
+              {#each dto.occurrences as o (o.id)}
+                <li><OccurrenceRow {o} {level} {fromDay} /></li>
+              {/each}
+            </RowList>
+          {:else}
+            <p class="muted">{t("ui.period.freezes.none")}</p>
+          {/if}
+        </Block>
+        <Block title={t("ui.today.period.steps")}>
+          <Steps {steps} />
+        </Block>
+      </div>
+    </div>
   {/if}
 </div>
 
 <style>
-  .body {
-    padding: 14px 14px 16px;
-    border-top: 1px solid var(--stroke2);
-    animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
-  }
-  @keyframes rise {
-    from {
-      transform: translateY(-4px);
-    }
-  }
   .stats {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 28px;
-    margin: 0 0 14px;
+    gap: 12px 40px;
+    margin: 0;
   }
   .stats div {
     display: grid;
@@ -140,14 +145,19 @@
   }
   dd {
     margin: 0;
-    font-weight: 600;
     font-size: 15px;
     font-variant-numeric: tabular-nums;
   }
-  h4 {
-    margin: 16px 0 6px;
-    color: var(--ink2);
-    font: 600 13px/1.3 var(--f);
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 56px;
+  }
+  @container content (min-width: 1000px) {
+    .cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+    }
   }
   table {
     width: 100%;
@@ -157,7 +167,7 @@
   }
   th,
   td {
-    padding: 6px 8px;
+    padding: 8px;
     border-bottom: 1px solid var(--stroke2);
     text-align: left;
   }
@@ -177,44 +187,7 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .occ {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .occ li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .dot {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--freeze);
-  }
-  .occ a {
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .occ a:hover {
-    text-decoration: underline;
-  }
   .muted {
     margin: 0;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .body {
-      animation: none;
-    }
-  }
-  @media (forced-colors: active) {
-    .dot {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
   }
 </style>
