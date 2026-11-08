@@ -6,11 +6,11 @@
 
   let { days }: { days: DayCount[] } = $props();
 
-  // The 90 px bar area holds the count (16 px), a 3 px gap and a bar of 4 to 70 px.
+  // Bars run from 4 px to 86 px, the tallest day at the top.
   const BAR_MIN = 4;
-  const BAR_RANGE = 66;
+  const BAR_RANGE = 86;
 
-  const top = $derived(Math.max(5, ...days.map((d) => d.count)));
+  const top = $derived(Math.max(1, ...days.map((d) => d.count)));
   const total = $derived(days.reduce((sum, d) => sum + d.count, 0));
   const letter = $derived(new Intl.DateTimeFormat(lang(), { weekday: "narrow" }));
   const spelled = $derived(
@@ -25,54 +25,37 @@
 </script>
 
 <Block title={t("ui.today.days.title")}>
-  <div class="week">
+  <div class="days">
     {#each days as d (d.start)}
-      <span class="day" role="img" aria-label={label(d)} aria-current={d.today ? "date" : undefined}>
-        <span class="bars" aria-hidden="true">
-          <span class="n">{d.count || ""}</span>
-          <i style="height: {BAR_MIN + Math.round((Math.min(d.count, top) / top) * BAR_RANGE)}px"></i>
-        </span>
-        <span aria-hidden="true">{letter.format(d.start)}</span>
+      <span class="day" class:today={d.today} role="img" aria-label={label(d)} aria-current={d.today ? "date" : undefined}>
+        <span class="n" aria-hidden="true">{d.count || ""}</span>
+        <i aria-hidden="true" style="height: {Math.max(BAR_MIN, (d.count / top) * BAR_RANGE)}px"></i>
+        <span class="l" aria-hidden="true">{letter.format(d.start)}</span>
       </span>
     {/each}
   </div>
-  <p class="caption">{t("ui.today.days.caption")}</p>
+  <p class="note">{total === 0 ? t("ui.today.days.summary.none") : tn("ui.today.days.summary", total)}</p>
   <p class="more"><a href={href.history()}>{t("ui.today.days.history")}</a></p>
-  <p class="sr">
-    {total === 0 ? t("ui.today.days.summary.none") : tn("ui.today.days.summary", total)}
-  </p>
 </Block>
 
 <style>
-  .week {
+  .days {
     display: grid;
     grid-template-columns: repeat(14, minmax(0, 1fr));
     gap: 5px;
+    align-items: end;
+    max-width: 760px;
   }
   .day {
     display: grid;
-    grid-template-rows: 90px 14px;
-    gap: 4px;
     justify-items: center;
-    color: var(--ink3);
-    font: 400 11px/14px var(--f);
-  }
-  .day[aria-current="date"] {
-    color: var(--ink);
-    font-weight: 600;
-  }
-  .bars {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 3px;
-    width: 100%;
-    height: 90px;
+    gap: 4px;
   }
   .n {
-    color: var(--ink);
-    font: 400 12px/16px var(--f);
+    min-height: 16px;
+    color: var(--ink2);
+    font-size: 12px;
+    line-height: 16px;
   }
   i {
     display: block;
@@ -81,21 +64,18 @@
     background: var(--calm);
     opacity: 0.75;
   }
-  .day[aria-current="date"] i {
+  .today i {
     background: var(--freeze);
     opacity: 1;
   }
-  .more {
-    margin: 12px 0 0;
-    font-size: 14px;
+  .l {
+    color: var(--ink3);
+    font-size: 11px;
+    line-height: 18px;
   }
-  .more a {
+  .today .l {
+    color: var(--ink);
     font-weight: 600;
-  }
-  .caption {
-    margin: 10px 0 0;
-    color: var(--ink2);
-    font-size: 12.5px;
   }
   @media (forced-colors: active) {
     i {
@@ -103,7 +83,7 @@
       background: CanvasText;
       opacity: 1;
     }
-    .day[aria-current="date"] i {
+    .today i {
       background: Highlight;
     }
   }

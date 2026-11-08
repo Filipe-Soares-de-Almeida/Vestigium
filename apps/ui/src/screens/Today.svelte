@@ -4,12 +4,14 @@
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import { marks, timeline } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { formatTime } from "../lib/format";
   import { lang, t } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
-  import { buildDay, type Day, dayStart, rangeStart } from "./today/day";
+  import { buildDay, type Day, dayStart, rangeStart, worstOf } from "./today/day";
   import Days from "./today/Days.svelte";
   import HealthCard from "./today/HealthCard.svelte";
   import Moments from "./today/Moments.svelte";
@@ -26,10 +28,26 @@
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const firstUse = $derived(app.history === "empty" || empty);
-  const date = $derived(
-    new Intl.DateTimeFormat(lang(), { weekday: "long", day: "numeric", month: "long" }).format(day?.start ?? Date.now()),
+  const date = $derived.by(() => {
+    const text = new Intl.DateTimeFormat(lang(), { weekday: "long", day: "numeric", month: "long" }).format(
+      day?.start ?? Date.now(),
+    );
+    return text.charAt(0).toLocaleUpperCase(lang()) + text.slice(1);
+  });
+  const sub = $derived(
+    day ? `${date} · ${t("ui.today.states.range", { from: formatTime(day.start), to: formatTime(day.now) })}` : date,
   );
   const startedAt = $derived(app.link?.link === "running" ? app.link.started_at_ms : null);
+
+  relatedLinks(() => {
+    const worst = day ? worstOf(day.occurrences) : null;
+    return [
+      ...(worst ? [{ label: t("ui.related.worst", { time: formatTime(worst.start_ms) }), href: href.occurrence(worst.id) }] : []),
+      { label: t("ui.related.live"), href: href.activity("now") },
+      { label: t("ui.related.disk_health"), href: href.health("disks") },
+      { label: t("ui.related.tweaks"), href: href.tweaks() },
+    ];
+  });
 
   /** Reads today and the last 14 days; a failed refresh keeps what is on screen. */
   async function load(): Promise<void> {
@@ -70,10 +88,7 @@
   });
 </script>
 
-<header class="head">
-  <h1>{t("ui.item.today")}</h1>
-  <p class="date">{date}</p>
-</header>
+<PageHead title={t("ui.item.today")} {sub} />
 
 {#if firstUse}
   <p class="lede">
@@ -95,7 +110,7 @@
     </p>
   {/if}
   <States {day} {level} />
-  <div class="cols">
+  <div class="cols2">
     <Moments items={day.items} {level} />
     <HealthCard />
   </div>
@@ -107,48 +122,23 @@
 {/if}
 
 <style>
-  .head {
-    margin-bottom: 4px;
-  }
-  .date {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 56px;
-  }
-  @container content (min-width: 1000px) {
-    .cols {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-  }
   .actions {
     display: flex;
     gap: 10px;
+    margin-top: 14px;
   }
   .suggest {
     display: flex;
     gap: 10px;
     align-items: start;
-    margin: -8px 0 14px;
+    max-width: 72ch;
+    margin: 12px 0 0;
     color: var(--ink2);
-    font-size: 13.5px;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.5;
   }
   .suggest :global(svg) {
     flex: none;
     margin-top: 1px;
-  }
-  .suggest a {
-    font-weight: 600;
-    text-decoration: none;
-    border-radius: 6px;
-  }
-  .suggest a:hover {
-    text-decoration: underline;
   }
 </style>

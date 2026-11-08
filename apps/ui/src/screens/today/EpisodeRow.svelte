@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "../../components/Icon.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
-  import { formatDuration, formatTime } from "../../lib/format";
+  import { formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { DetailLevel, Episode } from "../../lib/types";
@@ -27,7 +27,7 @@
   <span class="ico"><Icon name={episodeIcon(e)} /></span>
   <span class="what">
     <b>{episodeTitle(e, level)}</b>
-    <small>{episodeMeta(e)} · {formatDuration(e.end_ms - e.start_ms)}</small>
+    <small>{episodeMeta(e)}</small>
     {#if byTest}<small>{t("ui.today.episode.by_test")}</small>{/if}
   </span>
   <span class="end">
@@ -51,6 +51,7 @@
   }
   .row:hover {
     background: var(--row-hover);
+    text-decoration: none;
   }
   .row:active {
     background: var(--row-press);

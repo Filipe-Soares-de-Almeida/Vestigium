@@ -1,12 +1,11 @@
 <script lang="ts">
   import Icon from "../../components/Icon.svelte";
-  import StatusMark, { type StatusKind } from "../../components/StatusMark.svelte";
-  import { formatDuration, formatTime } from "../../lib/format";
+  import StatusMark from "../../components/StatusMark.svelte";
+  import { formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { DetailLevel, OccurrenceSummary } from "../../lib/types";
-  import { toneOf } from "./day";
-  import { causeIcon, causeName, occurrenceTitle } from "./text";
+  import { causeIcon, causeName, occurrenceMark, occurrenceTitle } from "./text";
 
   let {
     o,
@@ -19,11 +18,7 @@
     fromDay?: string | null;
   } = $props();
 
-  const STATUS: Record<ReturnType<typeof toneOf>, StatusKind> = {
-    freeze: "critical",
-    press: "attention",
-    busy: "info",
-  };
+  const mark = $derived(occurrenceMark(o));
 </script>
 
 <a class="row" href={href.occurrence(o.id, fromDay)} data-reveal>
@@ -31,14 +26,10 @@
   <span class="ico"><Icon name={causeIcon(o.cause)} /></span>
   <span class="what">
     <b>{occurrenceTitle(o, level)}</b>
-    <small>
-      {t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}{o.kind === "PostMortem"
-        ? ""
-        : ` · ${formatDuration(o.end_ms - o.start_ms)}`}
-    </small>
+    <small>{t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}</small>
   </span>
   <span class="end">
-    <StatusMark kind={STATUS[toneOf(o)]} reveal />
+    <StatusMark kind={mark.kind} word={mark.word} reveal />
     <span class="chev"><Icon name="chevron" /></span>
   </span>
 </a>
@@ -58,6 +49,7 @@
   }
   .row:hover {
     background: var(--row-hover);
+    text-decoration: none;
   }
   .row:active {
     background: var(--row-press);

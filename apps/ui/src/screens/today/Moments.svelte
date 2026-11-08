@@ -34,20 +34,10 @@
 <style>
   ul {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     margin: 0;
     padding: 0;
     list-style: none;
-  }
-  .empty {
-    margin: 0;
-    color: var(--ink2);
-  }
-  .more {
-    margin: 12px 0 0;
-    font-size: 14px;
-  }
-  .more a {
-    font-weight: 600;
   }
 </style>

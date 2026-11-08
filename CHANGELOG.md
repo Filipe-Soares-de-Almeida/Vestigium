@@ -238,6 +238,12 @@ How to use this file:
 
 ### Changed
 
+- Today follows the new layout more closely: the date line also gives the hours covered, States of the
+  PC opens with a divider and its zoom buttons, has taller rows and a wider legend, and its marks are
+  thin lines. The day's list is titled Day events, each row shows how grave it was by its symbol
+  (critical, overload or attention), and its second line no longer repeats the length. The Health
+  block lists the open alerts themselves, critical first, with a link to Health, and the 14-day chart
+  gives the total under it.
 - The home screen's Activity card shows today's worst freeze, with its time and length, and opens its
   report; with none today it says so. The header band, its cards and the search sit closer together on
   short windows, and the cards narrow on windows under 1180 px.

@@ -3,40 +3,44 @@
   import RowCard from "../../components/RowCard.svelte";
   import RowList from "../../components/RowList.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
+  import { app } from "../../lib/app.svelte";
   import { health } from "../../lib/health.svelte";
   import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
-  import { AREAS, areaState } from "../health/areas";
+  import { areaOf } from "../health/areas";
+  import { findingTitle } from "../health/words";
 
-  const touched = $derived(
-    health.dto ? AREAS.map((a) => areaState(a, health.dto!)).filter((s) => s.open.length) : [],
+  const level = $derived(app.settings?.settings.detail_level ?? "Simple");
+  /** Open findings, critical first, each with the area it opens. */
+  const open = $derived(
+    (health.dto?.open ?? [])
+      .slice()
+      .sort((a, b) => Number(b.concern === "Critical") - Number(a.concern === "Critical") || a.opened_ms - b.opened_ms)
+      .map((f) => ({ f, area: areaOf(f.kind) })),
   );
+  const line = $derived.by(() => {
+    const { critical, attention } = health;
+    if (!critical && !attention) return t("ui.home.health.none");
+    if (critical && attention) {
+      return t("ui.health.card.mixed", {
+        critical: tn("ui.health.card.n_critical", critical),
+        attention: tn("ui.health.card.n_attention", attention),
+      });
+    }
+    return critical ? tn("ui.health.card.critical", critical) : tn("ui.health.card.attention", attention);
+  });
 </script>
 
 <Block title={t("ui.health.title")}>
-  <p class="line">
-    {#if !touched.length}
-      {t("ui.home.health.none")}
-    {:else if health.critical}
-      {tn("ui.health.card.critical", health.critical)}
-    {:else}
-      {tn("ui.health.card.attention", health.attention)}
-    {/if}
-  </p>
-  {#if touched.length}
+  <p class="p">{line}</p>
+  {#if open.length}
     <RowList>
-      {#each touched as s (s.area.id)}
-        <RowCard href={href.health(s.area.id)} icon={s.area.icon} title={t(`ui.health.area.${s.area.id}`)}>
-          {#snippet right()}<StatusMark kind={s.mark === "Critical" ? "critical" : "attention"} reveal />{/snippet}
+      {#each open as { f, area } (`${f.kind}:${JSON.stringify(f.subject)}`)}
+        <RowCard href={href.health(area.id)} title={findingTitle(f, level)} sub={t(`ui.health.area.${area.id}`)}>
+          {#snippet right()}<StatusMark kind={f.concern === "Critical" ? "critical" : "attention"} reveal />{/snippet}
         </RowCard>
       {/each}
     </RowList>
   {/if}
+  <p class="more"><a href={href.health()}>{t("ui.today.health.open")}</a></p>
 </Block>
-
-<style>
-  .line {
-    margin: 0 0 12px;
-    font-size: 14px;
-  }
-</style>

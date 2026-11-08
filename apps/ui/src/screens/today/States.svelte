@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Block from "../../components/Block.svelte";
+  import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatDuration, formatPercent, formatTime } from "../../lib/format";
   import { lang, t, tn } from "../../lib/i18n.svelte";
   import { go, href } from "../../lib/router.svelte";
@@ -9,20 +11,22 @@
 
   let { day, level }: { day: Day; level: DetailLevel } = $props();
 
-  // Rows are 28 px with a 22 px band above them for the marks and 26 px below for the axis.
-  const ROW = 28;
-  const TOP = 22;
-  const HEIGHT = TOP + STATES.length * ROW + 26;
+  // Rows are 30 px with a 24 px band above them for the marks and 24 px below for the axis.
+  const ROW = 30;
+  const TOP = 24;
+  const BAR = 16;
+  const HEIGHT = TOP + STATES.length * ROW + 24;
   const MIN_SPAN_MS = 6 * HOUR_MS;
   const MINUTE_MS = 60_000;
   const MARK_NEAR_MS = 3 * MINUTE_MS;
   const MIN_VIEW_MS = 20 * MINUTE_MS;
-  /** Tick spacings for a zoomed view; the first that leaves 52 px between labels wins. */
-  const STEPS = [5, 10, 15, 30, 60, 120, 180, 360].map((minutes) => minutes * MINUTE_MS);
+  /** Tick spacings; the first that leaves 84 px between labels wins, else the widest. */
+  const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180].map((minutes) => minutes * MINUTE_MS);
 
   type Detail = { mark: OccurrenceSummary } | { run: Run; at: number };
 
   let width = $state(0);
+  let outer = $state(0);
   let filter = $state<PcState | null>(null);
   let cursor = $state<number | null>(null);
   let near = $state.raw<OccurrenceSummary | null>(null);
@@ -49,12 +53,10 @@
     near ? { mark: near } : hovered && cursor !== null ? { run: hovered, at: cursor } : null,
   );
 
-  /** Hours every 3 h, or every 6 h and more when the labels would touch. */
+  /** Labels at least 84 px apart, on round minutes or hours. */
   const ticks = $derived.by(() => {
-    const every = view
-      ? (STEPS.find((step) => (step * w) / vSpan >= 52) ?? 6 * HOUR_MS)
-      : 3 * HOUR_MS * Math.max(1, Math.ceil(52 / ((3 * HOUR_MS * w) / span)));
-    const hour = new Intl.DateTimeFormat(lang(), { hour: "numeric" });
+    const every = STEPS.find((step) => vSpan / step <= w / 84) ?? STEPS[STEPS.length - 1];
+    const hour = new Intl.DateTimeFormat(lang(), { hour: "2-digit", hourCycle: "h23" });
     const out: { x: number; label: string; anchor: string }[] = [];
     const first = day.start + Math.ceil((vFrom - day.start) / every) * every;
     for (let at = first; at <= vFrom + vSpan; at += every) {
@@ -62,7 +64,7 @@
       out.push({
         x: px,
         label: every >= HOUR_MS ? t("ui.today.states.hour", { hour: hour.format(at) }) : formatTime(at),
-        anchor: px < 1 ? "start" : px > w - 20 ? "end" : "middle",
+        anchor: px < 20 ? "start" : px > w - 20 ? "end" : "middle",
       });
     }
     return out;
@@ -142,7 +144,7 @@
   function hitTest(px: number, py: number): void {
     const at = vFrom + (px / w) * vSpan;
     const marks = day.occurrences.filter(
-      (o) => Math.abs(x(o.start_ms) - px) < 7 && py >= TOP - 18 && py <= TOP + 3 * ROW,
+      (o) => Math.abs(x(o.start_ms) - px) < 10 && py < TOP + 2,
     );
     near = closest(marks, (o) => Math.abs(x(o.start_ms) - px));
     cursor = near ? near.start_ms : Math.min(at, day.now - 1);
@@ -233,22 +235,20 @@
   });
 </script>
 
-<section class="states" aria-labelledby="states-title" bind:this={card}>
-  <div class="head">
-    <h2 id="states-title">{t("ui.today.states.title")}</h2>
-    <span class="date">
-      {t("ui.today.states.range", {
-        from: formatTime(view ? view.from : day.start),
-        to: formatTime(view ? Math.min(view.to, day.now) : day.now),
-      })}
-      {#if view}
-        <button type="button" class="clear" data-focus="whole-day" onclick={() => zoom.reset()}>
-          {t("ui.today.states.zoom.reset")}
-        </button>
-      {/if}
-    </span>
-  </div>
-  <div class="wrap">
+{#snippet zoomActions()}
+  <ZoomBar
+    {zoom}
+    {plot}
+    range={t("ui.today.states.range", {
+      from: formatTime(view ? view.from : day.start),
+      to: formatTime(view ? Math.min(view.to, day.now) : day.now),
+    })}
+  />
+{/snippet}
+
+<Block title={t("ui.today.states.title")} actions={zoomActions}>
+<section class="states" aria-label={t("ui.today.states.title")} bind:this={card} bind:clientWidth={outer}>
+  <div class="wrap" style="grid-template-columns: {outer < 820 ? 140 : 180}px minmax(0, 1fr)">
     <div class="labels">
       {#each STATES as state (state)}
         <button
@@ -293,7 +293,7 @@
         {#each day.runs as run, j (run.from)}
           {@const x1 = x(run.from)}
           {@const x2 = x(run.to)}
-          {@const y = TOP + rowOf(run.state) * ROW + 5}
+          {@const y = TOP + rowOf(run.state) * ROW + (ROW - BAR) / 2}
           {@const next = day.runs[j + 1]}
           <rect
             class="run s-{run.state}"
@@ -301,16 +301,16 @@
             class:on={hovered === run}
             x={x1}
             {y}
-            width={Math.max(2, x2 - x1)}
-            height={ROW - 10}
-            rx={Math.min((ROW - 10) / 2, Math.max(1, (x2 - x1) / 2))}
+            width={Math.max(1.5, x2 - x1)}
+            height={BAR}
+            rx={Math.min(BAR / 2, Math.max(0.75, (x2 - x1) / 2))}
           />
           {#if !filter && next && next.from === run.to}
             <line
               class="link"
               x1={x2}
               x2={x2}
-              y1={y + (ROW - 10) / 2}
+              y1={y + BAR / 2}
               y2={TOP + rowOf(next.state) * ROW + ROW / 2}
             />
           {/if}
@@ -326,8 +326,7 @@
             x1={mx}
             x2={mx}
             y1={TOP - 4}
-            y2={TOP + 3 * ROW}
-            stroke-width={on ? 3.5 : 2}
+            y2={TOP + STATES.length * ROW}
           />
           <circle class="dot t-{toneOf(o)}" class:on cx={mx} cy={TOP - 8} r={on ? 8.5 : 6} />
         {/each}
@@ -400,57 +399,43 @@
   <p class="sr" aria-live="polite">{live}</p>
   <p class="sr">{summary}</p>
 </section>
+</Block>
 
 <style>
   .states {
-    container: states / inline-size;
     position: relative;
-  }
-  .head {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 4px 12px;
-  }
-  .head h2 {
-    margin: 0;
-    font: 400 20px/1.3 var(--fd);
-  }
-  .date {
-    color: var(--ink2);
-    font-size: 13px;
   }
   .wrap {
     display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 12px;
-    margin-top: 6px;
+    column-gap: 12px;
+    align-items: start;
   }
   .labels {
     display: grid;
-    grid-template-rows: repeat(4, 28px);
+    grid-template-rows: repeat(4, 30px);
     align-content: start;
-    padding-top: 22px;
+    padding-top: 24px;
   }
   .legend {
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 28px;
-    margin-left: -8px;
+    width: 100%;
+    height: 30px;
     padding: 0 8px;
     border: 0;
     border-radius: 8px;
     background: none;
     color: var(--ink2);
-    font: 600 12.5px/1.35 var(--f);
+    font: 600 12.5px/1 var(--f);
     white-space: nowrap;
     text-align: left;
     cursor: pointer;
   }
+  .legend span:not(.state-dot) {
+    flex: 1;
+  }
   .legend b {
-    margin-left: auto;
     color: var(--ink);
     font-weight: 600;
   }
@@ -514,14 +499,15 @@
   }
   .link {
     stroke: var(--ink3);
-    stroke-opacity: 0.3;
+    opacity: 0.5;
   }
   .ax {
     fill: var(--ink3);
     font: 500 11.5px/1 var(--f);
   }
   .mark {
-    stroke-linecap: round;
+    stroke-width: 1.2;
+    opacity: 0.55;
   }
   .mark.t-busy {
     stroke: var(--busy);
@@ -596,7 +582,7 @@
     font-size: 12.5px;
   }
   .filterline {
-    margin: 10px 0 0;
+    margin: 8px 0 0;
     color: var(--ink2);
     font-size: 13px;
   }
@@ -607,27 +593,15 @@
     color: var(--ink);
   }
   .clear {
-    padding: 0 4px;
+    padding: 0;
     border: 0;
-    border-radius: 4px;
     background: none;
     color: var(--accent);
     font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
     cursor: pointer;
-  }
-  @container states (max-width: 520px) {
-    .wrap {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .labels {
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      grid-template-rows: none;
-      gap: 2px 12px;
-      padding-top: 0;
-    }
-    .legend {
-      margin-left: 0;
-    }
   }
   @media (forced-colors: active) {
     .run.s-pressure,
