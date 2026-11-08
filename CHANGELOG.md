@@ -238,6 +238,13 @@ How to use this file:
 
 ### Changed
 
+- Optimizations opens on Optimizations with its summary, the last restore point and Recommended for
+  this PC; every list row shows the change it makes, such as On → Off, instead of a status symbol.
+  Tweaks are applied one at a time from their own page, so the check boxes and the bar to apply
+  several at once are gone. A tweak's page sets What it does and Why beside What changes, which shows
+  the current and new values in two boxes, its effect, permission and cost, and Apply or Undo. All
+  tweaks lists every group under its own title with its count, and the other groups say what they hold
+  under their title.
 - Tests lists the memory and each disk under Devices. A disk's page is a regular page that scrolls as
   a whole: its title carries the status and the disk's connection, the surface check comes first with
   its map, result and estimate, then SMART beside the file system and the speed test beside the

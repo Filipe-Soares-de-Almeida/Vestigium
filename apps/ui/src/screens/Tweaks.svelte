@@ -2,21 +2,23 @@
   import AdminPill from "../components/AdminPill.svelte";
   import BackLink from "../components/BackLink.svelte";
   import Block from "../components/Block.svelte";
-  import Checkbox from "../components/Checkbox.svelte";
-  import ConcernMark from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
-  import PickAll from "../components/PickAll.svelte";
-  import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
+  import PageHead from "../components/PageHead.svelte";
+  import RowCard from "../components/RowCard.svelte";
+  import RowList from "../components/RowList.svelte";
+  import StatusMark from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
   import { t, tn } from "../lib/i18n.svelte";
   import { tweakGroupOf } from "../lib/groups";
-  import { go, href, type TweakGroup } from "../lib/router.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
+  import { href, type TweakGroup } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, type Outcome, tweaks } from "../lib/tweaks.svelte";
   import type { Advice, TweakPick, TweakRow } from "../lib/types";
   import { at } from "./dumps/words";
+  import { statusOf } from "./tests/status";
   import {
     changeOf,
     GROUP,
@@ -29,24 +31,15 @@
     restorePoint,
     risk,
     rowState,
-    type Shown,
     shown,
     signal,
-    TONE,
     what,
     whyNot,
   } from "./tweaks/words";
 
   let { key, group }: { key: string | null; group: TweakGroup | null } = $props();
 
-  const MARK: Record<Shown, "Recommended" | "Unknown" | "Ok" | "Closed"> = {
-    signal: "Recommended",
-    quiet: "Unknown",
-    applied: "Ok",
-    set: "Ok",
-    unavailable: "Unknown",
-    protected: "Closed",
-  };
+  const GROUPS = ["recommended", "quiet", "same", "done"] as const;
 
   let dialog = $state<HTMLDialogElement>();
   /** What the dialog asks: to apply these, to go on without a restore point, or to undo a row. */
@@ -64,14 +57,6 @@
   const withSignal = $derived(advice.filter((a) => stateOf(a) === "signal"));
   const quiet = $derived(advice.filter((a) => stateOf(a) === "quiet"));
   const settled = $derived(advice.filter((a) => !["signal", "quiet"].includes(stateOf(a))));
-  /** Only a tweak with a sign on this PC can be chosen with others; the rest apply one at a time. */
-  const choosable = (a: Advice) => a.status === "Ready" && stateOf(a) === "signal";
-
-  // A choice that lost its sign leaves the bar.
-  $effect(() => {
-    const allowed = new Set(withSignal.filter((a) => a.status === "Ready").map(keyOf));
-    if (tweaks.chosen.some((k) => !allowed.has(k))) tweaks.chosen = tweaks.chosen.filter((k) => allowed.has(k));
-  });
   const current = $derived(key === null ? null : (advice.find((a) => keyOf(a) === key) ?? null));
   const view = $derived<TweakGroup>(group ?? "recommended");
   const listed = $derived(view === "all" ? advice : advice.filter((a) => tweakGroupOf(stateOf(a)) === view));
@@ -79,10 +64,13 @@
   const backTo = $derived<TweakGroup>(current ? tweakGroupOf(stateOf(current)) : view);
   const groupName = (g: TweakGroup) =>
     t(g === "recommended" ? "ui.item.recommended" : `ui.tweaks.nav.${g}`);
-  const statusKind = (s: Shown): StatusKind | null =>
-    s === "signal" ? "attention" : s === "applied" || s === "set" ? "ok" : s === "quiet" ? null : "info";
-  const chosen = $derived(advice.filter((a) => tweaks.chosen.includes(keyOf(a))));
   const blocked = $derived(!app.running);
+  const statusOfRow = (mark: Parameters<typeof statusOf>[0]) => statusOf(mark).kind;
+
+  relatedLinks(() => [
+    ...(view === "all" ? [{ label: t("ui.item.recommended"), href: href.tweaks() }] : [{ label: t("ui.tweaks.nav.all"), href: href.tweaks(null, "all") }]),
+    { label: t("ui.health.title"), href: href.health() },
+  ]);
 
 
   function retry(): void {
@@ -128,7 +116,6 @@
   async function confirmed(): Promise<void> {
     const now = asking;
     if (now?.kind === "apply") {
-      tweaks.chosen = tweaks.chosen.filter((k) => !now.items.some((a) => keyOf(a) === k));
       await carry(now.items, (without) => tweaks.apply(now.items.map(pickOf), without), applied(now.items));
     } else if (now?.kind === "no_point") {
       close();
@@ -142,174 +129,47 @@
   function sub(a: Advice): string {
     const s = stateOf(a);
     if (s === "signal") return signal(a.signals[0]);
-    if (s === "quiet") {
-      const c = changeOf(a, a.changes, "Simple")[0];
-      return c ? `${c.from} → ${c.to}` : "";
-    }
+    if (s === "quiet") return whyNot(a);
     if (s === "applied") return t("ui.tweaks.sub.applied", { when: at(inPlace(a, history)?.applied_ms ?? 0) });
-    if (s === "set") return nowOf(a, "Simple");
+    if (s === "set") return t("ui.tweaks.status.set");
     return t(`ui.tweaks.sub.${s}`);
+  }
+
+  /** The change a tweak makes, "On → Off", or the value it holds when it makes none. */
+  function changeText(a: Advice): string {
+    const c = changeOf(a, a.changes, "Simple")[0];
+    return c ? `${c.from} → ${c.to}` : nowOf(a, "Simple");
   }
 
   const rowsOf = (a: Advice) => history.filter((r) => r.change.tweak === a.tweak && r.change.subject === a.subject);
 </script>
 
-{#snippet item(a: Advice)}
-  {@const s = stateOf(a)}
-  {@const kind = statusKind(s)}
-  <li class="trow">
-    {#if choosable(a)}
-      <Checkbox
-        checked={tweaks.chosen.includes(keyOf(a))}
-        onchange={(on) => tweaks.choose(keyOf(a), on)}
-      >
-        <span class="sr">{t("ui.tweaks.pick", { name: name(a, "Simple") })}</span>
-      </Checkbox>
-    {:else}
-      <span></span>
-    {/if}
-    <a class="open" href={href.tweaks(keyOf(a))} data-reveal>
-      <span class="ico"><Icon name={ICON[GROUP[a.tweak]]} /></span>
-      <span class="what"><b>{name(a, level)}</b><small>{sub(a)}</small></span>
-      <span class="end">
-        {#if kind}<StatusMark {kind} word={t(`ui.tweaks.status.${s}`)} reveal />{/if}
-        <span class="chev"><Icon name="chevron" /></span>
-      </span>
-    </a>
-  </li>
+{#snippet rows(list: Advice[])}
+  {#if list.length}
+    <RowList label={t("ui.tweaks.list")}>
+      {#each list as a (keyOf(a))}
+        <RowCard href={href.tweaks(keyOf(a))} icon={ICON[GROUP[a.tweak]]} title={name(a, level)} sub={sub(a)}>
+          {#snippet right()}<span>{changeText(a)}</span>{/snippet}
+        </RowCard>
+      {/each}
+    </RowList>
+  {:else}
+    <p class="empty">{t(view === "recommended" ? "ui.tweaks.lede.none" : "ui.tweaks.group_empty")}</p>
+  {/if}
 {/snippet}
 
-{#if key === null}
-  <div class="top">
-    <h1>{groupName(view)}</h1>
-  </div>
-{/if}
+{#snippet restore()}
+  <p class="restore">
+    <Icon name="restart" />
+    <span>
+      {tweaks.dto?.last_restore_point_ms
+        ? t("ui.tweaks.point.last", { when: at(tweaks.dto.last_restore_point_ms) })
+        : t("ui.tweaks.point.none")}
+    </span>
+  </p>
+{/snippet}
 
-{#if tweaks.dto === null && tweaks.error !== null}
-  <div class="gap"><ErrorView error={tweaks.error} heading="h2" onretry={retry} /></div>
-{:else if tweaks.dto === null}
-  <Loading />
-{:else if key !== null}
-  <BackLink href={href.tweaks(null, backTo)} label={t("ui.common.back_to", { place: groupName(backTo) })} />
-  {#if current}
-    {@const s = stateOf(current)}
-    {@const change = changeOf(current, current.changes, level)}
-    {@const rows = rowsOf(current)}
-    {@const holding = inPlace(current, history)}
-    <section class="detail" aria-labelledby="tweak-title">
-      <h1 id="tweak-title">{name(current, level)}</h1>
-      <p class="meta"><ConcernMark mark={MARK[s]} word={false} silent /><span>{t(`ui.tweaks.status.${s}`)}</span></p>
-        <p class="about">{what(current, level)}</p>
-
-        {#if s === "signal"}
-          <div class="sec">
-            <h3>{t("ui.tweaks.why")}</h3>
-            <ul class="ev">
-              {#each current.signals as sig, i (i)}
-                <li><span class="bullet" class:first={i === 0} aria-hidden="true"></span><span>{signal(sig)}</span></li>
-              {/each}
-            </ul>
-          </div>
-        {:else if s === "quiet"}
-          <div class="sec">
-            <h3>{t("ui.tweaks.why_not")}</h3>
-            <p class="plain">{whyNot(current)}</p>
-          </div>
-        {:else if s !== "applied"}
-          <p class="plain">{t(`ui.tweaks.note.${s}`)}</p>
-        {/if}
-
-        {#if change.length || nowOf(current, level)}
-          <dl class="facts sec">
-            {#if change.length}
-              {#each change as c, i (i)}
-                <dt>{i === 0 ? t("ui.tweaks.fact.now") : ""}</dt>
-                <dd>{c.from}</dd>
-                <dt>{i === 0 ? t("ui.tweaks.fact.after") : ""}</dt>
-                <dd><b>{c.to}</b></dd>
-              {/each}
-            {:else}
-              <dt>{t("ui.tweaks.fact.now")}</dt>
-              <dd>{nowOf(current, level)}</dd>
-            {/if}
-            {#if s === "signal" || s === "quiet"}
-              <dt>{t("ui.tweaks.fact.when")}</dt>
-              <dd><span class="pill2"><Icon name={current.takes === "Now" ? "clock" : "restart"} />{t(`ui.tweaks.takes.${current.takes}`)}</span></dd>
-              <dt>{t("ui.tweaks.fact.permission")}</dt>
-              <dd>{#if current.applier === "Elevated"}<AdminPill />{:else}<span class="pill2"><Icon name="person" />{t(`ui.tweaks.applier.${current.applier}`)}</span>{/if}</dd>
-              <dt>{t("ui.tweaks.fact.cost")}</dt>
-              <dd>{risk(current)}</dd>
-            {/if}
-          </dl>
-        {/if}
-
-        {#if current.status === "Ready"}
-          <div class="acts sec">
-            <button
-              type="button"
-              class="btn"
-              class:accent={s === "signal" && tweaks.chosen.length === 0}
-              disabled={blocked || tweaks.busy}
-              onclick={() => ask({ kind: "apply", items: [current] })}
-            >
-              <Icon name="tweaks" />{t(
-                tweaks.busy ? "ui.tweaks.applying" : tweaks.chosen.length ? "ui.tweaks.apply_only" : "ui.tweaks.apply_one",
-              )}
-            </button>
-            {#if s === "quiet"}<span class="hint">{t("ui.tweaks.quiet_hint")}</span>{/if}
-            {#if blocked}<span class="hint">{t("ui.tweaks.blocked")}</span>{/if}
-          </div>
-        {/if}
-
-        {#if rows.length}
-          <div class="hist sec">
-            <h3>{t("ui.tweaks.history")}</h3>
-            {#each rows as r (r.id)}
-              {@const st = rowState(r)}
-              {@const lines = changeOf(current, r.change.results.map((x) => x.change), level)}
-              <div class="hrow">
-                <p class="hline">
-                  <b>{at(r.applied_ms)}</b>
-                  {#each lines as c, i (i)}<span class="chg">{c.from} → {c.to}</span>{/each}
-                </p>
-                <div class="hstate">
-                  <span class="meta"><ConcernMark mark={st.mark} word={false} silent /><span>{st.text}</span></span>
-                  {#if holding && r.id === holding.id}
-                    <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "undo", row: r, advice: current })}>
-                      <Icon name="undo" />{t("ui.tweaks.undo")}
-                    </button>
-                  {:else if r.outside && current.status === "Ready"}
-                    <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "apply", items: [current] })}>
-                      <Icon name="tweaks" />{t("ui.tweaks.reapply")}
-                    </button>
-                  {/if}
-                </div>
-                {#if r.helped && r.undone_ms === null && r.change.undo_of === null}
-                  {@const h = r.helped}
-                  {@const max = Math.max(h.before, h.after, 1)}
-                  <div
-                    class="helped"
-                    role="img"
-                    aria-label={t("ui.tweaks.helped.label", { metric: metric(current.tweak), before: h.before, after: h.after, days: h.days })}
-                  >
-                    <div><span>{t("ui.tweaks.helped.before")}</span><i style:width="{Math.max((h.before / max) * 100, 3)}%"></i><b>{h.before}</b></div>
-                    <div><span>{t("ui.tweaks.helped.after")}</span><i class="after" style:width="{Math.max((h.after / max) * 100, 3)}%"></i><b>{h.after}</b></div>
-                    <small>{helpedVerdict(h.before, h.after)} · {tn("ui.tweaks.helped.span", h.days, { metric: metric(current.tweak) })}</small>
-                  </div>
-                {/if}
-                {#if level === "Technical" && r.change.restore_point}
-                  <small class="mono">{restorePoint(r.change.restore_point)}</small>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-    </section>
-  {:else}
-    <h1>{t("ui.tweaks.title")}</h1>
-    <p class="lede">{t("ui.tweaks.empty")}</p>
-  {/if}
-{:else}
+{#snippet lede()}
   <p class="lede">
     {#if level === "Technical"}
       {t("ui.tweaks.lede.tech", { signal: withSignal.length, quiet: quiet.length, settled: settled.length })}
@@ -321,60 +181,169 @@
       <b>{t("ui.tweaks.lede.none")}</b> {t("ui.tweaks.lede.none.tail")}
     {/if}
   </p>
-  {#if listed.length}
-    {@const pickable = listed.filter(choosable).map(keyOf)}
-    {#if pickable.length}
-      <div class="ghead">
-        <PickAll
-          ids={pickable}
-          chosen={tweaks.chosen}
-          label={t("ui.tweaks.pick_all", { group: groupName(view) })}
-          onchange={(on) => tweaks.chooseAll(pickable, on)}
-        />
+{/snippet}
+
+{#if tweaks.dto === null && tweaks.error !== null}
+  <PageHead title={t("ui.tweaks.title")} />
+  <div class="gap"><ErrorView error={tweaks.error} heading="h2" onretry={retry} /></div>
+{:else if tweaks.dto === null}
+  <PageHead title={t("ui.tweaks.title")} />
+  <Loading />
+{:else if key !== null}
+  <BackLink href={href.tweaks(null, backTo)} label={groupName(backTo)} />
+  {#if current}
+    {@const s = stateOf(current)}
+    {@const change = changeOf(current, current.changes, level)}
+    {@const rowsHere = rowsOf(current)}
+    {@const holding = inPlace(current, history)}
+    <PageHead title={name(current, level)} sub="{groupName(backTo)} · {sub(current)}" />
+    <div class="cols2">
+      <div>
+        <Block title={t("ui.tweaks.section.what")}>
+          <p class="p">{what(current, level)}</p>
+        </Block>
+        {#if s === "signal"}
+          <Block title={t("ui.tweaks.why")}>
+            <ul class="ev-l">
+              {#each current.signals as sig, i (i)}<li>{signal(sig)}</li>{/each}
+            </ul>
+          </Block>
+        {:else if s === "quiet"}
+          <Block title={t("ui.tweaks.why_not")}>
+            <p class="p">{whyNot(current)}</p>
+          </Block>
+        {:else if s === "applied"}
+          <Block title={t("ui.tweaks.section.applied")}>
+            <p class="p">{t("ui.tweaks.sub.applied", { when: at(holding?.applied_ms ?? 0) })}</p>
+          </Block>
+        {:else}
+          <Block title={t("ui.tweaks.section.state")}>
+            <p class="p">{t(`ui.tweaks.note.${s}`)}</p>
+          </Block>
+        {/if}
       </div>
+
+      <Block title={t("ui.tweaks.section.change")}>
+        {#if change.length}
+          {#each change as c, i (i)}
+            <div class="chg">
+              <div><span class="chg-l">{t(s === "applied" ? "ui.tweaks.fact.before" : "ui.tweaks.fact.now")}</span><b>{c.from}</b></div>
+              <Icon name="chevron" />
+              <div><span class="chg-l">{t(s === "applied" ? "ui.tweaks.fact.since" : "ui.tweaks.fact.after")}</span><b>{c.to}</b></div>
+            </div>
+          {/each}
+        {:else if nowOf(current, level)}
+          <div class="chg"><div><span class="chg-l">{t("ui.tweaks.fact.now")}</span><b>{nowOf(current, level)}</b></div></div>
+        {/if}
+        {#if s === "signal" || s === "quiet"}
+          <dl class="kv">
+            <div><dt>{t("ui.tweaks.fact.when")}</dt><dd>{t(`ui.tweaks.takes.${current.takes}`)}</dd></div>
+            <div><dt>{t("ui.tweaks.fact.permission")}</dt><dd>{t(`ui.tweaks.applier.${current.applier}`)}</dd></div>
+            <div><dt>{t("ui.tweaks.fact.cost")}</dt><dd>{risk(current)}</dd></div>
+          </dl>
+        {/if}
+        {#if holding}
+          <div class="acts">
+            <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "undo", row: holding, advice: current })}>
+              <Icon name="undo" />{t("ui.tweaks.undo")}
+            </button>
+            <span class="muted">{t("ui.tweaks.sub.applied", { when: at(holding.applied_ms) })}</span>
+          </div>
+        {:else if current.status === "Ready" && s !== "set"}
+          <div class="acts">
+            <button
+              type="button"
+              class="btn"
+              class:accent={s === "signal"}
+              disabled={blocked || tweaks.busy}
+              onclick={() => ask({ kind: "apply", items: [current] })}
+            >
+              {t(tweaks.busy ? "ui.tweaks.applying" : "ui.tweaks.apply_one")}
+            </button>
+            {#if current.applier === "Elevated"}<AdminPill />{:else}<span class="muted">{t(`ui.tweaks.applier.${current.applier}`)}</span>{/if}
+          </div>
+          {#if s === "quiet"}<p class="note">{t("ui.tweaks.quiet_hint")}</p>{/if}
+          {#if blocked}<p class="note">{t("ui.tweaks.blocked")}</p>{/if}
+        {:else if s === "set"}
+          <p class="muted">{t("ui.tweaks.nothing", { value: nowOf(current, "Simple").toLocaleLowerCase() })}</p>
+        {/if}
+      </Block>
+    </div>
+
+    {#if rowsHere.length}
+      <Block title={t("ui.tweaks.history")}>
+        {#each rowsHere as r (r.id)}
+          {@const st = rowState(r)}
+          {@const lines = changeOf(current, r.change.results.map((x) => x.change), level)}
+          <div class="hrow">
+            <p class="hline">
+              <span class="d">{at(r.applied_ms)}</span>
+              <span>{#each lines as c, i (i)}<span class="chg-t">{c.from} → {c.to}</span>{/each}</span>
+              <StatusMark kind={statusOfRow(st.mark)} word={st.text} />
+            </p>
+            {#if r.outside && current.status === "Ready" && !(holding && r.id === holding.id)}
+              <div class="acts">
+                <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "apply", items: [current] })}>
+                  <Icon name="tweaks" />{t("ui.tweaks.reapply")}
+                </button>
+              </div>
+            {/if}
+            {#if r.helped && r.undone_ms === null && r.change.undo_of === null}
+              {@const h = r.helped}
+              {@const max = Math.max(h.before, h.after, 1)}
+              <div
+                class="helped"
+                role="img"
+                aria-label={t("ui.tweaks.helped.label", { metric: metric(current.tweak), before: h.before, after: h.after, days: h.days })}
+              >
+                <div><span>{t("ui.tweaks.helped.before")}</span><i style:width="{Math.max((h.before / max) * 100, 3)}%"></i><b>{h.before}</b></div>
+                <div><span>{t("ui.tweaks.helped.after")}</span><i class="after" style:width="{Math.max((h.after / max) * 100, 3)}%"></i><b>{h.after}</b></div>
+                <small>{helpedVerdict(h.before, h.after)} · {tn("ui.tweaks.helped.span", h.days, { metric: metric(current.tweak) })}</small>
+              </div>
+            {/if}
+            {#if level === "Technical" && r.change.restore_point}
+              <small class="mono">{restorePoint(r.change.restore_point)}</small>
+            {/if}
+          </div>
+        {/each}
+      </Block>
     {/if}
-    <ul class="tlist" aria-label={t("ui.tweaks.list")}>
-      {#each listed as a (keyOf(a))}
-        {@render item(a)}
-      {/each}
-    </ul>
   {:else}
-    <p class="muted">{t("ui.tweaks.empty")}</p>
+    <PageHead title={t("ui.tweaks.title")} />
+    <p class="lede">{t("ui.tweaks.empty")}</p>
   {/if}
-  <Block title={t("ui.tweaks.point.title")}>
-    <p class="point">
-      {tweaks.dto.last_restore_point_ms
-        ? t("ui.tweaks.point.last", { when: at(tweaks.dto.last_restore_point_ms) })
-        : t("ui.tweaks.point.none")}
-    </p>
+{:else if view === "recommended"}
+  <PageHead title={t("ui.tweaks.title")} />
+  {@render lede()}
+  {@render restore()}
+  <Block title={t("ui.tweaks.group.recommended")}>
+    {@render rows(listed)}
   </Block>
+{:else if view === "all"}
+  <PageHead title={t("ui.tweaks.nav.all")} sub={withSignal.length ? tn("ui.tweaks.lede.signals", withSignal.length) : t("ui.tweaks.lede.none")} />
+  {@render restore()}
+  {#each GROUPS as g (g)}
+    {@const list = advice.filter((a) => tweakGroupOf(stateOf(a)) === g)}
+    <Block title="{groupName(g)} ({list.length})">
+      {#if list.length}
+        <RowList>
+          {#each list as a (keyOf(a))}
+            <RowCard href={href.tweaks(keyOf(a))} icon={ICON[GROUP[a.tweak]]} title={name(a, level)} sub={sub(a)}>
+              {#snippet right()}<span>{changeText(a)}</span>{/snippet}
+            </RowCard>
+          {/each}
+        </RowList>
+      {:else}
+        <p class="empty">{t("ui.tweaks.group_empty")}</p>
+      {/if}
+    </Block>
+  {/each}
+{:else}
+  <PageHead title={groupName(view)} sub={t(`ui.tweaks.desc.${view}`)} />
+  <section class="list">{@render rows(listed)}</section>
 {/if}
 
 {#if tweaks.dto !== null}
-  {#if chosen.length}
-    {@const admin = chosen.filter((a) => a.applier === "Elevated").length}
-    {@const restart = chosen.filter((a) => a.takes !== "Now").length}
-    <div class="delbar" role="region" aria-label={t("ui.tweaks.bar")}>
-      <p>
-        {tn("ui.tweaks.bar.chosen", chosen.length)}
-        <small>
-          {admin ? tn("ui.tweaks.bar.admin", admin) : t("ui.tweaks.bar.no_admin")}{restart ? ` · ${tn("ui.tweaks.bar.later", restart)}` : ""}
-        </small>
-      </p>
-      <div class="acts">
-        <button type="button" class="btn" onclick={() => (tweaks.chosen = [])}>{t("ui.tweaks.bar.clear")}</button>
-        <button
-          type="button"
-          class="btn accent"
-          disabled={blocked || tweaks.busy}
-          onclick={() => ask({ kind: "apply", items: chosen })}
-        >
-          <Icon name="tweaks" />{t(tweaks.busy ? "ui.tweaks.applying" : "ui.tweaks.bar.apply")}
-        </button>
-      </div>
-    </div>
-  {/if}
-
   <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => (asking = null)}>
     {#if asking?.kind === "apply"}
       {@const admin = asking.items.some((a) => a.applier === "Elevated")}
@@ -384,23 +353,23 @@
           {@const c = changeOf(a, a.changes, "Simple")[0]}
           <li>
             <b>{name(a, "Simple")}</b>
-            {#if c}<span class="chg">{c.from} → {c.to}</span>{/if}
-            <span class="pills">
-              <span class="pill2"><Icon name={a.applier === "Elevated" ? "shield" : "person"} />{t(`ui.tweaks.applier.${a.applier}`)}</span>
-              <span class="pill2"><Icon name={a.takes === "Now" ? "clock" : "restart"} />{t(`ui.tweaks.takes.${a.takes}`)}</span>
+            {#if c}<span class="chg-t">{c.from} → {c.to}</span>{/if}
+            <span class="tags">
+              <span class="tag">{t(`ui.tweaks.applier.${a.applier}`)}</span>
+              <span class="tag">{t(`ui.tweaks.takes.${a.takes}`)}</span>
             </span>
           </li>
         {/each}
       </ul>
       <p>{admin ? `${t("ui.tweaks.ask.point")} ` : ""}{t("ui.tweaks.ask.kept")}{admin ? ` ${t("ui.tweaks.ask.prompt")}` : ""}</p>
-      <div class="acts">
+      <div class="acts end">
         <button type="button" class="btn" onclick={close}>{t("ui.tweaks.cancel")}</button>
-        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name={admin ? "shield" : "tweaks"} />{t("ui.tweaks.bar.apply")}</button>
+        <button type="button" class="btn accent" onclick={() => void confirmed()}>{t("ui.tweaks.bar.apply")}</button>
       </div>
     {:else if asking?.kind === "no_point"}
       <h2 id="ask-title">{t("ui.tweaks.no_point.title")}</h2>
       <p>{t("ui.tweaks.no_point.body")}</p>
-      <div class="acts">
+      <div class="acts end">
         <button type="button" class="btn" onclick={() => { close(); toast.show(t("ui.tweaks.toast.nothing")); }}>{t("ui.tweaks.cancel")}</button>
         <button type="button" class="btn accent" onclick={() => void confirmed()}>{t("ui.tweaks.no_point.go")}</button>
       </div>
@@ -410,244 +379,123 @@
       <p>
         {t("ui.tweaks.undo.body", { name: name(asking.advice, "Simple"), value: back })}{asking.row.applier === "Elevated" ? ` ${t("ui.tweaks.ask.prompt")}` : ""}
       </p>
-      <div class="acts">
+      <div class="acts end">
         <button type="button" class="btn" onclick={close}>{t("ui.tweaks.cancel")}</button>
-        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name={asking.row.applier === "Elevated" ? "shield" : "undo"} />{t("ui.tweaks.undo")}</button>
+        <button type="button" class="btn accent" onclick={() => void confirmed()}><Icon name="undo" />{t("ui.tweaks.undo")}</button>
       </div>
     {/if}
   </dialog>
 {/if}
 
 <style>
-  .top {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-  }
   .gap {
     margin-top: 14px;
   }
-  .ghead {
+  .restore {
     display: flex;
     gap: 10px;
-    align-items: center;
-    margin: 12px 0 8px;
-  }
-  .tlist {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .trow {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr);
-    gap: 14px;
-    align-items: center;
-    padding-left: 12px;
-    border-radius: 6px;
-    background: var(--row);
-  }
-  .trow:hover {
-    background: var(--row-hover);
-  }
-  .open {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-    gap: 14px;
-    align-items: center;
-    min-width: 0;
-    padding: 9px 12px 9px 0;
-    border-radius: 6px;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .open:focus-visible {
-    outline: 2px solid var(--ink);
-    outline-offset: -2px;
-  }
-  .ico {
-    display: flex;
+    align-items: flex-start;
+    max-width: 74ch;
+    margin: 12px 0 0;
     color: var(--ink2);
+    font-size: 13px;
   }
-  .end {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
+  .restore :global(svg) {
+    flex: none;
+    margin-top: 2px;
   }
-  .what {
-    display: grid;
-    min-width: 0;
-  }
-  .what b {
-    overflow: hidden;
-    font-size: 14.5px;
-    font-weight: 400;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .what small {
-    overflow: hidden;
-    color: var(--ink2);
-    font-size: 12.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .chev {
-    display: grid;
-    color: var(--ink3);
-  }
-  .point {
-    margin: 0;
-    color: var(--ink2);
-    font-size: 14px;
-    line-height: 1.45;
-  }
-  .detail {
-    display: grid;
-    gap: 14px;
-  }
-  .sec {
-    margin-top: 16px;
+  .list {
+    margin-top: 32px;
     padding-top: 28px;
     border-top: 1px solid var(--rule);
   }
-  .meta {
+  .chg {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
     align-items: center;
-    margin: 4px 0 0;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .chg > div {
+    display: grid;
+    gap: 2px;
+    min-width: 150px;
+    padding: 10px 14px;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+  }
+  .chg > :global(svg) {
+    color: var(--ink3);
+  }
+  .chg-l {
     color: var(--ink2);
-    font-size: 13px;
+    font-size: 12.5px;
   }
-  .about,
-  .plain {
-    max-width: 70ch;
-    margin: 0;
-    line-height: 1.5;
+  .chg b {
+    font-size: 15px;
+    font-weight: 600;
   }
-  .plain {
-    color: var(--ink2);
-  }
-  h3 {
-    margin: 0 0 12px;
-    font: 400 20px/1.3 var(--fd);
-  }
-  .ev {
+  .kv {
     display: grid;
-    gap: 8px;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 8px 32px;
     margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .ev li {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 8px;
-    line-height: 1.45;
-  }
-  .bullet {
-    width: 6px;
-    height: 6px;
-    margin: 0.5em 0 0 6px;
-    border-radius: 50%;
-    background: var(--ink3);
-  }
-  .bullet.first {
-    background: var(--accent);
-  }
-  .facts {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 6px 14px;
-    margin: 0;
-    padding-top: 28px;
     font-size: 14px;
-    overflow-wrap: anywhere;
   }
-  .facts dt {
+  .kv div {
+    display: contents;
+  }
+  .kv dt {
     color: var(--ink2);
   }
-  .facts dd {
+  .kv dd {
+    min-width: 0;
     margin: 0;
   }
-  .pill2,
-  .pills .pill2 {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: var(--row);
-    color: var(--ink2);
-    font: 600 12px/1.6 var(--f);
-  }
-  .acts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    align-items: center;
-  }
-  .hint {
-    color: var(--ink2);
+  .muted {
     font-size: 13px;
-  }
-  .hist {
-    display: grid;
-    gap: 4px;
-  }
-  .hrow {
-    display: grid;
-    gap: 8px;
-    padding: 8px 0;
   }
   .hrow + .hrow {
+    margin-top: 10px;
+    padding-top: 10px;
     border-top: 1px solid var(--stroke2);
   }
   .hline {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 12px;
+    display: grid;
+    grid-template-columns: 128px minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: center;
     margin: 0;
     font-size: 14px;
   }
-  .chg {
+  .d {
     color: var(--ink2);
+    font-size: 13px;
   }
-  .hstate {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    align-items: center;
-    justify-content: space-between;
+  .chg-t + .chg-t::before {
+    content: " · ";
+    color: var(--ink3);
   }
   .helped {
     display: grid;
-    gap: 4px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--card2);
+    gap: 6px;
+    max-width: 420px;
+    margin-top: 10px;
     font-size: 13px;
   }
   .helped div {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr) 28px;
-    gap: 8px;
+    grid-template-columns: 64px minmax(0, 1fr) 40px;
+    gap: 10px;
     align-items: center;
   }
-  .helped span,
-  .helped small {
+  .helped span {
     color: var(--ink2);
   }
   .helped i {
     display: block;
-    height: 10px;
-    border-radius: 999px;
+    height: 8px;
+    border-radius: 4px;
     background: var(--ink3);
   }
   .helped i.after {
@@ -655,53 +503,57 @@
   }
   .helped b {
     text-align: right;
-  }
-  .mono {
-    color: var(--ink2);
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-size: 12.5px;
-  }
-  .delbar {
-    position: sticky;
-    bottom: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 14px;
-    padding: 12px 16px;
-    border: 1px solid var(--stroke);
-    border-radius: 14px;
-    background: var(--card);
-    box-shadow: 0 8px 28px #0003;
-  }
-  .delbar p {
-    margin: 0;
-    font-size: 14px;
     font-weight: 600;
   }
-  .delbar small {
-    display: block;
+  .helped small {
     color: var(--ink2);
-    font-size: 13px;
-    font-weight: 400;
+  }
+  .mono {
+    display: block;
+    margin-top: 6px;
+    color: var(--ink2);
+    font: 12.5px var(--mono);
+  }
+  .tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--hover);
+    color: var(--ink2);
+    font-size: 12px;
+    white-space: nowrap;
   }
   .confirm {
     max-width: min(560px, calc(100vw - 32px));
     padding: 18px 20px;
     border: 1px solid var(--stroke);
-    border-radius: 14px;
+    border-radius: 8px;
     background: var(--card);
     color: var(--ink);
-    box-shadow: 0 18px 60px #0006;
+    box-shadow: var(--shadow-float);
   }
   .confirm::backdrop {
     background: #0008;
   }
   .confirm h2 {
     margin: 0 0 10px;
-    font: 600 18px/1.3 var(--fd);
+  }
+  .confirm ul {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+  .confirm li {
+    display: grid;
+    gap: 4px;
   }
   .confirm p {
     margin: 0 0 12px;
@@ -709,42 +561,7 @@
     font-size: 14px;
     line-height: 1.5;
   }
-  .confirm ul {
-    display: grid;
-    gap: 10px;
-    max-height: 260px;
-    margin: 0 0 12px;
-    padding: 0;
-    overflow: auto;
-    list-style: none;
-  }
-  .confirm li {
-    display: grid;
-    gap: 4px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--stroke2);
-    font-size: 14px;
-  }
-  .confirm .pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .confirm .pill2 {
-    background: var(--card2);
-  }
-  .confirm .acts {
+  .acts.end {
     justify-content: flex-end;
-  }
-  .pill2 :global(svg) {
-    width: 13px;
-    height: 13px;
-  }
-  @media (forced-colors: active) {
-    .bullet,
-    .helped i {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
   }
 </style>

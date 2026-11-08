@@ -19,8 +19,6 @@ class Tweaks {
   error = $state<unknown>(null);
   /** A change is under way; Windows may be asking for permission. */
   busy = $state(false);
-  /** Tweaks ticked to apply together, by key. */
-  chosen = $state<string[]>([]);
 
   recommended = $derived(this.dto?.advice.filter((a) => a.status === "Ready" && a.signals.length > 0).length ?? 0);
 
@@ -38,20 +36,9 @@ class Tweaks {
     try {
       this.dto = await readTweaks();
       this.error = null;
-      const ready = new Set(this.dto.advice.filter((a) => a.status === "Ready").map(keyOf));
-      this.chosen = this.chosen.filter((k) => ready.has(k));
     } catch (error) {
       if (this.dto === null) this.error = error;
     }
-  }
-
-  choose(key: string, on: boolean): void {
-    this.chosen = on ? [...new Set([...this.chosen, key])] : this.chosen.filter((k) => k !== key);
-  }
-
-  /** Ticks or clears every tweak in `keys` at once. */
-  chooseAll(keys: string[], on: boolean): void {
-    this.chosen = on ? [...new Set([...this.chosen, ...keys])] : this.chosen.filter((k) => !keys.includes(k));
   }
 
   apply(picks: TweakPick[], withoutRestorePoint: boolean): Promise<Outcome> {
