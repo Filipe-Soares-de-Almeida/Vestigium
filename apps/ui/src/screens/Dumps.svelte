@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { tick as settle } from "svelte";
-
+  import AdminPill from "../components/AdminPill.svelte";
+  import BackLink from "../components/BackLink.svelte";
+  import Block from "../components/Block.svelte";
   import ConcernMark from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
@@ -9,18 +10,15 @@
   import { app } from "../lib/app.svelte";
   import { dumps } from "../lib/dumps.svelte";
   import { t, tn } from "../lib/i18n.svelte";
-  import { href } from "../lib/router.svelte";
+  import { type DumpGroup, href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, tweaks } from "../lib/tweaks.svelte";
   import Row from "./dumps/Row.svelte";
-  import { at, entries, type Entry, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, TONE } from "./dumps/words";
+  import { at, entries, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, TONE } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
 
-  let { id }: { id: number | null } = $props();
+  let { id, group }: { id: number | null; group: DumpGroup | null } = $props();
 
-
-  /** The entry shown open; the dump the address names opens first. */
-  let opened = $state<string | null>(null);
   let dialog = $state<HTMLDialogElement>();
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
@@ -40,20 +38,9 @@
       (a) => (a.tweak === "CrashDump" || a.tweak === "AppDumps") && a.status === "Ready" && a.signals.length > 0,
     ) ?? [],
   );
-
-  $effect(() => {
-    const wanted = id;
-    if (wanted === null || !dumps.dto || opened !== null) return;
-    const entry = list.find((e) => e.dump?.id === wanted);
-    if (!entry) return;
-    opened = entry.key;
-    void settle().then(() => document.getElementById(`dump-${entry.key}`)?.scrollIntoView({ block: "center" }));
-  });
-
-
-  function toggle(entry: Entry): void {
-    opened = opened === entry.key ? "" : entry.key;
-  }
+  /** The entry whose page is open, when the address names a dump. */
+  const opened = $derived(id === null ? null : (list.find((e) => e.dump?.id === id) ?? null));
+  const groups = $derived<Group[]>(group ? [group] : GROUPS);
 
   function retry(): void {
     dumps.error = null;
@@ -75,88 +62,96 @@
   const groupLabel = (g: Group) => t(`ui.dumps.group.${g}`);
 </script>
 
-{#snippet rows(group: Entry[])}
-  {#each group as entry (entry.key)}
-    <Row {entry} {level} open={opened === entry.key} ontoggle={() => toggle(entry)} />
-  {/each}
-{/snippet}
-
-<div class="top">
-  <h1>{t("ui.dumps.title")}</h1>
-</div>
+{#if id === null}
+  <div class="top">
+    <h1>{group ? groupLabel(group) : t("ui.dumps.title")}</h1>
+  </div>
+{/if}
 
 {#if dumps.dto === null && dumps.error !== null}
   <div class="gap"><ErrorView error={dumps.error} heading="h2" onretry={retry} /></div>
 {:else if dumps.dto === null}
   <Loading />
+{:else if id !== null}
+  <BackLink
+    href={href.dumps(null, opened?.group ?? null)}
+    label={t("ui.common.back_to", { place: opened ? groupLabel(opened.group) : t("ui.dumps.title") })}
+  />
+  {#if opened}
+    <Row entry={opened} {level} open />
+  {:else}
+    <h1>{t("ui.dumps.title")}</h1>
+    <p class="muted">{t("ui.dumps.missing")}</p>
+  {/if}
 {:else}
-  <p class="lede">
-    {#each lede(list, dumps.dto, level) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
-  </p>
-  <div class="split panes">
-    <div class="stack scrolls">
-      {#each GROUPS as group (group)}
-        {@const members = shown.filter((e) => e.group === group)}
-        {#if members.length}
-          {@const pickable = members.flatMap((e) => (e.dump && e.dump.deleted_ms === null ? [e.dump.id] : []))}
-          <section class="card list" aria-labelledby="group-{group}">
-            <div class="ghead">
-              {#if pickable.length}
-                <PickAll
-                  ids={pickable}
-                  chosen={dumps.chosen}
-                  label={t("ui.dumps.pick_all", { group: groupLabel(group) })}
-                  onchange={(on) => dumps.chooseAll(pickable, on)}
-                />
-              {/if}
-              <h2 id="group-{group}">{groupLabel(group)}</h2>
-            </div>
-            {@render rows(members)}
-          </section>
-        {/if}
-      {/each}
-      {#if !shown.length}
-        <section class="card">
-          <p class="muted empty">{t("ui.dumps.empty")}</p>
-        </section>
-      {/if}
-      {#if gone.length}
-        <section class="card list">
-          <details class="gone">
-            <summary>{tn("ui.dumps.gone", gone.length)}</summary>
-            {@render rows(gone)}
-          </details>
-        </section>
-      {/if}
-    </div>
+  {#if !group}
+    <p class="lede">
+      {#each lede(list, dumps.dto, level) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
+    </p>
+  {/if}
 
-    <div class="stack scrolls">
-      {#if parts.length}
-        <section class="card space" aria-labelledby="space-title">
-          <h2 id="space-title" class="sr">{t("ui.dumps.space.title")}</h2>
-          <p class="big">
-            {formatBytes(dumps.dto.space_bytes)}
-            <small>{tn("ui.dumps.space.in", shown.filter((e) => e.dump).length)}</small>
-          </p>
-          <div
-            class="bar"
-            role="img"
-            aria-label={parts.map((p) => `${groupLabel(p.group)}: ${formatBytes(p.bytes)}`).join("; ")}
-          >
-            {#each parts as p (p.group)}
-              <i style:flex-grow={p.bytes} style:background="var(--{TONE[p.group]})"></i>
-            {/each}
-          </div>
-          <div class="key" aria-hidden="true">
-            {#each parts as p (p.group)}
-              <span><i style:background="var(--{TONE[p.group]})"></i>{groupLabel(p.group)} {formatBytes(p.bytes)}</span>
-            {/each}
-          </div>
-        </section>
-      {/if}
+  {#each groups as g, index (g)}
+    {@const members = shown.filter((e) => e.group === g)}
+    {#if members.length}
+      {@const pickable = members.flatMap((e) => (e.dump && e.dump.deleted_ms === null ? [e.dump.id] : []))}
+      <Block title={groupLabel(g)} first={index === 0}>
+        {#snippet actions()}
+          {#if pickable.length}
+            <PickAll
+              ids={pickable}
+              chosen={dumps.chosen}
+              label={t("ui.dumps.pick_all", { group: groupLabel(g) })}
+              onchange={(on) => dumps.chooseAll(pickable, on)}
+            />
+          {/if}
+        {/snippet}
+        <ul class="rows">
+          {#each members as entry (entry.key)}
+            <li><Row {entry} {level} href={href.dumps(entry.dump?.id ?? null, entry.group)} /></li>
+          {/each}
+        </ul>
+      </Block>
+    {/if}
+  {/each}
+  {#if !shown.filter((e) => groups.includes(e.group)).length}
+    <p class="muted empty">{t("ui.dumps.empty")}</p>
+  {/if}
+  {#if gone.length && !group}
+    <Block title={tn("ui.dumps.gone", gone.length)}>
+      <ul class="rows">
+        {#each gone as entry (entry.key)}
+          <li><Row {entry} {level} href={href.dumps(entry.dump?.id ?? null, entry.group)} /></li>
+        {/each}
+      </ul>
+    </Block>
+  {/if}
 
-      <section class="card read" aria-labelledby="read-title">
-        <h2 id="read-title">{t("ui.dumps.read.title")}</h2>
+  {#if !group}
+    {#if parts.length}
+      <Block title={t("ui.dumps.space.title")}>
+        <p class="big">
+          {formatBytes(dumps.dto.space_bytes)}
+          <small>{tn("ui.dumps.space.in", shown.filter((e) => e.dump).length)}</small>
+        </p>
+        <div
+          class="bar"
+          role="img"
+          aria-label={parts.map((p) => `${groupLabel(p.group)}: ${formatBytes(p.bytes)}`).join("; ")}
+        >
+          {#each parts as p (p.group)}
+            <i style:flex-grow={p.bytes} style:background="var(--{TONE[p.group]})"></i>
+          {/each}
+        </div>
+        <div class="key" aria-hidden="true">
+          {#each parts as p (p.group)}
+            <span><i style:background="var(--{TONE[p.group]})"></i>{groupLabel(p.group)} {formatBytes(p.bytes)}</span>
+          {/each}
+        </div>
+      </Block>
+    {/if}
+
+    <Block title={t("ui.dumps.read.title")}>
+      <div class="read">
         {#if dumps.reading === "running"}
           <p class="status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.dumps.read.running")}</p>
         {:else}
@@ -169,6 +164,7 @@
           {/if}
           <p>{t(level === "Technical" ? "ui.dumps.read.lede.tech" : "ui.dumps.read.lede")}</p>
           <div class="line">
+            <AdminPill />
             <button
               type="button"
               class="btn"
@@ -194,21 +190,22 @@
             </span>
           </div>
         {/if}
-      </section>
+      </div>
+    </Block>
 
-      <section class="card" aria-labelledby="setting-title">
-        <h2 id="setting-title" class="sr">{t("ui.dumps.setting.title")}</h2>
-        <p class="setting">
-          <ConcernMark mark={crash.ok ? "Ok" : "Attention"} word={!crash.ok} />
-          <span>{crash.text}</span>
-        </p>
-        {#each dumpTweaks as a (keyOf(a))}
-          <p class="tweak"><Icon name="tweaks" /><a href={href.tweaks(keyOf(a))}>{t(`ui.dumps.tweak.${a.tweak}`)}</a></p>
-        {/each}
-      </section>
-    </div>
-  </div>
+    <Block title={t("ui.dumps.setting.title")}>
+      <p class="setting">
+        <ConcernMark mark={crash.ok ? "Ok" : "Attention"} word={!crash.ok} />
+        <span>{crash.text}</span>
+      </p>
+      {#each dumpTweaks as a (keyOf(a))}
+        <p class="tweak"><Icon name="tweaks" /><a href={href.tweaks(keyOf(a))}>{t(`ui.dumps.tweak.${a.tweak}`)}</a></p>
+      {/each}
+    </Block>
+  {/if}
+{/if}
 
+{#if dumps.dto !== null}
   {#if chosen.length}
     <div class="delbar" role="region" aria-label={t("ui.dumps.delete.bar")}>
       <p>
@@ -258,35 +255,33 @@
   .gap {
     margin-top: 14px;
   }
-  .list {
-    padding: 6px;
+  .lede {
+    max-width: 70ch;
+    margin: 6px 0 18px;
+    color: var(--ink2);
+    font-size: 16px;
   }
-  .ghead {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 8px 10px 4px;
+  .lede b {
+    color: var(--ink);
+    font-weight: 600;
   }
-  .list h2 {
+  .rows {
+    display: grid;
+    gap: 4px;
     margin: 0;
-    font: 600 15px/1.3 var(--f);
+    padding: 0;
+    list-style: none;
+  }
+  .muted {
+    margin: 0;
+    color: var(--ink2);
+    font-size: 14px;
   }
   .empty {
-    margin: 0;
-  }
-  .gone summary {
-    padding: 8px 10px;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-  }
-  .space {
-    display: grid;
-    gap: 8px;
+    margin-top: 16px;
   }
   .big {
-    margin: 0;
+    margin: 0 0 12px;
     font: 600 34px/1 var(--fd);
     letter-spacing: -0.02em;
   }
@@ -300,6 +295,7 @@
     display: flex;
     gap: 2px;
     height: 12px;
+    margin-bottom: 8px;
     overflow: hidden;
     border: 1px solid var(--stroke2);
     border-radius: 999px;
@@ -326,10 +322,6 @@
   .read {
     display: grid;
     gap: 10px;
-  }
-  .read h2 {
-    margin: 0;
-    font: 600 15px/1.3 var(--f);
   }
   .read p {
     margin: 0;
@@ -370,10 +362,6 @@
     align-items: center;
     color: var(--ink2);
     font-size: 13px;
-  }
-  .line :global(svg) {
-    width: 16px;
-    height: 16px;
   }
   .setting {
     display: grid;

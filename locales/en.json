@@ -2198,5 +2198,6 @@
   "ui.tweaks.nav.same": "No change",
   "ui.tweaks.nav.done": "Applied",
   "ui.tweaks.nav.all": "All tweaks",
-  "ui.tweaks.empty": "No tweaks in this list."
+  "ui.tweaks.empty": "No tweaks in this list.",
+  "ui.dumps.missing": "This dump is no longer in the list."
 }

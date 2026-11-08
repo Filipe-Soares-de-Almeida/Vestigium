@@ -4,10 +4,11 @@ import { formatBytes } from "../screens/occurrence/format";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
 import { t } from "./i18n.svelte";
-import { href, type Route, type TweakGroup } from "./router.svelte";
+import { type DumpGroup, href, type Route, type TweakGroup } from "./router.svelte";
 import type { StatusKind } from "../components/StatusMark.svelte";
 import { keyOf, tweaks } from "./tweaks.svelte";
 import { shown, type Shown } from "../screens/tweaks/words";
+import { entries, GROUPS as DUMP_GROUPS, present } from "../screens/dumps/words";
 import { hwtests } from "./tests.svelte";
 import type { DiskDto } from "./types";
 
@@ -72,6 +73,15 @@ const onTests = (device: string | null) => (r: Route) => r.screen === "tests" &&
 const mark = (concern: "Critical" | "Attention" | "Ok" | "Unknown"): StatusKind | undefined =>
   concern === "Critical" ? "critical" : concern === "Attention" ? "attention" : undefined;
 
+const DUMP_ICON: Record<DumpGroup, IconName> = { blue: "pc", live: "chip", app: "app" };
+
+/** The dump list a route shows: the one asked for, or the one of the dump it opens; none for the overview. */
+function dumpListOf(r: Route): DumpGroup | null {
+  if (r.screen !== "dumps") return null;
+  if (r.id !== null && dumps.dto) return entries(dumps.dto).find((e) => e.dump?.id === r.id)?.group ?? null;
+  return r.group;
+}
+
 /** The list a tweak belongs to, by how it stands. */
 export function tweakGroupOf(state: Shown): Exclude<TweakGroup, "all"> {
   return state === "signal" ? "recommended" : state === "quiet" ? "quiet" : state === "applied" ? "done" : "same";
@@ -92,6 +102,7 @@ export function buildGroups(): Group[] {
   const disks = hwtests.dto?.disks ?? [];
   const areas = health.dto ? AREAS.map((a) => areaState(a, health.dto!)) : [];
   const dumpBytes = dumps.dto?.space_bytes ?? 0;
+  const dumpEntries = dumps.dto ? entries(dumps.dto) : [];
   const g = (key: GroupKey, icon: IconName, extra: Partial<Group> & Pick<Group, "items">): Group => ({
     key,
     icon,
@@ -196,8 +207,15 @@ export function buildGroups(): Group[] {
           label: t("ui.item.overview"),
           icon: "dumps",
           meta: dumpBytes ? formatBytes(dumpBytes) : undefined,
-          match: (r) => r.screen === "dumps",
+          match: (r) => r.screen === "dumps" && dumpListOf(r) === null,
         },
+        ...DUMP_GROUPS.map((group) => ({
+          href: href.dumps(null, group),
+          label: t(`ui.dumps.group.${group}`),
+          icon: DUMP_ICON[group],
+          meta: String(dumpEntries.filter((e) => e.group === group && present(e)).length),
+          match: (r: Route) => r.screen === "dumps" && dumpListOf(r) === group,
+        })),
       ],
     }),
     g("captures", "captures", {

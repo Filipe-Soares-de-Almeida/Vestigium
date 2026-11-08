@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Checkbox from "../../components/Checkbox.svelte";
   import Icon from "../../components/Icon.svelte";
   import Steps from "../../components/Steps.svelte";
   import { marks } from "../../lib/api";
@@ -24,8 +25,19 @@
     TONE,
   } from "./words";
 
-  let { entry, level, open, ontoggle }: { entry: Entry; level: DetailLevel; open: boolean; ontoggle: () => void } =
-    $props();
+  let {
+    entry,
+    level,
+    open = false,
+    href: to,
+  }: {
+    entry: Entry;
+    level: DetailLevel;
+    /** Shows the whole report under the row, as the dump's own page does. */
+    open?: boolean;
+    /** A list row leads to the dump's page; without it the row is only the header of that page. */
+    href?: string;
+  } = $props();
 
   const FALL_LOOK_MS = 10 * 60_000;
 
@@ -51,30 +63,30 @@
   });
 </script>
 
+{#snippet face()}
+  <span class="ico"><Icon name={ICON[entry.group]} /></span>
+  <span class="what"><b>{title(entry, level)}</b><small>{sub(entry, level)}</small></span>
+  <span class="side">
+    {at(entry.at)}
+    {#if d}<br />{formatBytes(d.size_bytes)}{/if}
+  </span>
+  {#if to}<span class="chev"><Icon name="chevron" /></span>{/if}
+{/snippet}
+
 <div class="dblock">
   <div class="drow" class:gone>
     {#if d && !gone}
-      <input
-        type="checkbox"
-        class="pick"
-        checked={dumps.chosen.includes(d.id)}
-        aria-label={t("ui.dumps.pick", { file: fileName(d.path) })}
-        onchange={(event) => dumps.choose(d.id, event.currentTarget.checked)}
-      />
+      <Checkbox checked={dumps.chosen.includes(d.id)} onchange={(on) => dumps.choose(d.id, on)}>
+        <span class="sr">{t("ui.dumps.pick", { file: fileName(d.path) })}</span>
+      </Checkbox>
     {:else}
       <span></span>
     {/if}
-    <span class="icochip" style:background="var(--{tone}-t)" style:color="var(--{tone})">
-      <Icon name={ICON[entry.group]} />
-    </span>
-    <button type="button" class="open" aria-expanded={open} aria-controls={id} onclick={ontoggle}>
-      <span class="what"><b>{title(entry, level)}</b><small>{sub(entry, level)}</small></span>
-      <span class="side">
-        {at(entry.at)}
-        {#if d}<br />{formatBytes(d.size_bytes)}{/if}
-      </span>
-      <span class="chev"><Icon name="chevron" /></span>
-    </button>
+    {#if to}
+      <a class="open" href={to} data-reveal>{@render face()}</a>
+    {:else}
+      <div class="open static">{@render face()}</div>
+    {/if}
   </div>
   {#if open}
     <div class="detail" {id}>
@@ -96,9 +108,7 @@
       {:else}
         {#if culprit}
           <div class="culprit">
-            <span class="icochip" style:background="var(--{tone}-t)" style:color="var(--{tone})">
-              <Icon name={culprit.icon} />
-            </span>
+            <span class="ico"><Icon name={culprit.icon} /></span>
             <div><b>{culprit.name}</b><small>{culprit.sub}</small></div>
           </div>
         {:else}
@@ -147,50 +157,58 @@
 </div>
 
 <style>
-  :global(.dblock) + .dblock {
-    border-top: 1px solid var(--stroke2);
-  }
   .drow {
     display: grid;
-    grid-template-columns: 22px 40px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 14px;
     align-items: center;
-    padding: 10px;
-    border-radius: 8px;
+    padding-left: 12px;
+    border-radius: 6px;
+    background: var(--row);
   }
   .drow:hover {
-    background: var(--card2);
+    background: var(--row-hover);
   }
   .drow.gone .what,
-  .drow.gone .icochip {
+  .drow.gone .ico {
     opacity: 0.62;
   }
   .open {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto 12px;
-    gap: 12px;
+    grid-template-columns: 20px minmax(0, 1fr) auto auto;
+    gap: 14px;
     align-items: center;
     min-width: 0;
-    padding: 0;
-    border: 0;
+    padding: 9px 12px 9px 0;
     border-radius: 6px;
-    background: none;
     color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
+    text-decoration: none;
+  }
+  .open:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
+  }
+  .ico {
+    display: flex;
+    color: var(--ink2);
+  }
+  .what {
+    display: grid;
+    min-width: 0;
   }
   .what b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
+    overflow: hidden;
+    font-size: 14.5px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .what small {
-    display: block;
-    margin-top: 2px;
+    overflow: hidden;
     color: var(--ink2);
-    font-size: 13px;
-    line-height: 1.35;
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .side {
     color: var(--ink2);
@@ -202,39 +220,11 @@
   .chev {
     display: grid;
     color: var(--ink3);
-    transition: transform 0.15s;
-  }
-  .open[aria-expanded="true"] .chev {
-    transform: rotate(90deg);
-  }
-  .pick {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .pick:checked {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .pick:checked::after {
-    content: "";
-    width: 9px;
-    height: 5px;
-    border-bottom: 2px solid var(--on-accent);
-    border-left: 2px solid var(--on-accent);
-    transform: rotate(-45deg) translate(1px, -1px);
   }
   .detail {
     display: grid;
     gap: 14px;
-    padding: 4px 10px 16px 84px;
+    padding: 24px 0 0;
   }
   .why {
     max-width: 70ch;
@@ -243,8 +233,8 @@
   }
   .culprit {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 14px;
     align-items: center;
   }
   .culprit b {
@@ -261,9 +251,8 @@
     gap: 16px;
   }
   h3 {
-    margin: 0 0 8px;
-    color: var(--ink2);
-    font: 600 13px/1.35 var(--f);
+    margin: 0 0 12px;
+    font: 400 20px/1.3 var(--fd);
   }
   .ev {
     display: grid;
@@ -318,9 +307,6 @@
   .file {
     display: grid;
     gap: 4px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--card2);
     color: var(--ink2);
     font-size: 13px;
     overflow-wrap: anywhere;
@@ -330,26 +316,17 @@
     font-weight: 600;
   }
   @container content (max-width: 560px) {
-    .open {
-      grid-template-columns: minmax(0, 1fr) 12px;
-    }
     .side {
-      grid-row: 2;
-      text-align: left;
+      display: none;
     }
-    .detail {
-      padding-left: 10px;
+    .open {
+      grid-template-columns: 20px minmax(0, 1fr) auto;
     }
   }
   @media (forced-colors: active) {
     .bullet {
       forced-color-adjust: none;
       background: CanvasText;
-    }
-    .pick:checked {
-      forced-color-adjust: none;
-      background: Highlight;
-      border-color: Highlight;
     }
   }
 </style>

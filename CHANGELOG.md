@@ -24,6 +24,11 @@ How to use this file:
 
 ### Added
 
+- Dumps are now browsed from the navigation pane: the overview, and one list each for blue screens,
+  kernel reports and apps that crashed, with their counts. A dump opens on a page of its own with a back
+  link to its list. Reading the dumps shows the administrator badge, a group's check box ticks or clears
+  what that list shows (with a dash when only some are ticked), and the check marks sit centred in their
+  boxes.
 - Optimizations are now browsed from the navigation pane: Recommended, No sign on this PC, No change,
   Applied and All tweaks, each with its count. A tweak opens on a page of its own, with the administrator
   badge when it needs permission, and the back link returns to the list the tweak belongs to now, so

@@ -9,6 +9,8 @@ export type ActivityTab = "today" | "now";
 export type HistoryScope = "month" | "week" | "2w";
 
 /** Which tweaks a list shows: those worth applying, with no sign here, already set, applied by Vestigium, or all. */
+export type DumpGroup = "blue" | "live" | "app";
+
 export type TweakGroup = "recommended" | "quiet" | "same" | "done" | "all";
 const TWEAK_GROUPS: TweakGroup[] = ["recommended", "quiet", "same", "done", "all"];
 
@@ -27,7 +29,7 @@ export type Route =
   | { screen: "captures"; forOccurrence: number | null }
   | { screen: "capture"; id: number }
   | { screen: "health"; area: string | null }
-  | { screen: "dumps"; id: number | null }
+  | { screen: "dumps"; id: number | null; group: DumpGroup | null }
   | { screen: "tweaks"; key: string | null; group: TweakGroup | null }
   /** `device` is "memory" or a physical disk number. */
   | { screen: "tests"; device: string | null }
@@ -55,7 +57,8 @@ export const href = {
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
-  dumps: (id?: number) => (id ? `#/dumps/${id}` : "#/dumps"),
+  dumps: (id?: number | null, group?: DumpGroup | null) =>
+    id ? `#/dumps/${id}` : group ? `#/dumps?group=${group}` : "#/dumps",
   tweaks: (key?: string | null, group?: TweakGroup | null) =>
     key ? `#/tweaks/${encodeURIComponent(key)}` : group && group !== "recommended" ? `#/tweaks?group=${group}` : "#/tweaks",
   tests: (device?: string) => (device ? `#/tests/${device}` : "#/tests"),
@@ -91,7 +94,14 @@ export function parse(hash: string): Route {
     return { screen: "captures", forOccurrence: /^\d+$/.test(given) ? Number(given) : null };
   }
   if (screen === "health") return { screen: "health", area: arg || null };
-  if (screen === "dumps") return { screen: "dumps", id: /^\d+$/.test(arg ?? "") ? Number(arg) : null };
+  if (screen === "dumps") {
+    const asked = params.get("group");
+    return {
+      screen: "dumps",
+      id: /^\d+$/.test(arg ?? "") ? Number(arg) : null,
+      group: asked === "blue" || asked === "live" || asked === "app" ? asked : null,
+    };
+  }
   if (screen === "tweaks") {
     const asked = params.get("group") as TweakGroup | null;
     return {
