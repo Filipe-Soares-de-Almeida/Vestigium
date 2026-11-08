@@ -39,8 +39,6 @@
   import Tweaks from "./screens/Tweaks.svelte";
 
   let content: HTMLElement | undefined = $state();
-  /** Screens whose page holds still while their panes scroll inside. */
-  const STILL = new Set<string>();
 
   let main: HTMLElement | undefined = $state();
   let shown = "";
@@ -133,7 +131,7 @@
           <div class="tb" data-tauri-drag-region></div>
           <div class="content" bind:this={content}>
             <div class="grid">
-              <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
+              <main id="main" tabindex="-1" bind:this={main}>
                 {#if app.failure !== null}
                   <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
                 {:else if app.loading}
@@ -272,35 +270,5 @@
     min-width: 0;
     max-width: 1180px;
     outline: none;
-  }
-  /* A screen that scrolls inside its own panel holds the page still. */
-  .content:has(main.still) {
-    overflow: clip;
-  }
-  .content:has(main.still) .grid {
-    height: 100%;
-    padding-bottom: 20px;
-  }
-  main.still {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  main.still > :global(.screen) {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
-  }
-  @media (max-height: 520px) {
-    .content:has(main.still) {
-      overflow: auto;
-    }
-    .content:has(main.still) .grid {
-      height: auto;
-    }
-    main.still {
-      display: block;
-    }
   }
 </style>

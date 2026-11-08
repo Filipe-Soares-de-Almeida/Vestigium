@@ -616,34 +616,6 @@ th.fill {
     align-items: start;
   }
 }
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 14px;
-  margin-top: 14px;
-  align-items: start;
-}
-.stack {
-  display: grid;
-  gap: 14px;
-}
-@container content (max-width: 720px) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@container content (max-width: 720px) {
-  main.still > .screen {
-    overflow: auto;
-  }
-}
-
-.screen {
-    overflow: auto;
-  }
-}
-
 .screen {
   animation: enter 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
