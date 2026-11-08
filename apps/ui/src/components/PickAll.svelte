@@ -6,12 +6,15 @@
     ids,
     chosen,
     label,
+    text,
     onchange,
   }: {
     ids: T[];
     chosen: T[];
     /** What the box does, for a screen reader. */
     label: string;
+    /** A visible name beside the box; without it the box is named for screen readers only. */
+    text?: string;
     onchange: (on: boolean) => void;
   } = $props();
 
@@ -21,5 +24,5 @@
 </script>
 
 <Checkbox checked={all} indeterminate={some} disabled={ids.length === 0} onchange={() => onchange(!all)}>
-  <span class="sr">{label}</span>
+  {#if text}{text}{:else}<span class="sr">{label}</span>{/if}
 </Checkbox>

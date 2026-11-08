@@ -238,6 +238,12 @@ How to use this file:
 
 ### Changed
 
+- Dumps has one bar under its summary to select all, delete the selection and see its size, with the
+  confirmation in place instead of a dialog. Each row keeps its check box beside it and shows whether
+  it was read, when it was written and its size; deleted dumps are counted in one line. Space used,
+  with a bar and its key, sits beside Read the dumps, and the Windows dump setting closes the page
+  with its status. A dump's page shows its culprit beside the stop code, the call stack as a chain of
+  modules, what to do beside the file, and a block to delete it.
 - Optimizations opens on Optimizations with its summary, the last restore point and Recommended for
   this PC; every list row shows the change it makes, such as On → Off, instead of a status symbol.
   Tweaks are applied one at a time from their own page, so the check boxes and the bar to apply
