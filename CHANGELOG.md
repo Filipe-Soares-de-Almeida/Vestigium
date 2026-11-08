@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- Today has a new layout: the title with the date, the PC states chart, then the day's events and
+  Health side by side on wide windows, and the last 14 days. Each event shows its status as a symbol, and
+  the word appears when you point at the row. The Today and Now tabs are gone; the navigation pane
+  switches between them.
 - Opening a card on the home screen now grows it into its page, and going back shrinks the page into
   the same card. The effect is skipped when Windows is set to reduce motion.
 - The window now opens on a home screen: the status of the watcher, three quick cards (Health, Activity,

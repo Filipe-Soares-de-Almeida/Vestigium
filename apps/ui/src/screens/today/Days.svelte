@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Block from "../../components/Block.svelte";
   import { lang, t, tn } from "../../lib/i18n.svelte";
   import type { DayCount } from "./day";
 
@@ -22,8 +23,7 @@
   }
 </script>
 
-<section class="card" aria-labelledby="days-title">
-  <h3 id="days-title">{t("ui.today.days.title")}</h3>
+<Block title={t("ui.today.days.title")}>
   <div class="week">
     {#each days as d (d.start)}
       <span class="day" role="img" aria-label={label(d)} aria-current={d.today ? "date" : undefined}>
@@ -39,7 +39,7 @@
   <p class="sr">
     {total === 0 ? t("ui.today.days.summary.none") : tn("ui.today.days.summary", total)}
   </p>
-</section>
+</Block>
 
 <style>
   .week {

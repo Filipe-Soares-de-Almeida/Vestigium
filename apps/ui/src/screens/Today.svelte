@@ -7,7 +7,7 @@
   import { marks, timeline } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { formatTime } from "../lib/format";
-  import { t } from "../lib/i18n.svelte";
+  import { lang, t } from "../lib/i18n.svelte";
   import { href } from "../lib/router.svelte";
   import { buildDay, type Day, dayStart, rangeStart } from "./today/day";
   import Days from "./today/Days.svelte";
@@ -26,6 +26,9 @@
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const firstUse = $derived(app.history === "empty" || empty);
+  const date = $derived(
+    new Intl.DateTimeFormat(lang(), { weekday: "long", day: "numeric", month: "long" }).format(day?.start ?? Date.now()),
+  );
   const startedAt = $derived(app.link?.link === "running" ? app.link.started_at_ms : null);
 
   /** Reads today and the last 14 days; a failed refresh keeps what is on screen. */
@@ -67,6 +70,11 @@
   });
 </script>
 
+<header class="head">
+  <h1>{t("ui.item.today")}</h1>
+  <p class="date">{date}</p>
+</header>
+
 {#if firstUse}
   <p class="lede">
     {startedAt !== null
@@ -87,13 +95,11 @@
     </p>
   {/if}
   <States {day} {level} />
-  <div class="split">
+  <div class="cols">
     <Moments items={day.items} {level} />
-    <div class="stack">
-      <HealthCard />
-      <Days days={day.days} />
-    </div>
+    <HealthCard />
   </div>
+  <Days days={day.days} />
 {:else if error !== null}
   <ErrorView {error} onretry={retry} />
 {:else}
@@ -101,6 +107,25 @@
 {/if}
 
 <style>
+  .head {
+    margin-bottom: 4px;
+  }
+  .date {
+    margin: 4px 0 0;
+    color: var(--ink2);
+    font-size: 14px;
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 56px;
+  }
+  @container content (min-width: 1000px) {
+    .cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+    }
+  }
   .actions {
     display: flex;
     gap: 10px;

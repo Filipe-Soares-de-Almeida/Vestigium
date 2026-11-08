@@ -1,7 +1,9 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
 
+  import Block from "../../components/Block.svelte";
   import Icon from "../../components/Icon.svelte";
+  import StatusMark, { type StatusKind } from "../../components/StatusMark.svelte";
   import { formatDuration, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
@@ -23,14 +25,19 @@
   const opened = new SvelteSet<string>();
   const keyOf = (item: Item) => `${item.kind}-${item.start}`;
 
+  const STATUS: Record<ReturnType<typeof toneOf>, StatusKind> = {
+    freeze: "critical",
+    press: "attention",
+    busy: "info",
+  };
+
   function toggle(key: string): void {
     if (opened.has(key)) opened.delete(key);
     else opened.add(key);
   }
 </script>
 
-<section class="card list" aria-labelledby="moments-title">
-  <h3 id="moments-title">{t("ui.today.moments.title")}</h3>
+<Block title={t("ui.today.moments.title")}>
   {#if items.length === 0}
     <p class="empty">{t("ui.today.moments.none")}</p>
   {:else}
@@ -39,18 +46,21 @@
         <li>
           {#if item.kind === "occurrence"}
             {@const o = item.occurrence}
-            <a class="row" href={href.occurrence(o.id)}>
-              <span class="icochip tone-{toneOf(o)}"><Icon name={causeIcon(o.cause)} /></span>
+            <a class="row" href={href.occurrence(o.id)} data-reveal>
+              <span class="time">{formatTime(o.kind === "PostMortem" ? o.end_ms : o.start_ms)}</span>
+              <span class="ico"><Icon name={causeIcon(o.cause)} /></span>
               <span class="what">
                 <b>{occurrenceTitle(o, level)}</b>
-                <small>{t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}</small>
+                <small>
+                  {t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}{o.kind === "PostMortem"
+                    ? ""
+                    : ` · ${formatDuration(o.end_ms - o.start_ms)}`}
+                </small>
               </span>
-              {#if o.kind === "PostMortem"}
-                <span class="when">{formatTime(o.end_ms)}</span>
-              {:else}
-                <span class="when">{formatTime(o.start_ms)}<br />{formatDuration(o.end_ms - o.start_ms)}</span>
-              {/if}
-              <span class="chev"><Icon name="chevron" /></span>
+              <span class="end">
+                <StatusMark kind={STATUS[toneOf(o)]} reveal />
+                <span class="chev"><Icon name="chevron" /></span>
+              </span>
             </a>
           {:else}
             {@const e = item.episode}
@@ -60,18 +70,22 @@
               <button
                 type="button"
                 class="row"
+                data-reveal
                 aria-expanded={open}
                 aria-controls={open ? `period-${key}` : undefined}
                 onclick={() => toggle(key)}
               >
-                <span class="icochip tone-press"><Icon name={episodeIcon(e)} /></span>
+                <span class="time">{formatTime(e.start_ms)}</span>
+                <span class="ico"><Icon name={episodeIcon(e)} /></span>
                 <span class="what">
                   <b>{episodeTitle(e, level)}</b>
-                  <small>{episodeMeta(e)}</small>
+                  <small>{episodeMeta(e)} · {formatDuration(e.end_ms - e.start_ms)}</small>
                   {#if item.byTest}<small>{t("ui.today.episode.by_test")}</small>{/if}
                 </span>
-                <span class="when">{formatTime(e.start_ms)}<br />{formatDuration(e.end_ms - e.start_ms)}</span>
-                <span class="chev turn"><Icon name="chevron" /></span>
+                <span class="end">
+                  <StatusMark kind="overload" reveal />
+                  <span class="chev turn"><Icon name="chevron" /></span>
+                </span>
               </button>
               {#if open}
                 <Period
@@ -88,55 +102,89 @@
       {/each}
     </ul>
   {/if}
-</section>
+</Block>
 
 <style>
-  .list {
-    padding: 10px;
-  }
-  h3 {
-    padding: 6px 10px 2px;
-  }
   ul {
+    display: grid;
+    gap: 4px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
   .row {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) auto 14px;
-    gap: 12px;
+    grid-template-columns: 44px 20px minmax(0, 1fr) auto;
+    gap: 14px;
     align-items: center;
-    padding: 9px 10px;
-    border-radius: 8px;
-    color: inherit;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--row);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
     text-decoration: none;
   }
   button.row {
-    width: 100%;
-    border: 0;
-    background: none;
-    font: inherit;
-    text-align: left;
     cursor: pointer;
   }
-  a.row:hover,
-  button.row:hover {
-    background: var(--card2);
+  .row:hover {
+    background: var(--row-hover);
   }
-  /* An open episode is one card: its row is the header and the detail sits under it. */
+  .row:active {
+    background: var(--row-press);
+  }
+  .row:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
+  }
+  /* An open episode is one block: its row is the header and the detail sits under it. */
   .period.open {
     margin: 2px 0 8px;
     overflow: hidden;
-    border: 1px solid var(--stroke2);
-    border-radius: 10px;
-    background: var(--card2);
+    border-radius: 6px;
+    background: var(--row);
   }
-  .period.open button.row {
+  .period.open .row {
     border-radius: 0;
   }
-  .period.open button.row:hover {
-    background: color-mix(in srgb, var(--ink) 4%, transparent);
+  .time {
+    color: var(--ink2);
+    font-size: 13px;
+  }
+  .ico {
+    display: flex;
+    color: var(--ink2);
+  }
+  .what {
+    display: grid;
+    min-width: 0;
+  }
+  .what b {
+    overflow: hidden;
+    font-size: 14.5px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  small {
+    overflow: hidden;
+    color: var(--ink2);
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .end {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .chev {
+    display: grid;
+    color: var(--ink3);
   }
   .turn :global(svg) {
     transform: rotate(90deg);
@@ -145,48 +193,13 @@
   .open .turn :global(svg) {
     transform: rotate(-90deg);
   }
-  .what b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  small {
-    display: block;
-    color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .when {
-    color: var(--ink2);
-    font-size: 12.5px;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-  }
-  .chev {
-    display: grid;
-    color: var(--ink3);
-  }
-  .tone-busy {
-    background: var(--busy-t);
-    color: var(--busy);
-  }
-  .tone-press {
-    background: var(--press-t);
-    color: var(--press);
-  }
-  .tone-freeze {
-    background: var(--freeze-t);
-    color: var(--freeze);
-  }
   .empty {
     margin: 0;
-    padding: 4px 10px 8px;
     color: var(--ink2);
   }
-  @media (forced-colors: active) {
-    a.row:hover,
-    button.row:hover {
-      outline: 1px solid Highlight;
+  @media (prefers-reduced-motion: reduce) {
+    .turn :global(svg) {
+      transition: none;
     }
   }
 </style>

@@ -68,10 +68,6 @@
     return out;
   });
 
-  const date = $derived(
-    new Intl.DateTimeFormat(lang(), { weekday: "long", day: "numeric", month: "long" }).format(day.start),
-  );
-
   /** A day total, rounded to the minute: "45 min", "9 h 12". */
   function total(ms: number): string {
     const minutes = Math.round(ms / MINUTE_MS);
@@ -237,11 +233,11 @@
   });
 </script>
 
-<section class="card states" aria-labelledby="states-title" bind:this={card}>
+<section class="states" aria-labelledby="states-title" bind:this={card}>
   <div class="head">
     <h2 id="states-title">{t("ui.today.states.title")}</h2>
     <span class="date">
-      {date} · {t("ui.today.states.range", {
+      {t("ui.today.states.range", {
         from: formatTime(view ? view.from : day.start),
         to: formatTime(view ? Math.min(view.to, day.now) : day.now),
       })}
@@ -419,6 +415,7 @@
   }
   .head h2 {
     margin: 0;
+    font: 400 20px/1.3 var(--fd);
   }
   .date {
     color: var(--ink2);
