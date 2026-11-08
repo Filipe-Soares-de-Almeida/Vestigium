@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,8 @@ pub const BUCKET_BOUNDS_US: [u32; 12] = [1, 2, 3, 4, 5, 10, 25, 50, 100, 250, 50
 pub const BUCKETS: usize = 13;
 /// Individual DPC and ISR routines kept, longest first.
 pub const LONGEST_KEPT: usize = 50;
+/// Each module's longest routines kept besides the overall longest, so every driver shows some.
+pub const MODULE_LONGEST_KEPT: usize = 5;
 /// The longest deep capture anyone can ask for, in minutes: a whole day.
 pub const CAPTURE_MINUTES_MAX: u64 = 24 * 60;
 /// A frame over this many times the app's median...
@@ -201,11 +203,23 @@ struct Kept {
     core: u16,
 }
 
+/// Keeps the `cap` longest of what is offered, shortest on top.
+fn keep_longest(heap: &mut BinaryHeap<Reverse<Kept>>, kept: Kept, cap: usize) {
+    if heap.len() < cap {
+        heap.push(Reverse(kept));
+    } else if heap.peek().is_some_and(|Reverse(min)| *min < kept) {
+        heap.pop();
+        heap.push(Reverse(kept));
+    }
+}
+
 /// DPC and ISR durations by routine address, folded into modules at the end.
 #[derive(Debug, Default)]
 pub struct RoutineAggregator {
     stats: HashMap<(u64, RoutineKind), RoutineStats>,
     longest: BinaryHeap<Reverse<Kept>>,
+    /// The longest of each routine address, from which each module's longest are taken.
+    by_routine: HashMap<u64, BinaryHeap<Reverse<Kept>>>,
 }
 
 impl RoutineAggregator {
@@ -222,15 +236,16 @@ impl RoutineAggregator {
             kind,
             core,
         };
-        if self.longest.len() < LONGEST_KEPT {
-            self.longest.push(Reverse(kept));
-        } else if self.longest.peek().is_some_and(|Reverse(min)| *min < kept) {
-            self.longest.pop();
-            self.longest.push(Reverse(kept));
-        }
+        keep_longest(&mut self.longest, kept, LONGEST_KEPT);
+        keep_longest(
+            self.by_routine.entry(routine).or_default(),
+            kept,
+            MODULE_LONGEST_KEPT,
+        );
     }
 
-    /// Modules by DPC plus ISR time, most first, and the longest routines, longest first.
+    /// Modules by DPC plus ISR time, most first, and the longest routines, longest first: the
+    /// overall longest and each module's own longest.
     pub fn finish(self, modules: &ModuleMap) -> (Vec<DriverLatency>, Vec<LongRoutine>) {
         let name = |addr: u64| modules.find(addr).unwrap_or(UNKNOWN_MODULE).to_string();
         let mut by_module: HashMap<String, DriverLatency> = HashMap::new();
@@ -254,7 +269,19 @@ impl RoutineAggregator {
                 .cmp(&a.total_us())
                 .then(a.module.cmp(&b.module))
         });
-        let mut kept: Vec<Kept> = self.longest.into_iter().map(|Reverse(k)| k).collect();
+        let mut by_module: HashMap<String, Vec<Kept>> = HashMap::new();
+        for (routine, heap) in self.by_routine {
+            by_module
+                .entry(name(routine))
+                .or_default()
+                .extend(heap.into_iter().map(|Reverse(k)| k));
+        }
+        let mut chosen: BTreeSet<Kept> = self.longest.into_iter().map(|Reverse(k)| k).collect();
+        for mut own in by_module.into_values() {
+            own.sort_by(|a, b| b.cmp(a));
+            chosen.extend(own.into_iter().take(MODULE_LONGEST_KEPT));
+        }
+        let mut kept: Vec<Kept> = chosen.into_iter().collect();
         kept.sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
         let longest = kept
             .into_iter()
@@ -894,6 +921,39 @@ mod tests {
         assert_eq!(longest.last().map(|l| l.us), Some(31));
         assert!(longest.windows(2).all(|w| w[0].us >= w[1].us));
         assert_eq!(drivers[0].dpc.count, 80);
+    }
+
+    #[test]
+    fn every_module_keeps_its_own_longest() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x1000, "busy.sys");
+        map.insert(0x3000, 0x1000, "quiet.sys");
+        let mut agg = RoutineAggregator::new();
+        for us in 1_000..1_080u32 {
+            agg.add(0x1100, RoutineKind::Dpc, us, 0, i64::from(us));
+        }
+        for us in 1..=7u32 {
+            agg.add(
+                0x3100 + u64::from(us % 2),
+                RoutineKind::Isr,
+                us,
+                1,
+                i64::from(us),
+            );
+        }
+        let (_, longest) = agg.finish(&map);
+        let quiet: Vec<u32> = longest
+            .iter()
+            .filter(|l| l.module == "quiet.sys")
+            .map(|l| l.us)
+            .collect();
+        assert_eq!(
+            quiet,
+            [7, 6, 5, 4, 3],
+            "its five longest, across its routines"
+        );
+        assert_eq!(longest.len(), LONGEST_KEPT + MODULE_LONGEST_KEPT);
+        assert!(longest.windows(2).all(|w| w[0].us >= w[1].us));
     }
 
     #[test]
