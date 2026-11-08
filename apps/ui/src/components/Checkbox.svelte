@@ -74,7 +74,7 @@
     left: 50%;
     width: 10px;
     height: 2px;
-    border-radius: 1px;
+    border-radius: 2px;
     background: var(--on-accent);
     transform: translate(-50%, -50%);
   }
