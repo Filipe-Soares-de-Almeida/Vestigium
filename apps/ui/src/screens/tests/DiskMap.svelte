@@ -217,7 +217,7 @@
     border-radius: 6px;
     box-shadow:
       0 0 0 2px var(--ink),
-      0 0 0 4px var(--layer);
+      0 0 0 4px var(--main);
     pointer-events: none;
   }
   .readout {

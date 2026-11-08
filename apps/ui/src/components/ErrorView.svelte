@@ -9,7 +9,7 @@
   }: { error: unknown; onretry?: () => void; heading?: "h1" | "h2" } = $props();
 </script>
 
-<section class="card failure">
+<section class="failure">
   <svelte:element this={heading} class="title">{t("ui.common.error.title")}</svelte:element>
   <p>{errorText(error)}</p>
   {#if onretry}
@@ -22,11 +22,16 @@
     max-width: 62ch;
   }
   .title {
-    font: 600 18px/1.3 var(--fd);
-    margin: 0 0 6px;
+    margin: 4px 0 0;
+    font: 350 28px/1.2 var(--fd);
+  }
+  h2.title {
+    font: 400 20px/1.3 var(--fd);
   }
   p {
-    margin: 0 0 14px;
-    color: var(--ink2);
+    max-width: 72ch;
+    margin: 10px 0 14px;
+    font-size: 14px;
+    line-height: 1.55;
   }
 </style>

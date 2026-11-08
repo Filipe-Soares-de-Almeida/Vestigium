@@ -4,8 +4,8 @@
   import Banner from "./components/Banner.svelte";
   import ErrorView from "./components/ErrorView.svelte";
   import Loading from "./components/Loading.svelte";
-  import Mark from "./components/Mark.svelte";
   import NavPane from "./components/NavPane.svelte";
+  import Related from "./components/Related.svelte";
   import Toast from "./components/Toast.svelte";
   import UpdateDialog from "./components/UpdateDialog.svelte";
   import WindowControls from "./components/WindowControls.svelte";
@@ -16,7 +16,6 @@
   import { tweaks } from "./lib/tweaks.svelte";
   import { markFrame } from "./lib/frame";
   import { health } from "./lib/health.svelte";
-  import { t } from "./lib/i18n.svelte";
   import { router } from "./lib/router.svelte";
   import { updates } from "./lib/update.svelte";
   import Activity from "./screens/Activity.svelte";
@@ -110,16 +109,14 @@
 </script>
 
 <div class="win">
-  <header class="titlebar" data-tauri-drag-region="deep">
-    <Mark />
-    <span>{t("ui.shell.title")}</span>
-  </header>
   <div class="stage" bind:this={morph.stage}>
     {#if router.current.screen === "home" || morph.phase !== "idle"}
       <div class="layer home" bind:this={morph.home} data-morph-base inert={morph.phase !== "idle"}>
         {#if app.failure !== null}
+          <div class="tb" data-tauri-drag-region></div>
           <main class="plain"><ErrorView error={app.failure} heading="h1" onretry={() => app.load()} /></main>
         {:else if app.loading}
+          <div class="tb" data-tauri-drag-region></div>
           <main class="plain"><Loading /></main>
         {:else}
           <Home />
@@ -129,53 +126,59 @@
     {#if router.current.screen !== "home"}
       <div class="layer page" bind:this={morph.page} inert={morph.phase !== "idle"}>
         <NavPane />
-        <div class="content" bind:this={content}>
-          <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
-            {#if app.failure !== null}
-              <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
-            {:else if app.loading}
-              <Loading />
-            {:else}
-              <Banner />
-              {#key router.key}
-                <div class="screen">
-                  {#if router.current.screen === "occurrence"}
-                    <Occurrence id={router.current.id} fromDay={router.current.fromDay} />
-                  {:else if router.current.screen === "detail"}
-                    <Detail kind={router.current.kind} parts={router.current.parts} />
-                  {:else if router.current.screen === "disks"}
-                    <Disks />
-                  {:else if router.current.screen === "memory"}
-                    <Memory />
-                  {:else if router.current.screen === "events"}
-                    <Events />
-                  {:else if router.current.screen === "period"}
-                    <PeriodPage start={router.current.start} fromDay={router.current.fromDay} />
-                  {:else if router.current.screen === "programs"}
-                    <Programs />
-                  {:else if router.current.screen === "history"}
-                    <History month={router.current.month} scope={router.current.scope} day={router.current.day} />
-                  {:else if router.current.screen === "capture"}
-                    <Capture id={router.current.id} />
-                  {:else if router.current.screen === "captures"}
-                    <Captures forOccurrence={router.current.forOccurrence} />
-                  {:else if router.current.screen === "health"}
-                    <Health area={router.current.area} />
-                  {:else if router.current.screen === "dumps"}
-                    <Dumps id={router.current.id} group={router.current.group} />
-                  {:else if router.current.screen === "tweaks"}
-                    <Tweaks key={router.current.key} group={router.current.group} />
-                  {:else if router.current.screen === "tests"}
-                    <Tests device={router.current.device} />
-                  {:else if router.current.screen === "settings"}
-                    <Settings />
-                  {:else if router.current.screen === "activity"}
-                    <Activity tab={router.current.tab} />
-                  {/if}
-                </div>
-              {/key}
-            {/if}
-          </main>
+        <div class="ct">
+          <div class="tb" data-tauri-drag-region></div>
+          <div class="content" bind:this={content}>
+            <div class="grid">
+              <main id="main" tabindex="-1" bind:this={main} class:still={STILL.has(router.current.screen)}>
+                {#if app.failure !== null}
+                  <ErrorView error={app.failure} heading="h1" onretry={() => app.load()} />
+                {:else if app.loading}
+                  <Loading />
+                {:else}
+                  <Banner />
+                  {#key router.key}
+                    <div class="screen">
+                      {#if router.current.screen === "occurrence"}
+                        <Occurrence id={router.current.id} fromDay={router.current.fromDay} />
+                      {:else if router.current.screen === "detail"}
+                        <Detail kind={router.current.kind} parts={router.current.parts} />
+                      {:else if router.current.screen === "disks"}
+                        <Disks />
+                      {:else if router.current.screen === "memory"}
+                        <Memory />
+                      {:else if router.current.screen === "events"}
+                        <Events />
+                      {:else if router.current.screen === "period"}
+                        <PeriodPage start={router.current.start} fromDay={router.current.fromDay} />
+                      {:else if router.current.screen === "programs"}
+                        <Programs />
+                      {:else if router.current.screen === "history"}
+                        <History month={router.current.month} scope={router.current.scope} day={router.current.day} />
+                      {:else if router.current.screen === "capture"}
+                        <Capture id={router.current.id} />
+                      {:else if router.current.screen === "captures"}
+                        <Captures forOccurrence={router.current.forOccurrence} />
+                      {:else if router.current.screen === "health"}
+                        <Health area={router.current.area} />
+                      {:else if router.current.screen === "dumps"}
+                        <Dumps id={router.current.id} group={router.current.group} />
+                      {:else if router.current.screen === "tweaks"}
+                        <Tweaks key={router.current.key} group={router.current.group} />
+                      {:else if router.current.screen === "tests"}
+                        <Tests device={router.current.device} />
+                      {:else if router.current.screen === "settings"}
+                        <Settings />
+                      {:else if router.current.screen === "activity"}
+                        <Activity tab={router.current.tab} />
+                      {/if}
+                    </div>
+                  {/key}
+                {/if}
+              </main>
+              <Related />
+            </div>
+          </div>
         </div>
       </div>
     {/if}
@@ -187,31 +190,26 @@
 
 <style>
   .win {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 44px minmax(0, 1fr);
+    position: relative;
     height: 100vh;
   }
   .stage {
-    position: relative;
-    grid-row: 2;
-    min-height: 0;
+    position: absolute;
+    inset: 0;
   }
   /* Each layer isolates its stacking, so a child's z-index never shows over the other layer. */
   .layer {
     position: absolute;
     inset: 0;
     isolation: isolate;
+    background: var(--main);
   }
   .layer.home {
     overflow: hidden;
-    background: var(--layer);
-    border-top: 1px solid var(--stroke2);
   }
   .layer.page {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
-    background: var(--base);
   }
   @media (min-width: 1280px) {
     .layer.page {
@@ -230,46 +228,60 @@
   :global(:root[data-frame="win10"]:not([data-maximized])) .win {
     border-top: 1px solid var(--stroke);
   }
-  .titlebar {
-    grid-row: 1;
-    grid-column: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    height: 44px;
-    padding: 0 18px;
-    color: var(--ink2);
-    font: 400 12.5px/1.35 var(--f);
-    user-select: none;
+  /* The empty strip at the top of a column: it moves the window and leaves room for the caption buttons. */
+  .tb {
+    flex: none;
+    height: 40px;
   }
-  :global(:root[data-inactive]) .titlebar {
-    color: var(--ink3);
+  .plain {
+    padding: 0 48px 48px;
+  }
+  .ct {
+    display: grid;
+    grid-template-rows: 40px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
   }
   .content {
-    container: content / inline-size;
     min-height: 0;
     overflow: auto;
-    background: var(--layer);
-    border: 1px solid var(--stroke2);
-    border-right: 0;
-    border-bottom: 0;
-    border-top-left-radius: 10px;
+    scrollbar-gutter: stable;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 56px;
+    max-width: 1560px;
+    padding: 0 28px 72px;
+  }
+  @media (max-width: 1499px) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 1279px) {
+    .grid {
+      padding: 0 24px 64px;
+    }
   }
   main {
-    max-width: 1060px;
-    padding: 26px 36px 70px;
+    container: content / inline-size;
+    min-width: 0;
+    max-width: 1180px;
     outline: none;
   }
   /* A screen that scrolls inside its own panel holds the page still. */
   .content:has(main.still) {
     overflow: clip;
   }
-  main.still {
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
+  .content:has(main.still) .grid {
     height: 100%;
     padding-bottom: 20px;
+  }
+  main.still {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   main.still > :global(.screen) {
     display: flex;
@@ -281,9 +293,11 @@
     .content:has(main.still) {
       overflow: auto;
     }
+    .content:has(main.still) .grid {
+      height: auto;
+    }
     main.still {
       display: block;
-      height: auto;
     }
   }
 </style>

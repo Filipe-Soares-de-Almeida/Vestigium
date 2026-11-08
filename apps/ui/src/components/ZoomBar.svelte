@@ -6,14 +6,13 @@
     zoom,
     range,
     plot,
-    hint,
   }: {
     zoom: Zoom;
-    /** The stretch on screen, worded for the reader; shown while zoomed. */
+    /** The stretch on screen, worded for the reader; announced while zoomed. */
     range: string;
-    /** The chart's plot, which gets focus back when the button that had it goes away. */
+    /** The chart's plot, which gets focus back when the reset button turns off under it. */
     plot?: HTMLElement;
-    /** Replaces the usual hint, for a chart with more gestures. */
+    /** Kept for callers that word their gestures; the buttons speak for themselves. */
     hint?: string;
   } = $props();
 
@@ -23,35 +22,36 @@
   }
 </script>
 
-<div class="zoombar">
-  <span class="hint" aria-hidden="true">{hint ?? t("ui.zoom.hint")}</span>
-  {#if zoom.view}
-    <span class="range">{range}</span>
-    <button type="button" class="clear" onclick={reset}>{t("ui.zoom.reset")}</button>
-  {/if}
+<div class="zoombar" role="group" aria-label={t("ui.zoom.label")}>
+  <button type="button" aria-label={t("ui.zoom.out")} title={t("ui.zoom.out")} disabled={!zoom.view} onclick={() => zoom.center(1.4)}>−</button>
+  <button type="button" aria-label={t("ui.zoom.in")} title={t("ui.zoom.in")} onclick={() => zoom.center(0.7)}>+</button>
+  <button type="button" disabled={!zoom.view} onclick={reset}>{t("ui.zoom.reset")}</button>
+  <span class="sr" aria-live="polite">{zoom.view ? t("ui.zoom.said", { range }) : ""}</span>
 </div>
 
 <style>
   .zoombar {
-    display: flex;
-    flex-wrap: wrap;
+    display: inline-flex;
     align-items: center;
-    gap: 2px 12px;
-    min-height: 26px;
+    gap: 2px;
+  }
+  button {
+    height: 26px;
+    min-width: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    background: var(--ctl);
     color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .hint {
-    margin-right: auto;
-    color: var(--ink3);
-  }
-  .clear {
-    padding: 2px 6px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: var(--accent);
-    font: 600 12.5px/1.35 var(--f);
+    font: 600 13px/1 var(--f);
     cursor: pointer;
+  }
+  button:hover:enabled {
+    background: var(--card2);
+    color: var(--ink);
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 </style>

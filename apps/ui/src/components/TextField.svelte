@@ -24,7 +24,7 @@
     padding: 0 12px;
     border: 1px solid color-mix(in srgb, var(--ink3) 55%, transparent);
     border-radius: 6px;
-    background: var(--layer);
+    background: var(--field);
     box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ink3) 55%, transparent);
     caret-color: var(--accent);
     color: var(--ink);

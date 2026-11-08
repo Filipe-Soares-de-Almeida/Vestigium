@@ -37,7 +37,7 @@
     border: 1px solid color-mix(in srgb, var(--ink3) 55%, transparent);
     border-radius: 6px;
     appearance: none;
-    background: var(--layer);
+    background: var(--field);
     box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ink3) 55%, transparent);
     color: var(--ink);
     font: 400 14px/1.35 var(--f);

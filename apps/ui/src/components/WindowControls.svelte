@@ -58,12 +58,12 @@
 
 <style>
   .captions {
-    grid-row: 1;
-    grid-column: 1 / -1;
-    justify-self: end;
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 30;
     display: flex;
-    height: 44px;
-    z-index: 1;
+    height: 40px;
   }
   .caption {
     display: grid;
@@ -73,7 +73,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--ink);
+    color: var(--ink2);
   }
   .caption:focus-visible {
     outline-offset: -2px;
@@ -84,10 +84,11 @@
     stroke-width: 1;
   }
   .caption:hover {
-    background: var(--stroke2);
+    background: var(--hover);
+    color: var(--ink);
   }
   .caption:active {
-    background: color-mix(in srgb, var(--stroke2) 70%, transparent);
+    background: var(--row-press);
   }
   .close:hover,
   .close:active {

@@ -5,6 +5,7 @@
   import { shellStatus } from "../lib/status";
   import Finder from "./Finder.svelte";
   import Icon from "./Icon.svelte";
+  import Mark from "./Mark.svelte";
   import StatusMark from "./StatusMark.svelte";
 
   const status = $derived(shellStatus());
@@ -15,6 +16,10 @@
 </script>
 
 <nav class="pane" aria-label={t("ui.shell.nav.label")}>
+  <div class="tb" data-tauri-drag-region="deep">
+    <Mark size={16} />
+    <span>{t("ui.shell.title")}</span>
+  </div>
   <a class="home" href={href.home()}>
     <Icon name="home" />
     <span>{t("ui.nav.home")}</span>
@@ -46,10 +51,25 @@
 
 <style>
   .pane {
+    position: relative;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding: 4px 0 0;
+    background: var(--band);
+  }
+  .tb {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding-left: 16px;
+    color: var(--ink2);
+    font-size: 12px;
+  }
+  :global(:root[data-inactive]) .tb {
+    color: var(--ink3);
   }
   .home {
     display: flex;
@@ -57,7 +77,7 @@
     align-items: center;
     gap: 16px;
     height: 40px;
-    margin: 0 8px;
+    margin: 8px 8px 0;
     padding: 0 12px;
     border-radius: 6px;
     color: var(--ink);
@@ -66,11 +86,14 @@
   }
   .home:hover,
   .item:hover {
-    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    background: var(--hover);
+    text-decoration: none;
   }
-  .home :global(svg),
-  .item :global(svg) {
+  .home > :global(svg),
+  .item > :global(svg:first-child) {
     flex: none;
+    width: 16px;
+    height: 16px;
     color: var(--ink2);
   }
   .find {
@@ -112,7 +135,7 @@
     background: var(--row-press);
   }
   .item[aria-current="page"] {
-    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    background: var(--hover);
   }
   .item[aria-current="page"] :global(svg:first-child) {
     color: var(--ink);
@@ -165,22 +188,19 @@
   .foot i.ok {
     background: var(--good);
   }
-  .foot i.paused {
-    background: var(--press);
-  }
+  .foot i.paused,
   .foot i.off {
-    border: 1.5px solid var(--ink3);
+    box-shadow: inset 0 0 0 2px var(--ink3);
   }
   @media (forced-colors: active) {
-    .foot i,
-    .foot i.ok,
-    .foot i.paused {
+    .foot i.ok {
       forced-color-adjust: none;
       background: CanvasText;
     }
+    .foot i.paused,
     .foot i.off {
-      background: Canvas;
-      border-color: CanvasText;
+      forced-color-adjust: none;
+      box-shadow: inset 0 0 0 2px CanvasText;
     }
     .item[aria-current="page"]::before {
       forced-color-adjust: none;

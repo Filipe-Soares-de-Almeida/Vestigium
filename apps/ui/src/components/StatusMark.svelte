@@ -72,7 +72,7 @@
   }
   .cut {
     fill: none;
-    stroke: var(--layer);
+    stroke: var(--main);
     stroke-width: 1.7;
     stroke-linecap: round;
     stroke-linejoin: round;

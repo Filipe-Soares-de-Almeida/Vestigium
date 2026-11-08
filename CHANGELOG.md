@@ -238,6 +238,11 @@ How to use this file:
 
 ### Changed
 
+- The window now has the Windows Settings look on every page: the navigation pane is a lighter band
+  with the app's name at its top, the page sits on a flat plane instead of a framed card, page titles
+  are light, links show no underline until pointed at, and buttons are plain Windows buttons. At 1500
+  px and wider a Related column beside the page lists where to go next. Time charts zoom with − and +
+  buttons and See all.
 - The watcher writes its history every 5 minutes instead of every minute, which cuts what it writes
   to disk by about two thirds. Activity's Today tab and the overload period detail still show the
   latest minutes, read from the watcher's memory. The black box keeps the last 5 minutes instead of

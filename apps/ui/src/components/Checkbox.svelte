@@ -57,7 +57,7 @@
     margin-top: 1px;
     border: 1.5px solid var(--ink2);
     border-radius: 6px;
-    background: var(--layer);
+    background: var(--field);
   }
   .check:hover .box {
     border-color: var(--ink);

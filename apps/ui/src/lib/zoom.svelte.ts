@@ -82,6 +82,11 @@ export class Zoom {
     this.view = null;
   }
 
+  /** Zooms by `factor` around the middle of what is on screen. */
+  center(factor: number): void {
+    this.zoom(factor, (this.#options.inset?.left ?? 0) + this.plotWidth / 2);
+  }
+
   /** Handles + − and 0, zooming around `px`; `false` when the key is none of them. */
   key(key: string, px: number): boolean {
     if (key === "+" || key === "=") this.zoom(0.8, px);
