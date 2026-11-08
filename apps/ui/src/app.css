@@ -517,6 +517,77 @@ th.fill {
   border-radius: 50%;
   background: var(--ink3);
 }
+/* Windows radio buttons: a ring that fills with the accent, a label and an optional hint under it. */
+.rds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+}
+.rds.v {
+  flex-direction: column;
+}
+.rd {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rd input {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.rd-c {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--ink2);
+  border-radius: 50%;
+  background: var(--field);
+}
+.rd:hover .rd-c {
+  border-color: var(--ink);
+}
+.rd input:checked + .rd-c {
+  border: 6px solid var(--accent);
+  background: var(--on-accent);
+}
+.rd input:focus-visible + .rd-c {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.rd-l {
+  display: grid;
+  line-height: 20px;
+}
+.rd-l small {
+  color: var(--ink2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+/* A labelled setting: its name, the control and a note under it. */
+.fld {
+  margin: 0 0 18px;
+}
+.fld-l {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.fld-n {
+  max-width: 64ch;
+  margin: 8px 0 0;
+  color: var(--ink2);
+  font-size: 13px;
+}
+
 /* The live dot of a chart that updates every second. */
 .live {
   display: inline-flex;

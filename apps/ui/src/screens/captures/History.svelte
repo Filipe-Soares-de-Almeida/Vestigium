@@ -1,7 +1,9 @@
 <script lang="ts">
   import Block from "../../components/Block.svelte";
   import RowCard from "../../components/RowCard.svelte";
+  import Icon from "../../components/Icon.svelte";
   import RowList from "../../components/RowList.svelte";
+  import StatusMark from "../../components/StatusMark.svelte";
   import type { Entry } from "../../lib/capture.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
@@ -17,15 +19,20 @@
     <p class="empty">{t("ui.captures.history.empty")}</p>
   {:else}
     {#if compare}
-      <p class="compare"><span>{t("ui.captures.compare.label")}</span><b>{compare}</b></p>
+      <p class="cmp"><Icon name="captures" /><span>{compare}</span></p>
     {/if}
     <RowList>
       {#each entries as entry (entry.summary.id)}
         {@const row = rowOf(entry)}
-        <RowCard href={href.capture(row.id)} icon={row.icon} title={row.title} sub={row.sub}>
+        <RowCard
+          href={href.capture(row.id)}
+          icon="captures"
+          title={row.title}
+          sub="{row.day.charAt(0).toLocaleUpperCase() + row.day.slice(1)}, {row.time} · {row.sub}"
+        >
           {#snippet right()}
             {#if fresh === row.id}<span class="new">{t("ui.captures.history.new")}</span>{/if}
-            <span class="when">{row.day}, {row.time}</span>
+            <StatusMark kind={row.quiet ? "ok" : "critical"} word={t(row.quiet ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} reveal />
           {/snippet}
         </RowCard>
       {/each}
@@ -34,23 +41,15 @@
 </Block>
 
 <style>
-  .empty {
-    margin: 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .compare {
-    display: grid;
-    gap: 2px;
+  .cmp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin: 0 0 12px;
     font-size: 14px;
   }
-  .compare span {
+  .cmp :global(svg) {
     color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .compare b {
-    font-weight: 400;
   }
   .new {
     padding: 1px 8px;
@@ -58,9 +57,5 @@
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     color: var(--ink);
     font: 600 12px/1.6 var(--f);
-  }
-  .when {
-    color: var(--ink2);
-    font-size: 12.5px;
   }
 </style>

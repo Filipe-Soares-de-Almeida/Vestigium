@@ -1,71 +1,79 @@
 <script lang="ts">
   import { captures } from "../../lib/capture.svelte";
   import { focusHere } from "../../lib/focus";
-  import { formatDuration, formatTime } from "../../lib/format";
+  import StatusMark from "../../components/StatusMark.svelte";
+  import { formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import type { CaptureRun } from "../../lib/types";
 
   let { run }: { run: CaptureRun } = $props();
 
   const left = $derived(Math.max(0, run.ends_ms - captures.now));
+  const clock = (ms: number) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  };
   const done = $derived(
     Math.min(100, Math.max(0, ((captures.now - run.started_ms) / Math.max(1, run.ends_ms - run.started_ms)) * 100)),
   );
 </script>
 
-<section class="wait" aria-labelledby="wait-title">
-  <div class="head">
-    <h2 id="wait-title" tabindex="-1" use:focusHere>{t("ui.captures.wait.title")}</h2>
-    <span class="left">{left > 0 ? t("ui.captures.wait.left", { time: formatDuration(left) }) : t("ui.captures.wait.finishing")}</span>
-  </div>
-  <div class="bar" aria-hidden="true"><i style:width="{done}%"></i></div>
-  <p>{t("ui.captures.wait.body", { time: formatTime(run.ends_ms) })}</p>
+<section class="wait" aria-labelledby="wait-title" role="status">
+  <p class="state">
+    <StatusMark kind="overload" word={t("ui.captures.wait.mark")} />
+    <span id="wait-title" tabindex="-1" use:focusHere>{t("ui.captures.wait.keep")}</span>
+  </p>
+  <p class="clock">
+    <b>{clock(captures.now - run.started_ms)}</b>
+    {t("ui.captures.wait.of", { total: clock(run.ends_ms - run.started_ms) })}
+    {#if left === 0}· {t("ui.captures.wait.finishing")}{/if}
+  </p>
+  <span class="pbar" aria-hidden="true"><i style:width="{done}%"></i></span>
+  <p class="note">{t("ui.captures.wait.body", { time: formatTime(run.ends_ms) })}</p>
 </section>
 
 <style>
-  .wait {
-    display: grid;
-    gap: 10px;
-    margin-top: 24px;
-  }
-  .head {
+  .state {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 4px 12px;
+    align-items: center;
+    gap: 6px 14px;
+    margin: 0 0 10px;
+    color: var(--ink2);
+    font-size: 13px;
   }
-  h2 {
-    margin: 0;
-    font: 400 20px/1.3 var(--fd);
+  .state span {
     outline: none;
   }
-  .left {
+  .clock {
+    margin: 6px 0 10px;
     color: var(--ink2);
-    font-weight: 600;
+    font-size: 14px;
   }
-  .bar {
-    height: 8px;
-    overflow: hidden;
-    border: 1px solid var(--stroke2);
-    border-radius: 999px;
-    background: var(--card2);
+  .clock b {
+    margin-right: 6px;
+    color: var(--ink);
+    font: 350 28px/1.1 var(--fd);
   }
-  .bar i {
+  .pbar {
     display: block;
-    min-width: 6px;
+    max-width: 420px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--stroke);
+  }
+  .pbar i {
+    display: block;
     height: 100%;
-    border-radius: 999px;
+    border-radius: 2px;
     background: var(--accent);
   }
-  p {
-    margin: 0;
-    color: var(--ink2);
-    line-height: 1.5;
-    max-width: 62ch;
-  }
   @media (forced-colors: active) {
-    .bar i {
+    .pbar i {
       forced-color-adjust: none;
       background: Highlight;
     }

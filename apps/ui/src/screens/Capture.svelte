@@ -6,12 +6,16 @@
   import BackLink from "../components/BackLink.svelte";
   import Block from "../components/Block.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
+  import RowList from "../components/RowList.svelte";
+  import StatusMark from "../components/StatusMark.svelte";
   import Steps from "../components/Steps.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { captures } from "../lib/capture.svelte";
-  import { formatDuration, formatTime } from "../lib/format";
+  import { formatDuration } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { go, href } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import type { CaptureDto, OccurrenceSummary } from "../lib/types";
@@ -20,8 +24,7 @@
   import Apps from "./capture/Apps.svelte";
   import Drivers from "./capture/Drivers.svelte";
   import { buildResult, resultMarkdown } from "./capture/words";
-  import { toneOf } from "./today/day";
-  import { causeIcon, occurrenceTitle } from "./today/text";
+  import OccurrenceRow from "./today/OccurrenceRow.svelte";
 
   let { id }: { id: number } = $props();
 
@@ -34,6 +37,12 @@
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const view = $derived(dto ? buildResult(dto, level) : null);
   const canStart = $derived(app.running && captures.run === null && !captures.asking);
+
+  relatedLinks(() => [
+    ...during.slice(0, 1).map((o) => ({ label: t("ui.related.back_report"), href: href.occurrence(o.id) })),
+    { label: t("ui.related.new_capture"), href: href.captures() },
+    { label: t("ui.related.events_today"), href: href.events() },
+  ]);
 
   async function load(): Promise<void> {
     failure = null;
@@ -67,7 +76,7 @@
   }
 </script>
 
-<BackLink href={href.captures()} label={t("ui.common.back_to", { place: t("ui.captures.title") })} />
+<BackLink href={href.captures()} label={t("ui.captures.title")} />
 
 {#if failure !== null}
   <div class="failure">
@@ -77,74 +86,60 @@
   <h1 class="sr">{t("ui.captures.crumb")}</h1>
   <Loading />
 {:else if !dto || !view}
-  <section class="card missing">
-    <h1>{t("ui.captures.missing.title")}</h1>
-    <p>{t("ui.captures.missing.body")}</p>
-    <a class="btn" href={href.captures()}>{t("ui.captures.missing.back")}</a>
-  </section>
+  <PageHead title={t("ui.captures.missing.title")} sub={t("ui.captures.missing.body")} />
+  <div class="acts"><a class="btn" href={href.captures()}>{t("ui.captures.missing.back")}</a></div>
 {:else}
-  <div class="head">
-    <div>
-      <h1>{view.title}</h1>
-      <p class="meta">{view.meta}</p>
-      <div class="tools">
-        <button type="button" class="btn" onclick={copy}><Icon name="copy" />{t("ui.captures.copy")}</button>
-      </div>
+  {#snippet copyButton()}
+    <button type="button" class="btn" onclick={copy}><Icon name="copy" />{t("ui.captures.copy")}</button>
+  {/snippet}
+  <PageHead title={view.title} sub={view.meta} actions={copyButton} />
+  <div class="facts">
+    <div class="fact">
+      <span class="fact-l">{t("ui.occurrence.fact.duration")}</span>
+      <span class="fact-v">
+        {view.minutes < 60 ? t("ui.captures.dur.name", { minutes: view.minutes }) : formatDuration(view.minutes * 60_000)}
+        {t("ui.captures.figure.caption")}
+      </span>
     </div>
-    <p class="figure">
-      {view.minutes < 60 ? t("ui.captures.dur.name", { minutes: view.minutes }) : formatDuration(view.minutes * 60_000)}
-      <small>{t("ui.captures.figure.caption")}</small>
-    </p>
+    <div class="fact">
+      <span class="fact-l">{t("ui.captures.fact.result")}</span>
+      <span class="fact-v">
+        <StatusMark kind={view.none ? "ok" : "critical"} word={t(view.none ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} />
+      </span>
+    </div>
   </div>
 
   {#if view.notes.length}
-    <div class="notes">
+    <ul class="notes">
       {#each view.notes as note, i (i)}
-        <div class="note" role="note">
+        <li role="note">
           <Icon name={note.icon} />
-          <div>
-            <b>{note.head}</b>
-            <span>{note.body}</span>
-            {#if note.reason}<code>{note.reason}</code>{/if}
-          </div>
-        </div>
+          <span><b>{note.head}</b> {note.body}{#if note.reason}<code>{note.reason}</code>{/if}</span>
+        </li>
       {/each}
-    </div>
+    </ul>
   {/if}
 
-  <div class="split">
+  <div class="cols2">
     <Block title={t("ui.captures.conclusion.title")}>
       {#if view.main}
-        <div class="cause">
-          <span class="icochip"><Icon name={view.main.icon} /></span>
-          <div>
-            <b>{view.main.name}</b>
-            <small>{view.main.sub}</small>
-          </div>
-        </div>
-        <p class="summary">{view.main.summary}</p>
-        <ul class="ev">
+        <p class="cz-n">{view.main.name}</p>
+        <p class="cz-m">{view.main.sub}</p>
+        <p class="p">{view.main.summary}</p>
+        <ul class="ev-l">
           {#each view.main.evidence as line, i (i)}
-            <li>
-              <span class="bullet" aria-hidden="true"></span>
-              <span>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</span>
-            </li>
+            <li>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</li>
           {/each}
         </ul>
       {:else}
-        <div class="cause">
-          <span class="icochip quiet"><Icon name="wave" /></span>
-          <div>
-            <b>{t("ui.captures.none.head")}</b>
-            <small>{view.measured}</small>
-          </div>
-        </div>
-        <p class="summary">{t("ui.captures.none.body")}</p>
-        <p class="aside">{t("ui.captures.none.hint")}</p>
-        <div class="actions">
+        <p class="cz-n">{t("ui.captures.none.head")}</p>
+        <p class="cz-m">{view.measured}</p>
+        <p class="p">{t("ui.captures.none.body")}</p>
+        <p class="note">{t("ui.captures.none.hint")}</p>
+        <div class="acts">
           {#if canStart && view.minutes < 10}
             <button type="button" class="btn accent" onclick={again}>
-              <Icon name="shield" />{t("ui.captures.none.ten")}
+              <Icon name="start" />{t("ui.captures.none.ten")}
             </button>
           {/if}
           <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
@@ -152,47 +147,40 @@
       {/if}
     </Block>
 
-    <div class="stack">
+    <div>
       <Block title={t("ui.captures.todo.title")}>
         {#if view.steps.length}
           <Steps steps={view.steps} />
         {:else}
-          <p class="muted">{t("ui.captures.todo.none")}</p>
+          <p class="empty">{t("ui.captures.todo.none")}</p>
         {/if}
       </Block>
 
       {#if during.length}
         <Block title={t("ui.captures.during.title")}>
-          <ul>
+          <RowList>
             {#each during as o (o.id)}
-              <li>
-                <a class="row" href={href.occurrence(o.id)}>
-                  <span class="icochip tone-{toneOf(o)}"><Icon name={causeIcon(o.cause)} /></span>
-                  <span class="what"><b>{occurrenceTitle(o, level)}</b></span>
-                  <span class="when">{formatTime(o.start_ms)}<br />{formatDuration(o.end_ms - o.start_ms)}</span>
-                  <span class="chev"><Icon name="chevron" /></span>
-                </a>
-              </li>
+              <li><OccurrenceRow {o} {level} /></li>
             {/each}
-          </ul>
+          </RowList>
         </Block>
       {/if}
     </div>
   </div>
+
+  {#if view.hasMarks}
+    <Alignment {dto} {level} summary={view.alignSummary} title={t("ui.captures.align.title")} />
+  {:else}
+    <Block title={t("ui.captures.align.title")}>
+      <p class="empty">{view.alignSummary}</p>
+    </Block>
+  {/if}
 
   {#if view.drivers && view.drivers.rows.length}
     <Block title={t("ui.captures.drivers.title")}>
       <Drivers table={view.drivers} {level} captureId={dto.id} />
     </Block>
   {/if}
-
-  <Block title={t("ui.captures.align.title")}>
-    {#if view.hasMarks}
-      <Alignment {dto} {level} summary={view.alignSummary} />
-    {:else}
-      <p class="muted flat">{view.alignSummary}</p>
-    {/if}
-  </Block>
 
   {#if view.apps}
     <Block title={t("ui.captures.apps.title")}>
@@ -202,226 +190,75 @@
 {/if}
 
 <style>
-  .head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
-    align-items: end;
-    margin: 14px 0;
-  }
-  .head h1 {
-    font: 600 22px/1.3 var(--fd);
-    letter-spacing: 0;
-  }
-  .meta {
-    margin: 4px 0 0;
-    color: var(--ink2);
-  }
-  .tools {
+  .facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-top: 12px;
+    gap: 12px 52px;
+    margin: 22px 0 0;
   }
-  .figure {
-    margin: 0;
-    font: 600 40px/1 var(--fd);
-    letter-spacing: -0.02em;
-    text-align: right;
-    white-space: nowrap;
+  .fact {
+    display: grid;
+    gap: 3px;
   }
-  .figure small {
-    display: block;
-    margin-top: 4px;
+  .fact-l {
     color: var(--ink2);
-    font: 400 12.5px/1.35 var(--f);
-    letter-spacing: 0;
+    font-size: 12.5px;
+  }
+  .fact-v {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 15px;
+  }
+  .fact-v :global(.status) {
+    color: var(--ink);
+    font-size: 15px;
   }
   .notes {
     display: grid;
     gap: 8px;
-    margin-bottom: 14px;
-  }
-  .note {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-    padding: 10px 14px;
-    border: 1px solid var(--stroke2);
-    border-radius: 12px;
-    background: var(--card2);
-    font-size: 13.5px;
-    line-height: 1.45;
-  }
-  .note :global(svg) {
-    margin-top: 1px;
-    color: var(--ink2);
-  }
-  .note b {
-    display: block;
-    font-weight: 600;
-  }
-  .note span {
-    color: var(--ink2);
-  }
-  .note code {
-    display: block;
-    margin-top: 4px;
-    color: var(--ink2);
-    font: 400 12.5px var(--f);
-  }
-  .sub {
-    margin: 0 0 8px;
-    font: 600 15px/1.3 var(--f);
-  }
-  .cause {
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-  .cause .icochip {
-    width: 44px;
-    height: 44px;
-    background: var(--busy-t);
-    color: var(--busy);
-  }
-  .cause .icochip.quiet {
-    background: var(--card2);
-    border: 1px solid var(--stroke2);
-    color: var(--ink2);
-  }
-  .cause b {
-    display: block;
-    font-size: 16.5px;
-    font-weight: 600;
-    line-height: 1.35;
-  }
-  .cause small {
-    color: var(--ink2);
-    font-size: 13px;
-  }
-  .summary {
-    margin: 0 0 14px;
-    font-size: 16.5px;
-    line-height: 1.55;
-  }
-  .aside {
-    margin: 0 0 14px;
-    color: var(--ink2);
-    font-size: 13.5px;
-    line-height: 1.5;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .ev {
-    display: grid;
-    gap: 8px;
-    margin: 0;
+    max-width: 76ch;
+    margin: 18px 0 0;
     padding: 0;
+    color: var(--ink2);
+    font-size: 13.5px;
     list-style: none;
   }
-  .ev li {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 8px;
-    line-height: 1.45;
+  .notes li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
   }
-  .bullet {
-    width: 6px;
-    height: 6px;
-    margin: 0.5em 0 0 6px;
-    border-radius: 50%;
-    background: var(--accent);
+  .notes :global(svg) {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
   }
-  .ev small {
+  .notes b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .notes code {
     display: block;
+    margin-top: 4px;
+    font: 12.5px var(--mono);
+  }
+  .cz-n {
+    margin: 0;
+    font: 600 16px/1.35 var(--f);
+  }
+  .cz-m {
+    margin: 2px 0 10px;
     color: var(--ink2);
     font-size: 13px;
   }
-  .list {
-    padding: 10px;
-  }
-  .row {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) auto 14px;
-    gap: 12px;
-    align-items: center;
-    padding: 9px 10px;
-    border-radius: 8px;
-    color: inherit;
-    text-decoration: none;
-  }
-  .row:hover {
-    background: var(--card2);
-  }
-  .what b {
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  .when {
+  .ev-l small {
+    display: block;
     color: var(--ink2);
-    font-size: 12.5px;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-  }
-  .chev {
-    display: grid;
-    color: var(--ink3);
-  }
-  .tone-busy {
-    background: var(--busy-t);
-    color: var(--busy);
-  }
-  .tone-press {
-    background: var(--press-t);
-    color: var(--press);
-  }
-  .tone-freeze {
-    background: var(--freeze-t);
-    color: var(--freeze);
-  }
-  .wide {
-    margin-top: 14px;
-  }
-  .flat {
-    margin: 0;
+    font-size: 13px;
   }
   .failure {
     margin-top: 14px;
-  }
-  .missing {
-    max-width: 62ch;
-    margin-top: 14px;
-  }
-  .missing h1 {
-    font: 600 18px/1.3 var(--fd);
-    margin: 0 0 6px;
-  }
-  .missing p {
-    margin: 0 0 14px;
-    color: var(--ink2);
-  }
-  @container content (max-width: 720px) {
-    .head {
-      grid-template-columns: minmax(0, 1fr);
-      align-items: start;
-    }
-    .figure {
-      text-align: left;
-    }
-  }
-  @media (forced-colors: active) {
-    .bullet {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
   }
 </style>

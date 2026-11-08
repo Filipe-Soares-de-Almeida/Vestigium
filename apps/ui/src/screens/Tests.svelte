@@ -751,60 +751,6 @@
   .fld {
     margin: 14px 0 0;
   }
-  .fld-l {
-    margin: 0 0 8px;
-    font-size: 14px;
-  }
-  .fld-n {
-    max-width: 64ch;
-    margin: 8px 0 0;
-    color: var(--ink2);
-    font-size: 13px;
-  }
-  .rds {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 28px;
-  }
-  .rd {
-    position: relative;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 5px 0;
-    font-size: 14px;
-    line-height: 20px;
-    cursor: pointer;
-  }
-  .rd input {
-    position: absolute;
-    top: 5px;
-    left: 0;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    opacity: 0;
-    cursor: pointer;
-  }
-  .rd-c {
-    flex: none;
-    width: 20px;
-    height: 20px;
-    border: 1.5px solid var(--ink2);
-    border-radius: 50%;
-    background: var(--field);
-  }
-  .rd:hover .rd-c {
-    border-color: var(--ink);
-  }
-  .rd input:checked + .rd-c {
-    border: 6px solid var(--accent);
-    background: var(--on-accent);
-  }
-  .rd input:focus-visible + .rd-c {
-    outline: 2px solid var(--ink);
-    outline-offset: 2px;
-  }
   .running {
     margin-top: 24px;
   }

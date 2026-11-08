@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Block from "../../components/Block.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
@@ -7,7 +8,7 @@
   import { alignment, type Mark } from "./model";
   import { markLine } from "./words";
 
-  let { dto, level, summary }: { dto: CaptureDto; level: DetailLevel; summary: string } = $props();
+  let { dto, level, summary, title }: { dto: CaptureDto; level: DetailLevel; summary: string; title: string } = $props();
 
   const TOP = 26;
   const LANE = 38;
@@ -147,6 +148,11 @@
   }
 </script>
 
+{#snippet bar()}
+  <ZoomBar {zoom} {range} {plot} />
+{/snippet}
+
+<Block {title} actions={bar}>
 <div class="align">
   <div class="labels" aria-hidden="true">
     {#each LANES as lane (lane)}
@@ -224,9 +230,9 @@
   <span><span class="state-dot" style:background="var(--busy)"></span>{t("ui.captures.chart.key.alone")}</span>
   <span>{t("ui.captures.chart.key.size")}</span>
 </div>
-<ZoomBar {zoom} {range} {plot} />
-<p class="summary" id="align-summary">{summary}</p>
+<p class="note" id="align-summary">{summary}</p>
 <p class="sr" aria-live="polite">{said}</p>
+</Block>
 
 <style>
   .align {
@@ -357,12 +363,6 @@
     width: 8px;
     height: 8px;
     margin-right: 6px;
-  }
-  .summary {
-    margin: 10px 0 0;
-    max-width: 80ch;
-    font-size: 13.5px;
-    line-height: 1.5;
   }
   @container content (max-width: 720px) {
     .align {

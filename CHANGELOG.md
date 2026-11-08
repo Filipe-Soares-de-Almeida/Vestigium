@@ -238,6 +238,13 @@ How to use this file:
 
 ### Changed
 
+- Captures sets New capture beside the past captures. The length is chosen from radio buttons with a
+  hint each, the permission note stands out above the other notes, and Start capture comes before the
+  note that the capture goes on with the window closed. A running capture shows its elapsed time large
+  over a thin bar. Past captures show the day and time with their result, and a mark for a suspect
+  driver or nothing found. A capture's report opens with its duration and result, sets the conclusion
+  beside what to do, shows the timeline with its zoom buttons, lists drivers with their longest call
+  against the recommended 0.1 ms on a bar, and apps as plain rows.
 - Dumps has one bar under its summary to select all, delete the selection and see its size, with the
   confirmation in place instead of a dialog. Each row keeps its check box beside it and shows whether
   it was read, when it was written and its size; deleted dumps are counted in one line. Space used,

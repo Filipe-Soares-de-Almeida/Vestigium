@@ -89,6 +89,10 @@ export interface DriverLine {
   over: string;
   /** The longest call against the longest of the table, 0 to 100. */
   bar: number;
+  /** Where the recommended limit falls on the same scale, 0 to 100. */
+  limit: number;
+  /** How many times the recommended limit the longest call took; null when it stayed inside. */
+  ratio: string | null;
   dpcCalls: string;
   isrCalls: string;
   total: string;
@@ -345,6 +349,8 @@ function driverTable(dto: CaptureDto, level: DetailLevel, all: DriverRow[]): Dri
       longest: max,
       over: formatNumber(r.over),
       bar: Math.max(3, (r.times / widest) * 100),
+      limit: (1 / widest) * 100,
+      ratio: r.times > 1 ? timesText(r.times) : null,
       dpcCalls: r.dpc.count ? formatNumber(r.dpc.count) : "—",
       isrCalls: r.isr.count ? formatNumber(r.isr.count) : "—",
       total: totalText(r.totalUs),
