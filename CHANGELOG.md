@@ -238,6 +238,14 @@ How to use this file:
 
 ### Changed
 
+- Settings pages are titled sections instead of setting cards. Appearance is now Colors: the color
+  mode is three radio buttons and each color theme is a tile with its accent and state colors. Reports
+  chooses the detail level with radio buttons, each with its hint. Monitoring groups its switches
+  under Startup and Sensitivity, each named over the switch with its note under it. Data retention
+  lists each kind of data with its period and expected size, and the total expected space in large
+  type. Updates shows the installed version with Check now and the release notes in the page. Privacy
+  and data sets the kept data and the folder button apart from deleting the history, which asks for
+  confirmation in place.
 - Captures sets New capture beside the past captures. The length is chosen from radio buttons with a
   hint each, the permission note stands out above the other notes, and Start capture comes before the
   note that the capture goes on with the window closed. A running capture shows its elapsed time large

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import ReleaseNotes from "../../components/ReleaseNotes.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { type Release, updates } from "../../lib/update.svelte";
@@ -6,7 +8,10 @@
   import Toggle from "./Toggle.svelte";
 
   let notes = $state<Release[] | null>(null);
-  let showing = $state(false);
+
+  onMount(() => {
+    void updates.allNotes().then((found) => (notes = found));
+  });
 
   const status = $derived.by((): { text: string; error: boolean } | null => {
     if (updates.checking) return { text: t("ui.settings.updates.checking"), error: false };
@@ -23,56 +28,39 @@
     if (updates.result === "available") updates.dialog = "available";
   }
 
-  async function toggleNotes(): Promise<void> {
-    showing = !showing;
-    if (showing && notes === null) notes = await updates.allNotes();
-  }
 </script>
 
-<Row id="upd-auto" title={t("ui.settings.updates.auto")} hint={t("ui.settings.updates.auto_hint")}>
+<Row id="upd-auto" title={t("ui.settings.updates.section")} label={t("ui.settings.updates.auto")} hint={t("ui.settings.updates.auto_hint")}>
   <Toggle id="upd-auto" checked={updates.prefs?.check === true} onchange={(on) => updates.setCheck(on)} />
 </Row>
-<Row id="upd-version" title={t("ui.settings.updates.version")} hint={t("ui.settings.updates.version_hint", { version: updates.version })}>
-  <button type="button" class="btn" disabled={updates.checking} onclick={checkNow}>
-    {updates.result === "failed" ? t("ui.settings.updates.retry") : t("ui.settings.updates.check")}
-  </button>
-</Row>
-{#if status}
-  <p class="status" class:error={status.error} role="status">{status.text}</p>
-{/if}
-<Row id="upd-news" title={t("ui.settings.updates.news")} hint={t("ui.settings.updates.news_hint")}>
-  <button type="button" class="btn" aria-expanded={showing} onclick={toggleNotes}>
-    {showing ? t("ui.settings.updates.news_hide") : t("ui.settings.updates.news_show")}
-  </button>
-</Row>
-{#if showing && notes !== null}
-  <div class="notes">
-    {#if notes.length}
-      <ReleaseNotes releases={notes} />
-    {:else}
-      <p>{t("ui.settings.updates.news_none")}</p>
-    {/if}
+<Row id="upd-version" title={t("ui.settings.updates.installed")} hint={t("ui.settings.updates.version_hint", { version: updates.version })} wide>
+  <div class="acts">
+    <button type="button" class="btn accent" disabled={updates.checking} onclick={checkNow}>
+      {updates.result === "failed" ? t("ui.settings.updates.retry") : t("ui.settings.updates.check")}
+    </button>
+    {#if status}<span class="status" class:error={status.error} role="status">{status.text}</span>{/if}
   </div>
-{/if}
+</Row>
+<Row id="upd-news" title={t("ui.settings.updates.news")} wide>
+  {#if notes === null}
+    <p class="empty">{t("ui.common.loading")}</p>
+  {:else if notes.length}
+    <ReleaseNotes releases={notes} />
+  {:else}
+    <p class="empty">{t("ui.settings.updates.news_none")}</p>
+  {/if}
+</Row>
 
 <style>
+  .acts {
+    margin-top: 0;
+  }
   .status {
-    margin: 0 0 4px;
-    padding: 0 18px;
     color: var(--ink2);
     font-size: 13px;
   }
   .status.error {
-    color: var(--press);
-  }
-  .notes {
-    padding: 14px 18px;
-    border: 1px solid var(--stroke2);
-    border-radius: 8px;
-    background: var(--card);
-  }
-  .notes p {
-    margin: 0;
-    color: var(--ink2);
+    color: var(--ink);
+    font-weight: 600;
   }
 </style>

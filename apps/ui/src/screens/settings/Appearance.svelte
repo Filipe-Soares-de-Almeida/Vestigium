@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Segmented from "../../components/Segmented.svelte";
   import { app } from "../../lib/app.svelte";
   import { errorText } from "../../lib/errors";
   import { radioGroup } from "../../lib/focus";
@@ -30,18 +29,26 @@
   }
 </script>
 
-<Row id="mode" title={t("ui.settings.appearance.mode")} hint={t("ui.settings.appearance.mode.hint")}>
-  <Segmented
-    label={t("ui.settings.appearance.mode")}
-    options={MODES.map((mode) => ({ value: mode, label: t(`ui.settings.appearance.mode.${mode}`) }))}
-    value={settings.theme}
-    disabled={!app.editable}
-    onchange={(theme) => save({ theme })}
-  />
+<Row id="mode" title={t("ui.settings.appearance.mode")}>
+  <div class="rds v" role="radiogroup" aria-labelledby="mode-name">
+    {#each MODES as mode (mode)}
+      <label class="rd">
+        <input
+          type="radio"
+          name="theme-mode"
+          checked={settings.theme === mode}
+          disabled={!app.editable}
+          onchange={() => save({ theme: mode })}
+        />
+        <span class="rd-c" aria-hidden="true"></span>
+        <span class="rd-l">{t(`ui.settings.appearance.mode.${mode}`)}</span>
+      </label>
+    {/each}
+  </div>
 </Row>
 <Row id="color" title={t("ui.settings.appearance.color")} hint={t("ui.settings.appearance.color.hint")} wide>
   <div
-    class="swatches"
+    class="sw"
     role="radiogroup"
     aria-labelledby="color-name"
     aria-describedby="color-hint"
@@ -53,89 +60,82 @@
       <button
         type="button"
         role="radio"
+        class="sw-b"
         aria-checked={theme === settings.color_theme}
         tabindex={theme === settings.color_theme ? 0 : -1}
         data-focus="color:{theme}"
         disabled={!app.editable}
         onclick={() => theme !== settings.color_theme && save({ color_theme: theme })}
       >
-        <span class="sw" data-swatch={SWATCH[theme]} aria-hidden="true">
-          <i class="calm"></i><i class="busy"></i><i class="press"></i><i class="accent"></i>
-        </span>
-        {theme === "Red" ? t("ui.settings.appearance.color.default", { name }) : name}
+        <span class="sw-c" data-swatch={SWATCH[theme]} aria-hidden="true"><i></i></span>
+        <span class="sw-n">{theme === "Red" ? t("ui.settings.appearance.color.default", { name }) : name}</span>
       </button>
     {/each}
   </div>
 </Row>
 
 <style>
-  .swatches {
+  .sw {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
   }
-  button {
-    display: inline-flex;
-    align-items: center;
+  .sw-b {
+    display: grid;
+    justify-items: center;
+    align-content: start;
     gap: 10px;
-    padding: 6px 12px 6px 6px;
-    border: 1px solid var(--stroke2);
+    width: 132px;
+    padding: 10px 6px;
+    border: 0;
     border-radius: 10px;
-    background: var(--card2);
+    background: none;
     color: var(--ink);
-    font: 600 13px/1.4 var(--f);
+    font: 400 13px/1.4 var(--f);
     cursor: pointer;
   }
-  button:hover:enabled {
-    border-color: var(--stroke);
+  .sw-b:hover:enabled {
+    background: var(--hover);
   }
-  button[aria-checked="true"] {
-    border-color: transparent;
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-  button:disabled {
+  .sw-b:disabled {
     cursor: default;
     color: var(--ink3);
   }
-  .sw {
-    display: flex;
-    flex: none;
-    align-items: flex-end;
-    gap: 2px;
-    width: 44px;
-    height: 28px;
-    padding: 5px;
-    border: 1px solid var(--stroke2);
-    border-radius: 7px;
-    background: var(--base);
-  }
-  .sw i {
-    flex: 1;
-    height: 70%;
-    border-radius: 2px;
-  }
-  .sw .calm {
-    background: var(--calm);
-  }
-  .sw .busy {
-    background: var(--busy);
-  }
-  .sw .press {
-    background: var(--press);
-  }
-  .sw .accent {
-    height: 100%;
+  .sw-c {
+    position: relative;
+    display: block;
+    width: 64px;
+    height: 64px;
+    overflow: hidden;
+    border-radius: 12px;
     background: var(--accent);
   }
-  button:disabled .sw {
+  .sw-c i {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 16px;
+    background: linear-gradient(90deg, var(--calm) 0 33.4%, var(--busy) 33.4% 66.7%, var(--press) 66.7%);
+  }
+  .sw-b[aria-checked="true"] .sw-c {
+    box-shadow:
+      0 0 0 2px var(--main),
+      0 0 0 4px var(--ink);
+  }
+  .sw-b[aria-checked="true"] .sw-n {
+    font-weight: 600;
+  }
+  .sw-b:disabled .sw-c {
     opacity: 0.6;
   }
   @media (forced-colors: active) {
-    button[aria-checked="true"] {
+    .sw-b[aria-checked="true"] {
       outline: 2px solid Highlight;
       outline-offset: 1px;
     }
-    .sw {
+    .sw-c,
+    .sw-c i {
       forced-color-adjust: none;
     }
   }

@@ -61,7 +61,7 @@
   }
 </script>
 
-<Row id="autostart" title={t("ui.settings.watching.autostart")} hint={t("ui.settings.watching.autostart.hint")}>
+<Row id="autostart" title={t("ui.settings.watching.startup")} label={t("ui.settings.watching.autostart")} hint={t("ui.settings.watching.autostart.hint")}>
   {#if autostart === null}
     <span class="unknown">{t("ui.settings.watching.autostart.unknown")}</span>
   {:else}
@@ -75,7 +75,8 @@
 </Row>
 <Row
   id="sensitive"
-  title={t("ui.settings.watching.sensitive")}
+  title={t("ui.settings.watching.sensitivity")}
+  label={t("ui.settings.watching.sensitive")}
   hint={sensitiveUntil !== null
     ? t("ui.settings.watching.sensitive.until", { time: formatTime(sensitiveUntil) })
     : t("ui.settings.watching.sensitive.hint")}

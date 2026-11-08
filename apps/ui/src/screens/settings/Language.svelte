@@ -22,7 +22,7 @@
   }
 </script>
 
-<Row id="language" title={t("ui.settings.language.app")} hint={t("ui.settings.language.app.hint")}>
+<Row id="language" title={t("ui.settings.language.section")} hint={t("ui.settings.language.app.hint")}>
   <select
     value={settings.language}
     disabled={!app.editable}

@@ -1,8 +1,11 @@
 <script lang="ts">
+  import PageHead from "../components/PageHead.svelte";
   import { app } from "../lib/app.svelte";
   import { t } from "../lib/i18n.svelte";
   import { SETTINGS_PAGES } from "../lib/groups";
   import { router } from "../lib/router.svelte";
+  import { shellStatus } from "../lib/status";
+  import { updates } from "../lib/update.svelte";
   import Appearance from "./settings/Appearance.svelte";
   import History from "./settings/History.svelte";
   import Language from "./settings/Language.svelte";
@@ -18,13 +21,21 @@
     return (SETTINGS_PAGES as readonly string[]).includes(wanted ?? "") ? (wanted as Category) : "appearance";
   });
   const settings = $derived(app.settings?.settings ?? null);
+  /** The line under each page's title: what the page is about, the watcher's state or the version. */
+  const sub = $derived.by(() => {
+    if (current === "watching") return t(shellStatus().key);
+    if (current === "updates" || current === "privacy") return t("ui.settings.updates.version_hint", { version: updates.version });
+    return t(`ui.settings.sub.${current}`);
+  });
 </script>
 
-<h1>{t(`ui.settings.category.${current}`)}</h1>
 {#if settings === null}
-  <p class="lede">{t("ui.settings.unavailable")}</p>
+  <PageHead title={t(`ui.settings.category.${current}`)} sub={t("ui.settings.unavailable")} />
 {:else}
-  <p class="lede">{app.editable ? t("ui.settings.lede") : t("ui.settings.read_only")}</p>
+  <PageHead
+    title={t(`ui.settings.category.${current}`)}
+    sub={app.editable ? sub : t("ui.settings.read_only")}
+  />
   <div class="setlist">
     {#if current === "appearance"}
       <Appearance {settings} />
@@ -45,18 +56,13 @@
 {/if}
 
 <style>
-  .lede {
-    max-width: 70ch;
-    margin: 6px 0 18px;
-    color: var(--ink2);
-    font-size: 16px;
-  }
-  .setlist {
-    display: grid;
-    gap: 4px;
+  .setlist > :global(.sec:first-child) {
+    margin-top: 24px;
+    padding-top: 0;
+    border-top: 0;
   }
   .setlist :global(select) {
-    height: 32px;
+    height: 34px;
     min-width: 0;
     padding: 0 10px;
     border: 1px solid color-mix(in srgb, var(--ink3) 55%, transparent);

@@ -6,6 +6,7 @@
   import { errorText } from "../../lib/errors";
   import { t } from "../../lib/i18n.svelte";
   import { toast } from "../../lib/toast.svelte";
+  import Icon from "../../components/Icon.svelte";
   import Row from "./Row.svelte";
   import { type About, about, formatSize, openDataFolder } from "./data";
 
@@ -58,9 +59,9 @@
   }
 </script>
 
-<Row id="privacy" wide>
-  <p class="local">{t("ui.settings.privacy.local")}</p>
-  <dl class="facts">
+<p class="lede">{t("ui.settings.privacy.local")}</p>
+<Row id="privacy-data" title={t("ui.settings.privacy.data")} wide>
+  <dl class="kv">
     <div>
       <dt>{t("ui.settings.privacy.version")}</dt>
       <dd>{info?.version ?? "…"}</dd>
@@ -77,13 +78,28 @@
     </div>
   </dl>
   {#if failure !== null}
-    <p class="failure" role="status">{errorText(failure)}</p>
+    <p class="note" role="status">{errorText(failure)}</p>
   {/if}
-  <div class="buttons">
+  <div class="acts">
     <button type="button" class="btn" disabled={info?.data_bytes === null} onclick={open}>
-      {t("ui.settings.privacy.open")}
+      <Icon name="outside" />{t("ui.settings.privacy.open")}
     </button>
-    {#if !confirming}
+  </div>
+</Row>
+<Row id="privacy-clear" title={t("ui.settings.privacy.clear")} wide>
+  {#if confirming}
+    <div class="confirm" role="group" aria-label={t("ui.settings.privacy.clear")}>
+      <span>{t("ui.settings.privacy.clear_ask")}</span>
+      <button type="button" class="btn" disabled={clearing} bind:this={confirmButton} onclick={clear}>
+        <Icon name="trash" />{t("ui.settings.privacy.clear_confirm")}
+      </button>
+      <button type="button" class="btn" disabled={clearing} onclick={cancel}>
+        {t("ui.settings.privacy.clear_cancel")}
+      </button>
+    </div>
+  {:else}
+    <p class="p">{t("ui.settings.privacy.clear_hint")}</p>
+    <div class="acts">
       <button
         type="button"
         class="btn"
@@ -91,69 +107,44 @@
         bind:this={clearButton}
         onclick={ask}
       >
-        {t("ui.settings.privacy.clear")}
+        <Icon name="trash" />{t("ui.settings.privacy.clear_more")}
       </button>
-    {/if}
-  </div>
-  {#if confirming}
-    <div class="confirm">
-      <p>{t("ui.settings.privacy.clear_ask")}</p>
-      <div class="buttons">
-        <button type="button" class="btn accent" disabled={clearing} bind:this={confirmButton} onclick={clear}>
-          {t("ui.settings.privacy.clear_confirm")}
-        </button>
-        <button type="button" class="btn" disabled={clearing} onclick={cancel}>
-          {t("ui.settings.privacy.clear_cancel")}
-        </button>
-      </div>
     </div>
   {/if}
 </Row>
 
 <style>
-  p {
-    margin: 0;
+  .lede {
+    margin: 16px 0 0;
   }
-  .local {
-    max-width: 62ch;
-    margin-bottom: 10px;
+  .kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 8px 32px;
+    margin: 0;
+    font-size: 14px;
+  }
+  .kv div {
+    display: contents;
+  }
+  .kv dt {
     color: var(--ink2);
   }
-  .facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 28px;
-    margin: 0 0 12px;
-    color: var(--ink2);
-    font: 400 14px/1.5 var(--f);
-  }
-  .facts div {
-    display: flex;
-    gap: 6px;
-  }
-  dd {
+  .kv dd {
     margin: 0;
-    color: var(--ink);
-    font-weight: 600;
-  }
-  .buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
   }
   .confirm {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--stroke2);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    max-width: 840px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--hover);
+    font-size: 14px;
   }
-  .confirm p {
-    max-width: 62ch;
-    margin-bottom: 12px;
-    color: var(--ink);
-  }
-  .failure {
-    margin-bottom: 12px;
-    color: var(--ink2);
-    font: 400 13px/1.4 var(--f);
+  .confirm > span {
+    flex: 1 1 280px;
   }
 </style>

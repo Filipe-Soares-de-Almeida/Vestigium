@@ -63,111 +63,78 @@
   }
 </script>
 
-<Row
-  id="retention"
-  title={t("ui.settings.history.keep")}
-  hint={t("ui.settings.history.keep.hint", { size: formatSize(total) })}
-  wide
->
-  <div class="fields">
+<Row id="retention" title={t("ui.settings.history.by_kind")} wide>
+  <div class="ret">
     {#each FIELDS as { field, key } (field)}
       {@const wrong = rejected?.field === field ? rejected : null}
-      <div class="field">
-        <label for="retention-{key}">{t(`ui.settings.history.${key}`)}</label>
-        <select
-          id="retention-{key}"
-          value={String(shown[field])}
-          disabled={!app.editable}
-          aria-invalid={wrong ? true : undefined}
-          aria-describedby={wrong ? `retention-${key}-error` : undefined}
-          data-focus="retention:{field}"
-          onchange={(event) => change(field, Number(event.currentTarget.value))}
-        >
-          {#each choices(field) as value (value)}
-            <option value={String(value)}>{label(field, value)}</option>
-          {/each}
-        </select>
+      <div class="ret-r">
+        <label class="ret-n" for="retention-{key}">{t(`ui.settings.history.${key}`)}</label>
+        <span class="sel">
+          <select
+            id="retention-{key}"
+            value={String(shown[field])}
+            disabled={!app.editable}
+            aria-invalid={wrong ? true : undefined}
+            aria-describedby={wrong ? `retention-${key}-error` : undefined}
+            data-focus="retention:{field}"
+            onchange={(event) => change(field, Number(event.currentTarget.value))}
+          >
+            {#each choices(field) as value (value)}
+              <option value={String(value)}>{label(field, value)}</option>
+            {/each}
+          </select>
+        </span>
+        <span class="ret-mb">{t("ui.settings.history.predicted", { size: formatSize(sizes[field]) })}</span>
         {#if wrong}
           <span class="invalid" id="retention-{key}-error" role="status">{reason(field, wrong.error)}</span>
         {/if}
       </div>
     {/each}
   </div>
-  <div class="bar" aria-hidden="true">
-    {#each FIELDS as { field, tone } (field)}
-      <i style:flex-grow={sizes[field]} style:background="var(--{tone})"></i>
-    {/each}
-  </div>
-  <ul class="key">
-    {#each FIELDS as { field, key, tone } (field)}
-      <li>
-        <span class="state-dot" style:background="var(--{tone})"></span>
-        {t(`ui.settings.history.size.${key}`, { size: formatSize(sizes[field]) })}
-      </li>
-    {/each}
-    <li class="total">{t("ui.settings.history.size.total")} <b>{formatSize(total)}</b></li>
-  </ul>
+</Row>
+<Row id="retention-total" title={t("ui.settings.history.total_title")} wide>
+  <p class="big">{formatSize(total)}</p>
+  <p class="note">{t("ui.settings.history.total_note")}</p>
 </Row>
 
 <style>
-  .fields {
+  .ret {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    align-items: start;
+    gap: 14px;
+    max-width: 760px;
   }
-  .field {
+  .ret-r {
     display: grid;
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) 220px 140px;
+    gap: 8px 20px;
+    align-items: center;
+    font-size: 14px;
+  }
+  .sel select {
+    width: 100%;
+  }
+  .ret-mb {
     color: var(--ink2);
-    font: 400 13px/1.4 var(--f);
+    font-size: 13px;
+    text-align: right;
   }
   .invalid {
+    grid-column: 1 / -1;
     color: var(--ink);
+    font-size: 13px;
     font-weight: 600;
   }
-  .bar {
-    display: flex;
-    gap: 2px;
-    height: 10px;
-    margin-top: 14px;
-  }
-  .bar i {
-    min-width: 4px;
-    border-radius: 999px;
-  }
-  .key {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    margin: 8px 0 0;
-    padding: 0;
-    list-style: none;
-    color: var(--ink2);
-    font: 400 12.5px/1.35 var(--f);
-  }
-  .key .state-dot {
-    margin-right: 6px;
-  }
-  .total {
-    margin-left: auto;
-  }
-  .total b {
-    color: var(--ink);
-    font-weight: 600;
+  .big {
+    margin: 0;
+    font: 350 34px/1.1 var(--fd);
   }
   @container content (max-width: 720px) {
-    .fields {
-      grid-template-columns: minmax(0, 1fr);
+    .ret-r {
+      grid-template-columns: minmax(0, 1fr) auto;
     }
-    .total {
-      margin-left: 0;
-    }
-  }
-  @media (forced-colors: active) {
-    .bar i {
-      forced-color-adjust: none;
-      background: CanvasText !important;
+    .ret-mb {
+      grid-column: 1 / -1;
+      text-align: left;
     }
   }
 </style>
