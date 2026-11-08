@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Cause, Fact, Severity, Suspect, Trigger, Window};
+use crate::{Cause, Evidence, Fact, Severity, Suspect, Trigger, Window};
 
 /// What kind of stall an occurrence was, named after its gravest trigger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +60,48 @@ impl Occurrence {
             .first()
             .map_or(Cause::Unclear, |s| s.cause.clone())
     }
+
+    /// Whether `program` had a window that hung here, or a suspect names it as cause or evidence.
+    pub fn involves(&self, program: &str) -> bool {
+        let named = |name: &str| same_program(name, program);
+        self.window.hangs.iter().any(|h| named(&h.name))
+            || self.suspects.iter().any(|s| {
+                cause_programs(&s.cause).into_iter().any(named)
+                    || s.evidence.iter().any(|e| match e {
+                        Evidence::Process { name, .. } | Evidence::Hang { name, .. } => named(name),
+                        _ => false,
+                    })
+            })
+    }
+}
+
+/// The programs a cause names.
+fn cause_programs(cause: &Cause) -> Vec<&str> {
+    match cause {
+        Cause::DiskIo {
+            process: Some(name),
+            ..
+        }
+        | Cause::Memory {
+            process: Some(name),
+        }
+        | Cause::App { name }
+        | Cause::Frames { app: name } => vec![name.as_str()],
+        Cause::Cpu { processes } => processes.iter().map(String::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether two names are the same program, ignoring case and the ".exe" ending.
+pub fn same_program(a: &str, b: &str) -> bool {
+    let bare = |name: &str| {
+        let lower = name.to_lowercase();
+        lower
+            .strip_suffix(".exe")
+            .map(str::to_string)
+            .unwrap_or(lower)
+    };
+    bare(a) == bare(b)
 }
 
 /// What a list of occurrences shows: no window, only the top suspect's cause.

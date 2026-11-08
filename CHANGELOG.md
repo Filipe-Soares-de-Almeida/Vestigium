@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- An occurrence tells whether it involves a program: named by a suspect's cause or evidence, or by a
+  window of it that stopped responding; being busy nearby does not count.
 - Vestigium can read, for one process and without elevation, the path of its program, the user it runs
   as and who signed the file; the signature is checked offline, in the file and in the Windows
   catalogs.

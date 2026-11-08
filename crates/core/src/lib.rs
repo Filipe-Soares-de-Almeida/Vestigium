@@ -58,7 +58,7 @@ pub use gate::{GateState, RunGate};
 pub use hang::{HUNG_AFTER_MS, HangTracker, HungWindow};
 pub use machine::{DiskInfo, MachineInfo, Media};
 pub use minute::{DiskMinute, MINUTE_MS, MinuteRollup, MinuteSample, minute_of, summarize_minute};
-pub use occurrence::{Occurrence, OccurrenceKind, OccurrenceSummary};
+pub use occurrence::{Occurrence, OccurrenceKind, OccurrenceSummary, same_program};
 pub use postmortem::{POSTMORTEM_BEFORE_MS, POSTMORTEM_REACH_MS, postmortem};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
 pub use process::{
