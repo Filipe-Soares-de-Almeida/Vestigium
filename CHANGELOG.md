@@ -247,6 +247,8 @@ How to use this file:
 
 ### Changed
 
+- A driver's page in a capture report lists its five longest calls with their duration, kind, core and
+  time.
 - A deep capture keeps each driver's five longest calls besides the 50 longest overall, so every
   driver it measured has calls to show.
 - The Disk lane of the live chart names the busiest disk at that moment, such as "Disk C:".

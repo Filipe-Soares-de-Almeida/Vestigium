@@ -5,7 +5,7 @@
   import ErrorView from "../../components/ErrorView.svelte";
   import Loading from "../../components/Loading.svelte";
   import { captures } from "../../lib/capture.svelte";
-  import { formatNumber } from "../../lib/format";
+  import { formatClock, formatNumber } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { CaptureDto, RoutineStats } from "../../lib/types";
@@ -21,7 +21,8 @@
   let failure = $state<unknown>(null);
 
   const driver = $derived(dto?.drivers.find((d) => d.module === module) ?? null);
-  const calls = $derived((dto?.longest ?? []).filter((c) => c.module === module));
+  /** The capture keeps each driver's five longest calls besides the overall longest. */
+  const calls = $derived((dto?.longest ?? []).filter((c) => c.module === module).slice(0, 5));
 
   /** Microseconds as the report prints them: "840 µs" or "1.24 ms". */
   const us = (v: number) => (v >= 1000 ? `${formatNumber(v / 1000)} ms` : `${formatNumber(v)} µs`);
@@ -73,25 +74,34 @@
       </table>
       <p class="note">{t("ui.detail.driver.note")}</p>
     </Block>
-    {#if calls.length}
-      <Block title={t("ui.detail.driver.long_calls")}>
+    <Block title={t("ui.detail.driver.long_calls")}>
+      {#if calls.length}
         <table>
           <thead>
             <tr>
-              <th scope="col">{t("ui.detail.event.time")}</th>
+              <th scope="col">{t("ui.detail.driver.col.rank")}</th>
+              <th scope="col" class="n">{t("ui.detail.duration")}</th>
               <th scope="col">{t("ui.detail.col.kind")}</th>
               <th scope="col" class="n">{t("ui.detail.col.core")}</th>
-              <th scope="col" class="n">{t("ui.detail.col.longest")}</th>
+              <th scope="col">{t("ui.detail.event.time")}</th>
             </tr>
           </thead>
           <tbody>
             {#each calls as c, i (i)}
-              <tr><td>{at(c.ts_ms)}</td><td>{c.kind === "Dpc" ? "DPC" : "ISR"}</td><td class="n">{c.core}</td><td class="n">{us(c.us)}</td></tr>
+              <tr>
+                <td>{i + 1}</td>
+                <td class="n">{us(c.us)}</td>
+                <td>{c.kind === "Dpc" ? "DPC" : "ISR"}</td>
+                <td class="n">{c.core}</td>
+                <td>{formatClock(c.ts_ms)}</td>
+              </tr>
             {/each}
           </tbody>
         </table>
-      </Block>
-    {/if}
+      {:else}
+        <p class="empty">{t("ui.detail.driver.no_calls")}</p>
+      {/if}
+    </Block>
   </DetailPage>
 {:else}
   <DetailPage fallback={href.capture(captureId)} title={module}><Missing /></DetailPage>
