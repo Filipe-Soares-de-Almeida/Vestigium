@@ -2193,5 +2193,10 @@
   "ui.memory.history": "Test history",
   "ui.memory.history.none": "No memory tests yet.",
   "ui.memory.test.diag": "Windows Memory Diagnostic",
-  "ui.memory.test.quick": "Quick memory test"
+  "ui.memory.test.quick": "Quick memory test",
+  "ui.tweaks.nav.quiet": "No sign on this PC",
+  "ui.tweaks.nav.same": "No change",
+  "ui.tweaks.nav.done": "Applied",
+  "ui.tweaks.nav.all": "All tweaks",
+  "ui.tweaks.empty": "No tweaks in this list."
 }

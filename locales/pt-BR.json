@@ -2193,5 +2193,10 @@
   "ui.memory.history": "Histórico de testes",
   "ui.memory.history.none": "Nenhum teste de memória ainda.",
   "ui.memory.test.diag": "Diagnóstico de Memória do Windows",
-  "ui.memory.test.quick": "Teste rápido de memória"
+  "ui.memory.test.quick": "Teste rápido de memória",
+  "ui.tweaks.nav.quiet": "Sem indício neste PC",
+  "ui.tweaks.nav.same": "Sem alteração",
+  "ui.tweaks.nav.done": "Aplicados",
+  "ui.tweaks.nav.all": "Todos os ajustes",
+  "ui.tweaks.empty": "Nenhum ajuste nesta lista."
 }

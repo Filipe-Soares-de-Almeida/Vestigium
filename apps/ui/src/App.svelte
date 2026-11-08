@@ -39,7 +39,7 @@
 
   let content: HTMLElement | undefined = $state();
   /** Screens whose page holds still while their panes scroll inside. */
-  const STILL = new Set(["tests", "tweaks", "dumps"]);
+  const STILL = new Set(["tests", "dumps"]);
 
   let main: HTMLElement | undefined = $state();
   let shown = "";
@@ -161,7 +161,7 @@
                   {:else if router.current.screen === "dumps"}
                     <Dumps id={router.current.id} />
                   {:else if router.current.screen === "tweaks"}
-                    <Tweaks key={router.current.key} />
+                    <Tweaks key={router.current.key} group={router.current.group} />
                   {:else if router.current.screen === "tests"}
                     <Tests device={router.current.device} />
                   {:else if router.current.screen === "settings"}

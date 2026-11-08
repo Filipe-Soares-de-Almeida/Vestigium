@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- Optimizations are now browsed from the navigation pane: Recommended, No sign on this PC, No change,
+  Applied and All tweaks, each with its count. A tweak opens on a page of its own, with the administrator
+  badge when it needs permission, and the back link returns to the list the tweak belongs to now, so
+  applying or undoing it moves it to the right one.
 - Tests has a new layout. The overview lists the memory and each disk as rows with a status symbol, and
   each device opens as a page of titled sections; the devices are chosen from the navigation pane instead
   of a list inside the page. The Windows Memory Diagnostic shows the administrator badge.

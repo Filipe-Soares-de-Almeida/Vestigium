@@ -4,9 +4,10 @@ import { formatBytes } from "../screens/occurrence/format";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
 import { t } from "./i18n.svelte";
-import { href, type Route } from "./router.svelte";
+import { href, type Route, type TweakGroup } from "./router.svelte";
 import type { StatusKind } from "../components/StatusMark.svelte";
-import { tweaks } from "./tweaks.svelte";
+import { keyOf, tweaks } from "./tweaks.svelte";
+import { shown, type Shown } from "../screens/tweaks/words";
 import { hwtests } from "./tests.svelte";
 import type { DiskDto } from "./types";
 
@@ -70,6 +71,21 @@ const onHealth = (area: string | null) => (r: Route) => r.screen === "health" &&
 const onTests = (device: string | null) => (r: Route) => r.screen === "tests" && (r.device ?? null) === device;
 const mark = (concern: "Critical" | "Attention" | "Ok" | "Unknown"): StatusKind | undefined =>
   concern === "Critical" ? "critical" : concern === "Attention" ? "attention" : undefined;
+
+/** The list a tweak belongs to, by how it stands. */
+export function tweakGroupOf(state: Shown): Exclude<TweakGroup, "all"> {
+  return state === "signal" ? "recommended" : state === "quiet" ? "quiet" : state === "applied" ? "done" : "same";
+}
+
+/** The list a route shows: the one asked for, or the one of the tweak it opens. */
+function tweakListOf(r: Route): TweakGroup | null {
+  if (r.screen !== "tweaks") return null;
+  if (r.key !== null) {
+    const advice = tweaks.dto?.advice.find((a) => keyOf(a) === r.key);
+    return advice ? tweakGroupOf(shown(advice, tweaks.dto?.history ?? [])) : "recommended";
+  }
+  return r.group ?? "recommended";
+}
 
 /** Builds every group from what the stores hold now; read it inside `$derived` to follow them. */
 export function buildGroups(): Group[] {
@@ -152,15 +168,26 @@ export function buildGroups(): Group[] {
       ],
     }),
     g("tweaks", "tweaks", {
-      items: [
-        {
-          href: href.tweaks(),
-          label: t("ui.item.recommended"),
-          icon: "tweaks",
-          meta: tweaks.recommended ? String(tweaks.recommended) : undefined,
-          match: (r) => r.screen === "tweaks",
-        },
-      ],
+      items: (
+        [
+          ["recommended", "ui.item.recommended", "tweaks"],
+          ["quiet", "ui.tweaks.nav.quiet", "info"],
+          ["same", "ui.tweaks.nav.same", "shield"],
+          ["done", "ui.tweaks.nav.done", "undo"],
+          ["all", "ui.tweaks.nav.all", "settings"],
+        ] as const
+      ).map(([key, label, icon]) => {
+        const advice = tweaks.dto?.advice ?? [];
+        const history = tweaks.dto?.history ?? [];
+        const count = key === "all" ? advice.length : advice.filter((a) => tweakGroupOf(shown(a, history)) === key).length;
+        return {
+          href: href.tweaks(null, key),
+          label: t(label),
+          icon,
+          meta: count ? String(count) : undefined,
+          match: (r: Route) => tweakListOf(r) === key,
+        };
+      }),
     }),
     g("dumps", "dumps", {
       items: [

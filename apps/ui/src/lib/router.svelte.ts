@@ -8,6 +8,10 @@ export type ActivityTab = "today" | "now";
 
 export type HistoryScope = "month" | "week" | "2w";
 
+/** Which tweaks a list shows: those worth applying, with no sign here, already set, applied by Vestigium, or all. */
+export type TweakGroup = "recommended" | "quiet" | "same" | "done" | "all";
+const TWEAK_GROUPS: TweakGroup[] = ["recommended", "quiet", "same", "done", "all"];
+
 export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
@@ -24,7 +28,7 @@ export type Route =
   | { screen: "capture"; id: number }
   | { screen: "health"; area: string | null }
   | { screen: "dumps"; id: number | null }
-  | { screen: "tweaks"; key: string | null }
+  | { screen: "tweaks"; key: string | null; group: TweakGroup | null }
   /** `device` is "memory" or a physical disk number. */
   | { screen: "tests"; device: string | null }
   | { screen: "settings"; category: string | null };
@@ -52,7 +56,8 @@ export const href = {
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
   dumps: (id?: number) => (id ? `#/dumps/${id}` : "#/dumps"),
-  tweaks: (key?: string) => (key ? `#/tweaks/${encodeURIComponent(key)}` : "#/tweaks"),
+  tweaks: (key?: string | null, group?: TweakGroup | null) =>
+    key ? `#/tweaks/${encodeURIComponent(key)}` : group && group !== "recommended" ? `#/tweaks?group=${group}` : "#/tweaks",
   tests: (device?: string) => (device ? `#/tests/${device}` : "#/tests"),
   settings: (category?: string) => (category ? `#/settings/${category}` : "#/settings"),
 };
@@ -87,7 +92,14 @@ export function parse(hash: string): Route {
   }
   if (screen === "health") return { screen: "health", area: arg || null };
   if (screen === "dumps") return { screen: "dumps", id: /^\d+$/.test(arg ?? "") ? Number(arg) : null };
-  if (screen === "tweaks") return { screen: "tweaks", key: arg ? decodeURIComponent(arg) : null };
+  if (screen === "tweaks") {
+    const asked = params.get("group") as TweakGroup | null;
+    return {
+      screen: "tweaks",
+      key: arg ? decodeURIComponent(arg) : null,
+      group: asked && TWEAK_GROUPS.includes(asked) ? asked : null,
+    };
+  }
   if (screen === "tests") return { screen: "tests", device: arg === "memory" || /^\d+$/.test(arg ?? "") ? arg : null };
   if (screen === "settings") return { screen: "settings", category: arg || null };
   return { screen: "home" };

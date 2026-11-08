@@ -1,12 +1,18 @@
 <script lang="ts">
+  import AdminPill from "../components/AdminPill.svelte";
+  import BackLink from "../components/BackLink.svelte";
+  import Block from "../components/Block.svelte";
+  import Checkbox from "../components/Checkbox.svelte";
   import ConcernMark from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import PickAll from "../components/PickAll.svelte";
+  import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
   import { t, tn } from "../lib/i18n.svelte";
-  import { go, href } from "../lib/router.svelte";
+  import { tweakGroupOf } from "../lib/groups";
+  import { go, href, type TweakGroup } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, type Outcome, tweaks } from "../lib/tweaks.svelte";
   import type { Advice, TweakPick, TweakRow } from "../lib/types";
@@ -31,15 +37,7 @@
     whyNot,
   } from "./tweaks/words";
 
-  let { key }: { key: string | null } = $props();
-
-  let detail = $state<HTMLElement>();
-
-  // Another tweak opens at the top of its detail.
-  $effect(() => {
-    void key;
-    detail?.scrollTo(0, 0);
-  });
+  let { key, group }: { key: string | null; group: TweakGroup | null } = $props();
 
   const MARK: Record<Shown, "Recommended" | "Unknown" | "Ok" | "Closed"> = {
     signal: "Recommended",
@@ -74,9 +72,15 @@
     const allowed = new Set(withSignal.filter((a) => a.status === "Ready").map(keyOf));
     if (tweaks.chosen.some((k) => !allowed.has(k))) tweaks.chosen = tweaks.chosen.filter((k) => allowed.has(k));
   });
-  const current = $derived(
-    advice.find((a) => keyOf(a) === key) ?? withSignal[0] ?? quiet[0] ?? advice[0] ?? null,
-  );
+  const current = $derived(key === null ? null : (advice.find((a) => keyOf(a) === key) ?? null));
+  const view = $derived<TweakGroup>(group ?? "recommended");
+  const listed = $derived(view === "all" ? advice : advice.filter((a) => tweakGroupOf(stateOf(a)) === view));
+  /** The list the open tweak belongs to now, so Back follows it when applying moves it. */
+  const backTo = $derived<TweakGroup>(current ? tweakGroupOf(stateOf(current)) : view);
+  const groupName = (g: TweakGroup) =>
+    t(g === "recommended" ? "ui.item.recommended" : `ui.tweaks.nav.${g}`);
+  const statusKind = (s: Shown): StatusKind | null =>
+    s === "signal" ? "attention" : s === "applied" || s === "set" ? "ok" : s === "quiet" ? null : "info";
   const chosen = $derived(advice.filter((a) => tweaks.chosen.includes(keyOf(a))));
   const blocked = $derived(!app.running);
 
@@ -89,8 +93,6 @@
   const pickOf = (a: Advice): TweakPick => ({ tweak: a.tweak, subject: a.subject });
 
   function ask(next: NonNullable<typeof asking>): void {
-    // The tweak in view stays in view once applied, so its history shows beside it.
-    if (key === null && current) go(href.tweaks(keyOf(current)));
     asking = next;
     if (!dialog?.open) dialog?.showModal();
   }
@@ -154,120 +156,53 @@
 
 {#snippet item(a: Advice)}
   {@const s = stateOf(a)}
-  {@const tone = TONE[GROUP[a.tweak]]}
-  <div class="row" class:current={current && keyOf(a) === keyOf(current)}>
+  {@const kind = statusKind(s)}
+  <li class="trow">
     {#if choosable(a)}
-      <input
-        type="checkbox"
-        class="pick"
+      <Checkbox
         checked={tweaks.chosen.includes(keyOf(a))}
-        aria-label={t("ui.tweaks.pick", { name: name(a, "Simple") })}
-        onchange={(event) => tweaks.choose(keyOf(a), event.currentTarget.checked)}
-      />
+        onchange={(on) => tweaks.choose(keyOf(a), on)}
+      >
+        <span class="sr">{t("ui.tweaks.pick", { name: name(a, "Simple") })}</span>
+      </Checkbox>
     {:else}
       <span></span>
     {/if}
-    <span
-      class="icochip"
-      style:background={s === "signal" ? `var(--${tone}-t)` : "var(--card2)"}
-      style:color={s === "signal" ? `var(--${tone})` : "var(--ink2)"}
-    >
-      <Icon name={ICON[GROUP[a.tweak]]} />
-    </span>
-    <button
-      type="button"
-      class="open"
-      aria-current={current && keyOf(a) === keyOf(current) ? "true" : undefined}
-      onclick={() => go(href.tweaks(keyOf(a)))}
-    >
+    <a class="open" href={href.tweaks(keyOf(a))} data-reveal>
+      <span class="ico"><Icon name={ICON[GROUP[a.tweak]]} /></span>
       <span class="what"><b>{name(a, level)}</b><small>{sub(a)}</small></span>
-      <span class="chev"><Icon name="chevron" /></span>
-    </button>
+      <span class="end">
+        {#if kind}<StatusMark {kind} word={t(`ui.tweaks.status.${s}`)} reveal />{/if}
+        <span class="chev"><Icon name="chevron" /></span>
+      </span>
+    </a>
+  </li>
+{/snippet}
+
+{#if key === null}
+  <div class="top">
+    <h1>{groupName(view)}</h1>
   </div>
-{/snippet}
-
-{#snippet group(title: string, list: Advice[])}
-  {#if list.length}
-    {@const pickable = list.filter(choosable).map(keyOf)}
-    <div class="ghead">
-      {#if pickable.length}
-        <PickAll
-          ids={pickable}
-          chosen={tweaks.chosen}
-          label={t("ui.tweaks.pick_all", { group: title })}
-          onchange={(on) => tweaks.chooseAll(pickable, on)}
-        />
-      {/if}
-      <h2>{title}</h2>
-    </div>
-    {#each list as a (keyOf(a))}
-      {@render item(a)}
-    {/each}
-  {/if}
-{/snippet}
-
-<div class="top">
-  <h1>{t("ui.tweaks.title")}</h1>
-</div>
+{/if}
 
 {#if tweaks.dto === null && tweaks.error !== null}
   <div class="gap"><ErrorView error={tweaks.error} heading="h2" onretry={retry} /></div>
 {:else if tweaks.dto === null}
   <Loading />
-{:else}
-  <p class="lede">
-    {#if level === "Technical"}
-      {t("ui.tweaks.lede.tech", { signal: withSignal.length, quiet: quiet.length, settled: settled.length })}
-    {:else if withSignal.length}
-      <b>{tn("ui.tweaks.lede.signals", withSignal.length)}</b> {t("ui.tweaks.lede.signals.tail")}
-    {:else if history.some((r) => r.undone_ms === null && r.change.undo_of === null)}
-      <b>{t("ui.tweaks.lede.done")}</b> {t("ui.tweaks.lede.done.tail")}
-    {:else}
-      <b>{t("ui.tweaks.lede.none")}</b> {t("ui.tweaks.lede.none.tail")}
-    {/if}
-  </p>
-
-  <div class="pane2 panes">
-    <div class="stack scrolls">
-      <section class="card list" aria-label={t("ui.tweaks.list")}>
-        {@render group(t("ui.tweaks.group.signal"), withSignal)}
-        {@render group(t("ui.tweaks.group.quiet"), quiet)}
-        {@render group(t("ui.tweaks.group.settled"), settled)}
-      </section>
-      <section class="card point" aria-labelledby="point-title">
-        <h2 id="point-title">{t("ui.tweaks.point.title")}</h2>
-        <p>
-          {tweaks.dto.last_restore_point_ms
-            ? t("ui.tweaks.point.last", { when: at(tweaks.dto.last_restore_point_ms) })
-            : t("ui.tweaks.point.none")}
-        </p>
-      </section>
-    </div>
-
-    {#if current}
-      {@const s = stateOf(current)}
-      {@const tone = TONE[GROUP[current.tweak]]}
-      {@const change = changeOf(current, current.changes, level)}
-      {@const rows = rowsOf(current)}
-      {@const holding = inPlace(current, history)}
-      <section class="card detail scrolls" aria-labelledby="tweak-title" bind:this={detail}>
-        <div class="head">
-          <span
-            class="icochip"
-            style:background={s === "signal" ? `var(--${tone}-t)` : "var(--card2)"}
-            style:color={s === "signal" ? `var(--${tone})` : "var(--ink2)"}
-          >
-            <Icon name={ICON[GROUP[current.tweak]]} />
-          </span>
-          <div>
-            <h2 id="tweak-title">{name(current, level)}</h2>
-            <p class="meta"><ConcernMark mark={MARK[s]} word={false} silent /><span>{t(`ui.tweaks.status.${s}`)}</span></p>
-          </div>
-        </div>
+{:else if key !== null}
+  <BackLink href={href.tweaks(null, backTo)} label={t("ui.common.back_to", { place: groupName(backTo) })} />
+  {#if current}
+    {@const s = stateOf(current)}
+    {@const change = changeOf(current, current.changes, level)}
+    {@const rows = rowsOf(current)}
+    {@const holding = inPlace(current, history)}
+    <section class="detail" aria-labelledby="tweak-title">
+      <h1 id="tweak-title">{name(current, level)}</h1>
+      <p class="meta"><ConcernMark mark={MARK[s]} word={false} silent /><span>{t(`ui.tweaks.status.${s}`)}</span></p>
         <p class="about">{what(current, level)}</p>
 
         {#if s === "signal"}
-          <div>
+          <div class="sec">
             <h3>{t("ui.tweaks.why")}</h3>
             <ul class="ev">
               {#each current.signals as sig, i (i)}
@@ -276,7 +211,7 @@
             </ul>
           </div>
         {:else if s === "quiet"}
-          <div>
+          <div class="sec">
             <h3>{t("ui.tweaks.why_not")}</h3>
             <p class="plain">{whyNot(current)}</p>
           </div>
@@ -285,7 +220,7 @@
         {/if}
 
         {#if change.length || nowOf(current, level)}
-          <dl class="facts">
+          <dl class="facts sec">
             {#if change.length}
               {#each change as c, i (i)}
                 <dt>{i === 0 ? t("ui.tweaks.fact.now") : ""}</dt>
@@ -301,7 +236,7 @@
               <dt>{t("ui.tweaks.fact.when")}</dt>
               <dd><span class="pill2"><Icon name={current.takes === "Now" ? "clock" : "restart"} />{t(`ui.tweaks.takes.${current.takes}`)}</span></dd>
               <dt>{t("ui.tweaks.fact.permission")}</dt>
-              <dd><span class="pill2"><Icon name={current.applier === "Elevated" ? "shield" : "person"} />{t(`ui.tweaks.applier.${current.applier}`)}</span></dd>
+              <dd>{#if current.applier === "Elevated"}<AdminPill />{:else}<span class="pill2"><Icon name="person" />{t(`ui.tweaks.applier.${current.applier}`)}</span>{/if}</dd>
               <dt>{t("ui.tweaks.fact.cost")}</dt>
               <dd>{risk(current)}</dd>
             {/if}
@@ -309,7 +244,7 @@
         {/if}
 
         {#if current.status === "Ready"}
-          <div class="acts">
+          <div class="acts sec">
             <button
               type="button"
               class="btn"
@@ -327,7 +262,7 @@
         {/if}
 
         {#if rows.length}
-          <div class="hist">
+          <div class="hist sec">
             <h3>{t("ui.tweaks.history")}</h3>
             {#each rows as r (r.id)}
               {@const st = rowState(r)}
@@ -369,10 +304,53 @@
             {/each}
           </div>
         {/if}
-      </section>
+    </section>
+  {:else}
+    <h1>{t("ui.tweaks.title")}</h1>
+    <p class="lede">{t("ui.tweaks.empty")}</p>
+  {/if}
+{:else}
+  <p class="lede">
+    {#if level === "Technical"}
+      {t("ui.tweaks.lede.tech", { signal: withSignal.length, quiet: quiet.length, settled: settled.length })}
+    {:else if withSignal.length}
+      <b>{tn("ui.tweaks.lede.signals", withSignal.length)}</b> {t("ui.tweaks.lede.signals.tail")}
+    {:else if history.some((r) => r.undone_ms === null && r.change.undo_of === null)}
+      <b>{t("ui.tweaks.lede.done")}</b> {t("ui.tweaks.lede.done.tail")}
+    {:else}
+      <b>{t("ui.tweaks.lede.none")}</b> {t("ui.tweaks.lede.none.tail")}
     {/if}
-  </div>
+  </p>
+  {#if listed.length}
+    {@const pickable = listed.filter(choosable).map(keyOf)}
+    {#if pickable.length}
+      <div class="ghead">
+        <PickAll
+          ids={pickable}
+          chosen={tweaks.chosen}
+          label={t("ui.tweaks.pick_all", { group: groupName(view) })}
+          onchange={(on) => tweaks.chooseAll(pickable, on)}
+        />
+      </div>
+    {/if}
+    <ul class="tlist" aria-label={t("ui.tweaks.list")}>
+      {#each listed as a (keyOf(a))}
+        {@render item(a)}
+      {/each}
+    </ul>
+  {:else}
+    <p class="muted">{t("ui.tweaks.empty")}</p>
+  {/if}
+  <Block title={t("ui.tweaks.point.title")}>
+    <p class="point">
+      {tweaks.dto.last_restore_point_ms
+        ? t("ui.tweaks.point.last", { when: at(tweaks.dto.last_restore_point_ms) })
+        : t("ui.tweaks.point.none")}
+    </p>
+  </Block>
+{/if}
 
+{#if tweaks.dto !== null}
   {#if chosen.length}
     {@const admin = chosen.filter((a) => a.applier === "Elevated").length}
     {@const restart = chosen.filter((a) => a.takes !== "Now").length}
@@ -451,124 +429,92 @@
   .gap {
     margin-top: 14px;
   }
-  .pane2 {
-    display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr);
-    gap: 14px;
-    align-items: start;
-  }
-  .list {
-    padding: 6px;
-  }
   .ghead {
     display: flex;
     gap: 10px;
     align-items: center;
-    padding: 10px 10px 4px;
+    margin: 12px 0 8px;
   }
-  .list h2 {
-    margin: 0;
-    color: var(--ink2);
-    font: 600 13px/1.3 var(--f);
-  }
-  .row {
+  .tlist {
     display: grid;
-    grid-template-columns: 22px 32px minmax(0, 1fr);
-    gap: 10px;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .trow {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 14px;
     align-items: center;
-    padding: 8px 10px;
-    border-radius: 8px;
+    padding-left: 12px;
+    border-radius: 6px;
+    background: var(--row);
   }
-  .row:hover,
-  .row.current {
-    background: var(--card2);
-  }
-  .row .icochip {
-    width: 32px;
-    height: 32px;
-  }
-  .row .icochip :global(svg) {
-    width: 18px;
-    height: 18px;
+  .trow:hover {
+    background: var(--row-hover);
   }
   .open {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 12px;
-    gap: 10px;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 14px;
     align-items: center;
     min-width: 0;
-    padding: 0;
-    border: 0;
+    padding: 9px 12px 9px 0;
     border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .open:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
+  }
+  .ico {
+    display: flex;
+    color: var(--ink2);
+  }
+  .end {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .what {
+    display: grid;
+    min-width: 0;
   }
   .what b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
+    overflow: hidden;
+    font-size: 14.5px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .what small {
-    display: block;
-    margin-top: 2px;
+    overflow: hidden;
     color: var(--ink2);
-    font-size: 13px;
-    line-height: 1.35;
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .chev {
     display: grid;
     color: var(--ink3);
   }
-  .pick {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    border: 1.5px solid var(--ink3);
-    border-radius: 6px;
-    background: var(--card);
-    appearance: none;
-    cursor: pointer;
-  }
-  .pick:checked {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-  .pick:checked::after {
-    content: "";
-    width: 9px;
-    height: 5px;
-    border-bottom: 2px solid var(--on-accent);
-    border-left: 2px solid var(--on-accent);
-    transform: rotate(-45deg) translate(1px, -1px);
-  }
-  .point h2 {
-    margin: 0 0 6px;
-    font: 600 15px/1.3 var(--f);
-  }
-  .point p {
+  .point {
     margin: 0;
     color: var(--ink2);
-    font-size: 13.5px;
+    font-size: 14px;
     line-height: 1.45;
   }
   .detail {
     display: grid;
     gap: 14px;
   }
-  .head {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 12px;
-    align-items: center;
-  }
-  .head h2 {
-    margin: 0;
-    font: 600 20px/1.3 var(--fd);
+  .sec {
+    margin-top: 16px;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
   }
   .meta {
     display: flex;
@@ -589,9 +535,8 @@
     color: var(--ink2);
   }
   h3 {
-    margin: 0 0 8px;
-    color: var(--ink2);
-    font: 600 13px/1.35 var(--f);
+    margin: 0 0 12px;
+    font: 400 20px/1.3 var(--fd);
   }
   .ev {
     display: grid;
@@ -621,9 +566,7 @@
     grid-template-columns: auto minmax(0, 1fr);
     gap: 6px 14px;
     margin: 0;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--card2);
+    padding-top: 28px;
     font-size: 14px;
     overflow-wrap: anywhere;
   }
@@ -640,7 +583,7 @@
     gap: 5px;
     padding: 1px 8px;
     border-radius: 999px;
-    background: var(--card);
+    background: var(--row);
     color: var(--ink2);
     font: 600 12px/1.6 var(--f);
   }
@@ -657,8 +600,6 @@
   .hist {
     display: grid;
     gap: 4px;
-    padding-top: 6px;
-    border-top: 1px solid var(--stroke2);
   }
   .hrow {
     display: grid;
@@ -799,21 +740,11 @@
     width: 13px;
     height: 13px;
   }
-  @container content (max-width: 760px) {
-    .pane2 {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
   @media (forced-colors: active) {
     .bullet,
     .helped i {
       forced-color-adjust: none;
       background: CanvasText;
-    }
-    .pick:checked {
-      forced-color-adjust: none;
-      background: Highlight;
-      border-color: Highlight;
     }
   }
 </style>
