@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use vestigium_core::{
-    EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, Reading,
-    Sample, Settings, TweakChange,
+    EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, ProgramPoint,
+    Reading, Sample, Settings, TweakChange,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -18,6 +18,10 @@ pub enum Request {
     Now,
     /// The last ten minutes, so the live screen opens with them drawn.
     Recent,
+    /// One program's use at each ranking of the last ten minutes.
+    ProgramRecent {
+        name: String,
+    },
     SetPaused {
         paused: bool,
         /// When a pause ends by itself, Unix epoch milliseconds; none holds it until resumed or
@@ -59,6 +63,10 @@ pub enum Response {
         /// CPU, disk and memory pressure episodes of those minutes, ended or under way; hints are
         /// left out.
         pressure: Vec<PressureSpan>,
+    },
+    /// Oldest first; empty when the program ran in none of those rankings.
+    ProgramRecent {
+        points: Vec<ProgramPoint>,
     },
     Settings {
         settings: Settings,

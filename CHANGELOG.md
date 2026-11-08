@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- The watcher keeps each running program's CPU, memory and disk use for the last ten minutes in
+  memory, at every 5 s ranking, and answers it for one program; the window and the watcher speak a new
+  protocol version.
 - The watcher stores each disk's SMART attributes once a day, from the health pass that already reads
   them; an idle hard disk is still never woken for it.
 - The database keeps one reading a day of each SMART attribute of each disk, deleted with the records

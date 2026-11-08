@@ -1,6 +1,6 @@
 use vestigium_core::{
-    EpisodeKind, LanguagePref, PCIE_ASPM, PlanItem, PressureSpan, Reading, SUB_PCIEXPRESS, Setting,
-    SettingChange, SettingResult, Settings, TweakChange, TweakId, Value,
+    EpisodeKind, LanguagePref, PCIE_ASPM, PlanItem, PressureSpan, ProgramPoint, Reading,
+    SUB_PCIEXPRESS, Setting, SettingChange, SettingResult, Settings, TweakChange, TweakId, Value,
 };
 
 fn aspm_item() -> PlanItem {
@@ -42,6 +42,9 @@ fn every_request_roundtrips_as_json() {
         Request::Status,
         Request::Now,
         Request::Recent,
+        Request::ProgramRecent {
+            name: "build.exe".to_string(),
+        },
         Request::SetPaused {
             paused: true,
             until_ms: Some(1_700_000_000_000),
@@ -73,6 +76,14 @@ fn every_response_roundtrips_as_json() {
             ..AgentStatus::default()
         }),
         Response::Now(Box::default()),
+        Response::ProgramRecent {
+            points: vec![ProgramPoint {
+                ts_ms: 5_000,
+                cpu_pct: 3.5,
+                private_bytes: 64 << 20,
+                io_bps: 2048.0,
+            }],
+        },
         Response::Now(Box::new(NowFrame {
             pressure: vec![
                 EpisodeKind::CpuSaturated,

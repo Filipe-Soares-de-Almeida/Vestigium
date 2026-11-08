@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use vestigium_core::{
-    CpuWindow, ProcessCounters, ProcessSample, ProcessTop, heaviest, last_seen, process_rates,
-    programs, usage,
+    CpuWindow, ProcessCounters, ProcessSample, ProcessTop, ProgramRing, heaviest, last_seen,
+    process_rates, programs, usage,
 };
 
 fn top_processes(
@@ -315,4 +315,56 @@ fn cpu_window_starts_over_when_cleared() {
     window.clear();
 
     assert_eq!(window.push(5_000.0, 10_000_000, 1), None);
+}
+
+fn program(name: &str, cpu_pct: f32, private_mb: u64) -> ProcessSample {
+    ProcessSample {
+        pid: 1,
+        name: name.to_string(),
+        cpu_pct,
+        private_bytes: private_mb << 20,
+        read_bps: 2048.0,
+        write_bps: 0.0,
+        gpu_pct: 0.0,
+    }
+}
+
+#[test]
+fn program_ring_returns_one_program_over_its_span() {
+    let mut ring = ProgramRing::new(10_000);
+    ring.push(0, &[program("a.exe", 1.0, 10), program("b.exe", 2.0, 20)]);
+    ring.push(5_000, &[program("b.exe", 3.0, 30)]);
+    ring.push(10_000, &[program("a.exe", 4.0, 40)]);
+
+    let a: Vec<(i64, f32, u64)> = ring
+        .history("a.exe")
+        .iter()
+        .map(|p| (p.ts_ms, p.cpu_pct, p.private_bytes >> 20))
+        .collect();
+    assert_eq!(
+        a,
+        [(0, 1.0, 10), (10_000, 4.0, 40)],
+        "only the rankings that list it"
+    );
+    assert_eq!(ring.history("b.exe")[0].io_bps, 2048.0);
+    assert!(ring.history("c.exe").is_empty());
+
+    ring.push(15_001, &[program("a.exe", 5.0, 50)]);
+    assert_eq!(
+        ring.history("a.exe").len(),
+        2,
+        "the ranking at 0 s fell out"
+    );
+    assert_eq!(ring.history("b.exe").len(), 0);
+}
+
+#[test]
+fn program_ring_forgets_names_it_no_longer_holds() {
+    let mut ring = ProgramRing::new(1_000);
+    for i in 0..400 {
+        ring.push(i * 2_000, &[program(&format!("p{i}.exe"), 1.0, 1)]);
+    }
+
+    assert_eq!(ring.history("p399.exe").len(), 1);
+    assert!(ring.history("p0.exe").is_empty());
 }

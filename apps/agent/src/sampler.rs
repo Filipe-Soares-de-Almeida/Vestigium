@@ -16,8 +16,8 @@ use vestigium_collect::{
 use vestigium_core::{
     Blackbox, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState, HICCUP_MS, HungWindow,
     MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick,
-    ProcessCounters, ProcessTop, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings,
-    Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
+    ProcessCounters, ProcessTop, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate, Sample,
+    Settings, Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -95,6 +95,8 @@ pub struct Wiring {
     pub now: Arc<Mutex<NowFrame>>,
     /// The last ten minutes, one reading a second, for the live screen.
     pub readings: Arc<Mutex<Ring<Reading>>>,
+    /// Each program's use at every ranking of the last ten minutes, for a program's page.
+    pub programs: Arc<Mutex<ProgramRing>>,
     /// The pressure episodes of the last ten minutes, for the live screen.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     /// Late probe wakes of the last fifteen minutes, kept while sensitive mode is on.
@@ -146,6 +148,7 @@ struct Sampler {
     recent: Arc<Mutex<RecentState>>,
     now: Arc<Mutex<NowFrame>>,
     readings: Arc<Mutex<Ring<Reading>>>,
+    programs: Arc<Mutex<ProgramRing>>,
     pressure: Arc<Mutex<Vec<PressureSpan>>>,
     hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     settings: Arc<Mutex<Settings>>,
@@ -226,6 +229,7 @@ impl Sampler {
             recent: wiring.recent,
             now: wiring.now,
             readings: wiring.readings,
+            programs: wiring.programs,
             pressure: wiring.pressure,
             hiccups: wiring.hiccups,
             settings: wiring.settings,
@@ -488,6 +492,7 @@ impl Sampler {
                 });
                 all.sort_by(|a, b| b.cpu_pct.total_cmp(&a.cpu_pct));
                 all.truncate(PROGRAMS_LISTED);
+                lock(&self.programs).push(ts_ms, &all);
                 now.programs = Some(ProcessTop {
                     ts_ms,
                     entries: all,
@@ -977,6 +982,7 @@ mod tests {
                 recent: Arc::new(Mutex::new(RecentState::default())),
                 now: now.clone(),
                 readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
+                programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
                 pressure: Arc::new(Mutex::new(Vec::new())),
                 hiccups: Arc::new(Mutex::new(VecDeque::new())),
                 settings: Arc::new(Mutex::new(Settings::default())),

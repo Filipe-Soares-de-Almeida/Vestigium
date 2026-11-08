@@ -242,6 +242,123 @@ pub fn process_rates(
         .collect()
 }
 
+/// One program's use at one ranking.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProgramPoint {
+    /// Unix epoch, milliseconds.
+    pub ts_ms: i64,
+    /// Share of the whole machine, 0 to 100.
+    pub cpu_pct: f32,
+    pub private_bytes: u64,
+    pub io_bps: f32,
+}
+
+/// A program's use in one ranking, its name held as an index into the ring's names.
+#[derive(Clone, Copy, Debug)]
+struct ProgramUse {
+    name: u32,
+    cpu_pct: f32,
+    private_mb: u32,
+    io_kbps: u32,
+}
+
+/// Every program's use at each ranking of a recent span, kept compact in memory: names are
+/// stored once and the figures in MB and KB/s.
+#[derive(Debug)]
+pub struct ProgramRing {
+    span_ms: i64,
+    names: Vec<String>,
+    ids: HashMap<String, u32>,
+    frames: VecDeque<(i64, Vec<ProgramUse>)>,
+}
+
+impl ProgramRing {
+    pub fn new(span_ms: i64) -> ProgramRing {
+        ProgramRing {
+            span_ms,
+            names: Vec::new(),
+            ids: HashMap::new(),
+            frames: VecDeque::new(),
+        }
+    }
+
+    /// Adds the programs of one ranking and drops the rankings older than the span.
+    pub fn push(&mut self, ts_ms: i64, programs: &[ProcessSample]) {
+        while self
+            .frames
+            .front()
+            .is_some_and(|(at, _)| *at < ts_ms - self.span_ms)
+        {
+            self.frames.pop_front();
+        }
+        if self.names.len() > 4 * programs.len().max(64) {
+            self.compact();
+        }
+        let uses = programs
+            .iter()
+            .map(|p| ProgramUse {
+                name: self.id(&p.name),
+                cpu_pct: p.cpu_pct,
+                private_mb: u32::try_from(p.private_bytes >> 20).unwrap_or(u32::MAX),
+                io_kbps: ((p.read_bps + p.write_bps) / 1024.0) as u32,
+            })
+            .collect();
+        self.frames.push_back((ts_ms, uses));
+    }
+
+    /// The rankings that list `name`, oldest first.
+    pub fn history(&self, name: &str) -> Vec<ProgramPoint> {
+        let Some(&id) = self.ids.get(name) else {
+            return Vec::new();
+        };
+        self.frames
+            .iter()
+            .filter_map(|(ts_ms, uses)| {
+                let used = uses.iter().find(|u| u.name == id)?;
+                Some(ProgramPoint {
+                    ts_ms: *ts_ms,
+                    cpu_pct: used.cpu_pct,
+                    private_bytes: u64::from(used.private_mb) << 20,
+                    io_bps: used.io_kbps as f32 * 1024.0,
+                })
+            })
+            .collect()
+    }
+
+    pub fn clear(&mut self) {
+        self.frames.clear();
+        self.names.clear();
+        self.ids.clear();
+    }
+
+    fn id(&mut self, name: &str) -> u32 {
+        if let Some(&id) = self.ids.get(name) {
+            return id;
+        }
+        let id = self.names.len() as u32;
+        self.names.push(name.to_string());
+        self.ids.insert(name.to_string(), id);
+        id
+    }
+
+    /// Forgets the names no kept ranking uses any more.
+    fn compact(&mut self) {
+        let mut names = Vec::new();
+        let mut ids = HashMap::new();
+        for (_, uses) in &mut self.frames {
+            for used in uses {
+                let name = &self.names[used.name as usize];
+                used.name = *ids.entry(name.clone()).or_insert_with(|| {
+                    names.push(name.clone());
+                    (names.len() - 1) as u32
+                });
+            }
+        }
+        self.names = names;
+        self.ids = ids;
+    }
+}
+
 /// The CPU one process used over a sliding span, from readings of its cumulative time.
 #[derive(Clone, Debug)]
 pub struct CpuWindow {

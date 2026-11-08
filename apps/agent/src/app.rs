@@ -10,8 +10,8 @@ use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, WindowsSettings, spawn_probe, wall_ms};
 use vestigium_core::{
     Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PlanItem, PressureSpan, ProbeHiccup,
-    RING_MS, Reading, RecentState, Ring, RunGate, SENSITIVE_FOR, SettingStore, Settings, Timing,
-    carry_out, check_item,
+    ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate, SENSITIVE_FOR, SettingStore,
+    Settings, Timing, carry_out, check_item,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -93,6 +93,8 @@ pub struct Shared {
     pub now: Arc<Mutex<NowFrame>>,
     /// The last ten minutes, one reading a second.
     pub readings: Arc<Mutex<Ring<Reading>>>,
+    /// Each program's use at every ranking of the last ten minutes.
+    pub programs: Arc<Mutex<ProgramRing>>,
     /// The pressure episodes of the last ten minutes, ended or under way.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     pub settings: Arc<Mutex<Settings>>,
@@ -194,6 +196,9 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 .collect();
             Response::Recent { readings, pressure }
         }
+        Request::ProgramRecent { name } => Response::ProgramRecent {
+            points: lock(&shared.programs).history(&name),
+        },
         Request::SetPaused { paused, until_ms } => {
             set_paused(shared, paused, until_ms);
             shutdown::wake();
@@ -231,6 +236,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 return error(ErrorCode::Failed, err);
             }
             lock(&shared.readings).clear();
+            lock(&shared.programs).clear();
             lock(&shared.pressure).clear();
             lock(&shared.now).latest = None;
             *lock(&shared.recent) = RecentState::default();
@@ -308,6 +314,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         recent: Arc::new(Mutex::new(RecentState::default())),
         now: Arc::new(Mutex::new(NowFrame::default())),
         readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
+        programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
         cleared: Arc::new(AtomicBool::new(false)),
@@ -358,6 +365,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 recent: shared.recent.clone(),
                 now: shared.now.clone(),
                 readings: shared.readings.clone(),
+                programs: shared.programs.clone(),
                 pressure: shared.pressure.clone(),
                 hiccups: shared.hiccups.clone(),
                 settings: shared.settings.clone(),
@@ -557,6 +565,7 @@ mod tests {
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: Arc::new(Mutex::new(NowFrame::default())),
             readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
+            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
             cleared: Arc::new(AtomicBool::new(false)),
@@ -844,6 +853,31 @@ mod tests {
             None,
         );
         assert_eq!(shared.gate.state(), GateState::Running);
+    }
+
+    #[test]
+    fn program_recent_answers_from_the_ring() {
+        let shared = shared();
+        let build = vestigium_core::ProcessSample {
+            pid: 7,
+            name: "build.exe".to_string(),
+            cpu_pct: 12.0,
+            private_bytes: 64 << 20,
+            read_bps: 0.0,
+            write_bps: 0.0,
+            gpu_pct: 0.0,
+        };
+        lock(&shared.programs).push(wall_ms(), &[build]);
+
+        let answer = handle(
+            Request::ProgramRecent {
+                name: "build.exe".to_string(),
+            },
+            &shared,
+            None,
+        );
+
+        assert!(matches!(answer, Response::ProgramRecent { points } if points.len() == 1));
     }
 
     #[test]
