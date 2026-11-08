@@ -11,7 +11,7 @@
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
-  import { href } from "../lib/router.svelte";
+  import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import { AREAS, areaState, findArea, type Mark } from "./health/areas";
   import Finding from "./health/Finding.svelte";
@@ -76,7 +76,7 @@
         <p class="check">
           <StatusMark kind="ok" size={20} reveal />
           <span>
-            {findingTitle(finding, level)}
+            <a href={href.detail("finding", finding.id, { from: here(), label: t("ui.health.title") })}>{findingTitle(finding, level)}</a>
             <small>
               {t("ui.health.closed_line", { opened: when(finding.opened_ms), closed: when(finding.closed_ms ?? 0) })}
             </small>
@@ -124,7 +124,7 @@
         <p class="check">
           <StatusMark kind="ok" size={20} reveal />
           <span>
-            {findingTitle(finding, level)}
+            <a href={href.detail("finding", finding.id, { from: here(), label: t("ui.health.title") })}>{findingTitle(finding, level)}</a>
             <small>
               {t("ui.health.closed_line", { opened: when(finding.opened_ms), closed: when(finding.closed_ms ?? 0) })}
             </small>
@@ -158,6 +158,14 @@
     padding: 6px 0;
     font-size: 14px;
     line-height: 1.45;
+  }
+  .check a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .check a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .check small {
     display: block;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { here, href } from "../../lib/router.svelte";
   import { formatClock, formatPercent } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import type { OccurrenceDto } from "../../lib/types";
@@ -86,7 +87,7 @@
               <td>{formatClock(event.ts_ms)}</td>
               <td class="opt">{event.channel}</td>
               <th scope="row" class="fill" title={event.provider}>{event.provider}</th>
-              <td>{event.id}</td>
+              <td><a href={href.detail("event", [dto.id, event.record_id], { from: here(), label: t("ui.occurrence.crumb") })}>{event.id}</a></td>
               <td>{t(`ui.occurrence.event.${event.meaning}`)}</td>
             </tr>
           {/each}

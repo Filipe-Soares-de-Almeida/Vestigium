@@ -16,7 +16,7 @@
   import { errorText } from "../lib/errors";
   import { formatNumber, formatPercent } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
-  import { go, href } from "../lib/router.svelte";
+  import { go, here, href } from "../lib/router.svelte";
   import { hwtests, type Started } from "../lib/tests.svelte";
   import { toast } from "../lib/toast.svelte";
   import type { BenchMode, DiskDto, FindingDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
@@ -315,7 +315,7 @@
         {#each rows as row, i (i)}
           {#if row.run}
             {@const line = runLine(row.run)}
-            <div class="hline"><ConcernMark mark={outcomeMark(row.run)} word={false} /><span><b>{line.name}</b><small>{line.what}</small></span><span class="when">{at(row.ts)}</span></div>
+            <a class="hline" href={href.detail("test", row.run.id, { from: here(), label: t("ui.shell.nav.tests") })}><ConcernMark mark={outcomeMark(row.run)} word={false} /><span><b>{line.name}</b><small>{line.what}</small></span><span class="when">{at(row.ts)}</span></a>
           {:else if row.diag}
             {@const w = diagnosticWord(row.diag)}
             <div class="hline"><ConcernMark mark={w.mark} word={false} /><span><b>{t("ui.tests.hist.diag")}</b><small>{w.text}</small></span><span class="when">{at(row.ts)}</span></div>
@@ -476,7 +476,7 @@
           <thead><tr>{#if level === "Technical"}<th>ID</th>{/if}<th>{t("ui.tests.smart.attr")}</th><th>{t("ui.tests.smart.current")}</th><th>{t("ui.tests.smart.worst")}</th><th>{t("ui.tests.smart.raw")}</th></tr></thead>
           <tbody>
             {#each attrs as a (a.id)}
-              <tr class:flag={WATCHED.includes(a.id) && a.raw > 0}>{#if level === "Technical"}<td class="mono">{a.id} (0x{a.id.toString(16).toUpperCase().padStart(2, "0")})</td>{/if}<td>{attrName(a.id)}</td><td>{a.current}</td><td>{a.worst}</td><td><b>{formatNumber(a.raw)}</b></td></tr>
+              <tr class:flag={WATCHED.includes(a.id) && a.raw > 0}>{#if level === "Technical"}<td class="mono">{a.id} (0x{a.id.toString(16).toUpperCase().padStart(2, "0")})</td>{/if}<td><a href={href.detail("smart", [d.number, a.id], { from: here(), label: diskName(d) })}>{attrName(a.id)}</a></td><td>{a.current}</td><td>{a.worst}</td><td><b>{formatNumber(a.raw)}</b></td></tr>
             {/each}
           </tbody>
         </table>

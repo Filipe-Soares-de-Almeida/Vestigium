@@ -24,6 +24,11 @@ How to use this file:
 
 ### Added
 
+- Many list rows now open a detail page, with a back link to the list they came from and the navigation
+  pane staying where you were: a test in the history, a SMART attribute, a Health alert that was
+  resolved, a program, a Windows event of a freeze report, and a driver of a capture report. Each page
+  shows only what Vestigium has kept: it has no chart for what it does not record yet, such as the
+  history of one SMART attribute or one program over time.
 - Settings are now chosen from the navigation pane, with its seven pages (Appearance, Reports, Language,
   Monitoring, Data retention, Updates, Privacy and data) under one group, reached from the Settings card
   on the home screen or from the search. Each page is a flat list of settings under its own title.

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { t } from "../../lib/i18n.svelte";
+  import { here, href } from "../../lib/router.svelte";
   import type { DetailLevel } from "../../lib/types";
   import type { DriverTable } from "./words";
 
-  let { table, level }: { table: DriverTable; level: DetailLevel } = $props();
+  let { table, level, captureId }: { table: DriverTable; level: DetailLevel; captureId: number } = $props();
 </script>
 
 <div class="scroll">
@@ -30,7 +31,7 @@
         <tr class:kernel={row.kernel}>
           <td class="who">
             <b>
-              {row.name}
+              <a class="dl" href={href.detail("driver", [captureId, row.module], { from: here(), label: t("ui.captures.crumb") })}>{row.name}</a>
               {#if row.suspect}
                 <span class="pill"><span class="state-dot" style:background="var(--freeze)"></span>{t("ui.captures.pill.suspect")}</span>
               {/if}

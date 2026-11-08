@@ -182,7 +182,7 @@
 
   {#if view.drivers && view.drivers.rows.length}
     <Block title={t("ui.captures.drivers.title")}>
-      <Drivers table={view.drivers} {level} />
+      <Drivers table={view.drivers} {level} captureId={dto.id} />
     </Block>
   {/if}
 

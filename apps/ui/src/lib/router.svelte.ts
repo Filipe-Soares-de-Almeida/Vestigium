@@ -9,6 +9,10 @@ export type ActivityTab = "today" | "now";
 export type HistoryScope = "month" | "week" | "2w";
 
 /** Which tweaks a list shows: those worth applying, with no sign here, already set, applied by Vestigium, or all. */
+/** The kinds of detail page; `parts` of the route name the item inside its kind. */
+export type DetailKind = "test" | "finding" | "event" | "driver" | "smart" | "process";
+const DETAIL_KINDS: DetailKind[] = ["test", "finding", "event", "driver", "smart", "process"];
+
 export type DumpGroup = "blue" | "live" | "app";
 
 export type TweakGroup = "recommended" | "quiet" | "same" | "done" | "all";
@@ -18,6 +22,8 @@ export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
   | { screen: "programs" }
+  /** `origin` is the page the item was opened from: the back link goes there and the sidebar follows it. */
+  | { screen: "detail"; kind: DetailKind; parts: string[]; from: string | null; label: string | null; origin: Route | null }
   | { screen: "disks" }
   | { screen: "memory" }
   | { screen: "events" }
@@ -39,6 +45,14 @@ export type Screen = Route["screen"];
 
 export const href = {
   home: () => "#/",
+  detail: (kind: DetailKind, item: string | number | (string | number)[], opts: { from?: string; label?: string } = {}) => {
+    const parts = Array.isArray(item) ? item : [item];
+    const query = new URLSearchParams();
+    if (opts.from) query.set("de", opts.from);
+    if (opts.label) query.set("dl", opts.label);
+    const text = query.toString();
+    return `#/detail/${kind}/${parts.map((p) => encodeURIComponent(String(p))).join("/")}${text ? `?${text}` : ""}`;
+  },
   programs: () => "#/activity/programs",
   disks: () => "#/disks",
   memory: () => "#/memory",
@@ -67,7 +81,7 @@ export const href = {
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
-  const [screen, arg] = path.split("/");
+  const [screen, arg, ...rest] = path.split("/");
   const params = new URLSearchParams(query);
   const dayParam = (name: string) => (/^\d{4}-\d{2}-\d{2}$/.test(params.get(name) ?? "") ? params.get(name) : null);
   if (screen === "occurrence" && /^\d+$/.test(arg ?? "")) {
@@ -80,6 +94,17 @@ export function parse(hash: string): Route {
   }
   if (screen === "events" || (screen === "activity" && arg === "all")) return { screen: "events" };
   if (screen === "period" && /^\d+$/.test(arg ?? "")) return { screen: "period", start: Number(arg), fromDay: dayParam("day") };
+  if (screen === "detail" && DETAIL_KINDS.includes(arg as DetailKind) && rest.length) {
+    const from = params.get("de");
+    return {
+      screen: "detail",
+      kind: arg as DetailKind,
+      parts: rest.map(decodeURIComponent),
+      from,
+      label: params.get("dl"),
+      origin: from ? parse(from) : null,
+    };
+  }
   if (screen === "disks") return { screen: "disks" };
   if (screen === "memory") return { screen: "memory" };
   if (screen === "programs" || (screen === "activity" && arg === "programs")) return { screen: "programs" };
@@ -139,6 +164,7 @@ class Router {
     const route = this.current;
     if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
     if (route.screen === "period") return `period/${route.start}`;
+    if (route.screen === "detail") return `detail/${route.kind}/${route.parts.join("/")}`;
     if (route.screen === "health") return `health/${route.area ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }
@@ -152,6 +178,12 @@ addEventListener("hashchange", () => {
   const commit = () => router.commit(next, group);
   if (!router.hook?.(next, router.current, commit)) commit();
 });
+
+/** The address as it is now, read reactively so a link built from it follows the screen it sits on. */
+export function here(): string {
+  void router.current;
+  return location.hash;
+}
 
 /** Opens a screen, as in `go(href.activity("now"))`. */
 export function go(path: string): void {

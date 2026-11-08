@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { buildGroups, groupOf, itemHref } from "../lib/groups";
+  import { buildGroups, followed, groupOf, itemHref } from "../lib/groups";
   import { t } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
@@ -30,7 +30,7 @@
             class="item"
             data-reveal
             href={itemHref(current, item)}
-            aria-current={item.match(router.current) ? "page" : undefined}
+            aria-current={item.match(followed(router.current)) ? "page" : undefined}
           >
             <Icon name={item.icon} />
             <span class="label">{item.label}</span>

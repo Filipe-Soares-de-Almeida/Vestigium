@@ -5,6 +5,7 @@
   import { app } from "../lib/app.svelte";
   import { formatPercent } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
+  import { here, href } from "../lib/router.svelte";
   import type { ProcessSample } from "../lib/types";
   import { formatBytes, formatRate } from "./now/lanes";
   import { NowStream } from "./now/stream.svelte";
@@ -88,7 +89,7 @@
       <tbody>
         {#each rows as row (row.pid)}
           <tr>
-            <th scope="row" title={row.name}>{row.name}</th>
+            <th scope="row" title={row.name}><a href={href.detail("process", row.name, { from: here(), label: t("ui.item.programs") })}>{row.name}</a></th>
             <td>{formatPercent(row.cpu_pct, 1)}</td>
             <td>{formatBytes(row.private_bytes)}</td>
             <td>{formatRate(row.read_bps + row.write_bps)}</td>

@@ -252,6 +252,7 @@ export function entryHref(group: Group): string {
 
 const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   home: null,
+  detail: null,
   activity: "activity",
   history: "activity",
   programs: "now",
@@ -269,8 +270,14 @@ const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   settings: "settings",
 };
 
+/** The route the sidebar follows: a detail page counts as the page it was opened from. */
+export function followed(route: Route): Route {
+  return route.screen === "detail" && route.origin ? followed(route.origin) : route;
+}
+
 /** The group the sidebar shows for a route; `from` is the `g` query, honoured when that group lists the route. */
-export function groupOf(groups: Group[], route: Route, from: string | null): Group | null {
+export function groupOf(groups: Group[], current: Route, from: string | null): Group | null {
+  const route = followed(current);
   const asked = from ? groups.find((g) => g.key === from) : undefined;
   if (asked?.items.some((i) => i.match(route))) return asked;
   const fallback =

@@ -9,7 +9,7 @@
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { lang, t } from "../lib/i18n.svelte";
-  import { href } from "../lib/router.svelte";
+  import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import type { Episode } from "../lib/types";
   import { AREAS, areaState } from "./health/areas";
@@ -60,7 +60,7 @@
     if (!dto) return [];
     const diag = dto.diagnostics.map((d) => {
       const word = diagnosticWord(d);
-      return { at: d.ts_ms, title: t("ui.memory.test.diag"), mark: word.mark, text: word.text };
+      return { at: d.ts_ms, title: t("ui.memory.test.diag"), mark: word.mark, text: word.text, run: null as number | null };
     });
     const quick = dto.runs
       .filter((r) => kindOf(r) === "MemoryQuick")
@@ -71,6 +71,7 @@
           title: t("ui.memory.test.quick"),
           mark: outcomeMark(r),
           text: q ? formatBytes(q.tested_bytes) : "",
+          run: r.id as number | null,
         };
       });
     return [...diag, ...quick].sort((a, b) => b.at - a.at);
@@ -139,7 +140,7 @@
       {#each history as h (h.title + h.at)}
         {@const s = statusOf(h.mark)}
         <RowCard
-          href={to(href.tests("memory"))}
+          href={h.run === null ? to(href.tests("memory")) : href.detail("test", h.run, { from: here(), label: t("ui.group.memory") })}
           icon="tests"
           title={h.title}
           sub={[stamp.format(h.at), h.text].filter(Boolean).join(" · ")}
