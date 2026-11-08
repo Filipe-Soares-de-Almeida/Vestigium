@@ -15,6 +15,7 @@ mod memory;
 mod pdh;
 mod presentmon;
 mod probe;
+mod process_info;
 mod processes;
 mod timer;
 mod tweaks;
@@ -45,6 +46,7 @@ pub use presentmon::{
     CsvColumns, FrameRow, PRESENTMON_SESSION, PresentMonOutcome, presentmon_args, run_presentmon,
 };
 pub use probe::{ProbeConfig, spawn_probe};
+pub use process_info::{image_path, run_as, signature};
 pub use processes::ProcessSnapshotter;
 pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
 pub use tweaks::{

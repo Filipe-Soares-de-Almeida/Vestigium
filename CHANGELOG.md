@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- Vestigium can read, for one process and without elevation, the path of its program, the user it runs
+  as and who signed the file; the signature is checked offline, in the file and in the Windows
+  catalogs.
 - The watcher keeps each running program's CPU, memory and disk use for the last ten minutes in
   memory, at every 5 s ranking, and answers it for one program; the window and the watcher speak a new
   protocol version.

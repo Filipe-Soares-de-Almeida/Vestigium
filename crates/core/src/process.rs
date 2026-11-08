@@ -242,6 +242,34 @@ pub fn process_rates(
         .collect()
 }
 
+/// Who a process runs as, as far as a reader without elevation can tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunAs {
+    System,
+    LocalService,
+    NetworkService,
+    CurrentUser {
+        elevated: bool,
+    },
+    OtherUser,
+    /// Windows did not let the user look.
+    Unknown,
+}
+
+/// What the signature of a program file says, checked offline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Signature {
+    /// Signed by a trusted publisher; `signer` is empty when its certificate has no name.
+    Valid {
+        signer: String,
+    },
+    /// Signed, but the signature does not hold.
+    Invalid,
+    Unsigned,
+    /// The file could not be read.
+    Unknown,
+}
+
 /// One program's use at one ranking.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProgramPoint {
