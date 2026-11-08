@@ -238,6 +238,11 @@ How to use this file:
 
 ### Changed
 
+- The home screen and the navigation pane say more about this PC: the Freezes card counts today's
+  occurrences and overload periods, Disks names each disk with its letter, Memory gives its size and
+  free memory, Dumps the space they use and Settings the version. In the pane, All events shows
+  today's count, disks carry their letter, Disk alerts and the test devices show a mark when they need
+  a look, and every Optimizations list shows its count, zero included.
 - Detail pages and every page opened from a list name only the place their back link returns to, such
   as Memory instead of Back to Memory. A detail page shows its facts in one line under the title and
   its blocks two by two on a wide window, each opened by a divider.

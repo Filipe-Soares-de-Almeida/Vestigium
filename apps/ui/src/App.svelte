@@ -17,6 +17,7 @@
   import { markFrame } from "./lib/frame";
   import { health } from "./lib/health.svelte";
   import { router } from "./lib/router.svelte";
+  import { today } from "./lib/today.svelte";
   import { updates } from "./lib/update.svelte";
   import Activity from "./screens/Activity.svelte";
   import Capture from "./screens/Capture.svelte";
@@ -52,6 +53,8 @@
   onMount(() => dumps.watch());
   onMount(() => tweaks.watch());
   onMount(() => hwtests.listen());
+  onMount(() => void hwtests.load());
+  onMount(() => today.watch());
 
   // Stores what finished while the window was closed and restores a running capture, again when the watcher comes up.
   $effect(() => {

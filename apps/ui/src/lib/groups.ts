@@ -3,14 +3,18 @@ import { areaState, AREAS } from "../screens/health/areas";
 import { formatBytes } from "../screens/occurrence/format";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
-import { t } from "./i18n.svelte";
 import { type DumpGroup, href, type Route, type TweakGroup } from "./router.svelte";
 import type { StatusKind } from "../components/StatusMark.svelte";
 import { keyOf, tweaks } from "./tweaks.svelte";
 import { shown, type Shown } from "../screens/tweaks/words";
 import { entries, GROUPS as DUMP_GROUPS, present } from "../screens/dumps/words";
 import { hwtests } from "./tests.svelte";
+import { today } from "./today.svelte";
 import type { DiskDto } from "./types";
+import { lang, t, tn } from "./i18n.svelte";
+import { updates } from "./update.svelte";
+import { statusOf } from "../screens/tests/status";
+import { diskState, memoryState } from "../screens/tests/words";
 
 // The sidebar groups: each subject opens into the pages that belong to it.
 
@@ -64,6 +68,15 @@ const SETTINGS_ICONS: Record<(typeof SETTINGS_PAGES)[number], IconName> = {
 };
 
 export const diskName = (d: DiskDto) => t(`ui.tests.disk.name.${d.media}`, { size: d.bytes ? formatBytes(d.bytes) : "" }).trim();
+/** "C:, E:" for the volumes of a disk. */
+const lettersOf = (d: DiskDto) => d.volumes.map((v) => v.replace(/\\$/, "")).join(", ");
+/** A disk as the navigation pane names it: "SSD de 1 TB · C:". */
+const diskLabel = (d: DiskDto) => (d.volumes.length ? `${diskName(d)} · ${lettersOf(d)}` : diskName(d));
+/** The status a test device shows in the pane: only what needs a look. */
+function deviceMark(mark: Parameters<typeof statusOf>[0]): StatusKind | undefined {
+  const kind = statusOf(mark).kind;
+  return kind === "critical" || kind === "attention" ? kind : undefined;
+}
 
 const onActivity = (tab: "today" | "now") => (r: Route) => r.screen === "activity" && r.tab === tab;
 const fromHistory = (r: Route) => (r.screen === "occurrence" || r.screen === "period") && r.fromDay !== null;
@@ -103,11 +116,30 @@ export function buildGroups(): Group[] {
   const areas = health.dto ? AREAS.map((a) => areaState(a, health.dto!)) : [];
   const dumpBytes = dumps.dto?.space_bytes ?? 0;
   const dumpEntries = dumps.dto ? entries(dumps.dto) : [];
+  const occurrences = today.occurrences.length;
+  const periods = today.periods;
+  const list = new Intl.ListFormat(lang(), { type: "conjunction" });
+  const memory = hwtests.dto?.memory ?? null;
+  const subs: Partial<Record<GroupKey, string>> = {
+    freezes: t("ui.group.freezes.sub_n", {
+      occurrences: occurrences ? tn("ui.events.occurrences", occurrences) : t("ui.events.occurrences.none"),
+      periods: periods ? tn("ui.events.periods", periods) : t("ui.events.periods.none"),
+    }),
+    disks: disks.length
+      ? list.format(disks.map((d) => (d.volumes.length ? `${diskName(d)} (${lettersOf(d)})` : diskName(d))))
+      : undefined,
+    memory: memory
+      ? t("ui.group.memory.sub_n", { total: formatBytes(memory.total_bytes), free: formatBytes(memory.available_bytes) })
+      : undefined,
+    dumps: dumpBytes ? t("ui.group.dumps.sub_n", { size: formatBytes(dumpBytes) }) : undefined,
+    settings: t("ui.group.settings.sub_n", { version: updates.version }),
+  };
+  const diskAreaMark = areas.find((a) => a.area.id === "disks")?.mark;
   const g = (key: GroupKey, icon: IconName, extra: Partial<Group> & Pick<Group, "items">): Group => ({
     key,
     icon,
     name: t(`ui.group.${key}`),
-    sub: t(`ui.group.${key}.sub`),
+    sub: subs[key] ?? t(`ui.group.${key}.sub`),
     ...extra,
   });
   return [
@@ -129,6 +161,7 @@ export function buildGroups(): Group[] {
           href: href.events(),
           label: t("ui.item.events"),
           icon: "today",
+          meta: String(occurrences + periods),
           match: (r) => r.screen === "events" || ((r.screen === "occurrence" || r.screen === "period") && r.fromDay === null),
         },
       ],
@@ -149,10 +182,16 @@ export function buildGroups(): Group[] {
       cross: true,
       items: [
         { href: href.disks(), label: t("ui.item.overview"), icon: "disk", match: (r) => r.screen === "disks" },
-        { href: href.health("disks"), label: t("ui.item.disk_alerts"), icon: "health", match: onHealth("disks") },
+        {
+          href: href.health("disks"),
+          label: t("ui.item.disk_alerts"),
+          icon: "health",
+          status: diskAreaMark ? mark(diskAreaMark) : undefined,
+          match: onHealth("disks"),
+        },
         ...disks.map((d) => ({
           href: href.tests(String(d.number)),
-          label: diskName(d),
+          label: diskLabel(d),
           icon: (d.media === "Hdd" ? "hdd" : "ssd") as IconName,
           match: onTests(String(d.number)),
         })),
@@ -169,11 +208,18 @@ export function buildGroups(): Group[] {
     g("tests", "tests", {
       items: [
         { href: href.tests(), label: t("ui.item.overview"), icon: "tests", match: onTests(null) },
-        { href: href.tests("memory"), label: t("ui.item.memory_tests"), icon: "memory", match: onTests("memory") },
+        {
+          href: href.tests("memory"),
+          label: t("ui.group.memory"),
+          icon: "memory",
+          status: hwtests.dto ? deviceMark(memoryState(hwtests.dto, false).mark) : undefined,
+          match: onTests("memory"),
+        },
         ...disks.map((d) => ({
           href: href.tests(String(d.number)),
           label: diskName(d),
           icon: (d.media === "Hdd" ? "hdd" : "ssd") as IconName,
+          status: hwtests.dto ? deviceMark(diskState(hwtests.dto, d, hwtests.details[d.number] ?? null, false).mark) : undefined,
           match: onTests(String(d.number)),
         })),
       ],
@@ -195,7 +241,7 @@ export function buildGroups(): Group[] {
           href: href.tweaks(null, key),
           label: t(label),
           icon,
-          meta: count ? String(count) : undefined,
+          meta: String(count),
           match: (r: Route) => tweakListOf(r) === key,
         };
       }),

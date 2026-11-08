@@ -1,12 +1,8 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-
   import Finder from "../components/Finder.svelte";
   import Icon from "../components/Icon.svelte";
   import Mark from "../components/Mark.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
-  import { marks } from "../lib/api";
-  import { app } from "../lib/app.svelte";
   import { formatDuration, formatTime } from "../lib/format";
   import { health } from "../lib/health.svelte";
   import { buildGroups, entryHref } from "../lib/groups";
@@ -15,8 +11,7 @@
   import { href } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
-  import type { OccurrenceSummary } from "../lib/types";
-  import { dayStart, worstOf } from "./today/day";
+  import { today } from "../lib/today.svelte";
   import { occurrenceMark } from "./today/text";
 
   const status = $derived(shellStatus());
@@ -37,7 +32,7 @@
   );
   const tweakKind: StatusKind = $derived(tweaks.recommended ? "attention" : "ok");
 
-  let worst = $state.raw<OccurrenceSummary | null>(null);
+  const worst = $derived(today.worst);
   const worstMark = $derived(worst ? occurrenceMark(worst) : { kind: "ok" as StatusKind, word: "" });
   const activityLine = $derived(
     worst
@@ -48,25 +43,6 @@
       : t("ui.home.activity.none"),
   );
 
-  /** Today's gravest occurrence, for the Activity card; a failed read keeps the last one. */
-  async function loadWorst(): Promise<void> {
-    const now = Date.now();
-    try {
-      worst = worstOf((await marks(dayStart(now), now)).occurrences);
-    } catch {
-      // The card keeps what it showed.
-    }
-  }
-
-  $effect(() => {
-    if (app.history !== "ready") return;
-    untrack(() => void loadWorst());
-    const onvisible = () => {
-      if (!document.hidden) void loadWorst();
-    };
-    document.addEventListener("visibilitychange", onvisible);
-    return () => document.removeEventListener("visibilitychange", onvisible);
-  });
 </script>
 
 <div class="home" data-morph-base>
