@@ -18,6 +18,7 @@ import type {
   RunningTest,
   ScanFinished,
   Settings,
+  ProgramPoint,
   SettingsDto,
   SmartPoint,
   TestsDto,
@@ -158,6 +159,11 @@ export function tests(): Promise<TestsDto> {
 }
 
 /** SMART or NVMe detail of one disk, read now; reading an idle HDD spins it up. */
+/** One program's use at each ranking of the last ten minutes. */
+export function programRecent(name: string): Promise<ProgramPoint[]> {
+  return invoke("program_recent", { name });
+}
+
 /** The last 30 days of one SMART attribute of a disk, named as the disk counters name it. */
 export function smartHistory(disk: string, attr: number): Promise<SmartPoint[]> {
   return invoke("smart_history", { disk, attr });

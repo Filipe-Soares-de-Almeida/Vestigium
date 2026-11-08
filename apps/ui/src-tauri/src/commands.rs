@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
-use vestigium_core::{Episode, Settings};
+use vestigium_core::{Episode, ProgramPoint, Settings};
 use vestigium_ipc::{Request, Response};
 
 use vestigium_store::CaptureSummary;
@@ -447,6 +447,22 @@ pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
 #[tauri::command]
 pub async fn disk_detail(number: u32, name: String) -> Result<DiskDetailDto, UiError> {
     blocking(move || Ok(crate::hwtests::disk_detail(number, &name, now_ms()))).await
+}
+
+/// One program's use at each ranking of the last ten minutes; empty while the watcher is away.
+#[tauri::command]
+pub async fn program_recent(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<ProgramPoint>, UiError> {
+    let link = state.link.clone();
+    blocking(move || match link.call(&Request::ProgramRecent { name }) {
+        Ok(Response::ProgramRecent { points }) => Ok(points),
+        Ok(other) => Err(refused(other)),
+        Err(UiError::AgentStopped) => Ok(Vec::new()),
+        Err(err) => Err(err),
+    })
+    .await
 }
 
 /// The last 30 days of one SMART attribute of a disk, one reading a day.

@@ -32,6 +32,7 @@ const COMMANDS: &[&str] = &[
     "tests",
     "disk_detail",
     "smart_history",
+    "program_recent",
     "open_memory_diagnostic",
     "start_memory_test",
     "start_benchmark",

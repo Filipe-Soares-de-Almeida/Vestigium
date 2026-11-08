@@ -254,6 +254,8 @@ How to use this file:
 
 ### Changed
 
+- A program's page shows lines of its CPU use and memory over the last 10 minutes, refreshed every 5
+  s.
 - A SMART attribute's page shows its current value, its state, the disk, when it was last read and a
   line of its last 30 days.
 - A driver's page in a capture report lists its five longest calls with their duration, kind, core and

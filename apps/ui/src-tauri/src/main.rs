@@ -54,6 +54,7 @@ fn main() {
             commands::tests,
             commands::disk_detail,
             commands::smart_history,
+            commands::program_recent,
             commands::open_memory_diagnostic,
             commands::start_memory_test,
             commands::start_benchmark,

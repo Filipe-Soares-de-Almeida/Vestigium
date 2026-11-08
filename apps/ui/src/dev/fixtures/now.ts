@@ -173,6 +173,14 @@ function refuse(kind: UiError["kind"]): Promise<never> {
 }
 
 export const handlers: Record<string, Handler> = {
+  // Ten minutes of rankings every 5 s, with a busy stretch in the middle.
+  program_recent: () =>
+    Array.from({ length: 120 }, (_, i) => ({
+      ts_ms: Date.now() - (119 - i) * 5000,
+      cpu_pct: 2 + (i > 50 && i < 70 ? 18 : 0) + (i % 7) * 0.4,
+      private_bytes: (420 + i * 1.5) * 1048576,
+      io_bps: 0,
+    })),
   live_start: (args) => {
     const link = query.get("link");
     if (link === "stopped") return refuse("agent_stopped");
