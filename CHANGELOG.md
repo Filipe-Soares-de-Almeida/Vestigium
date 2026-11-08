@@ -24,6 +24,7 @@ How to use this file:
 
 ### Added
 
+- The watcher measures its own processor use over the last minute and reports it with its status.
 - Many list rows now open a detail page, with a back link to the list they came from and the navigation
   pane staying where you were: a test in the history, a SMART attribute, a Health alert that was
   resolved, a program, a Windows event of a freeze report, and a driver of a capture report. Each page

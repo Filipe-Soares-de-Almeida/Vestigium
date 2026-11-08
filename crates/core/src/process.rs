@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -240,6 +240,39 @@ pub fn process_rates(
             }
         })
         .collect()
+}
+
+/// The CPU one process used over a sliding span, from readings of its cumulative time.
+#[derive(Clone, Debug)]
+pub struct CpuWindow {
+    span_ms: f64,
+    readings: VecDeque<(f64, u64)>,
+}
+
+impl CpuWindow {
+    pub fn new(span_ms: f64) -> CpuWindow {
+        CpuWindow {
+            span_ms,
+            readings: VecDeque::new(),
+        }
+    }
+
+    /// Adds a reading taken at `at_ms` on a steady clock; returns the share of the whole machine
+    /// used since the oldest reading kept, 0 to 100.
+    pub fn push(&mut self, at_ms: f64, cpu_time_100ns: u64, logical_cpus: u32) -> Option<f32> {
+        self.readings.push_back((at_ms, cpu_time_100ns));
+        while self.readings.len() > 2 && at_ms - self.readings[1].0 >= self.span_ms {
+            self.readings.pop_front();
+        }
+        let (&(then, old), &(now, new)) = (self.readings.front()?, self.readings.back()?);
+        let capacity_100ns = (now - then) * 10_000.0 * f64::from(logical_cpus);
+        (capacity_100ns > 0.0)
+            .then(|| (new.saturating_sub(old) as f64 / capacity_100ns * 100.0) as f32)
+    }
+
+    pub fn clear(&mut self) {
+        self.readings.clear();
+    }
 }
 
 /// Union of the `per_metric` heaviest samples by CPU, private memory, I/O and GPU, sorted by CPU.

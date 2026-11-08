@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use vestigium_core::{
-    ProcessCounters, ProcessSample, ProcessTop, heaviest, last_seen, process_rates, programs, usage,
+    CpuWindow, ProcessCounters, ProcessSample, ProcessTop, heaviest, last_seen, process_rates,
+    programs, usage,
 };
 
 fn top_processes(
@@ -291,4 +292,27 @@ fn usage_averages_each_program_over_the_rankings() {
 #[test]
 fn usage_of_no_rankings_is_empty() {
     assert!(usage(&[]).is_empty());
+}
+
+#[test]
+fn cpu_window_reports_the_share_over_its_span() {
+    let mut window = CpuWindow::new(60_000.0);
+
+    assert_eq!(window.push(0.0, 0, 4), None, "one reading has no interval");
+    // 0.24 s of CPU in 60 s on 4 logical processors is 0.1% of the machine.
+    assert_eq!(window.push(60_000.0, 2_400_000, 4), Some(0.1));
+    // The reading at 0 s falls out once a newer one still covers the span.
+    window.push(65_000.0, 2_400_000, 4);
+    assert_eq!(window.push(120_000.0, 2_400_000, 4), Some(0.0));
+}
+
+#[test]
+fn cpu_window_starts_over_when_cleared() {
+    let mut window = CpuWindow::new(60_000.0);
+    window.push(0.0, 0, 1);
+    window.push(1_000.0, 10_000_000, 1);
+
+    window.clear();
+
+    assert_eq!(window.push(5_000.0, 10_000_000, 1), None);
 }

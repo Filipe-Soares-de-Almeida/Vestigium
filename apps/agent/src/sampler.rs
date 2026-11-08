@@ -14,7 +14,7 @@ use vestigium_collect::{
     physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    Blackbox, DiskInfo, EventMeaning, Gap, GapReason, GateState, HICCUP_MS, HungWindow,
+    Blackbox, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState, HICCUP_MS, HungWindow,
     MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick,
     ProcessCounters, ProcessTop, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings,
     Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
@@ -39,6 +39,8 @@ const TOP_EVERY: usize = 5;
 /// Seconds between two checks for windows that stopped responding.
 const HANG_EVERY: usize = 2;
 const TOP_PER_METRIC: usize = 5;
+/// The span the agent's own CPU share is averaged over.
+const OWN_CPU_SPAN_MS: f64 = 60_000.0;
 /// Programs the live screen can list in full, busiest first.
 const PROGRAMS_LISTED: usize = 300;
 const SNAPSHOT_BUFFER: usize = 512 * 1024;
@@ -158,6 +160,8 @@ struct Sampler {
     /// GPU use per process at the latest sample, for the next ranking.
     gpu_by_pid: HashMap<u32, f32>,
     logical_cpus: u32,
+    /// The agent's own CPU time, for the share the status reports.
+    own_cpu: CpuWindow,
     health: HealthPass<WindowsHealth>,
     /// When the first health pass is due; afterwards a pass runs with every hourly prune.
     first_health_ms: Option<i64>,
@@ -233,6 +237,7 @@ impl Sampler {
             snapshots: VecDeque::with_capacity(TOP_EVERY + 1),
             gpu_by_pid: HashMap::new(),
             logical_cpus: logical_cpus(),
+            own_cpu: CpuWindow::new(OWN_CPU_SPAN_MS),
             health: HealthPass::new(WindowsHealth),
             first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
             disk_active_ms: HashMap::new(),
@@ -497,6 +502,9 @@ impl Sampler {
             self.batcher.push_processes(top);
         }
 
+        if ticks.is_multiple_of(TOP_EVERY) {
+            self.note_own_cpu();
+        }
         self.take_events();
         self.settle_fall(ts_ms, false);
         if mem::take(&mut self.dumps_due) {
@@ -773,8 +781,24 @@ impl Sampler {
     }
 
     /// Closes what the black box holds and writes everything, before a pause, a suspend or a stop.
+    /// Updates the agent's own CPU share from the latest process snapshot.
+    fn note_own_cpu(&mut self) {
+        let own = std::process::id();
+        let Some((woke, cpu_time_100ns)) = self.snapshots.back().and_then(|(woke, snapshot)| {
+            let me = snapshot.iter().find(|p| p.pid == own)?;
+            Some((*woke, me.cpu_time_100ns))
+        }) else {
+            return;
+        };
+        if let Some(pct) = self.own_cpu.push(woke, cpu_time_100ns, self.logical_cpus) {
+            lock(&self.status).cpu_pct = Some(pct);
+        }
+    }
+
     fn leave(&mut self, reason: GapReason) {
         let now = wall_ms();
+        self.own_cpu.clear();
+        lock(&self.status).cpu_pct = None;
         self.take_events();
         let outputs = self.blackbox.drain(now);
         self.keep(outputs, now);

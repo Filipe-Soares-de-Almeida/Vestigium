@@ -118,6 +118,9 @@ pub struct AgentStatus {
     /// Sensitive mode saw hitches worth a deep capture.
     #[serde(default)]
     pub suggest_capture: bool,
+    /// The agent's own share of the whole machine over the last minute, 0 to 100.
+    #[serde(default)]
+    pub cpu_pct: Option<f32>,
 }
 
 /// The latest second watched.
