@@ -14,7 +14,7 @@
   import { toast } from "../lib/toast.svelte";
   import { keyOf, tweaks } from "../lib/tweaks.svelte";
   import Row from "./dumps/Row.svelte";
-  import { at, entries, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, TONE } from "./dumps/words";
+  import { at, entries, fileName, type Group, GROUPS, lastRead, lede, present, setting, space, title, TONE } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
 
   let { id, group }: { id: number | null; group: DumpGroup | null } = $props();
@@ -78,6 +78,7 @@
     label={t("ui.common.back_to", { place: opened ? groupLabel(opened.group) : t("ui.dumps.title") })}
   />
   {#if opened}
+    <h1 class="sr">{title(opened, level)}</h1>
     <Row entry={opened} {level} open />
   {:else}
     <h1>{t("ui.dumps.title")}</h1>

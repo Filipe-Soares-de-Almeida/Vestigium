@@ -65,7 +65,7 @@
     color: var(--press);
   }
   .attention svg {
-    color: var(--busy);
+    color: color-mix(in srgb, var(--busy) 78%, var(--ink));
   }
   .ok svg {
     color: var(--good);
