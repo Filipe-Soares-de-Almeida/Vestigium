@@ -22,7 +22,7 @@
   import TechTables from "./occurrence/TechTables.svelte";
   import WindowChart from "./occurrence/WindowChart.svelte";
 
-  let { id }: { id: number } = $props();
+  let { id, fromDay = null }: { id: number; fromDay?: string | null } = $props();
 
   /** `undefined` while it loads, `null` when the history no longer has it. */
   let dto = $state<OccurrenceDto | null | undefined>(undefined);
@@ -73,7 +73,9 @@
 {/snippet}
 
 <LevelHead
-  parent={{ href: href.activity(), name: t("ui.shell.nav.activity") }}
+  parent={fromDay
+    ? { href: href.history({ day: fromDay, month: fromDay.slice(0, 7) }), name: t("ui.item.history") }
+    : { href: href.activity(), name: t("ui.shell.nav.activity") }}
   current={view?.crumb ?? t("ui.occurrence.crumb")}
   label={t("ui.occurrence.path")}
 />

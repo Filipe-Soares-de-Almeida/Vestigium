@@ -5,16 +5,18 @@
     value = $bindable(""),
     options,
     label,
+    onchange,
   }: {
     value?: string;
     options: { value: string; text: string }[];
     /** Accessible name; the list shows no visible label of its own. */
     label: string;
+    onchange?: (value: string) => void;
   } = $props();
 </script>
 
 <span class="select">
-  <select bind:value aria-label={label}>
+  <select bind:value aria-label={label} onchange={() => onchange?.(value)}>
     {#each options as option (option.value)}
       <option value={option.value}>{option.text}</option>
     {/each}

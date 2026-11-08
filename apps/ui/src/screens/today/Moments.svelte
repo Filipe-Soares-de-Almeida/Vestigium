@@ -3,33 +3,20 @@
 
   import Block from "../../components/Block.svelte";
   import Icon from "../../components/Icon.svelte";
-  import StatusMark, { type StatusKind } from "../../components/StatusMark.svelte";
+  import StatusMark from "../../components/StatusMark.svelte";
   import { formatDuration, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
-  import { href } from "../../lib/router.svelte";
   import type { DetailLevel } from "../../lib/types";
-  import { type Item, toneOf } from "./day";
+  import type { Item } from "./day";
+  import OccurrenceRow from "./OccurrenceRow.svelte";
   import Period from "./Period.svelte";
-  import {
-    causeIcon,
-    causeName,
-    episodeIcon,
-    episodeMeta,
-    episodeTitle,
-    occurrenceTitle,
-  } from "./text";
+  import { episodeIcon, episodeMeta, episodeTitle } from "./text";
 
   let { items, level }: { items: Item[]; level: DetailLevel } = $props();
 
   /** Episodes open in place, by row key, so the day's refresh keeps them open. */
   const opened = new SvelteSet<string>();
   const keyOf = (item: Item) => `${item.kind}-${item.start}`;
-
-  const STATUS: Record<ReturnType<typeof toneOf>, StatusKind> = {
-    freeze: "critical",
-    press: "attention",
-    busy: "info",
-  };
 
   function toggle(key: string): void {
     if (opened.has(key)) opened.delete(key);
@@ -46,22 +33,7 @@
         <li>
           {#if item.kind === "occurrence"}
             {@const o = item.occurrence}
-            <a class="row" href={href.occurrence(o.id)} data-reveal>
-              <span class="time">{formatTime(o.kind === "PostMortem" ? o.end_ms : o.start_ms)}</span>
-              <span class="ico"><Icon name={causeIcon(o.cause)} /></span>
-              <span class="what">
-                <b>{occurrenceTitle(o, level)}</b>
-                <small>
-                  {t(`ui.common.kind.${o.kind}`)} · {causeName(o.cause)}{o.kind === "PostMortem"
-                    ? ""
-                    : ` · ${formatDuration(o.end_ms - o.start_ms)}`}
-                </small>
-              </span>
-              <span class="end">
-                <StatusMark kind={STATUS[toneOf(o)]} reveal />
-                <span class="chev"><Icon name="chevron" /></span>
-              </span>
-            </a>
+            <OccurrenceRow {o} {level} />
           {:else}
             {@const e = item.episode}
             {@const key = keyOf(item)}

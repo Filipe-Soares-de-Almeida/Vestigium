@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- A History screen, under Activity, lists every day since the first record. A calendar colours each
+  day by its freezes, with arrows to change month; a Period list narrows it to the month, the last week or
+  the last two weeks; a chart shows freezes by weekday; and Day by day lists the days, or the freezes of the
+  day you pick. Opening a freeze from there and going back returns to the same month and day.
 - Today has a new layout: the title with the date, the PC states chart, then the day's events and
   Health side by side on wide windows, and the last 14 days. Each event shows its status as a symbol, and
   the word appears when you point at the row. The Today and Now tabs are gone; the navigation pane

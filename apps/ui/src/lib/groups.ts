@@ -64,6 +64,7 @@ const SETTINGS_ICONS: Record<(typeof SETTINGS_PAGES)[number], IconName> = {
 export const diskName = (d: DiskDto) => t(`ui.tests.disk.name.${d.media}`, { size: d.bytes ? formatBytes(d.bytes) : "" }).trim();
 
 const onActivity = (tab: "today" | "now") => (r: Route) => r.screen === "activity" && r.tab === tab;
+const onHistory = (r: Route) => r.screen === "history" || (r.screen === "occurrence" && r.fromDay !== null);
 const onHealth = (area: string | null) => (r: Route) => r.screen === "health" && (r.area ?? null) === area;
 const onTests = (device: string | null) => (r: Route) => r.screen === "tests" && (r.device ?? null) === device;
 const mark = (concern: "Critical" | "Attention" | "Ok" | "Unknown"): StatusKind | undefined =>
@@ -83,7 +84,10 @@ export function buildGroups(): Group[] {
   });
   return [
     g("activity", "today", {
-      items: [{ href: href.activity(), label: t("ui.item.today"), icon: "today", match: onActivity("today") }],
+      items: [
+        { href: href.activity(), label: t("ui.item.today"), icon: "today", match: onActivity("today") },
+        { href: href.history(), label: t("ui.item.history"), icon: "clock", match: onHistory },
+      ],
     }),
     g("now", "now", {
       items: [{ href: href.activity("now"), label: t("ui.item.live"), icon: "now", match: onActivity("now") }],
@@ -94,7 +98,7 @@ export function buildGroups(): Group[] {
           href: href.activity(),
           label: t("ui.item.events"),
           icon: "today",
-          match: (r) => r.screen === "occurrence",
+          match: (r) => r.screen === "occurrence" && r.fromDay === null,
         },
       ],
     }),
@@ -198,6 +202,7 @@ export function entryHref(group: Group): string {
 const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   home: null,
   activity: "activity",
+  history: "activity",
   occurrence: "freezes",
   captures: "captures",
   capture: "captures",
@@ -212,6 +217,11 @@ const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
 export function groupOf(groups: Group[], route: Route, from: string | null): Group | null {
   const asked = from ? groups.find((g) => g.key === from) : undefined;
   if (asked?.items.some((i) => i.match(route))) return asked;
-  const fallback = route.screen === "activity" && route.tab === "now" ? "now" : DEFAULT_GROUP[route.screen];
+  const fallback =
+    route.screen === "activity" && route.tab === "now"
+      ? "now"
+      : route.screen === "occurrence" && route.fromDay !== null
+        ? "activity"
+        : DEFAULT_GROUP[route.screen];
   return groups.find((g) => g.key === fallback) ?? null;
 }

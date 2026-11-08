@@ -1,14 +1,19 @@
-// Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/occurrence/<id>, #/captures[?for=<occurrence id>],
+// Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
+// #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
 // #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
 
 export type ActivityTab = "today" | "now";
 
+export type HistoryScope = "month" | "week" | "2w";
+
 export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
-  | { screen: "occurrence"; id: number }
+  | { screen: "history"; month: string | null; scope: HistoryScope; day: string | null }
+  /** `fromDay` is set when the report was opened from a day of the History. */
+  | { screen: "occurrence"; id: number; fromDay: string | null }
   | { screen: "captures"; forOccurrence: number | null }
   | { screen: "capture"; id: number }
   | { screen: "health"; area: string | null }
@@ -23,7 +28,15 @@ export type Screen = Route["screen"];
 export const href = {
   home: () => "#/",
   activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
-  occurrence: (id: number) => `#/occurrence/${id}`,
+  history: (opts: { month?: string | null; scope?: HistoryScope; day?: string | null } = {}) => {
+    const query = new URLSearchParams();
+    if (opts.month) query.set("m", opts.month);
+    if (opts.scope && opts.scope !== "month") query.set("p", opts.scope);
+    if (opts.day) query.set("d", opts.day);
+    const text = query.toString();
+    return text ? `#/history?${text}` : "#/history";
+  },
+  occurrence: (id: number, fromDay?: string | null) => (fromDay ? `#/occurrence/${id}?day=${fromDay}` : `#/occurrence/${id}`),
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
@@ -36,8 +49,15 @@ export const href = {
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
   const [screen, arg] = path.split("/");
+  const params = new URLSearchParams(query);
+  const dayParam = (name: string) => (/^\d{4}-\d{2}-\d{2}$/.test(params.get(name) ?? "") ? params.get(name) : null);
   if (screen === "occurrence" && /^\d+$/.test(arg ?? "")) {
-    return { screen: "occurrence", id: Number(arg) };
+    return { screen: "occurrence", id: Number(arg), fromDay: dayParam("day") };
+  }
+  if (screen === "history") {
+    const month = /^\d{4}-\d{2}$/.test(params.get("m") ?? "") ? params.get("m") : null;
+    const given = params.get("p");
+    return { screen: "history", month, scope: given === "week" || given === "2w" ? given : "month", day: dayParam("d") };
   }
   if (screen === "now") return { screen: "activity", tab: "now" };
   if (screen === "today") return { screen: "activity", tab: "today" };

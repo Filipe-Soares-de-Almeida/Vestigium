@@ -26,6 +26,7 @@
   import Home from "./screens/Home.svelte";
   import { morph } from "./lib/morph.svelte";
   import Health from "./screens/Health.svelte";
+  import History from "./screens/History.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
   import Settings from "./screens/Settings.svelte";
   import Tests from "./screens/Tests.svelte";
@@ -133,7 +134,9 @@
               {#key router.key}
                 <div class="screen">
                   {#if router.current.screen === "occurrence"}
-                    <Occurrence id={router.current.id} />
+                    <Occurrence id={router.current.id} fromDay={router.current.fromDay} />
+                  {:else if router.current.screen === "history"}
+                    <History month={router.current.month} scope={router.current.scope} day={router.current.day} />
                   {:else if router.current.screen === "capture"}
                     <Capture id={router.current.id} />
                   {:else if router.current.screen === "captures"}
