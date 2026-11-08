@@ -45,8 +45,8 @@
 
 </script>
 
-<div class="home" data-morph-base>
-  <header class="band" data-morph-base>
+<div class="home">
+  <header class="band">
     <div class="tb" data-tauri-drag-region></div>
     <div class="head">
       <div class="id">
@@ -95,7 +95,7 @@
     </div>
   </header>
   <div class="find"><Finder id="home-find" big autofocus /></div>
-  <div class="grid" data-morph-base>
+  <div class="grid">
     <ul class="tiles">
       {#each tiles as group (group.key)}
         <li>

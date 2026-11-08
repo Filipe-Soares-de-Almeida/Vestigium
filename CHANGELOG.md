@@ -427,6 +427,8 @@ How to use this file:
 
 ### Fixed
 
+- Opening a page from a home tile no longer flashes a light grey card in the dark theme: the card that
+  grows into the page keeps the colour the tile shows.
 - A surface check that was stopped and then continued shows on the Tests screen as one map of the
   whole disk, as on the Health screen, instead of only the last part with the start marked as not
   read.

@@ -112,7 +112,7 @@
 <div class="win">
   <div class="stage" bind:this={morph.stage}>
     {#if router.current.screen === "home" || morph.phase !== "idle"}
-      <div class="layer home" bind:this={morph.home} data-morph-base inert={morph.phase !== "idle"}>
+      <div class="layer home" bind:this={morph.home} inert={morph.phase !== "idle"}>
         {#if app.failure !== null}
           <div class="tb" data-tauri-drag-region></div>
           <main class="plain"><ErrorView error={app.failure} heading="h1" onretry={() => app.load()} /></main>

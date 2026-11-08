@@ -15,15 +15,28 @@ const EASE_CLOSE = "cubic-bezier(.85, 0, .5, 1)";
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** A translucent colour laid over an opaque one, as one opaque colour. */
-function solidOver(base: string, over: string): string {
-  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
-  ctx.canvas.width = ctx.canvas.height = 1;
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, 1, 1);
-  ctx.fillStyle = over;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+let pixel: CanvasRenderingContext2D | null = null;
+
+/** Paints the colours over each other on one pixel and returns its RGBA. */
+function paint(colors: string[]): Uint8ClampedArray {
+  pixel ??= Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d", { willReadFrequently: true })!;
+  pixel.clearRect(0, 0, 1, 1);
+  for (const color of colors) {
+    pixel.fillStyle = color;
+    pixel.fillRect(0, 0, 1, 1);
+  }
+  return pixel.getImageData(0, 0, 1, 1).data;
+}
+
+/** The opaque colour an element shows: its background over its ancestors', down to the first opaque one. */
+function solidOf(el: Element): string {
+  const layers: string[] = [];
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    const color = getComputedStyle(node).backgroundColor;
+    layers.unshift(color);
+    if (paint([color])[3] === 255) break;
+  }
+  const [r, g, b] = paint(layers);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
@@ -149,7 +162,7 @@ class Morph {
     const pageFrom = `translate(${x}px, ${y}px) scale(${sx}, ${sy})`;
     const copyTo = `translate(${-x}px, ${-y}px) scale(${1 / sx}, ${1 / sy})`;
 
-    const base = getComputedStyle(card.closest("[data-morph-base]") ?? this.home!).backgroundColor;
+    const background = solidOf(card);
     const copy = card.cloneNode(true) as HTMLElement;
     ["href", "data-morph"].forEach((a) => copy.removeAttribute(a));
     copy.setAttribute("aria-hidden", "true");
@@ -160,7 +173,7 @@ class Morph {
       top: `${y}px`,
       width: `${rect.width}px`,
       height: `${rect.height}px`,
-      background: solidOver(base, getComputedStyle(card).backgroundColor),
+      background,
       boxShadow: "none",
       borderRadius: "0",
       overflow: "visible",
