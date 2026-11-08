@@ -239,6 +239,8 @@ How to use this file:
 
 ### Changed
 
+- The status line in the navigation pane, on the home screen and in Monitoring settings shows the
+  watcher's own processor use, such as "Monitoring · 0.1% CPU".
 - The home screen and the navigation pane say more about this PC: the Freezes card counts today's
   occurrences and overload periods, Disks names each disk with its letter, Memory gives its size and
   free memory, Dumps the space they use and Settings the version. In the pane, All events shows

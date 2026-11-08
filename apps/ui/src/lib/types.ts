@@ -388,6 +388,8 @@ export interface AgentStatus {
   last_error: string | null;
   /** Sensitive mode saw stutters worth a deep capture. */
   suggest_capture: boolean;
+  /** The watcher's own share of the whole machine over the last minute, 0 to 100. */
+  cpu_pct?: number | null;
 }
 
 export type AgentLink =

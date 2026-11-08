@@ -53,7 +53,7 @@
         <span class="mark"><Mark /></span>
         <div class="who">
           <h1>{t("ui.shell.title")}</h1>
-          <p class="state"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
+          <p class="state"><i class={status.tone} aria-hidden="true"></i>{status.text}</p>
         </div>
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>

@@ -23,7 +23,7 @@
   const settings = $derived(app.settings?.settings ?? null);
   /** The line under each page's title: what the page is about, the watcher's state or the version. */
   const sub = $derived.by(() => {
-    if (current === "watching") return t(shellStatus().key);
+    if (current === "watching") return shellStatus().text;
     if (current === "updates" || current === "privacy") return t("ui.settings.updates.version_hint", { version: updates.version });
     return t(`ui.settings.sub.${current}`);
   });

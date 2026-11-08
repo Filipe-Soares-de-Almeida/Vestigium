@@ -66,6 +66,7 @@
   "ui.shell.status.stopped": "Vestigium stopped",
   "ui.shell.status.unreachable": "No connection to Vestigium",
   "ui.shell.status.capturing": "Capturing",
+  "ui.shell.status.cpu": "{state} · {cpu} CPU",
   "ui.shell.paused.title": "Monitoring paused.",
   "ui.shell.paused.body": "Nothing is logged until it resumes.",
   "ui.shell.paused.resume": "Resume",

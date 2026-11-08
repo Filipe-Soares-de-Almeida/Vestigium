@@ -46,7 +46,7 @@
       {/each}
     </ul>
   {/if}
-  <p class="foot"><i class={status.tone} aria-hidden="true"></i>{t(status.key)}</p>
+  <p class="foot"><i class={status.tone} aria-hidden="true"></i>{status.text}</p>
 </nav>
 
 <style>
