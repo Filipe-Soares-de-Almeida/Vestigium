@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- Tests has a new layout. The overview lists the memory and each disk as rows with a status symbol, and
+  each device opens as a page of titled sections; the devices are chosen from the navigation pane instead
+  of a list inside the page. The Windows Memory Diagnostic shows the administrator badge.
 - Disks and Memory have an overview each. Disks shows, for every disk, how it stands, the SMART values that
   warn once read, and the Health alerts about it. Memory shows its Health checks, the memory tests, any
   memory overload today and the history of memory tests. Each links to the Health and Tests pages it draws

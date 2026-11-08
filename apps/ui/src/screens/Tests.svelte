@@ -1,11 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import AdminPill from "../components/AdminPill.svelte";
+  import Block from "../components/Block.svelte";
   import ConcernMark, { type MarkKind } from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Icon, { type IconName } from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import RowCard from "../components/RowCard.svelte";
+  import RowList from "../components/RowList.svelte";
   import Segmented from "../components/Segmented.svelte";
+  import StatusMark from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { errorText } from "../lib/errors";
@@ -20,6 +25,7 @@
   import { areaOf } from "./health/areas";
   import { findingTitle } from "./health/words";
   import DiskMap from "./tests/DiskMap.svelte";
+  import { statusOf } from "./tests/status";
   import { mapView } from "./tests/mapView.svelte";
   import ReadHistory from "./tests/ReadHistory.svelte";
   import {
@@ -79,6 +85,7 @@
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const dto = $derived(hwtests.dto);
+  const overview = $derived(device === null);
   const chosen = $derived<Device>(device === null || device === "memory" ? "memory" : Number(device));
   const disk = $derived(chosen === "memory" ? null : (dto?.disks.find((d) => d.number === chosen) ?? null));
   const running = $derived(hwtests.running);
@@ -262,10 +269,10 @@
 
 {#snippet devRow(id: Device, icon: IconName, name: string, sub: string)}
   {@const s = withHealth(id, id === "memory" ? memoryState(dto!, runDev === "memory") : diskState(dto!, dto!.disks.find((d) => d.number === id)!, hwtests.details[id as number] ?? null, runDev === id))}
-  <button type="button" class="dev" aria-current={chosen === id ? "true" : undefined} onclick={() => go(href.tests(deviceKey(id)))}>
-    <span class="icochip"><Icon name={icon} /></span>
-    <span><b>{name}</b><small>{sub}</small><small class="st"><ConcernMark mark={s.mark} word={false} silent />{s.line}</small></span>
-  </button>
+  {@const st = statusOf(s.mark)}
+  <RowCard href={href.tests(deviceKey(id))} {icon} title={name} sub="{sub} · {s.line}">
+    {#snippet right()}<StatusMark kind={st.kind} word={st.word} reveal />{/snippet}
+  </RowCard>
 {/snippet}
 
 {#snippet liveBlock()}
@@ -327,13 +334,12 @@
   {@const quick = lastQuick(dto!)}
   {@const q = quick ? quickOf(quick) : null}
   <header class="rh">
-    <span class="icochip"><Icon name="memory" /></span>
     <div>
       <h2 id="report-title">{t("ui.tests.memory.title")}</h2>
       <p>{t("ui.tests.memory.sub", { total: formatBytes(dto!.memory.total_bytes), free: formatBytes(dto!.memory.available_bytes) })}</p>
     </div>
   </header>
-  <p class="state"><ConcernMark mark={s.mark} word={false} silent />{s.line}</p>
+  <p class="state"><StatusMark kind={statusOf(s.mark).kind} word={statusOf(s.mark).word} /><span>{s.line}</span></p>
   {#if point}
     <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
   {/if}
@@ -356,7 +362,7 @@
       <button type="button" class="btn" class:accent={!diag && !waiting && quick !== null} disabled={busy} onclick={() => void diagnostic()}>
         <Icon name="shield" />{t(diag || waiting ? "ui.tests.diag.again" : "ui.tests.diag.start")}
       </button>
-      <span class="pills">{@render pills([["shield", t("ui.tests.pill.permission")], ["restart", t("ui.tests.pill.restart")]])}</span>
+      <AdminPill text={t("ui.tests.pill.permission")} /><span class="pills">{@render pills([["restart", t("ui.tests.pill.restart")]])}</span>
     </div>
   </div>
 
@@ -422,13 +428,12 @@
   {@const scan = diskSurface(dto!, d)}
   {@const resumable = scanRun?.outcome === "Interrupted" && scan !== null && scan.to_bytes < scan.disk_bytes}
   <header class="rh">
-    <span class="icochip"><Icon name={diskIcon(d)} /></span>
     <div>
       <h2 id="report-title">{diskName(d)}</h2>
       <p>{t("ui.tests.disk.sub", { n: d.number, bus: t(`ui.tests.bus.${d.bus}`), volumes: d.volumes.map(vol).join(", ") || "—" })}</p>
     </div>
   </header>
-  <p class="state"><ConcernMark mark={s.mark} word={false} silent />{s.line}</p>
+  <p class="state"><StatusMark kind={statusOf(s.mark).kind} word={statusOf(s.mark).word} /><span>{s.line}</span></p>
   {#if point}
     <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
   {/if}
@@ -581,7 +586,11 @@
 
 <div class="screen-in">
   <div class="top">
-    <h1>{t("ui.tests.title")}</h1>
+    {#if overview}
+      <h1>{t("ui.tests.title")}</h1>
+    {:else}
+      <h1 class="sr">{t("ui.tests.title")}</h1>
+    {/if}
   </div>
 
   {#if dto === null && hwtests.error !== null}
@@ -589,7 +598,7 @@
   {:else if dto === null}
     <Loading />
   {:else}
-    {#if verdict}<p class="lede"><b>{verdict.strong}</b> {verdict.rest}</p>{/if}
+    {#if overview && verdict}<p class="lede"><b>{verdict.strong}</b> {verdict.rest}</p>{/if}
     {#if live && runDev !== null && runDev !== chosen}
       <button type="button" class="strip" onclick={() => go(href.tests(deviceKey(runDev)))}>
         <ConcernMark mark="Running" word={false} /><b>{live.title}</b>
@@ -598,28 +607,37 @@
         <span class="go">{t("ui.tests.strip.open")}<Icon name="chevron" /></span>
       </button>
     {/if}
-    <div class="pane2">
-      <section class="card devs" aria-label={t("ui.tests.devices")}>
-        <h2>{t("ui.tests.group.memory")}</h2>
-        {@render devRow("memory", "memory", t("ui.tests.memory.title"), formatBytes(dto.memory.total_bytes))}
-        <h2>{t("ui.tests.group.disks")}</h2>
-        {#each dto.disks as d (d.number)}
-          {@render devRow(d.number, diskIcon(d), diskName(d), t("ui.tests.disk.short", { n: d.number, volumes: d.volumes.map(vol).join(", ") || "—" }))}
-        {/each}
-      </section>
-      <!-- The report scrolls on its own, so the keyboard needs to reach it. -->
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <section class="card report" bind:this={report} tabindex="0" aria-labelledby="report-title">
-        {#if runDev === chosen}{@render liveBlock()}{/if}
-        {#if chosen === "memory"}
-          {@render memoryReport()}
-        {:else if disk}
-          {@render diskReport(disk)}
-        {:else}
-          <p class="muted">{t("ui.tests.disk.gone")}</p>
-        {/if}
-      </section>
-    </div>
+    {#if overview}
+      <div class="cols">
+        <Block title={t("ui.tests.group.memory")} first>
+          <RowList>
+            {@render devRow("memory", "memory", t("ui.tests.memory.title"), formatBytes(dto.memory.total_bytes))}
+          </RowList>
+        </Block>
+        <Block title={t("ui.tests.group.disks")} first>
+          <RowList>
+            {#each dto.disks as d (d.number)}
+              {@render devRow(d.number, diskIcon(d), diskName(d), t("ui.tests.disk.short", { n: d.number, volumes: d.volumes.map(vol).join(", ") || "—" }))}
+            {/each}
+          </RowList>
+        </Block>
+      </div>
+    {:else}
+      <div class="pane2">
+        <!-- The report scrolls on its own, so the keyboard needs to reach it. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <section class="report" bind:this={report} tabindex="0" aria-labelledby="report-title">
+          {#if runDev === chosen}{@render liveBlock()}{/if}
+          {#if chosen === "memory"}
+            {@render memoryReport()}
+          {:else if disk}
+            {@render diskReport(disk)}
+          {:else}
+            <p class="muted">{t("ui.tests.disk.gone")}</p>
+          {/if}
+        </section>
+      </div>
+    {/if}
     {@const readDisk = reading === null ? null : dto.disks.find((d) => d.number === reading)}
     {#if readDisk}
       <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
@@ -672,68 +690,21 @@
   .pane2 {
     display: grid;
     flex: 1 1 auto;
-    grid-template-columns: 268px minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
     min-height: 0;
   }
-  .devs {
+  .cols {
     display: grid;
-    align-content: start;
-    align-self: start;
-    gap: 2px;
-    max-height: 100%;
-    padding: 6px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 56px;
     overflow: auto;
   }
-  .devs h2 {
-    margin: 0;
-    padding: 10px 10px 4px;
-    color: var(--ink2);
-    font: 600 13px/1.3 var(--f);
-  }
-  .dev {
-    display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    width: 100%;
-    padding: 9px 10px;
-    border: 0;
-    border-radius: 10px;
-    background: none;
-    color: var(--ink);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .dev:hover {
-    background: var(--card2);
-  }
-  .dev[aria-current="true"] {
-    background: var(--card2);
-    box-shadow: inset 0 0 0 1px var(--stroke);
-  }
-  .dev .icochip {
-    width: 36px;
-    height: 36px;
-  }
-  .dev b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  .dev small {
-    display: block;
-    margin-top: 2px;
-    color: var(--ink2);
-    font-size: 12.5px;
-    line-height: 1.35;
-  }
-  .dev .st {
-    display: flex;
-    gap: 6px;
-    align-items: flex-start;
+  @container content (min-width: 1000px) {
+    .cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+    }
   }
   .report {
     display: grid;
@@ -757,13 +728,14 @@
   }
   .rh {
     display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     align-items: center;
   }
   .rh h2 {
     margin: 0;
-    font: 600 22px/1.3 var(--fd);
+    font: 600 28px/1.25 var(--fd);
+    letter-spacing: -0.005em;
   }
   .rh p {
     margin: 3px 0 0;
@@ -789,18 +761,19 @@
   .blk {
     display: grid;
     gap: 8px;
-    padding-top: 14px;
-    border-top: 1px solid var(--stroke2);
+    margin-top: 16px;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
   }
   .blk h3 {
     display: flex;
-    gap: 8px;
+    gap: 12px;
     align-items: center;
-    margin: 0;
-    font: 600 15px/1.3 var(--f);
+    margin: 0 0 4px;
+    font: 400 20px/1.3 var(--fd);
   }
   .blk h3 :global(svg) {
-    color: var(--ink2);
+    color: var(--accent);
   }
   .blk h3 .sub {
     margin-left: auto;
