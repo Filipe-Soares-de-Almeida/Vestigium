@@ -27,11 +27,10 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px 20px;
     align-items: center;
-    min-height: 66px;
-    padding: 14px 18px;
-    background: var(--card);
-    border: 1px solid var(--stroke2);
-    border-radius: 8px;
+    min-height: 56px;
+    padding: 10px 12px;
+    background: var(--row);
+    border-radius: 6px;
   }
   .wide {
     grid-template-columns: minmax(0, 1fr);
@@ -40,7 +39,7 @@
     margin: 0;
   }
   .name {
-    font-weight: 600;
+    font-size: 14.5px;
     line-height: 1.3;
   }
   .hint {
@@ -72,7 +71,7 @@
   }
   @media (forced-colors: active) {
     .set {
-      border-color: CanvasText;
+      outline: 1px solid CanvasText;
     }
   }
 </style>

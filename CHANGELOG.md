@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- Settings are now chosen from the navigation pane, with its seven pages (Appearance, Reports, Language,
+  Monitoring, Data retention, Updates, Privacy and data) under one group, reached from the Settings card
+  on the home screen or from the search. Each page is a flat list of settings under its own title.
 - Captures has a new layout: the permission note of a new capture is highlighted, past captures are rows
   with their result and time, and a capture's report is made of titled sections with a back link to the
   list. The navigation pane keeps a single Captures entry, highlighted on the report too.
