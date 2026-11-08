@@ -238,6 +238,13 @@ How to use this file:
 
 ### Changed
 
+- Now is titled Now, with its reading of the PC as the line under the title. The ten-minute chart has
+  its live dot and zoom buttons beside its title, taller lanes with each value on the lane's line, a
+  label every minute and its note under the chart. Programs using the most now can be sorted by
+  processor, memory or disk, and its rows, like those of Programs, read as plain text that opens the
+  program. Programs has a filter field and a sort list instead of sortable headers. All events
+  (formerly Day events) is a table with the time, event, type, origin, length and severity of each,
+  and History's weekday chart uses the bars of the 14-day chart.
 - Today follows the new layout more closely: the date line also gives the hours covered, States of the
   PC opens with a divider and its zoom buttons, has taller rows and a wider legend, and its marks are
   thin lines. The day's list is titled Day events, each row shows how grave it was by its symbol

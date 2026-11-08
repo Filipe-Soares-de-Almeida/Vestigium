@@ -10,6 +10,7 @@
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { lang, t, tn } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { type HistoryScope, href } from "../lib/router.svelte";
   import Calendar from "./history/Calendar.svelte";
   import {
@@ -99,6 +100,11 @@
     { value: "month", text: t("ui.history.scope.month") },
     { value: "week", text: t("ui.history.scope.week") },
     { value: "2w", text: t("ui.history.scope.fortnight") },
+  ]);
+
+  relatedLinks(() => [
+    { label: t("ui.item.today"), href: href.activity() },
+    { label: t("ui.related.events_today"), href: href.events() },
   ]);
 
   /** The address holds the month, period and day, so Back from a report lands on the same view. */

@@ -6,9 +6,9 @@ import type { LivePoint } from "../../lib/types";
 import { LANES, STATE_TOKEN } from "./lanes";
 
 /** Height of one lane, and of the band inside it where 0 to 100% is drawn. */
-export const LANE_H = 56;
-const BAND_TOP = 9;
-const BAND_H = 38;
+export const LANE_H = 58;
+const BAND_TOP = 8;
+const BAND_H = 44;
 /** Room on the right for the dot of the latest value. */
 export const RIGHT = 7;
 export const HEIGHT = LANES.length * LANE_H;

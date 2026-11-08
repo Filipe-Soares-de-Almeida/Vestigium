@@ -396,6 +396,144 @@ th.fill {
   white-space: nowrap;
 }
 
+/* A label beside its control, such as "Sort by" before a list. */
+.inl {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink2);
+  font-size: 13.5px;
+}
+/* The tool row above a list: a filter field, a sort list. */
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin: 24px 0 14px;
+}
+/* Data tables: a name column that takes the spare width, numbers at the right. */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.tbl th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--stroke);
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--stroke2);
+  white-space: nowrap;
+}
+.tbl .num {
+  text-align: right;
+}
+.tbl .nm {
+  width: 100%;
+  max-width: 0;
+  min-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tbl .empty-cell {
+  color: var(--ink2);
+}
+/* A row that opens a page: its name is a link whose hit area covers the row. */
+.tbl tbody tr:has(.row-a) {
+  position: relative;
+  cursor: pointer;
+}
+.tbl tbody tr:has(.row-a):hover td {
+  background: var(--row-hover);
+}
+.row-a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.row-a:hover {
+  text-decoration: none;
+}
+.row-a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.row-a:focus-visible {
+  outline: none;
+}
+.row-a:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+/* Event tables: each row a light card, 4 px apart. */
+.tbl-ev {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+.tbl-ev tbody td {
+  background: var(--row);
+  border-bottom: 0;
+}
+.tbl-ev tbody td:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.tbl-ev tbody td:last-child {
+  border-radius: 0 6px 6px 0;
+}
+.wide {
+  max-width: 1060px;
+}
+/* A bulleted list of plain lines: evidence, hung programs. */
+.ev-l {
+  display: grid;
+  gap: 6px;
+  max-width: 72ch;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  list-style: none;
+}
+.ev-l li {
+  position: relative;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.ev-l li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink3);
+}
+/* The live dot of a chart that updates every second. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.live i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  transition: opacity 0.3s;
+}
+
 /* The content column is the container: two columns from 900 px, one below. */
 .cols2 {
   display: grid;

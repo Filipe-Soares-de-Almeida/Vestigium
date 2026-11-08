@@ -3,8 +3,11 @@
 
   import ErrorView from "../components/ErrorView.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import { app } from "../lib/app.svelte";
   import { t } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
+  import { href } from "../lib/router.svelte";
   import HungWindows from "./now/HungWindows.svelte";
   import LastOccurrence from "./now/LastOccurrence.svelte";
   import { momentKey, sentence } from "./now/sentence";
@@ -30,6 +33,15 @@
     app.history === "empty" && app.link?.link === "running" ? app.link.started_at_ms : null,
   );
 
+  relatedLinks(() => {
+    const last = view.frame?.latest ?? null;
+    return [
+      { label: t("ui.related.all_programs"), href: href.programs() },
+      ...(last ? [{ label: t("ui.related.last_freeze"), href: href.occurrence(last.id) }] : []),
+      { label: t("ui.item.today"), href: href.activity() },
+    ];
+  });
+
   // The region speaks the answer only when the state of the PC changes, never every second.
   let spoken = "";
   $effect(() => {
@@ -41,41 +53,26 @@
   });
 </script>
 
-<header class="head">
-  <h1>{t("ui.item.live")}</h1>
-</header>
-
 {#if !stream.watching}
-  <p class="lede">
-    {t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}
-  </p>
+  <PageHead
+    title={t("ui.now.title")}
+    sub={t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}
+  />
 {:else if stream.error !== null}
+  <PageHead title={t("ui.now.title")} />
   <ErrorView error={stream.error} onretry={() => stream.retry()} />
 {:else if !live.started}
+  <PageHead title={t("ui.now.title")} />
   <Loading />
 {:else}
-  <p class="lede">{lede}</p>
-  <p class="sr" aria-live="polite">{said}</p>
+  <PageHead title={t("ui.now.title")} sub={lede} />
   <TenMinutes points={view.points} paused={stream.paused} onsay={(text) => (said = text)} />
-  <div class="cols">
-    <TopPrograms top={view.frame?.top ?? null} total={view.frame?.programs?.entries.length ?? 0} />
+  <p class="sr" aria-live="polite">{said}</p>
+  <div class="cols2">
+    <TopPrograms top={view.frame?.top ?? null} programs={view.frame?.programs ?? null} />
     <div>
       <HungWindows hung={view.hung} nowMs={view.nowMs} />
       <LastOccurrence latest={view.frame?.latest ?? null} {since} />
     </div>
   </div>
 {/if}
-
-<style>
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 56px;
-  }
-  @container content (min-width: 1000px) {
-    .cols {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-  }
-</style>

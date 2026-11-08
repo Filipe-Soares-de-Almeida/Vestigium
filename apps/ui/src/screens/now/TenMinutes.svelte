@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import Block from "../../components/Block.svelte";
   import ChartTip from "../../components/ChartTip.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock, formatTime } from "../../lib/format";
@@ -21,10 +22,9 @@
     onsay: (text: string) => void;
   } = $props();
 
-  const AXIS = [10, 8, 6, 4, 2, 0];
-  /** Below this plot width only the two ends of the axis are labelled. */
-  const AXIS_FULL_FROM = 300;
   const MIN_VIEW_S = 20;
+  /** Minute spacings for the whole ten minutes; the first that leaves 70 px between labels wins. */
+  const WHOLE = [1, 2, 5];
   /** Tick spacings in seconds for a zoomed view; the first that leaves 84 px between labels wins. */
   const STEPS = [5, 10, 15, 30, 60, 120, 300];
 
@@ -33,6 +33,7 @@
   let cursor = $state<{ idx: number; left: number } | null>(null);
   let plot = $state<HTMLElement>();
   let plotWidth = $state(0);
+  let outer = $state(0);
 
   const built = $derived(build(points));
   /** The stretch on screen, in seconds; a zoomed view keeps its place while new seconds arrive. */
@@ -60,6 +61,13 @@
         out.push({ left: (px / width) * 100, label: every < 60 ? formatClock(at * 1000) : formatTime(at * 1000) });
       }
     }
+    return out;
+  });
+  /** Minutes before now that the unzoomed axis labels, the left edge left out. */
+  const marks = $derived.by(() => {
+    const every = WHOLE.find((m) => (m * zoom.plotWidth) / 10 >= 70) ?? 5;
+    const out: number[] = [];
+    for (let m = 10 - every; m >= 0; m -= every) out.push(m);
     return out;
   });
   const latest = $derived(points.at(-1) ?? null);
@@ -157,15 +165,16 @@
   }
 </script>
 
-<section class="tenmin-card" aria-labelledby="tenmin-title">
-  <div class="head">
-    <h2 id="tenmin-title">{t("ui.now.tenmin.title")}</h2>
-    <span class="live" class:paused>
-      <i class:dim={beat && !paused}></i>{t(paused ? "ui.now.tenmin.paused" : "ui.now.tenmin.live")}
-    </span>
-  </div>
-  <p class="caption">{t("ui.now.tenmin.caption")}</p>
-  <div class="tenmin">
+{#snippet extra()}
+  <span class="live" class:paused>
+    <i class:dim={beat && !paused} aria-hidden="true"></i>{t(paused ? "ui.now.tenmin.paused" : "ui.now.tenmin.live")}
+  </span>
+  <ZoomBar {zoom} {range} {plot} />
+{/snippet}
+
+<Block title={t("ui.now.tenmin.title")} actions={extra}>
+<section class="tenmin-card" aria-label={t("ui.now.tenmin.title")} bind:clientWidth={outer}>
+  <div class="tenmin" style:grid-template-columns="{outer < 820 ? 120 : 160}px minmax(0, 1fr)">
     <div class="labels">
       {#each LANES as lane (lane.key)}
         <div class="label">
@@ -173,10 +182,8 @@
             class="state-dot"
             style:background="var(--{STATE_TOKEN[latest?.lanes[lane.key] ?? 'suspended']})"
           ></span>
-          <span>
-            {t(`ui.now.lane.${lane.key}`)}
-            <b>{latest ? value(latest, lane) : t("ui.now.lane.none")}</b>
-          </span>
+          <span class="name">{t(`ui.now.lane.${lane.key}`)}</span>
+          <b>{latest ? value(latest, lane) : t("ui.now.lane.none")}</b>
         </div>
       {/each}
     </div>
@@ -222,56 +229,26 @@
             <span class="mid" style:left="{tick.left}%">{tick.label}</span>
           {/each}
         {:else}
-          {#each AXIS as minutes (minutes)}
-            {#if minutes === 10 || minutes === 0 || plotWidth >= AXIS_FULL_FROM}
-              <span style:left="{100 - minutes * 10}%">
-                {minutes === 0 ? t("ui.now.axis.now") : t("ui.now.axis.minutes", { minutes })}
-              </span>
-            {/if}
+          {#each marks as minutes (minutes)}
+            <span class:mid={minutes > 0} style:left="{100 - minutes * 10}%">
+              {minutes === 0 ? t("ui.now.axis.now") : t("ui.now.axis.minutes", { minutes })}
+            </span>
           {/each}
         {/if}
       </div>
     </div>
   </div>
-  <ZoomBar {zoom} {range} {plot} hint={t("ui.now.tenmin.hint")} />
+  <p class="note">{t("ui.now.tenmin.caption")}</p>
   <p class="sr" id="tenmin-summary">{summary}</p>
 </section>
+</Block>
 
 <style>
-  .tenmin-card {
-    container: tenmin / inline-size;
-  }
-  .head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px 12px;
-    margin-bottom: 10px;
-  }
-  .head h2 {
-    margin: 0;
-    font: 400 20px/1.3 var(--fd);
-  }
-  .live {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--ink2);
-    font-size: 12.5px;
-    white-space: nowrap;
-  }
-  .live i {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--ok);
-  }
-  .live i.dim {
-    opacity: 0.45;
-  }
   .live.paused {
     color: var(--ink);
+  }
+  .live i.dim {
+    opacity: 0.4;
   }
   .live.paused i {
     border-radius: 2px;
@@ -282,38 +259,35 @@
       opacity: 1;
     }
   }
-  .caption {
-    margin: -4px 0 12px;
-    color: var(--ink2);
-    font-size: 13px;
-  }
   .tenmin {
     display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 12px;
-    margin-top: 6px;
+    column-gap: 12px;
+    align-items: start;
   }
   .labels {
     display: grid;
-    grid-auto-rows: 56px;
+    grid-auto-rows: 58px;
     align-content: start;
   }
   .label {
     display: flex;
     gap: 8px;
     align-items: center;
-    border-top: 1px solid var(--stroke2);
-    color: var(--ink2);
-    font: 600 12.5px/1.25 var(--f);
     min-width: 0;
+    border-top: 1px solid var(--stroke2);
   }
   .label:first-child {
     border-top: 0;
   }
+  .name {
+    flex: 1;
+    min-width: 0;
+    color: var(--ink2);
+    font: 600 12.5px var(--f);
+  }
   .label b {
-    display: block;
     color: var(--ink);
-    font: 600 16px/1.25 var(--f);
+    font: 600 16px var(--f);
   }
   .plot {
     position: relative;
@@ -339,10 +313,7 @@
     transform: translateX(-50%);
     white-space: nowrap;
   }
-  .axis span:first-child {
-    transform: none;
-  }
-  .axis span:last-child {
+  .axis span {
     transform: translateX(-100%);
   }
   .axis span.mid {
@@ -353,20 +324,6 @@
   }
   .plot.pan:active {
     cursor: grabbing;
-  }
-  @container content (max-width: 720px) {
-    .tenmin {
-      grid-template-columns: 118px minmax(0, 1fr);
-    }
-  }
-  @container tenmin (max-width: 420px) {
-    .tenmin {
-      grid-template-columns: 92px minmax(0, 1fr);
-      gap: 8px;
-    }
-    .label {
-      gap: 6px;
-    }
   }
   @media (forced-colors: active) {
     .live i {

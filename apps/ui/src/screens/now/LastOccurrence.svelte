@@ -3,11 +3,10 @@
   import { type IconName } from "../../components/Icon.svelte";
   import RowCard from "../../components/RowCard.svelte";
   import RowList from "../../components/RowList.svelte";
-  import StatusMark, { type StatusKind } from "../../components/StatusMark.svelte";
   import { formatDuration, formatTime } from "../../lib/format";
   import { lang, t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
-  import type { Cause, OccurrenceSummary, Severity } from "../../lib/types";
+  import type { Cause, OccurrenceSummary } from "../../lib/types";
 
   let {
     latest,
@@ -18,7 +17,6 @@
     since: number | null;
   } = $props();
 
-  const STATUS: Record<Severity, StatusKind> = { Light: "info", Medium: "attention", Severe: "critical" };
   const DAY_MS = 86_400_000;
 
   function icon(cause: Cause): IconName {
@@ -71,21 +69,13 @@
 <Block title={t("ui.now.last_occurrence")}>
   {#if latest}
     <RowList>
-      <RowCard href={href.occurrence(latest.id)} icon={icon(latest.cause)} title={title(latest)} sub={when(latest.start_ms)}>
-        {#snippet right()}<StatusMark kind={STATUS[latest.severity]} reveal />{/snippet}
-      </RowCard>
+      <RowCard href={href.occurrence(latest.id)} icon={icon(latest.cause)} title={title(latest)} sub={when(latest.start_ms)} />
     </RowList>
   {:else}
-    <p class="muted">
+    <p class="empty">
       {since === null
         ? t("ui.now.last.none")
         : t("ui.now.last.none_since", { time: moment(since) })}
     </p>
   {/if}
 </Block>
-
-<style>
-  p {
-    margin: 0;
-  }
-</style>

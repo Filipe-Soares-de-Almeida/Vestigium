@@ -3,20 +3,22 @@
 
   import ErrorView from "../components/ErrorView.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import SelectField from "../components/SelectField.svelte";
+  import StatusMark from "../components/StatusMark.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
-  import { formatTime } from "../lib/format";
+  import { formatDuration, formatTime } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
+  import { href } from "../lib/router.svelte";
   import { dayStart, type Item, itemsOf } from "./today/day";
-  import EpisodeRow from "./today/EpisodeRow.svelte";
-  import OccurrenceRow from "./today/OccurrenceRow.svelte";
+  import { causeName, episodeDisk, episodeKey, episodeTitle, occurrenceMark, occurrenceTitle } from "./today/text";
 
   const REFRESH_MS = 60_000;
   type Filter = "all" | "freeze" | "stutter" | "hang" | "period";
 
   let items = $state.raw<Item[] | null>(null);
-  let range = $state<[number, number]>([0, 0]);
   let error = $state<unknown>(null);
   let filter = $state("all");
 
@@ -28,7 +30,6 @@
     const start = dayStart(now);
     try {
       items = itemsOf(start, now, await marks(start, now)).items;
-      range = [start, now];
       error = null;
     } catch (err) {
       if (items === null) error = err;
@@ -71,39 +72,87 @@
       ? t("ui.events.sub", {
           occurrences: occurrences ? tn("ui.events.occurrences", occurrences) : t("ui.events.occurrences.none"),
           periods: periods ? tn("ui.events.periods", periods) : t("ui.events.periods.none"),
-          from: formatTime(range[0]),
-          to: formatTime(range[1]),
+          from: formatTime(items[0].start),
+          to: formatTime(items[items.length - 1].start),
         })
       : "",
   );
+
+  /** One table row: when, what, which kind, where from, how long and how grave. */
+  function rowOf(item: Item) {
+    if (item.kind === "occurrence") {
+      const o = item.occurrence;
+      return {
+        at: o.kind === "PostMortem" ? o.end_ms : o.start_ms,
+        title: occurrenceTitle(o, level),
+        href: href.occurrence(o.id),
+        type: t(`ui.common.kind.${o.kind}`),
+        origin: causeName(o.cause),
+        duration: o.kind === "PostMortem" ? "—" : formatDuration(o.end_ms - o.start_ms),
+        mark: occurrenceMark(o),
+      };
+    }
+    const e = item.episode;
+    const key = episodeKey(e);
+    return {
+      at: e.start_ms,
+      title: episodeTitle(e, level),
+      href: href.period(e.start_ms),
+      type: t("ui.today.episode.kind"),
+      origin:
+        e.culprit?.name ??
+        (key === "DiskBusy" ? episodeDisk(e) : t(key === "MemoryHigh" ? "ui.now.lane.memory" : "ui.now.lane.cpu")),
+      duration: formatDuration(e.end_ms - e.start_ms),
+      mark: { kind: "overload" as const, word: t("ui.status.overload") },
+    };
+  }
+
+  relatedLinks(() => [
+    { label: t("ui.related.states_day"), href: href.activity() },
+    { label: t("ui.related.capture"), href: href.captures() },
+    { label: t("ui.item.history"), href: href.history() },
+  ]);
 </script>
 
-<header class="head">
-  <h1>{t("ui.item.events")}</h1>
-  {#if sub}<p class="sub">{sub}</p>{/if}
-</header>
+<PageHead title={t("ui.item.events")} {sub} />
 
 {#if firstUse}
   <p class="lede">{t("ui.events.first_use")}</p>
 {:else if items}
   <div class="tools">
-    <label class="show">
+    <label class="inl">
       <span>{t("ui.events.show")}</span>
       <SelectField bind:value={filter} options={filters} label={t("ui.events.show")} />
     </label>
   </div>
   {#if shown.length}
-    <ul>
-      {#each shown as item (`${item.kind}-${item.start}`)}
-        <li>
-          {#if item.kind === "occurrence"}
-            <OccurrenceRow o={item.occurrence} {level} />
-          {:else}
-            <EpisodeRow e={item.episode} {level} byTest={item.byTest} />
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    <div class="wide">
+      <table class="tbl tbl-ev">
+        <thead>
+          <tr>
+            <th scope="col">{t("ui.events.col.time")}</th>
+            <th scope="col">{t("ui.events.col.event")}</th>
+            <th scope="col">{t("ui.events.col.type")}</th>
+            <th scope="col">{t("ui.events.col.origin")}</th>
+            <th scope="col">{t("ui.events.col.duration")}</th>
+            <th scope="col">{t("ui.events.col.gravity")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each shown as item (`${item.kind}-${item.start}`)}
+            {@const row = rowOf(item)}
+            <tr>
+              <td>{formatTime(row.at)}</td>
+              <td class="nm" title={row.title}><a class="row-a" href={row.href}>{row.title}</a></td>
+              <td>{row.type}</td>
+              <td>{row.origin}</td>
+              <td>{row.duration}</td>
+              <td><StatusMark kind={row.mark.kind} word={row.mark.word} /></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {:else}
     <p class="empty">{t(filter === "all" ? "ui.today.moments.none" : "ui.events.none")}</p>
   {/if}
@@ -112,40 +161,3 @@
 {:else}
   <Loading />
 {/if}
-
-<style>
-  .head {
-    margin-bottom: 4px;
-  }
-  .sub {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .lede {
-    max-width: 70ch;
-    margin: 6px 0 18px;
-    color: var(--ink2);
-    font-size: 16px;
-  }
-  .tools {
-    margin: 16px 0 12px;
-  }
-  .show {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-  }
-  ul {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .empty {
-    margin: 0;
-    color: var(--ink2);
-  }
-</style>
