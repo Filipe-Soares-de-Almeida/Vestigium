@@ -90,7 +90,10 @@ export function buildGroups(): Group[] {
       ],
     }),
     g("now", "now", {
-      items: [{ href: href.activity("now"), label: t("ui.item.live"), icon: "now", match: onActivity("now") }],
+      items: [
+        { href: href.activity("now"), label: t("ui.item.live"), icon: "now", match: onActivity("now") },
+        { href: href.programs(), label: t("ui.item.programs"), icon: "app", match: (r) => r.screen === "programs" },
+      ],
     }),
     g("freezes", "wave", {
       items: [
@@ -203,6 +206,7 @@ const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   home: null,
   activity: "activity",
   history: "activity",
+  programs: "now",
   occurrence: "freezes",
   captures: "captures",
   capture: "captures",

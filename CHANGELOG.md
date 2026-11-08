@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- Now, the live view, has its own place in the navigation pane, with a Programs screen: the full list of
+  running programs, with a filter and sortable columns, that keeps updating every second. Now itself uses
+  the new layout, and its top programs link to the full list instead of opening a pop-up.
 - A History screen, under Activity, lists every day since the first record. A calendar colours each
   day by its freezes, with arrows to change month; a Period list narrows it to the month, the last week or
   the last two weeks; a chart shows freezes by weekday; and Day by day lists the days, or the freezes of the

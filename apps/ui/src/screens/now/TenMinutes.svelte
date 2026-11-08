@@ -157,7 +157,7 @@
   }
 </script>
 
-<section class="card tenmin-card" aria-labelledby="tenmin-title">
+<section class="tenmin-card" aria-labelledby="tenmin-title">
   <div class="head">
     <h2 id="tenmin-title">{t("ui.now.tenmin.title")}</h2>
     <span class="live" class:paused>
@@ -251,6 +251,7 @@
   }
   .head h2 {
     margin: 0;
+    font: 400 20px/1.3 var(--fd);
   }
   .live {
     display: inline-flex;

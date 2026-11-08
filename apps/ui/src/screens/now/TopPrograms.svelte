@@ -1,88 +1,72 @@
 <script lang="ts">
+  import Block from "../../components/Block.svelte";
   import { formatPercent } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
+  import { href } from "../../lib/router.svelte";
   import type { ProcessTop } from "../../lib/types";
   import { formatBytes, formatRate } from "./lanes";
 
-  let { top, total, onopen }: { top: ProcessTop | null; total: number; onopen: () => void } = $props();
+  let { top, total }: { top: ProcessTop | null; total: number } = $props();
 
   // The watcher ranks the busiest programs by processor, each summing its processes; five show.
   const rows = $derived(top?.entries.slice(0, 5) ?? []);
 </script>
 
-<section class="card top" aria-labelledby="top-title">
-  <div class="head">
-    <h2 id="top-title">{t("ui.now.top.title")}</h2>
+<Block title={t("ui.now.top.title")}>
+  <div class="top">
+    {#if rows.length === 0}
+      <p class="muted">{t("ui.now.top.waiting")}</p>
+    {:else}
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">{t("ui.now.top.program")}</th>
+            <th scope="col">{t("ui.now.top.cpu")}</th>
+            <th scope="col">{t("ui.now.top.memory")}</th>
+            <th scope="col">{t("ui.now.top.disk")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each rows as row (row.pid)}
+            <tr>
+              <th scope="row" class="fill" title={row.name}>{row.name}</th>
+              <td data-label={t("ui.now.top.cpu")}>{formatPercent(row.cpu_pct, 1)}</td>
+              <td data-label={t("ui.now.top.memory")}>{formatBytes(row.private_bytes)}</td>
+              <td data-label={t("ui.now.top.disk")}>{formatRate(row.read_bps + row.write_bps)}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
     {#if total > 0}
-      <button type="button" class="more" onclick={onopen}>{t("ui.now.top.all", { count: total })}</button>
+      <p class="more"><a href={href.programs()}>{t("ui.now.top.all", { count: total })}</a></p>
     {/if}
   </div>
-  {#if rows.length === 0}
-    <p class="muted">{t("ui.now.top.waiting")}</p>
-  {:else}
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">{t("ui.now.top.program")}</th>
-          <th scope="col">{t("ui.now.top.cpu")}</th>
-          <th scope="col">{t("ui.now.top.memory")}</th>
-          <th scope="col">{t("ui.now.top.disk")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each rows as row (row.pid)}
-          <tr>
-            <th scope="row" class="fill" title={row.name}>{row.name}</th>
-            <td data-label={t("ui.now.top.cpu")}>{formatPercent(row.cpu_pct, 1)}</td>
-            <td data-label={t("ui.now.top.memory")}>{formatBytes(row.private_bytes)}</td>
-            <td data-label={t("ui.now.top.disk")}>{formatRate(row.read_bps + row.write_bps)}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  {/if}
-</section>
+</Block>
 
 <style>
   .top {
     container: top / inline-size;
   }
-  .head {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-    margin: 0 0 8px;
-  }
-  h2 {
-    font: 600 15px/1.3 var(--f);
+  p {
     margin: 0;
   }
   .more {
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid var(--stroke);
-    border-radius: 7px;
-    background: var(--card);
-    color: var(--ink);
-    font: 600 13px/1 var(--f);
-    white-space: nowrap;
-    cursor: pointer;
+    margin-top: 12px;
+    font-size: 14px;
   }
-  .more:hover {
-    background: var(--card2);
-  }
-  p {
-    margin: 0;
+  .more a {
+    font-weight: 600;
   }
   table {
     width: 100%;
     border-collapse: collapse;
     font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
   }
   th,
   td {
-    padding: 6px 8px;
+    padding: 8px;
     border-bottom: 1px solid var(--stroke2);
     text-align: right;
     white-space: nowrap;
@@ -99,7 +83,10 @@
     font-weight: 600;
   }
   tbody th {
-    font-weight: 600;
+    max-width: 0;
+    overflow: hidden;
+    font-weight: 400;
+    text-overflow: ellipsis;
   }
   tbody tr:last-child > * {
     border-bottom: 0;

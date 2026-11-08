@@ -28,6 +28,7 @@
   import Health from "./screens/Health.svelte";
   import History from "./screens/History.svelte";
   import Occurrence from "./screens/Occurrence.svelte";
+  import Programs from "./screens/Programs.svelte";
   import Settings from "./screens/Settings.svelte";
   import Tests from "./screens/Tests.svelte";
   import Tweaks from "./screens/Tweaks.svelte";
@@ -135,6 +136,8 @@
                 <div class="screen">
                   {#if router.current.screen === "occurrence"}
                     <Occurrence id={router.current.id} fromDay={router.current.fromDay} />
+                  {:else if router.current.screen === "programs"}
+                    <Programs />
                   {:else if router.current.screen === "history"}
                     <History month={router.current.month} scope={router.current.scope} day={router.current.day} />
                   {:else if router.current.screen === "capture"}

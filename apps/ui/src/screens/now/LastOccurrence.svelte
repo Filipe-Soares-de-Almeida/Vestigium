@@ -1,5 +1,9 @@
 <script lang="ts">
-  import Icon, { type IconName } from "../../components/Icon.svelte";
+  import Block from "../../components/Block.svelte";
+  import { type IconName } from "../../components/Icon.svelte";
+  import RowCard from "../../components/RowCard.svelte";
+  import RowList from "../../components/RowList.svelte";
+  import StatusMark, { type StatusKind } from "../../components/StatusMark.svelte";
   import { formatDuration, formatTime } from "../../lib/format";
   import { lang, t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
@@ -14,7 +18,7 @@
     since: number | null;
   } = $props();
 
-  const TONE: Record<Severity, string> = { Light: "busy", Medium: "press", Severe: "freeze" };
+  const STATUS: Record<Severity, StatusKind> = { Light: "info", Medium: "attention", Severe: "critical" };
   const DAY_MS = 86_400_000;
 
   function icon(cause: Cause): IconName {
@@ -64,65 +68,24 @@
   }
 </script>
 
-{#if latest}
-  <a class="card link" href={href.occurrence(latest.id)}>
-    <span class="icochip" style:background="var(--{TONE[latest.severity]}-t)" style:color="var(--{TONE[latest.severity]})">
-      <Icon name={icon(latest.cause)} />
-    </span>
-    <span class="text">
-      <small>{t("ui.now.last_occurrence")}</small>
-      <b>{title(latest)}</b>
-      <small>{when(latest.start_ms)}</small>
-    </span>
-    <Icon name="chevron" />
-  </a>
-{:else}
-  <section class="card" aria-labelledby="last-title">
-    <h2 id="last-title">{t("ui.now.last_occurrence")}</h2>
+<Block title={t("ui.now.last_occurrence")}>
+  {#if latest}
+    <RowList>
+      <RowCard href={href.occurrence(latest.id)} icon={icon(latest.cause)} title={title(latest)} sub={when(latest.start_ms)}>
+        {#snippet right()}<StatusMark kind={STATUS[latest.severity]} reveal />{/snippet}
+      </RowCard>
+    </RowList>
+  {:else}
     <p class="muted">
       {since === null
         ? t("ui.now.last.none")
         : t("ui.now.last.none_since", { time: moment(since) })}
     </p>
-  </section>
-{/if}
+  {/if}
+</Block>
 
 <style>
-  h2 {
-    font: 600 15px/1.3 var(--f);
-    margin: 0 0 8px;
-  }
   p {
     margin: 0;
-  }
-  .link {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) 12px;
-    gap: 12px;
-    align-items: center;
-    color: inherit;
-    text-decoration: none;
-  }
-  .link:hover {
-    background: var(--card2);
-  }
-  .link:focus-visible {
-    outline-offset: 2px;
-  }
-  .text {
-    min-width: 0;
-  }
-  b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  small {
-    display: block;
-    color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .link > :global(svg:last-child) {
-    color: var(--ink3);
   }
 </style>

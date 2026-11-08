@@ -1,5 +1,5 @@
 // Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
-// #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
+// #/activity/programs, #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
 // #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
@@ -11,6 +11,7 @@ export type HistoryScope = "month" | "week" | "2w";
 export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
+  | { screen: "programs" }
   | { screen: "history"; month: string | null; scope: HistoryScope; day: string | null }
   /** `fromDay` is set when the report was opened from a day of the History. */
   | { screen: "occurrence"; id: number; fromDay: string | null }
@@ -27,6 +28,7 @@ export type Screen = Route["screen"];
 
 export const href = {
   home: () => "#/",
+  programs: () => "#/activity/programs",
   activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
   history: (opts: { month?: string | null; scope?: HistoryScope; day?: string | null } = {}) => {
     const query = new URLSearchParams();
@@ -59,6 +61,7 @@ export function parse(hash: string): Route {
     const given = params.get("p");
     return { screen: "history", month, scope: given === "week" || given === "2w" ? given : "month", day: dayParam("d") };
   }
+  if (screen === "programs" || (screen === "activity" && arg === "programs")) return { screen: "programs" };
   if (screen === "now") return { screen: "activity", tab: "now" };
   if (screen === "today") return { screen: "activity", tab: "today" };
   if (screen === "activity") {
