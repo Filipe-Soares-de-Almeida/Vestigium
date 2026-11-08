@@ -2177,5 +2177,21 @@
   "ui.period.missing.title": "This period is no longer in the history",
   "ui.period.missing.body": "It may be older than the data Vestigium keeps.",
   "ui.events.occurrences.none": "no occurrences",
-  "ui.events.periods.none": "no overloads"
+  "ui.events.periods.none": "no overloads",
+  "ui.disks.none": "No disks found.",
+  "ui.disks.smart": "SMART",
+  "ui.disks.smart.none": "SMART has not been read yet. Read it from the tests of this disk.",
+  "ui.disks.alerts": "Health alerts",
+  "ui.disks.alerts.none": "No Health alerts on this disk.",
+  "ui.disks.open_tests": "Open the tests of this disk",
+  "ui.memory.sub": "{total} of memory, {free} free.",
+  "ui.memory.open_health": "Open the memory in Health",
+  "ui.memory.tests": "Tests",
+  "ui.memory.open_tests": "Open the memory tests",
+  "ui.memory.today": "Today",
+  "ui.memory.today.none": "No memory overload today.",
+  "ui.memory.history": "Test history",
+  "ui.memory.history.none": "No memory tests yet.",
+  "ui.memory.test.diag": "Windows Memory Diagnostic",
+  "ui.memory.test.quick": "Quick memory test"
 }

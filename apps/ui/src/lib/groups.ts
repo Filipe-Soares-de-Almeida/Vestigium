@@ -121,6 +121,7 @@ export function buildGroups(): Group[] {
     g("disks", "disk", {
       cross: true,
       items: [
+        { href: href.disks(), label: t("ui.item.overview"), icon: "disk", match: (r) => r.screen === "disks" },
         { href: href.health("disks"), label: t("ui.item.disk_alerts"), icon: "health", match: onHealth("disks") },
         ...disks.map((d) => ({
           href: href.tests(String(d.number)),
@@ -133,6 +134,7 @@ export function buildGroups(): Group[] {
     g("memory", "memory", {
       cross: true,
       items: [
+        { href: href.memory(), label: t("ui.item.overview"), icon: "memory", match: (r) => r.screen === "memory" },
         { href: href.health("memory"), label: t("ui.item.memory_health"), icon: "health", match: onHealth("memory") },
         { href: href.tests("memory"), label: t("ui.item.memory_tests"), icon: "tests", match: onTests("memory") },
       ],
@@ -208,6 +210,8 @@ const DEFAULT_GROUP: Record<Route["screen"], GroupKey | null> = {
   activity: "activity",
   history: "activity",
   programs: "now",
+  disks: "disks",
+  memory: "memory",
   events: "freezes",
   period: "freezes",
   occurrence: "freezes",

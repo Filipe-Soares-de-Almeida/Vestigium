@@ -2177,5 +2177,21 @@
   "ui.period.missing.title": "Este período não está mais no histórico",
   "ui.period.missing.body": "Ele pode ser mais antigo que os dados que o Vestigium guarda.",
   "ui.events.occurrences.none": "nenhuma ocorrência",
-  "ui.events.periods.none": "nenhuma sobrecarga"
+  "ui.events.periods.none": "nenhuma sobrecarga",
+  "ui.disks.none": "Nenhum disco encontrado.",
+  "ui.disks.smart": "SMART",
+  "ui.disks.smart.none": "O SMART ainda não foi lido. Leia-o nos testes deste disco.",
+  "ui.disks.alerts": "Alertas da Saúde",
+  "ui.disks.alerts.none": "Nenhum alerta da Saúde neste disco.",
+  "ui.disks.open_tests": "Abrir os testes deste disco",
+  "ui.memory.sub": "{total} de memória, {free} livres.",
+  "ui.memory.open_health": "Abrir a memória em Saúde",
+  "ui.memory.tests": "Testes",
+  "ui.memory.open_tests": "Abrir os testes de memória",
+  "ui.memory.today": "Hoje",
+  "ui.memory.today.none": "Nenhuma sobrecarga de memória hoje.",
+  "ui.memory.history": "Histórico de testes",
+  "ui.memory.history.none": "Nenhum teste de memória ainda.",
+  "ui.memory.test.diag": "Diagnóstico de Memória do Windows",
+  "ui.memory.test.quick": "Teste rápido de memória"
 }

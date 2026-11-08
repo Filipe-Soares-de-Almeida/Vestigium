@@ -1,5 +1,5 @@
 // Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
-// #/activity/programs, #/activity/all, #/period/<start ms>[?day=YYYY-MM-DD], #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
+// #/disks, #/memory, #/activity/programs, #/activity/all, #/period/<start ms>[?day=YYYY-MM-DD], #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
 // #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
@@ -12,6 +12,8 @@ export type Route =
   | { screen: "home" }
   | { screen: "activity"; tab: ActivityTab }
   | { screen: "programs" }
+  | { screen: "disks" }
+  | { screen: "memory" }
   | { screen: "events" }
   /** `start` is the start of the episode in Unix milliseconds. */
   | { screen: "period"; start: number; fromDay: string | null }
@@ -32,6 +34,8 @@ export type Screen = Route["screen"];
 export const href = {
   home: () => "#/",
   programs: () => "#/activity/programs",
+  disks: () => "#/disks",
+  memory: () => "#/memory",
   events: () => "#/activity/all",
   period: (start: number, fromDay?: string | null) => (fromDay ? `#/period/${start}?day=${fromDay}` : `#/period/${start}`),
   activity: (tab: ActivityTab = "today") => (tab === "now" ? "#/activity?tab=now" : "#/activity"),
@@ -68,6 +72,8 @@ export function parse(hash: string): Route {
   }
   if (screen === "events" || (screen === "activity" && arg === "all")) return { screen: "events" };
   if (screen === "period" && /^\d+$/.test(arg ?? "")) return { screen: "period", start: Number(arg), fromDay: dayParam("day") };
+  if (screen === "disks") return { screen: "disks" };
+  if (screen === "memory") return { screen: "memory" };
   if (screen === "programs" || (screen === "activity" && arg === "programs")) return { screen: "programs" };
   if (screen === "now") return { screen: "activity", tab: "now" };
   if (screen === "today") return { screen: "activity", tab: "today" };

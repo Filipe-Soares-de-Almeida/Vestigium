@@ -24,6 +24,10 @@ How to use this file:
 
 ### Added
 
+- Disks and Memory have an overview each. Disks shows, for every disk, how it stands, the SMART values that
+  warn once read, and the Health alerts about it. Memory shows its Health checks, the memory tests, any
+  memory overload today and the history of memory tests. Each links to the Health and Tests pages it draws
+  from, and the navigation pane stays on Disks or Memory when you follow them.
 - Health has a new layout. The overview lists the areas of the PC as rows, with a status symbol only for
   the areas that have alerts, and the full scan shows a badge that it asks for administrator permission.
   Each area page puts every alert in its own section, with the checks that found nothing marked by a green
