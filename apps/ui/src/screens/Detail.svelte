@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { DetailKind } from "../lib/router.svelte";
+  import DiagnosticDetail from "./detail/DiagnosticDetail.svelte";
   import DriverDetail from "./detail/DriverDetail.svelte";
   import EventDetail from "./detail/EventDetail.svelte";
   import FindingDetail from "./detail/FindingDetail.svelte";
@@ -14,6 +15,8 @@
 
 {#if kind === "test"}
   <TestDetail id={num(0)} />
+{:else if kind === "diagnostic"}
+  <DiagnosticDetail recordId={num(0)} />
 {:else if kind === "finding"}
   <FindingDetail id={num(0)} />
 {:else if kind === "event"}

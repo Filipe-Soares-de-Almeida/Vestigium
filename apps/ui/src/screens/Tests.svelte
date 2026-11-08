@@ -326,7 +326,14 @@
             };
           }
           const w = diagnosticWord(row.diag!);
-          return { key: `d${i}`, date: formatDayShort(row.ts), title: t("ui.tests.hist.diag"), sub: w.text, mark: { ...statusOf(w.mark), word: w.text } };
+          return {
+            key: `d${row.diag!.record_id}`,
+            date: formatDayShort(row.ts),
+            title: t("ui.tests.hist.diag"),
+            sub: w.text,
+            mark: { ...statusOf(w.mark), word: w.text },
+            href: href.detail("diagnostic", row.diag!.record_id, { from: here(), label: t("ui.tests.memory.title") }),
+          };
         })}
       />
     {:else}

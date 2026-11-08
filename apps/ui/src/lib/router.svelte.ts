@@ -10,8 +10,8 @@ export type HistoryScope = "month" | "week" | "2w";
 
 /** Which tweaks a list shows: those worth applying, with no sign here, already set, applied by Vestigium, or all. */
 /** The kinds of detail page; `parts` of the route name the item inside its kind. */
-export type DetailKind = "test" | "finding" | "event" | "driver" | "smart" | "process";
-const DETAIL_KINDS: DetailKind[] = ["test", "finding", "event", "driver", "smart", "process"];
+export type DetailKind = "test" | "diagnostic" | "finding" | "event" | "driver" | "smart" | "process";
+const DETAIL_KINDS: DetailKind[] = ["test", "diagnostic", "finding", "event", "driver", "smart", "process"];
 
 export type DumpGroup = "blue" | "live" | "app";
 

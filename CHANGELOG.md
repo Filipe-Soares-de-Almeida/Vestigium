@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- A Windows Memory Diagnostic run in the memory test history opens its own page: result, duration,
+  coverage, faulty pages and what to do when it found errors.
 - Each Windows Memory Diagnostic run read from the System log is named by the record of its first
   event, so the same run is found again on every read.
 - A pause can carry an end time: the watcher then resumes by itself, and its status says when. The

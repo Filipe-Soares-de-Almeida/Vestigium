@@ -153,7 +153,7 @@ function diagnostics(errors: boolean): MemoryDiagnostic[] {
     pages_untested: 1843,
     bad_pages: errors ? 6 : 0,
   };
-  return [{ ts_ms: now - 20 * DAY, result: errors ? "Errors" : "Pass", detail }];
+  return [{ record_id: 48_211, ts_ms: now - 20 * DAY, result: errors ? "Errors" : "Pass", detail }];
 }
 
 let running: RunningTest | null = null;

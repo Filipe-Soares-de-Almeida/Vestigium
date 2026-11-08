@@ -1071,6 +1071,8 @@ export interface DiagnosticDetail {
 
 /** One run of the Windows Memory Diagnostic, from the System log. */
 export interface MemoryDiagnostic {
+  /** The System log record of the run's first event, which names the run. */
+  record_id: number;
   ts_ms: number;
   result: DiagnosticResult;
   detail: DiagnosticDetail | null;
