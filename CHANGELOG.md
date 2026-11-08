@@ -238,6 +238,9 @@ How to use this file:
 
 ### Changed
 
+- Detail pages and every page opened from a list name only the place their back link returns to, such
+  as Memory instead of Back to Memory. A detail page shows its facts in one line under the title and
+  its blocks two by two on a wide window, each opened by a divider.
 - Settings pages are titled sections instead of setting cards. Appearance is now Colors: the color
   mode is three radio buttons and each color theme is a tile with its accent and state colors. Reports
   chooses the detail level with radio buttons, each with its hint. Monitoring groups its switches

@@ -55,7 +55,7 @@
         { label: t("ui.detail.driver.total"), value: us(driver.dpc.total_us + driver.isr.total_us) },
       ]}
     />
-    <Block title={t("ui.detail.driver.routines")} first>
+    <Block title={t("ui.detail.driver.routines")}>
       <table>
         <thead>
           <tr>

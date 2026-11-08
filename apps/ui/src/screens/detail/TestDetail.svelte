@@ -48,7 +48,7 @@
     />
 
     {#if quick}
-      <Block title={t("ui.detail.result")} first>
+      <Block title={t("ui.detail.result")}>
         <p class="line">
           {t("ui.detail.quick.tested", { tested: formatBytes(quick.tested_bytes), total: formatBytes(quick.total_bytes), share: formatPercent((quick.tested_bytes / Math.max(1, quick.total_bytes)) * 100) })}
         </p>
@@ -69,7 +69,7 @@
         </Block>
       {/if}
     {:else if surface}
-      <Block title={t("ui.detail.result")} first>
+      <Block title={t("ui.detail.result")}>
         <p class="line">{t("ui.detail.surface.range", { from: formatBytes(surface.from_bytes), to: formatBytes(surface.to_bytes), total: formatBytes(surface.disk_bytes) })}</p>
         <p class="line">{surface.unreadable_blocks ? t("ui.detail.surface.unreadable", { count: formatNumber(surface.unreadable_blocks) }) : t("ui.detail.surface.clean")}</p>
         {#if surface.failure}<p class="line">{surface.failure}</p>{/if}
@@ -87,14 +87,14 @@
         </Block>
       {/if}
     {:else if check}
-      <Block title={t("ui.detail.result")} first>
+      <Block title={t("ui.detail.result")}>
         <p class="line">{t(`ui.detail.check.${check.result}`)}</p>
       </Block>
       {#if check.output && level !== "Simple"}
         <Block title={t("ui.detail.check.output")}><pre>{check.output}</pre></Block>
       {/if}
     {:else if bench}
-      <Block title={t("ui.detail.result")} first>
+      <Block title={t("ui.detail.result")}>
         <table>
           <thead><tr><th scope="col">{t("ui.detail.col.mode")}</th><th scope="col" class="n">MB/s</th><th scope="col" class="n">IOPS</th><th scope="col" class="n">{t("ui.detail.col.ms")}</th></tr></thead>
           <tbody>

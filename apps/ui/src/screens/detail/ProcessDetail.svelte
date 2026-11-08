@@ -37,7 +37,7 @@
         { label: "GPU", value: formatPercent(program.gpu_pct, 1) },
       ]}
     />
-    <Block title={t("ui.detail.process.now")} first>
+    <Block title={t("ui.detail.process.now")}>
       <p class="text">{t("ui.detail.process.now_only")}</p>
     </Block>
   </DetailPage>

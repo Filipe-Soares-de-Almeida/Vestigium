@@ -20,20 +20,25 @@
   .facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px 40px;
-    margin: 18px 0 0;
+    gap: 12px 52px;
+    margin: 22px 0 0;
   }
   .facts div {
     display: grid;
-    gap: 2px;
+    gap: 3px;
   }
   dt {
     color: var(--ink2);
     font-size: 12.5px;
   }
   dd {
+    display: flex;
+    align-items: center;
     margin: 0;
     font-size: 15px;
-    font-variant-numeric: tabular-nums;
+  }
+  dd :global(.status) {
+    color: var(--ink);
+    font-size: 15px;
   }
 </style>

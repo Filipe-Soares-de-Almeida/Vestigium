@@ -33,7 +33,7 @@
         { label: t("ui.detail.value_last"), value: view.value },
       ]}
     />
-    <Block title={t("ui.detail.why")} first>
+    <Block title={t("ui.detail.why")}>
       <p class="text">{view.why}</p>
     </Block>
     {#if view.evidence.length}

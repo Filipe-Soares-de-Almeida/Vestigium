@@ -61,7 +61,7 @@
       ]}
     />
     {#if event.data_xml && level !== "Simple"}
-      <Block title={t("ui.detail.event.data")} first>
+      <Block title={t("ui.detail.event.data")}>
         <pre>{event.data_xml}</pre>
       </Block>
     {/if}

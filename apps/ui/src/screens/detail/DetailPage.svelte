@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
 
   import BackLink from "../../components/BackLink.svelte";
+  import PageHead from "../../components/PageHead.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { router } from "../../lib/router.svelte";
 
@@ -23,20 +24,13 @@
   const place = $derived(route?.label ?? t("ui.detail.back_default"));
 </script>
 
-<BackLink href={to} label={t("ui.common.back_to", { place })} />
-<header class="head">
-  <h1>{title}</h1>
-  {#if sub}<p class="sub">{sub}</p>{/if}
-</header>
-{@render children()}
+<BackLink href={to} label={place} />
+<PageHead {title} {sub} />
+<div class="cols2 body">{@render children()}</div>
 
 <style>
-  .head {
-    margin-bottom: 4px;
-  }
-  .sub {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
+  /* The facts run across the page; the blocks under them pair up two by two on a wide window. */
+  .body > :global(.facts) {
+    grid-column: 1 / -1;
   }
 </style>

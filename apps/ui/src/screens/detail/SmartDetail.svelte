@@ -30,7 +30,7 @@
         { label: t("ui.detail.smart.raw"), value: formatNumber(attribute.raw) },
       ]}
     />
-    <Block title={t("ui.detail.smart.meaning")} first>
+    <Block title={t("ui.detail.smart.meaning")}>
       <p class="text">{WATCHED.includes(attr) ? t("ui.detail.smart.watched") : t("ui.detail.smart.plain")}</p>
       <p class="text note">{t("ui.detail.smart.latest_only")}</p>
     </Block>
