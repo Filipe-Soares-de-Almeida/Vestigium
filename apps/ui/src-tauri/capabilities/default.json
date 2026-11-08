@@ -42,6 +42,8 @@
     "allow-disk-detail",
     "allow-smart-history",
     "allow-program-recent",
+    "allow-process-facts",
+    "allow-program-marks",
     "allow-open-memory-diagnostic",
     "allow-start-memory-test",
     "allow-start-benchmark",

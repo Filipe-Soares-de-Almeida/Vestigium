@@ -7,7 +7,7 @@ use vestigium_core::{
     CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Fault,
     Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample, Reading,
     Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit, heaviest,
-    pc_state, steady_only, usage,
+    pc_state, same_program, steady_only, usage,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
@@ -75,6 +75,13 @@ pub struct TimelineDto {
     pub step_ms: i64,
     #[serde(flatten)]
     pub columns: Columns,
+}
+
+/// The occurrences and overload periods that involve one program.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ProgramMarksDto {
+    pub occurrences: Vec<OccurrenceSummary>,
+    pub episodes: Vec<Episode>,
 }
 
 /// What the timeline marks: stalls, pressure, Windows events, holes in watching and tests.
@@ -741,6 +748,41 @@ impl History {
 
     pub fn machine(&mut self) -> Result<Option<MachineInfo>, StoreError> {
         Ok(self.read(|store| store.machine())?.flatten())
+    }
+
+    /// The occurrences and overload periods of `[from_ms, to_ms]` that involve `program`: named
+    /// by a suspect, a hung window or the culprit of the period; oldest first.
+    pub fn program_marks(
+        &mut self,
+        program: &str,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<ProgramMarksDto, StoreError> {
+        let found = self.read(|store| {
+            let mut occurrences = Vec::new();
+            for summary in store.occurrences(from_ms, to_ms)? {
+                if store
+                    .occurrence(summary.id)?
+                    .is_some_and(|o| o.involves(program))
+                {
+                    occurrences.push(summary);
+                }
+            }
+            let episodes = store
+                .episodes(from_ms, to_ms)?
+                .into_iter()
+                .filter(|e| {
+                    e.culprit
+                        .as_ref()
+                        .is_some_and(|c| same_program(&c.name, program))
+                })
+                .collect();
+            Ok(ProgramMarksDto {
+                occurrences,
+                episodes,
+            })
+        })?;
+        Ok(found.unwrap_or_default())
     }
 
     /// The daily readings of one SMART attribute of a disk since `from_ms`, oldest first.

@@ -33,6 +33,8 @@ const COMMANDS: &[&str] = &[
     "disk_detail",
     "smart_history",
     "program_recent",
+    "process_facts",
+    "program_marks",
     "open_memory_diagnostic",
     "start_memory_test",
     "start_benchmark",

@@ -173,6 +173,15 @@ function refuse(kind: UiError["kind"]): Promise<never> {
 }
 
 export const handlers: Record<string, Handler> = {
+  process_facts: (args) => ({
+    started_ms: Date.now() - 3 * 3600_000,
+    threads: 61,
+    processes: 9,
+    path: `C:\\Program Files\\${String(args.name).replace(/\.exe$/i, "")}\\${args.name}`,
+    run_as: { CurrentUser: { elevated: false } },
+    signature: { Valid: { signer: "Example Software Inc." } },
+  }),
+  program_marks: () => ({ occurrences: [], episodes: [] }),
   // Ten minutes of rankings every 5 s, with a busy stretch in the middle.
   program_recent: () =>
     Array.from({ length: 120 }, (_, i) => ({

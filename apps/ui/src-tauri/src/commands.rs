@@ -449,6 +449,27 @@ pub async fn disk_detail(number: u32, name: String) -> Result<DiskDetailDto, UiE
     blocking(move || Ok(crate::hwtests::disk_detail(number, &name, now_ms()))).await
 }
 
+/// A process's file, user and signature, and the threads and processes of its program, now.
+#[tauri::command]
+pub async fn process_facts(
+    pid: u32,
+    name: String,
+) -> Result<crate::process::ProcessFactsDto, UiError> {
+    blocking(move || Ok(crate::process::facts(pid, &name))).await
+}
+
+/// The occurrences and overload periods of `[from_ms, to_ms]` that involve a program.
+#[tauri::command]
+pub async fn program_marks(
+    state: State<'_, AppState>,
+    name: String,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<crate::history::ProgramMarksDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || Ok(lock(&history).program_marks(&name, from_ms, to_ms)?)).await
+}
+
 /// One program's use at each ranking of the last ten minutes; empty while the watcher is away.
 #[tauri::command]
 pub async fn program_recent(

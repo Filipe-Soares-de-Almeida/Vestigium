@@ -7,6 +7,7 @@ mod commands;
 mod history;
 mod hwtests;
 mod live;
+mod process;
 mod tweaks;
 mod update;
 
@@ -55,6 +56,8 @@ fn main() {
             commands::disk_detail,
             commands::smart_history,
             commands::program_recent,
+            commands::process_facts,
+            commands::program_marks,
             commands::open_memory_diagnostic,
             commands::start_memory_test,
             commands::start_benchmark,

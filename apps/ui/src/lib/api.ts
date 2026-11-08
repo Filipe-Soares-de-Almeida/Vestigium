@@ -18,6 +18,8 @@ import type {
   RunningTest,
   ScanFinished,
   Settings,
+  ProcessFacts,
+  ProgramMarks,
   ProgramPoint,
   SettingsDto,
   SmartPoint,
@@ -159,6 +161,16 @@ export function tests(): Promise<TestsDto> {
 }
 
 /** SMART or NVMe detail of one disk, read now; reading an idle HDD spins it up. */
+/** A process's file, user and signature, and the threads and processes of its program, now. */
+export function processFacts(pid: number, name: string): Promise<ProcessFacts> {
+  return invoke("process_facts", { pid, name });
+}
+
+/** The occurrences and overload periods of `[fromMs, toMs]` that involve a program. */
+export function programMarks(name: string, fromMs: number, toMs: number): Promise<ProgramMarks> {
+  return invoke("program_marks", { name, fromMs, toMs });
+}
+
 /** One program's use at each ranking of the last ten minutes. */
 export function programRecent(name: string): Promise<ProgramPoint[]> {
   return invoke("program_recent", { name });

@@ -259,6 +259,8 @@ How to use this file:
 
 ### Changed
 
+- A program's page shows its PID, when it started, its threads and processes, the path of its file,
+  who signed it, the user it runs as, and today's freezes and overloads that involve it.
 - A program's page shows lines of its CPU use and memory over the last 10 minutes, refreshed every 5
   s.
 - A SMART attribute's page shows its current value, its state, the disk, when it was last read and a

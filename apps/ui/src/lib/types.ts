@@ -933,6 +933,34 @@ export interface NvmeDetail {
 }
 
 /** One disk's SMART block and verdict, as the watcher reads it. */
+/** Who a process runs as; `CurrentUser` says whether it runs as administrator. */
+export type RunAs =
+  | "System"
+  | "LocalService"
+  | "NetworkService"
+  | { CurrentUser: { elevated: boolean } }
+  | "OtherUser"
+  | "Unknown";
+
+/** What a program file's signature says, checked offline. */
+export type Signature = { Valid: { signer: string } } | "Invalid" | "Unsigned" | "Unknown";
+
+/** A process's file, user and signature, and the threads and processes of its program. */
+export interface ProcessFacts {
+  started_ms: number | null;
+  threads: number | null;
+  processes: number | null;
+  path: string | null;
+  run_as: RunAs;
+  signature: Signature;
+}
+
+/** The occurrences and overload periods that involve one program. */
+export interface ProgramMarks {
+  occurrences: OccurrenceSummary[];
+  episodes: Episode[];
+}
+
 /** One program's use at one ranking of the watcher. */
 export interface ProgramPoint {
   ts_ms: number;
