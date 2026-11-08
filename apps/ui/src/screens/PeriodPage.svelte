@@ -4,13 +4,15 @@
   import BackLink from "../components/BackLink.svelte";
   import ErrorView from "../components/ErrorView.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
-  import { formatDuration, formatTime } from "../lib/format";
-  import { t } from "../lib/i18n.svelte";
+  import { formatTime } from "../lib/format";
+  import { lang, t } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
   import type { Episode } from "../lib/types";
-  import { isPressure } from "./today/day";
+  import { dayStart, isPressure } from "./today/day";
   import Period from "./today/Period.svelte";
   import { episodeMeta, episodeTitle } from "./today/text";
 
@@ -26,6 +28,19 @@
       ? { href: href.history({ day: fromDay, month: fromDay.slice(0, 7) }), name: t("ui.item.history") }
       : { href: href.events(), name: t("ui.item.events") },
   );
+
+  /** "today at 10:02", or the day and time for an earlier day. */
+  function when(ms: number): string {
+    const time = formatTime(ms);
+    if (dayStart(ms) === dayStart(Date.now())) return t("ui.period.when.today", { time });
+    const date = new Intl.DateTimeFormat(lang(), { day: "numeric", month: "long" }).format(ms);
+    return t("ui.period.when.day", { date, time });
+  }
+
+  relatedLinks(() => [
+    { label: t("ui.related.live_now"), href: href.activity("now") },
+    { label: t("ui.related.see_day"), href: back.href },
+  ]);
 
   async function load(): Promise<void> {
     failure = null;
@@ -44,7 +59,7 @@
   });
 </script>
 
-<BackLink href={back.href} label={t("ui.common.back_to", { place: back.name })} />
+<BackLink href={back.href} label={back.name} />
 
 {#if failure !== null}
   <ErrorView error={failure} heading="h1" onretry={load} />
@@ -52,32 +67,9 @@
   <h1 class="sr">{t("ui.period.title")}</h1>
   <Loading />
 {:else if found === null}
-  <h1>{t("ui.period.missing.title")}</h1>
-  <p class="lede">{t("ui.period.missing.body")}</p>
+  <PageHead title={t("ui.period.missing.title")} sub={t("ui.period.missing.body")} />
 {:else}
   {@const e = found.episode}
-  <header class="head">
-    <h1>{episodeTitle(e, level)}</h1>
-    <p class="sub">
-      {episodeMeta(e)} · {formatTime(e.start_ms)} · {formatDuration(e.end_ms - e.start_ms)}
-    </p>
-  </header>
+  <PageHead title={episodeTitle(e, level)} sub="{episodeMeta(e)} · {when(e.start_ms)}" />
   <Period episode={e} byTest={found.byTest} {level} id="period" label={episodeTitle(e, level)} {fromDay} />
 {/if}
-
-<style>
-  .head {
-    margin-bottom: 4px;
-  }
-  .sub {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .lede {
-    max-width: 70ch;
-    margin: 6px 0 18px;
-    color: var(--ink2);
-    font-size: 16px;
-  }
-</style>

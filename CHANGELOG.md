@@ -238,6 +238,14 @@ How to use this file:
 
 ### Changed
 
+- A freeze report opens with its title, date and Copy report at the right, then a line with its
+  severity, duration and where it happened. The probable cause and what to do sit side by side, with
+  what may also have contributed listed under the cause instead of folded away; the chart of the
+  moment has taller lanes, the label of the moment above them and its zoom buttons beside its title;
+  Sequence and a Technical block, whose switch shows the processes and Windows events, close the page.
+  An overload period's page shows its numbers large and, under In the day, the day's States of the PC
+  chart zoomed on 100 minutes around it, instead of its own resource chart. Toggle switches show their
+  state after the switch, as in Windows.
 - Now is titled Now, with its reading of the PC as the line under the title. The ten-minute chart has
   its live dot and zoom buttons beside its title, taller lanes with each value on the lane's line, a
   label every minute and its note under the chart. Programs using the most now can be sorted by

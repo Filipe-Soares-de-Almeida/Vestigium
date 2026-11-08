@@ -51,6 +51,5 @@
     width: fit-content;
     margin-top: 4px;
     color: var(--accent);
-    font-weight: 600;
   }
 </style>

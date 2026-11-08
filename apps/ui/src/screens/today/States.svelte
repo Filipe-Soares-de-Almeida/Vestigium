@@ -9,13 +9,27 @@
   import { type Day, gapAt, HOUR_MS, pointAt, type Run, STATE_TOKEN, STATES, toneOf } from "./day";
   import { causeName, kindName, occurrenceTitle } from "./text";
 
-  let { day, level }: { day: Day; level: DetailLevel } = $props();
+  let {
+    day,
+    level,
+    title = t("ui.today.states.title"),
+    row = 30,
+    focus = null,
+  }: {
+    day: Day;
+    level: DetailLevel;
+    title?: string;
+    /** Height of a state's row. */
+    row?: number;
+    /** The stretch shown first, zoomed in; the whole day when `null`. */
+    focus?: { from: number; to: number } | null;
+  } = $props();
 
-  // Rows are 30 px with a 24 px band above them for the marks and 24 px below for the axis.
-  const ROW = 30;
+  // Rows sit under a 24 px band for the marks, with 24 px below for the axis.
+  const ROW = $derived(row);
   const TOP = 24;
-  const BAR = 16;
-  const HEIGHT = TOP + STATES.length * ROW + 24;
+  const BAR = $derived(Math.max(8, row - 14));
+  const HEIGHT = $derived(TOP + STATES.length * ROW + 24);
   const MIN_SPAN_MS = 6 * HOUR_MS;
   const MINUTE_MS = 60_000;
   const MARK_NEAR_MS = 3 * MINUTE_MS;
@@ -214,10 +228,11 @@
     event.preventDefault();
   }
 
-  // A new day starts with the whole day on screen.
+  // A new day starts with the whole day on screen, or with the stretch asked for.
   $effect(() => {
     void day.start;
     zoom.reset();
+    if (focus) zoom.view = { from: Math.max(day.start, focus.from), to: Math.min(day.start + span, focus.to) };
   });
 
   // The tooltip sits above the plot unless that would leave the scrolling area, and inside the card.
@@ -246,8 +261,8 @@
   />
 {/snippet}
 
-<Block title={t("ui.today.states.title")} actions={zoomActions}>
-<section class="states" aria-label={t("ui.today.states.title")} bind:this={card} bind:clientWidth={outer}>
+<Block {title} actions={zoomActions}>
+<section class="states" aria-label={title} bind:this={card} bind:clientWidth={outer} style:--row="{ROW}px">
   <div class="wrap" style="grid-template-columns: {outer < 820 ? 140 : 180}px minmax(0, 1fr)">
     <div class="labels">
       {#each STATES as state (state)}
@@ -412,7 +427,7 @@
   }
   .labels {
     display: grid;
-    grid-template-rows: repeat(4, 30px);
+    grid-template-rows: repeat(4, var(--row));
     align-content: start;
     padding-top: 24px;
   }
@@ -421,7 +436,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    height: 30px;
+    height: var(--row);
     padding: 0 8px;
     border: 0;
     border-radius: 8px;

@@ -1,23 +1,15 @@
-import { formatDuration, formatPercent, formatTime } from "../../lib/format";
+import { formatPercent, formatTime } from "../../lib/format";
 import { t } from "../../lib/i18n.svelte";
-import type { Columns, DetailLevel, Episode, EpisodeDetailDto, ProcessSample } from "../../lib/types";
-import { type Band, type ChartView, type LaneKey, lanesOf } from "../occurrence/chart";
+import type { Columns, Episode, EpisodeDetailDto, ProcessSample } from "../../lib/types";
 import { formatBytes, formatMs, formatRate } from "../occurrence/format";
-import { episodeDisk, episodeKey, kindName } from "./text";
+import { episodeKey } from "./text";
 
-// What the detail of a pressure episode shows: its numbers, its chart, who used what and what to do.
+// What the detail of a pressure episode shows: its numbers, who used what and what to do.
 
 const KEY = "ui.today.period";
 
 type PeriodKind = ReturnType<typeof episodeKey>;
 type Measure = "cpu" | "mem" | "io";
-
-/** The lanes each kind shows first; Detailed adds processor and memory, Technical every lane. */
-const LANES: Record<PeriodKind, LaneKey[]> = {
-  CpuSaturated: ["cpu", "mem"],
-  MemoryHigh: ["mem", "cpu"],
-  DiskBusy: ["disk", "latency"],
-};
 
 /** The column that crossed the threshold. */
 const METRIC: Record<PeriodKind, keyof Omit<Columns, "t" | "state">> = {
@@ -34,48 +26,6 @@ const MEASURES: Record<PeriodKind, [Measure, Measure]> = {
 };
 
 const PROGRAMS_SHOWN = 5;
-
-export function laneKeysOf(e: Episode, level: DetailLevel): LaneKey[] {
-  const first = LANES[episodeKey(e)];
-  if (level === "Simple") return first;
-  const more: LaneKey[] = level === "Detailed" ? ["cpu", "mem"] : ["cpu", "mem", "disk", "latency", "gpu", "lag"];
-  return [...new Set([...first, ...more])];
-}
-
-/** The chart: seconds from the start of the episode, the episode and what stalled in it as bands. */
-export function periodView(e: Episode, dto: EpisodeDetailDto, level: DetailLevel): ChartView {
-  const origin = e.start_ms / 1000;
-  const disk = episodeDisk(e);
-  const names: Partial<Record<LaneKey, string>> = disk
-    ? { disk: t(`${KEY}.lane.disk`, { disk }), latency: t(`${KEY}.lane.latency`, { disk }) }
-    : {};
-  const { lanes, summary } = lanesOf(dto.chart, laneKeysOf(e, level), names);
-  const rel = (ms: number) => ms / 1000 - origin;
-  const bands: Band[] = [
-    {
-      from: 0,
-      to: rel(e.end_ms),
-      tone: "press",
-      label: t(`${KEY}.band`, { duration: formatDuration(e.end_ms - e.start_ms) }),
-    },
-    ...dto.occurrences.map((o) => ({
-      from: rel(o.start_ms),
-      to: rel(Math.max(o.end_ms, o.start_ms + 1000)),
-      tone: "freeze" as const,
-      label: `${kindName(o)} · ${formatDuration(o.end_ms - o.start_ms)}`,
-    })),
-  ];
-  for (const b of bands) {
-    summary.push(
-      t("ui.occurrence.chart.summary.band", {
-        label: b.label,
-        from: formatTime((origin + b.from) * 1000),
-        to: formatTime((origin + b.to) * 1000),
-      }),
-    );
-  }
-  return { x: dto.chart.t.map((s) => s - origin), originMs: e.start_ms, lanes, bands, markers: [], summary };
-}
 
 /** Known values of `column` in the points that overlap the episode. */
 function inside(e: Episode, dto: EpisodeDetailDto, column: keyof Omit<Columns, "t" | "state">): number[] {

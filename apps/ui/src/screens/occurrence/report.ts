@@ -25,6 +25,7 @@ import {
   formatStamp,
   sameDay,
 } from "./format";
+import { causeName as shortCause } from "../today/text";
 
 // The words of a report, built from its typed facts and evidence at the reader's detail level.
 
@@ -85,6 +86,12 @@ export interface ReportView {
   crumb: string;
   title: string;
   meta: string;
+  /** The date and time alone, and the "sensitive mode" note when it applies. */
+  when: string;
+  /** The kind with its gravity: "Severe freeze". */
+  severity: string;
+  /** What it happened in, in a few words: "C: disk". */
+  where: string;
   figure: string;
   figureCaption: string;
   tone: Tone;
@@ -640,6 +647,9 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
     meta: [when, k(`class.${dto.kind}.${dto.severity}`), dto.sensitive ? k("sensitive") : ""]
       .filter(Boolean)
       .join(" · "),
+    when: [when, dto.sensitive ? k("sensitive") : ""].filter(Boolean).join(" · "),
+    severity: k(`class.${dto.kind}.${dto.severity}`),
+    where: shortCause(main.cause),
     figure: figure.value,
     figureCaption: figure.caption,
     tone: toneOf(dto),

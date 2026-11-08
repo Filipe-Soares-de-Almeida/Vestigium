@@ -6,12 +6,13 @@
   import Loading from "../../components/Loading.svelte";
   import RowList from "../../components/RowList.svelte";
   import Steps from "../../components/Steps.svelte";
-  import { episodeDetail } from "../../lib/api";
+  import { episodeDetail, marks, timeline } from "../../lib/api";
   import { t } from "../../lib/i18n.svelte";
   import type { DetailLevel, Episode, EpisodeDetailDto } from "../../lib/types";
-  import WindowChart from "../occurrence/WindowChart.svelte";
-  import { periodPrograms, periodStats, periodSteps, periodView } from "./period";
+  import { buildDay, type Day, dayStart } from "./day";
+  import { periodPrograms, periodStats, periodSteps } from "./period";
   import OccurrenceRow from "./OccurrenceRow.svelte";
+  import States from "./States.svelte";
 
   let {
     episode,
@@ -29,11 +30,15 @@
     fromDay?: string | null;
   } = $props();
 
+  /** The day chart opens on 100 minutes around the start of the period. */
+  const AROUND_MS = 100 * 60_000;
+
   let dto = $state.raw<EpisodeDetailDto | null>(null);
+  let day = $state.raw<Day | null>(null);
   let error = $state<unknown>(null);
 
   const key = $derived(`${episode.start_ms}-${episode.end_ms}`);
-  const view = $derived(dto ? periodView(episode, dto, level) : null);
+  const focus = $derived({ from: episode.start_ms - AROUND_MS / 2, to: episode.start_ms + AROUND_MS / 2 });
   const stats = $derived(dto ? periodStats(episode, dto) : []);
   const programs = $derived(dto ? periodPrograms(episode, dto) : null);
   const steps = $derived(periodSteps(episode, byTest));
@@ -41,7 +46,14 @@
   async function load(): Promise<void> {
     error = null;
     try {
-      dto = await episodeDetail(episode);
+      const end = Math.min(dayStart(episode.start_ms, 1) - 1, Date.now());
+      const [detail, line, found] = await Promise.all([
+        episodeDetail(episode),
+        timeline(dayStart(episode.start_ms), end, 24 * 60),
+        marks(dayStart(episode.start_ms), end),
+      ]);
+      dto = detail;
+      day = buildDay(end, line, found);
     } catch (err) {
       error = err;
     }
@@ -57,11 +69,11 @@
 <div class="body" {id} role="region" aria-label={label}>
   {#if error !== null}
     <ErrorView {error} onretry={load} />
-  {:else if !dto || !view || !programs}
+  {:else if !dto || !day || !programs}
     <Loading />
   {:else}
     <Block title={t("ui.period.numbers")} first>
-      <dl class="stats">
+      <dl class="figs">
         {#each stats as stat (stat.label)}
           <div>
             <dt>{stat.label}</dt>
@@ -70,42 +82,23 @@
         {/each}
       </dl>
     </Block>
-    <Block title={t("ui.period.chart")}>
-      {#if view.lanes.length}
-        <WindowChart
-          {view}
-          clock
-          label={t("ui.today.period.chart.label")}
-          hint={t("ui.today.period.chart.hint")}
-          keys={t("ui.today.period.chart.keys")}
-        />
-      {:else}
-        <p class="muted">{t("ui.today.period.chart.none")}</p>
-      {/if}
-    </Block>
-    <div class="cols">
+    <States {day} {level} title={t("ui.period.day")} row={26} {focus} />
+    <div class="cols2">
       <Block title={t("ui.today.period.programs")}>
         {#if programs.rows.length}
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t("ui.today.period.col.program")}</th>
-                <th scope="col" class="n">{programs.columns[0]}</th>
-                <th scope="col" class="n">{programs.columns[1]}</th>
-              </tr>
-            </thead>
+          <table class="tbl">
             <tbody>
               {#each programs.rows as row (row.pid)}
                 <tr>
-                  <th scope="row" title={row.name}>{row.name}</th>
-                  <td class="n">{row.values[0]}</td>
-                  <td class="n">{row.values[1]}</td>
+                  <td class="nm" title={row.name}>{row.name}</td>
+                  <td class="num">{row.values[0]}</td>
+                  <td class="num">{row.values[1]}</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         {:else}
-          <p class="muted">{t("ui.today.period.programs.none")}</p>
+          <p class="empty">{t("ui.today.period.programs.none")}</p>
         {/if}
       </Block>
       <div>
@@ -117,7 +110,7 @@
               {/each}
             </RowList>
           {:else}
-            <p class="muted">{t("ui.period.freezes.none")}</p>
+            <p class="empty">{t("ui.period.freezes.none")}</p>
           {/if}
         </Block>
         <Block title={t("ui.today.period.steps")}>
@@ -129,65 +122,18 @@
 </div>
 
 <style>
-  .stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px 40px;
-    margin: 0;
-  }
-  .stats div {
+  .figs {
     display: grid;
-    gap: 2px;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 16px 32px;
+    margin: 0;
   }
   dt {
     color: var(--ink2);
-    font-size: 12.5px;
+    font-size: 13px;
   }
   dd {
-    margin: 0;
-    font-size: 15px;
-    font-variant-numeric: tabular-nums;
-  }
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 56px;
-  }
-  @container content (min-width: 1000px) {
-    .cols {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-    font-size: 13.5px;
-  }
-  th,
-  td {
-    padding: 8px;
-    border-bottom: 1px solid var(--stroke2);
-    text-align: left;
-  }
-  thead th {
-    color: var(--ink2);
-    font-weight: 600;
-    font-size: 12.5px;
-  }
-  tbody th {
-    overflow: hidden;
-    font-weight: 400;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .n {
-    width: 30%;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .muted {
-    margin: 0;
+    margin: 2px 0 0;
+    font: 350 24px/1.2 var(--fd);
   }
 </style>

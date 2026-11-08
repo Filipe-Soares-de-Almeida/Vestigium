@@ -3,6 +3,9 @@
   import uPlot from "uplot";
   import "uplot/dist/uPlot.min.css";
 
+  import type { Snippet } from "svelte";
+
+  import Block from "../../components/Block.svelte";
   import ChartTip from "../../components/ChartTip.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock, formatTime } from "../../lib/format";
@@ -13,12 +16,18 @@
 
   let {
     view,
+    title,
+    children,
     clock = false,
     label = t("ui.occurrence.chart.label"),
     hint = t("ui.occurrence.chart.hint"),
     keys = t("ui.occurrence.chart.keys"),
   }: {
     view: ChartView;
+    /** The block's title; its zoom buttons sit beside it. */
+    title: string;
+    /** Notes under the chart. */
+    children?: Snippet;
     /** Labels the axis with the time of day instead of seconds from the origin. */
     clock?: boolean;
     label?: string;
@@ -26,7 +35,8 @@
     keys?: string;
   } = $props();
 
-  const PLOT_H = 52;
+  /** A lane's height; its name and peak sit in the top 24 px. */
+  const PLOT_H = 84;
   /** Axis steps in seconds, and the room one label needs before the next step is used. */
   const TICK_STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
   const TICK_ROOM_PX = 56;
@@ -84,20 +94,12 @@
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  /** A token's hex colour at `alpha`, since a canvas gradient takes no CSS colour mixing. */
-  function faded(hex: string, alpha: number): string {
-    const digits = hex.replace("#", "");
-    const full = digits.length === 3 ? [...digits].map((c) => c + c).join("") : digits.slice(0, 6);
-    const n = Number.parseInt(full, 16);
-    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
-  }
-
   function options(lane: Lane, width: number, x0: number, x1: number): uPlot.Options {
     const peak = Math.max(1, ...lane.values.map((v) => v ?? 0));
     return {
       width,
       height: PLOT_H,
-      padding: [6, 0, 2, 0],
+      padding: [24, 0, 8, 0],
       legend: { show: false },
       select: { show: false, left: 0, top: 0, width: 0, height: 0 },
       scales: {
@@ -116,13 +118,6 @@
         {
           stroke: () => token(`--${lane.tone}`),
           width: 2,
-          fill: (u) => {
-            const color = token(`--${lane.tone}`);
-            const fill = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
-            fill.addColorStop(0, faded(color, 0.42));
-            fill.addColorStop(1, faded(color, 0));
-            return fill;
-          },
           spanGaps: false,
           points: { show: false },
         },
@@ -230,7 +225,24 @@
   }
 </script>
 
+{#snippet bar()}
+  <ZoomBar {zoom} {range} plot={wrap} />
+{/snippet}
+
+<Block {title} actions={bar}>
 <div class="chart">
+  {#if view.bands.length}
+    <div class="bandlabels" aria-hidden="true">
+      {#each view.bands as band, i (i)}
+        {@const at = place(band.from, band.to)}
+        {#if at && at.left > 60}
+          <span class="flip" style:right="{100 - at.left - at.width}%">{band.label}</span>
+        {:else if at}
+          <span style:left="{at.left}%">{band.label}</span>
+        {/if}
+      {/each}
+    </div>
+  {/if}
   <div
     class="plots"
     class:pan={zoom.view !== null}
@@ -296,19 +308,6 @@
       <span style:left="{pct(s)}%" class:start={pct(s) < 4} class:end={pct(s) > 96}>{tickLabel(s)}</span>
     {/each}
   </div>
-  {#if view.bands.length}
-    <div class="bandlabels" aria-hidden="true">
-      {#each view.bands as band, i (i)}
-        {@const at = place(band.from, band.to)}
-        {#if at && at.left > 60}
-          <span class="flip" style:right="{100 - at.left - at.width}%">{band.label}</span>
-        {:else if at}
-          <span style:left="{at.left}%">{band.label}</span>
-        {/if}
-      {/each}
-    </div>
-  {/if}
-  <ZoomBar {zoom} {range} plot={wrap} {hint} />
   <ul class="sr" id="{uid}-summary">
     {#each view.summary as line, i (i)}
       <li>{line}</li>
@@ -316,14 +315,14 @@
   </ul>
   <p class="sr" id="{uid}-keys">{keys}</p>
 </div>
+{@render children?.()}
+</Block>
 
 <style>
   .plots {
     position: relative;
     display: grid;
-    gap: 14px;
-    padding-bottom: 10px;
-    border-radius: 8px;
+    border-radius: 4px;
   }
   /* Keyboard focus shows as the readout at the moment, not as a ring. */
   .plots:focus-visible {
@@ -339,11 +338,19 @@
     position: relative;
     z-index: 1;
   }
+  .lane + .lane {
+    border-top: 1px solid var(--stroke2);
+  }
   .lanehead {
+    position: absolute;
+    top: 5px;
+    right: 4px;
+    left: 4px;
+    z-index: 1;
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 2px;
+    pointer-events: none;
   }
   .name {
     color: var(--ink2);
@@ -355,7 +362,7 @@
     white-space: nowrap;
   }
   .plot {
-    height: 52px;
+    height: 84px;
   }
   .plot :global(.uplot) {
     width: 100%;
@@ -367,32 +374,40 @@
   }
   .band {
     position: absolute;
-    top: 0;
+    top: -4px;
     bottom: 0;
-    border-radius: 8px;
+    border-radius: 4px;
   }
   .band.freeze {
-    background: color-mix(in srgb, var(--freeze) 22%, transparent);
+    background: var(--freeze-t);
   }
   .band.press {
     background: color-mix(in srgb, var(--press) 12%, transparent);
   }
+  /* An event of the moment: a dashed line through the lanes with a dot at the top. */
   .marker {
     position: absolute;
+    top: 0;
     bottom: 0;
     z-index: 2;
     width: 0;
-    height: 0;
-    border: 5px solid transparent;
-    border-top: 0;
-    border-bottom: 8px solid var(--ink2);
-    transform: translateX(-50%);
+    border-left: 1px dashed var(--freeze);
+  }
+  .marker::before {
+    content: "";
+    position: absolute;
+    top: -1.5px;
+    left: -4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--freeze);
   }
   .axis,
   .bandlabels {
     position: relative;
-    height: 18px;
-    font: 500 11.5px/18px var(--f);
+    height: 24px;
+    font: 500 11.5px/24px var(--f);
     color: var(--ink3);
   }
   .axis span,
@@ -411,9 +426,15 @@
     transform: translateX(-100%);
   }
   .bandlabels {
-    margin-top: 2px;
+    height: 18px;
     color: var(--ink2);
-    font-weight: 600;
+    font: 600 12px/18px var(--f);
+  }
+  .bandlabels span {
+    padding-left: 6px;
+  }
+  .bandlabels span.flip {
+    padding: 0 6px 0 0;
   }
   @media (forced-colors: active) {
     .band {
@@ -423,7 +444,11 @@
     }
     .marker {
       forced-color-adjust: none;
-      border-bottom-color: CanvasText;
+      border-left-color: CanvasText;
+    }
+    .marker::before {
+      forced-color-adjust: none;
+      background: CanvasText;
     }
   }
 </style>
