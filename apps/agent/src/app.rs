@@ -142,6 +142,20 @@ fn apply_user_tweak(
     }
 }
 
+/// Pauses or resumes watching; a pause with `until_ms` ends by itself at that time.
+pub fn set_paused(shared: &Shared, paused: bool, until_ms: Option<i64>) {
+    {
+        let mut status = lock(&shared.status);
+        status.paused = paused;
+        status.paused_until_ms = until_ms.filter(|_| paused);
+    }
+    shared.gate.set(if paused {
+        GateState::Paused
+    } else {
+        GateState::Running
+    });
+}
+
 fn error(code: ErrorCode, message: impl std::fmt::Display) -> Response {
     Response::Error {
         code,
@@ -180,13 +194,8 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 .collect();
             Response::Recent { readings, pressure }
         }
-        Request::SetPaused { paused } => {
-            shared.gate.set(if paused {
-                GateState::Paused
-            } else {
-                GateState::Running
-            });
-            lock(&shared.status).paused = paused;
+        Request::SetPaused { paused, until_ms } => {
+            set_paused(shared, paused, until_ms);
             shutdown::wake();
             Response::Done
         }
@@ -810,7 +819,14 @@ mod tests {
         let shared = shared();
 
         assert_eq!(
-            handle(Request::SetPaused { paused: true }, &shared, None),
+            handle(
+                Request::SetPaused {
+                    paused: true,
+                    until_ms: None
+                },
+                &shared,
+                None
+            ),
             Response::Done
         );
         assert_eq!(shared.gate.state(), GateState::Paused);
@@ -819,8 +835,46 @@ mod tests {
             Response::Status(AgentStatus { paused: true, .. })
         ));
 
-        handle(Request::SetPaused { paused: false }, &shared, None);
+        handle(
+            Request::SetPaused {
+                paused: false,
+                until_ms: None,
+            },
+            &shared,
+            None,
+        );
         assert_eq!(shared.gate.state(), GateState::Running);
+    }
+
+    #[test]
+    fn a_timed_pause_reports_its_end_until_resumed() {
+        let shared = shared();
+
+        handle(
+            Request::SetPaused {
+                paused: true,
+                until_ms: Some(1_700_000_000_000),
+            },
+            &shared,
+            None,
+        );
+        assert!(matches!(
+            handle(Request::Status, &shared, None),
+            Response::Status(AgentStatus {
+                paused_until_ms: Some(1_700_000_000_000),
+                ..
+            })
+        ));
+
+        handle(
+            Request::SetPaused {
+                paused: false,
+                until_ms: Some(1_700_000_000_000),
+            },
+            &shared,
+            None,
+        );
+        assert_eq!(lock(&shared.status).paused_until_ms, None);
     }
 
     #[test]

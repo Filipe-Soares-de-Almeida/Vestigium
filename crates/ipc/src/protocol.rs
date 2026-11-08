@@ -5,7 +5,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -20,6 +20,10 @@ pub enum Request {
     Recent,
     SetPaused {
         paused: bool,
+        /// When a pause ends by itself, Unix epoch milliseconds; none holds it until resumed or
+        /// until the watcher restarts.
+        #[serde(default)]
+        until_ms: Option<i64>,
     },
     SetSensitive {
         on: bool,
@@ -108,6 +112,9 @@ pub enum TrayState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentStatus {
     pub paused: bool,
+    /// When the pause ends by itself, while paused; Unix epoch milliseconds.
+    #[serde(default)]
+    pub paused_until_ms: Option<i64>,
     /// When sensitive mode turns itself off, while it is on; Unix epoch milliseconds.
     pub sensitive_until_ms: Option<i64>,
     pub state: TrayState,

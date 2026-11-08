@@ -169,9 +169,14 @@ pub async fn start_agent(state: State<'_, AppState>) -> Result<(), UiError> {
     blocking(move || link.start_agent()).await
 }
 
+/// Pauses or resumes watching; `until_ms` ends the pause by itself at that time.
 #[tauri::command]
-pub async fn set_paused(state: State<'_, AppState>, paused: bool) -> Result<(), UiError> {
-    send(&state, Request::SetPaused { paused }).await
+pub async fn set_paused(
+    state: State<'_, AppState>,
+    paused: bool,
+    until_ms: Option<i64>,
+) -> Result<(), UiError> {
+    send(&state, Request::SetPaused { paused, until_ms }).await
 }
 
 #[tauri::command]

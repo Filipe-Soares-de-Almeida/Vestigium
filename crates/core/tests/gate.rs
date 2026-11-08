@@ -43,3 +43,30 @@ fn stopping_releases_paused_waiters() {
     assert_eq!(waiter.join().unwrap(), GateState::Stopping);
     assert_eq!(gate.state(), GateState::Stopping);
 }
+
+#[test]
+fn a_timed_wait_gives_up_while_still_paused() {
+    let gate = RunGate::new();
+    gate.set(GateState::Paused);
+    let started = Instant::now();
+
+    let state = gate.wait_while_paused_for(Duration::from_millis(100));
+
+    assert_eq!(state, GateState::Paused);
+    assert!(started.elapsed() >= Duration::from_millis(90));
+}
+
+#[test]
+fn a_timed_wait_returns_when_resumed() {
+    let gate = RunGate::new();
+    gate.set(GateState::Paused);
+    let waiter = {
+        let gate = gate.clone();
+        thread::spawn(move || gate.wait_while_paused_for(Duration::from_secs(10)))
+    };
+
+    thread::sleep(Duration::from_millis(50));
+    gate.set(GateState::Running);
+
+    assert_eq!(waiter.join().unwrap(), GateState::Running);
+}

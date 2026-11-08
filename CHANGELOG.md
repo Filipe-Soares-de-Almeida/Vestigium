@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- A pause can carry an end time: the watcher then resumes by itself, and its status says when. The
+  window and the watcher speak a new protocol version.
 - The watcher measures its own processor use over the last minute and reports it with its status.
 - Many list rows now open a detail page, with a back link to the list they came from and the navigation
   pane staying where you were: a test in the history, a SMART attribute, a Health alert that was

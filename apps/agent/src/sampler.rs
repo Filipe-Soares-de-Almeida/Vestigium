@@ -39,6 +39,8 @@ const TOP_EVERY: usize = 5;
 /// Seconds between two checks for windows that stopped responding.
 const HANG_EVERY: usize = 2;
 const TOP_PER_METRIC: usize = 5;
+/// While paused, the longest wait before the end of a timed pause is checked again.
+const PAUSE_CHECK_MS: i64 = 60_000;
 /// The span the agent's own CPU share is averaged over.
 const OWN_CPU_SPAN_MS: f64 = 60_000.0;
 /// Programs the live screen can list in full, busiest first.
@@ -324,7 +326,7 @@ impl Sampler {
                     self.leave(GapReason::Paused);
                     sources.reset();
                     self.snapshots.clear();
-                    if gate.wait_while_paused() == GateState::Stopping {
+                    if self.wait_out_pause(gate) == GateState::Stopping {
                         return;
                     }
                     self.probe_rx.try_iter().for_each(drop);
@@ -781,6 +783,31 @@ impl Sampler {
     }
 
     /// Closes what the black box holds and writes everything, before a pause, a suspend or a stop.
+    /// Blocks while paused and ends a timed pause when its time comes; the wall clock is read
+    /// again at least every minute, so a pause spent asleep still ends on time after waking.
+    fn wait_out_pause(&self, gate: &RunGate) -> GateState {
+        loop {
+            let until = lock(&self.status).paused_until_ms;
+            let left_ms = until.map_or(PAUSE_CHECK_MS, |end| {
+                (end - wall_ms()).clamp(0, PAUSE_CHECK_MS)
+            });
+            if until.is_some() && left_ms == 0 {
+                {
+                    let mut status = lock(&self.status);
+                    status.paused = false;
+                    status.paused_until_ms = None;
+                }
+                gate.set(GateState::Running);
+                shutdown::wake();
+                return GateState::Running;
+            }
+            match gate.wait_while_paused_for(Duration::from_millis(left_ms as u64)) {
+                GateState::Paused => continue,
+                state => return state,
+            }
+        }
+    }
+
     /// Updates the agent's own CPU share from the latest process snapshot.
     fn note_own_cpu(&mut self) {
         let own = std::process::id();
@@ -1413,6 +1440,30 @@ mod tests {
         stop(&running);
 
         assert!(stored, "the event and its bookmark were not stored");
+    }
+
+    #[test]
+    fn a_timed_pause_ends_by_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), Duration::from_secs(1));
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
+
+        {
+            let mut status = lock(&running.status);
+            status.paused = true;
+            status.paused_until_ms = Some(wall_ms() + 500);
+        }
+        running.gate.set(GateState::Paused);
+        let resumed = wait_until(PATIENCE, || {
+            running.gate.state() == GateState::Running && !lock(&running.status).paused
+        });
+        stop(&running);
+
+        assert!(resumed, "the pause did not end by itself");
+        assert_eq!(lock(&running.status).paused_until_ms, None);
     }
 
     #[test]

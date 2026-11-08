@@ -1,4 +1,5 @@
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 /// What the watcher threads should be doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +38,15 @@ impl RunGate {
         let guard = self
             .changed
             .wait_while(self.lock(), |state| *state == GateState::Paused)
+            .unwrap_or_else(PoisonError::into_inner);
+        *guard
+    }
+
+    /// Blocks while paused, for at most `timeout`; returns the state it ends in.
+    pub fn wait_while_paused_for(&self, timeout: Duration) -> GateState {
+        let (guard, _) = self
+            .changed
+            .wait_timeout_while(self.lock(), timeout, |state| *state == GateState::Paused)
             .unwrap_or_else(PoisonError::into_inner);
         *guard
     }

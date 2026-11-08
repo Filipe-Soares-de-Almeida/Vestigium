@@ -10,7 +10,7 @@ use vestigium_core::{ColorTheme, GateState, RecentState};
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::TrayState;
 
-use crate::app::{Shared, lock};
+use crate::app::{Shared, lock, set_paused};
 use crate::icon::Taskbar;
 use crate::{autostart, icon, shutdown};
 
@@ -229,13 +229,7 @@ impl Tray {
                 let _ = Command::new(ui).spawn();
             }
         } else if id == self.pause.id() {
-            let paused = shared.gate.state() == GateState::Running;
-            shared.gate.set(if paused {
-                GateState::Paused
-            } else {
-                GateState::Running
-            });
-            lock(&shared.status).paused = paused;
+            set_paused(shared, shared.gate.state() == GateState::Running, None);
         } else if id == self.sensitive.id() {
             shared.sensitive.set(self.sensitive.is_checked(), wall_ms());
         } else if id == self.autostart.id() {

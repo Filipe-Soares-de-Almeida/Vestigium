@@ -42,7 +42,10 @@ fn every_request_roundtrips_as_json() {
         Request::Status,
         Request::Now,
         Request::Recent,
-        Request::SetPaused { paused: true },
+        Request::SetPaused {
+            paused: true,
+            until_ms: Some(1_700_000_000_000),
+        },
         Request::SetSensitive { on: true },
         Request::Settings,
         Request::SetSettings(settings),
@@ -144,8 +147,15 @@ fn every_response_roundtrips_as_json() {
 
 #[test]
 fn requests_are_tagged_by_type() {
-    let json = serde_json::to_string(&Request::SetPaused { paused: true }).unwrap();
-    assert_eq!(json, r#"{"type":"set_paused","paused":true}"#);
+    let json = serde_json::to_string(&Request::SetPaused {
+        paused: true,
+        until_ms: None,
+    })
+    .unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"set_paused","paused":true,"until_ms":null}"#
+    );
 }
 
 #[test]
