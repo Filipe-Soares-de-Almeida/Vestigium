@@ -19,6 +19,7 @@ import type {
   ScanFinished,
   Settings,
   SettingsDto,
+  SmartPoint,
   TestsDto,
   TimelineDto,
   TweakPick,
@@ -157,6 +158,11 @@ export function tests(): Promise<TestsDto> {
 }
 
 /** SMART or NVMe detail of one disk, read now; reading an idle HDD spins it up. */
+/** The last 30 days of one SMART attribute of a disk, named as the disk counters name it. */
+export function smartHistory(disk: string, attr: number): Promise<SmartPoint[]> {
+  return invoke("smart_history", { disk, attr });
+}
+
 export function diskDetail(number: number, name: string): Promise<DiskDetailDto> {
   return invoke("disk_detail", { number, name });
 }

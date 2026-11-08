@@ -302,6 +302,14 @@ if (scenario === "running") startMemory(5);
 export const handlers: Record<string, Handler> = {
   tests: () => dto(),
   disk_detail: detail,
+  // Thirty daily readings that creep up for the watched attributes and stay put for the others.
+  smart_history: (args) =>
+    Array.from({ length: 30 }, (_, i) => ({
+      read_ms: now - (29 - i) * DAY,
+      current: 100,
+      worst: 100,
+      raw: [5, 197].includes(args.attr as number) && scenario === "errors" ? Math.floor(i / 6) : 1000 + i * 24,
+    })),
   open_memory_diagnostic: () => null,
   start_memory_test: (args) => startMemory(args.minutes as number),
   start_benchmark: (args) => startBench(args.volume as string),

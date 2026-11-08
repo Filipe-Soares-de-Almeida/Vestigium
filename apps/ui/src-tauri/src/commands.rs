@@ -61,6 +61,8 @@ impl Default for AppState {
 
 /// How far back the watcher keeps its readings in memory.
 const RECENT_MS: i64 = 10 * 60_000;
+/// How far back the SMART page draws an attribute.
+const SMART_SHOWN_MS: i64 = 30 * 24 * 60 * 60_000;
 
 /// The watcher's last minutes, for a range that reaches into them; empty when it does not answer.
 fn recent(link: &Link, to_ms: i64, now_ms: i64) -> Recent {
@@ -445,6 +447,18 @@ pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
 #[tauri::command]
 pub async fn disk_detail(number: u32, name: String) -> Result<DiskDetailDto, UiError> {
     blocking(move || Ok(crate::hwtests::disk_detail(number, &name, now_ms()))).await
+}
+
+/// The last 30 days of one SMART attribute of a disk, one reading a day.
+#[tauri::command]
+pub async fn smart_history(
+    state: State<'_, AppState>,
+    disk: String,
+    attr: u8,
+) -> Result<Vec<crate::history::SmartPointDto>, UiError> {
+    let history = state.history.clone();
+    blocking(move || Ok(lock(&history).smart_history(&disk, attr, now_ms() - SMART_SHOWN_MS)?))
+        .await
 }
 
 /// Opens Windows' own Memory Diagnostic, which asks for permission and offers to restart.

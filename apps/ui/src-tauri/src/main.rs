@@ -53,6 +53,7 @@ fn main() {
             commands::undo_tweak,
             commands::tests,
             commands::disk_detail,
+            commands::smart_history,
             commands::open_memory_diagnostic,
             commands::start_memory_test,
             commands::start_benchmark,

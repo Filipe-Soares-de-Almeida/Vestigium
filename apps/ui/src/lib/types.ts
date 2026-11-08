@@ -933,6 +933,14 @@ export interface NvmeDetail {
 }
 
 /** One disk's SMART block and verdict, as the watcher reads it. */
+/** One day's reading of a SMART attribute. */
+export interface SmartPoint {
+  read_ms: number;
+  current: number;
+  worst: number;
+  raw: number;
+}
+
 export interface DiskHealth {
   name: string;
   read_ms: number;

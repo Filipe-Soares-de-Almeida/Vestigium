@@ -13,6 +13,15 @@ use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError,
 
 use crate::hwtests::TestRunDto;
 
+/// One day's reading of a SMART attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SmartPointDto {
+    pub read_ms: i64,
+    pub current: u8,
+    pub worst: u8,
+    pub raw: u64,
+}
+
 /// How far back the health page lists the findings that closed.
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
 /// How far back the dumps page lists the blue screens Windows reported.
@@ -732,6 +741,26 @@ impl History {
 
     pub fn machine(&mut self) -> Result<Option<MachineInfo>, StoreError> {
         Ok(self.read(|store| store.machine())?.flatten())
+    }
+
+    /// The daily readings of one SMART attribute of a disk since `from_ms`, oldest first.
+    pub fn smart_history(
+        &mut self,
+        disk: &str,
+        attr: u8,
+        from_ms: i64,
+    ) -> Result<Vec<SmartPointDto>, StoreError> {
+        let rows = self.read(|store| store.smart_history(disk, attr, from_ms))?;
+        Ok(rows
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| SmartPointDto {
+                read_ms: r.read_ms,
+                current: r.current,
+                worst: r.worst,
+                raw: r.raw,
+            })
+            .collect())
     }
 
     /// Test runs that ended in `[from_ms, to_ms]`, oldest first.
