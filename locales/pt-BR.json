@@ -616,6 +616,7 @@
   "ui.now.lane.cpu": "CPU",
   "ui.now.lane.memory": "Memória",
   "ui.now.lane.disk": "Disco",
+  "ui.now.lane.disk_named": "Disco {disk}",
   "ui.now.lane.gpu": "GPU",
   "ui.now.lane.none": "—",
   "ui.now.chart.label": "Gráfico dos últimos 10 minutos. Setas: ler um momento; + e −: zoom; 0: os 10 minutos.",

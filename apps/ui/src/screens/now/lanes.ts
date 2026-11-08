@@ -1,8 +1,15 @@
 import { formatNumber, formatPercent } from "../../lib/format";
 import { lang } from "../../lib/i18n.svelte";
-import type { Lanes, LivePoint, PcState, ProcessSample, Reading } from "../../lib/types";
+import type { DiskLoad, Lanes, LivePoint, PcState, ProcessSample, Reading } from "../../lib/types";
 
 export type LaneKey = keyof Lanes;
+
+/** The drive letters of the busiest disk in a second, such as "C:"; `null` when it holds none. */
+export function busiestDisk(disks: readonly DiskLoad[]): string | null {
+  const top = disks.reduce<DiskLoad | null>((a, d) => (a === null || d.active_pct > a.active_pct ? d : a), null);
+  const letters = top?.name.split(" ").filter((part) => /^[A-Z]:$/i.test(part)) ?? [];
+  return letters.length ? letters.join(" ") : null;
+}
 
 /** The four lanes of the live chart, top to bottom, with the reading each one draws. */
 export const LANES: readonly { key: LaneKey; value: (reading: Reading) => number | null }[] = [

@@ -9,20 +9,26 @@
   import type { LivePoint } from "../../lib/types";
   import { wheelZoom, Zoom } from "../../lib/zoom.svelte";
   import { HEIGHT, RIGHT, SPAN_S, build, laneChart, type LaneChart } from "./chart";
-  import { LANES, STATE_TOKEN, laneValue } from "./lanes";
+  import { LANES, STATE_TOKEN, laneValue, type LaneKey } from "./lanes";
 
   let {
     points,
+    disk = null,
     paused = false,
     onsay,
   }: {
     points: LivePoint[];
+    /** The drive letters of the busiest disk now, which name the disk lane. */
+    disk?: string | null;
     /** Ctrl is held: the chart stays on the second it was pressed. */
     paused?: boolean;
     onsay: (text: string) => void;
   } = $props();
 
   const MIN_VIEW_S = 20;
+
+  const laneName = (key: LaneKey) =>
+    key === "disk" && disk ? t("ui.now.lane.disk_named", { disk }) : t(`ui.now.lane.${key}`);
   /** Minute spacings for the whole ten minutes; the first that leaves 70 px between labels wins. */
   const WHOLE = [1, 2, 5];
   /** Tick spacings in seconds for a zoomed view; the first that leaves 84 px between labels wins. */
@@ -88,9 +94,9 @@
       const values = points.map((p) => lane.value(p.reading)).filter((v) => v !== null);
       const now = latest ? laneValue(lane.value(latest.reading)) : null;
       return now === null || values.length === 0
-        ? t("ui.now.chart.summary_none", { lane: t(`ui.now.lane.${lane.key}`) })
+        ? t("ui.now.chart.summary_none", { lane: laneName(lane.key) })
         : t("ui.now.chart.summary", {
-            lane: t(`ui.now.lane.${lane.key}`),
+            lane: laneName(lane.key),
             now,
             max: laneValue(Math.max(...values)) ?? "",
           });
@@ -158,7 +164,7 @@
     if (readout) {
       const row = readout.row;
       const values = LANES.map((lane) =>
-        t("ui.now.chart.value", { lane: t(`ui.now.lane.${lane.key}`), value: value(row, lane) }),
+        t("ui.now.chart.value", { lane: laneName(lane.key), value: value(row, lane) }),
       );
       onsay(t("ui.now.chart.readout", { ago: ago(readout.ago), values: values.join(", ") }));
     }
@@ -182,7 +188,7 @@
             class="state-dot"
             style:background="var(--{STATE_TOKEN[latest?.lanes[lane.key] ?? 'suspended']})"
           ></span>
-          <span class="name">{t(`ui.now.lane.${lane.key}`)}</span>
+          <span class="name">{laneName(lane.key)}</span>
           <b>{latest ? value(latest, lane) : t("ui.now.lane.none")}</b>
         </div>
       {/each}
@@ -217,7 +223,7 @@
           heading={ago(readout.ago)}
           rows={LANES.map((lane) => ({
             key: lane.key,
-            label: t(`ui.now.lane.${lane.key}`),
+            label: laneName(lane.key),
             value: value(readout.row, lane),
             dot: `var(--${STATE_TOKEN[readout.row.lanes[lane.key]]})`,
           }))}

@@ -10,6 +10,7 @@
   import { href } from "../lib/router.svelte";
   import HungWindows from "./now/HungWindows.svelte";
   import LastOccurrence from "./now/LastOccurrence.svelte";
+  import { busiestDisk } from "./now/lanes";
   import { momentKey, sentence } from "./now/sentence";
   import { NowStream } from "./now/stream.svelte";
   import TenMinutes from "./now/TenMinutes.svelte";
@@ -66,7 +67,12 @@
   <Loading />
 {:else}
   <PageHead title={t("ui.now.title")} sub={lede} />
-  <TenMinutes points={view.points} paused={stream.paused} onsay={(text) => (said = text)} />
+  <TenMinutes
+    points={view.points}
+    disk={busiestDisk(view.frame?.sample?.disks ?? [])}
+    paused={stream.paused}
+    onsay={(text) => (said = text)}
+  />
   <p class="sr" aria-live="polite">{said}</p>
   <div class="cols2">
     <TopPrograms top={view.frame?.top ?? null} programs={view.frame?.programs ?? null} />
