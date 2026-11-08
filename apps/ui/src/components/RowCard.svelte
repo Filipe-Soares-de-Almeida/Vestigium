@@ -11,6 +11,7 @@
     sub,
     right,
     chevron = true,
+    static: still = false,
   }: {
     /** A link row; without it the row is a button. */
     href?: string;
@@ -21,11 +22,17 @@
     /** Trailing content, usually a StatusMark with `reveal`. */
     right?: Snippet;
     chevron?: boolean;
+    /** A row that only shows a value and opens nothing. */
+    static?: boolean;
   } = $props();
 </script>
 
 <li>
-  {#if href}
+  {#if still}
+    <div class="card still">
+      {@render body()}
+    </div>
+  {:else if href}
     <a class="card" {href} data-reveal>
       {@render body()}
     </a>
@@ -65,6 +72,12 @@
   }
   .card:hover {
     background: var(--row-hover);
+    text-decoration: none;
+  }
+  .card.still,
+  .card.still:hover {
+    background: var(--row);
+    cursor: default;
   }
   .card:active {
     background: var(--row-press);

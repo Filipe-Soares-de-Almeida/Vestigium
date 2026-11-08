@@ -238,6 +238,12 @@ How to use this file:
 
 ### Changed
 
+- Tests lists the memory and each disk under Devices. A disk's page is a regular page that scrolls as
+  a whole: its title carries the status and the disk's connection, the surface check comes first with
+  its map, result and estimate, then SMART beside the file system and the speed test beside the
+  history. SMART values are rows; the speed test shows each measure large over a bar with the typical
+  range. The memory page sets the Windows diagnostic beside the quick test, whose length is chosen
+  with radio buttons, and the full test outside Windows beside the history.
 - Health shows when the last full scan ran under its title and opens with the overall status beside
   its summary. Each area row shows its status, a green check when it has no alert, then the count; the
   full scan and a History of new, resolved and scanned alerts sit side by side. An area page carries

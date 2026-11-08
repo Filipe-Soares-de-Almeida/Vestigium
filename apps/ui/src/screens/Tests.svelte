@@ -3,26 +3,27 @@
 
   import AdminPill from "../components/AdminPill.svelte";
   import Block from "../components/Block.svelte";
-  import ConcernMark, { type MarkKind } from "../components/ConcernMark.svelte";
+  import type { MarkKind } from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
+  import HistList from "../components/HistList.svelte";
   import Icon, { type IconName } from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import RowCard from "../components/RowCard.svelte";
   import RowList from "../components/RowList.svelte";
-  import Segmented from "../components/Segmented.svelte";
   import StatusMark from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { errorText } from "../lib/errors";
   import { formatNumber, formatPercent } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { go, here, href } from "../lib/router.svelte";
   import { hwtests, type Started } from "../lib/tests.svelte";
   import { toast } from "../lib/toast.svelte";
   import type { BenchMode, DiskDto, FindingDto, MemoryDiagnostic, TestRunDto, VolumeDto } from "../lib/types";
   import { at } from "./dumps/words";
-  import { formatBytes } from "./occurrence/format";
-  import { areaOf } from "./health/areas";
+  import { formatBytes, formatDayShort } from "./occurrence/format";
   import { findingTitle } from "./health/words";
   import DiskMap from "./tests/DiskMap.svelte";
   import { statusOf } from "./tests/status";
@@ -33,7 +34,6 @@
     benchModeName,
     benchOf,
     checkOf,
-    coverage,
     type Device,
     deviceKey,
     diagnosticCovered,
@@ -76,7 +76,6 @@
 
   let minutes = $state(5);
   let now = $state(Date.now());
-  let report = $state<HTMLElement>();
   let dialog = $state<HTMLDialogElement>();
   let asking = $state<{ kind: "bench"; volume: VolumeDto } | { kind: "smart"; disk: DiskDto } | null>(null);
   /** The disk whose earlier reads are open in a dialog. */
@@ -100,12 +99,6 @@
     void hwtests.load().then(readQuickDetails);
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
-  });
-
-  // Another device starts at the top of its report; progress updates keep the place.
-  $effect(() => {
-    void chosen;
-    report?.scrollTo(0, 0);
   });
 
   /** SSD and NVMe health reads at once; an HDD only when asked, since reading wakes it. */
@@ -243,6 +236,23 @@
     return { mark: point.concern as MarkKind, line: t("ui.tests.health_says", { what: findingTitle(point, level) }) };
   }
 
+  relatedLinks(() =>
+    chosen === "memory" && !overview
+      ? [
+          { label: t("ui.item.memory_health"), href: href.health("memory") },
+          { label: t("ui.group.tests"), href: href.tests() },
+        ]
+      : disk && !overview
+        ? [
+            { label: t("ui.related.disk_health"), href: href.health("disks") },
+            { label: t("ui.group.disks"), href: href.disks() },
+          ]
+        : [
+            { label: t("ui.related.disk_health"), href: href.health("disks") },
+            { label: t("ui.item.memory_health"), href: href.health("memory") },
+          ],
+  );
+
   const historyOf = (d: Device) =>
     [
       ...(dto?.runs ?? [])
@@ -278,20 +288,18 @@
 {#snippet liveBlock()}
   {#if live}
     <div class="running" aria-live="polite">
-      <div class="rhead">
-        <div>
-          <h3><ConcernMark mark="Running" word={false} />{live.title}</h3>
-          <p>{live.note}</p>
-        </div>
+      <p class="state"><StatusMark kind="info" word={t("ui.health.mark.Running")} /><span>{live.title}</span></p>
+      <div class="run">
+        <span class="run-l"><span>{live.note}</span>{#if live.frac !== null}<b>{formatPercent(live.frac * 100)}</b>{/if}</span>
+        <span class="pbar" class:indeterminate={live.frac === null} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={live.frac === null ? undefined : Math.round(live.frac * 100)}>
+          <i style:width={live.frac === null ? undefined : `${live.frac * 100}%`}></i>
+        </span>
         {#if live.stoppable}
-          <button type="button" class="btn" onclick={() => void hwtests.stop()}><Icon name="stop" />{t("ui.tests.stop")}</button>
+          <button type="button" class="btn" onclick={() => void hwtests.stop()}>{t("ui.tests.cancel")}</button>
         {/if}
       </div>
-      <div class="prog" class:indeterminate={live.frac === null} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={live.frac === null ? undefined : Math.round(live.frac * 100)}>
-        <i style:transform={live.frac === null ? undefined : `translateX(${(live.frac - 1) * 100}%)`}></i>
-      </div>
       {#if live.facts.length}
-        <p class="facts-line" class:bad={live.bad}>{#each live.facts as f, i (i)}<span>{f}</span>{/each}</p>
+        <p class="note facts-line" class:bad={live.bad}>{#each live.facts as f, i (i)}<span>{f}</span>{/each}</p>
       {/if}
       {#if "read" in live && live.bytes}
         <DiskMap read={live.read} diskBytes={live.bytes} name={live.title} {level} />
@@ -300,350 +308,343 @@
   {/if}
 {/snippet}
 
-{#snippet pills(items: [IconName, string][])}
-  {#each items as [icon, text] (text)}
-    <span class="pill2"><Icon name={icon} />{text}</span>
-  {/each}
-{/snippet}
-
 {#snippet history(d: Device)}
   {@const rows = historyOf(d)}
-  <div class="blk">
-    <h3><Icon name="clock" />{t(d === "memory" ? "ui.tests.hist.memory" : "ui.tests.hist.disk")}</h3>
+  <Block title={t("ui.tests.hist.title")}>
     {#if rows.length}
-      <div class="hlist">
-        {#each rows as row, i (i)}
-          {#if row.run}
-            {@const line = runLine(row.run)}
-            <a class="hline" href={href.detail("test", row.run.id, { from: here(), label: t("ui.shell.nav.tests") })}><ConcernMark mark={outcomeMark(row.run)} word={false} /><span><b>{line.name}</b><small>{line.what}</small></span><span class="when">{at(row.ts)}</span></a>
-          {:else if row.diag}
-            {@const w = diagnosticWord(row.diag)}
-            <div class="hline"><ConcernMark mark={w.mark} word={false} /><span><b>{t("ui.tests.hist.diag")}</b><small>{w.text}</small></span><span class="when">{at(row.ts)}</span></div>
-          {/if}
-        {/each}
-      </div>
+      <HistList
+        entries={rows.map((row, i) => {
+          if (row.run) {
+            const line = runLine(row.run);
+            return {
+              key: `r${row.run.id}`,
+              date: formatDayShort(row.ts),
+              title: line.name,
+              sub: line.what,
+              mark: statusOf(outcomeMark(row.run)),
+              href: href.detail("test", row.run.id, { from: here(), label: d === "memory" ? t("ui.tests.memory.title") : disk ? diskName(disk) : t("ui.tests.title") }),
+            };
+          }
+          const w = diagnosticWord(row.diag!);
+          return { key: `d${i}`, date: formatDayShort(row.ts), title: t("ui.tests.hist.diag"), sub: w.text, mark: { ...statusOf(w.mark), word: w.text } };
+        })}
+      />
     {:else}
-      <p class="muted">{t("ui.tests.hist.none")}</p>
+      <p class="empty">{t("ui.tests.hist.none")}</p>
     {/if}
-  </div>
+  </Block>
 {/snippet}
 
 {#snippet memoryReport()}
-  {@const s = withHealth("memory", memoryState(dto!, runDev === "memory"))}
-  {@const point = healthPoint("memory")}
   {@const quick = lastQuick(dto!)}
   {@const q = quick ? quickOf(quick) : null}
-  <header class="rh">
-    <div>
-      <h2 id="report-title">{t("ui.tests.memory.title")}</h2>
-      <p>{t("ui.tests.memory.sub", { total: formatBytes(dto!.memory.total_bytes), free: formatBytes(dto!.memory.available_bytes) })}</p>
-    </div>
-  </header>
-  <p class="state"><StatusMark kind={statusOf(s.mark).kind} word={statusOf(s.mark).word} /><span>{s.line}</span></p>
-  {#if point}
-    <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
-  {/if}
+  <PageHead title={t("ui.tests.memory.title")} sub={t("ui.tests.memory.sub", { total: formatBytes(dto!.memory.total_bytes), free: formatBytes(dto!.memory.available_bytes) })} />
+  {#if runDev === "memory"}{@render liveBlock()}{/if}
 
-  <div class="blk">
-    <h3><Icon name="windows" />{t("ui.tests.diag.title")}<span class="sub">{t("ui.tests.diag.when")}</span></h3>
-    {#if diag}
-      {@const w = diagnosticWord(diag)}
-      {@const share = coverage(diag)}
-      <p class="res"><ConcernMark mark={w.mark} word={false} /><b>{w.text}</b><span class="when">{at(diag.ts_ms)}{diag.detail ? ` · ${span(diag.detail.duration_s * 1000)}` : ""}</span></p>
-      {#if share !== null}<div class="cov" role="img" aria-label={t("ui.tests.diag.coverage")}><i style:width="{share * 100}%"></i></div>{/if}
-      <p class="note">{diagnosticCovered(diag, level)}</p>
-    {:else}
-      <p class="muted">{t("ui.tests.diag.never")}</p>
-    {/if}
-    {#if waiting && asked !== null}
-      <p class="wait"><Icon name="restart" /><span>{t("ui.tests.diag.waiting", { when: at(asked) })}</span></p>
-    {/if}
-    <div class="acts">
-      <button type="button" class="btn" class:accent={!diag && !waiting && quick !== null} disabled={busy} onclick={() => void diagnostic()}>
-        <Icon name="shield" />{t(diag || waiting ? "ui.tests.diag.again" : "ui.tests.diag.start")}
-      </button>
-      <AdminPill text={t("ui.tests.pill.permission")} /><span class="pills">{@render pills([["restart", t("ui.tests.pill.restart")]])}</span>
-    </div>
-  </div>
-
-  <div class="blk">
-    <h3><Icon name="memory" />{t("ui.tests.quick.title")}<span class="sub">{t("ui.tests.quick.when")}</span></h3>
-    {#if quick && q}
-      <p class="res">
-        <ConcernMark mark={outcomeMark(quick)} word={false} />
-        <b>{q.error_count ? tn("ui.tests.quick.errors", q.error_count) : t(quick.outcome === "Interrupted" ? "ui.tests.result.stopped" : quick.outcome === "Failed" ? "ui.tests.result.failed" : "ui.tests.result.clean")}</b>
-        <span class="when">{at(quick.ended_ms)} · {span(quick.ended_ms - quick.started_ms)} · {tn("ui.tests.quick.rounds", q.rounds)}</span>
-      </p>
-      {#if q.failure}
-        <p class="note">{t("ui.tests.quick.failure")}{level === "Technical" ? ` (${q.failure})` : ""}</p>
+  <div class="cols2">
+    <Block title={t("ui.tests.diag.title")} icon="windows">
+      {#if diag}
+        {@const w = diagnosticWord(diag)}
+        {@const st = statusOf(w.mark)}
+        <p class="state"><StatusMark kind={st.kind} word={w.text} /><span>{t("ui.tests.diag.when")}</span></p>
+        <dl class="kv"><div><dt>{t("ui.tests.last")}</dt><dd>{at(diag.ts_ms)}{diag.detail ? ` · ${span(diag.detail.duration_s * 1000)}` : ""}</dd></div></dl>
+        <p class="p">{diagnosticCovered(diag, level)}</p>
       {:else}
-        <div class="cov" role="img" aria-label={t("ui.tests.quick.coverage")}><i style:width="{(q.tested_bytes / Math.max(1, q.total_bytes)) * 100}%"></i></div>
-        <p class="note">{quickCovered(q, level)}</p>
+        <p class="state"><StatusMark kind="info" word={t("ui.memory.on_demand")} /><span>{t("ui.tests.diag.when")}</span></p>
+        <p class="p">{t("ui.tests.diag.never")}</p>
       {/if}
-      {#if q.errors.length && level !== "Simple"}
-        <table class="tab">
-          <thead><tr><th>{t("ui.tests.err.where")}</th><th>{t("ui.tests.err.pattern")}</th><th>{t("ui.tests.err.expected")}</th><th>{t("ui.tests.err.read")}</th></tr></thead>
-          <tbody>
-            {#each q.errors as e, i (i)}
-              <tr><td>{t("ui.tests.err.offset", { at: formatBytes(e.offset) })}</td><td>{t(`ui.tests.pattern.${e.pattern}`)}</td><td class="mono">0x{e.expected.toString(16).padStart(16, "0")}</td><td class="mono">0x{e.actual.toString(16).padStart(16, "0")}</td></tr>
-            {/each}
-          </tbody>
-        </table>
+      {#if waiting && asked !== null}
+        <p class="note">{t("ui.tests.diag.waiting", { when: at(asked) })}</p>
       {/if}
-      <p class="honest">{t(q.error_count ? "ui.tests.quick.honest.errors" : "ui.tests.quick.honest")}</p>
-    {:else}
-      <p class="muted">{t("ui.tests.quick.never")}</p>
-    {/if}
-    {#if dto!.memory.quick_bytes === null}
-      <p class="note">{t("ui.tests.quick.low", { free: formatBytes(dto!.memory.available_bytes) })}</p>
-    {:else}
-      <p class="note">{t("ui.tests.quick.will", { tested: formatBytes(dto!.memory.quick_bytes), total: formatBytes(dto!.memory.total_bytes) })}</p>
       <div class="acts">
-        <Segmented
-          label={t("ui.tests.quick.length")}
-          options={dto!.memory.minutes.map((m) => ({ value: String(m), label: tn("ui.tests.span.min", m), hint: "" }))}
-          value={String(minutes)}
-          onchange={(v: string) => (minutes = Number(v))}
-        />
-        <button type="button" class="btn" class:accent={!quick && !diag} disabled={busy} onclick={() => void hwtests.memory(minutes).then(started)}>
-          <Icon name="start" />{t("ui.tests.quick.start")}
+        <button type="button" class="btn" class:accent={!diag && !waiting && quick !== null} disabled={busy} onclick={() => void diagnostic()}>
+          <Icon name="restart" />{t(diag || waiting ? "ui.tests.diag.again" : "ui.tests.diag.start")}
         </button>
       </div>
-    {/if}
+      <p class="tags"><AdminPill /><span class="tag">{t("ui.tests.pill.restart")}</span></p>
+    </Block>
+
+    <Block title={t("ui.tests.quick.title")} icon="memory">
+      {#if quick && q}
+        {@const st = statusOf(outcomeMark(quick))}
+        <p class="state">
+          <StatusMark kind={st.kind} word={q.error_count ? tn("ui.tests.quick.errors", q.error_count) : t(quick.outcome === "Interrupted" ? "ui.tests.result.stopped" : quick.outcome === "Failed" ? "ui.tests.result.failed" : "ui.tests.result.clean")} />
+          <span>{t("ui.tests.quick.when")}</span>
+        </p>
+        <dl class="kv"><div><dt>{t("ui.tests.last")}</dt><dd>{at(quick.ended_ms)} · {span(quick.ended_ms - quick.started_ms)} · {tn("ui.tests.quick.rounds", q.rounds)}</dd></div></dl>
+        {#if q.failure}
+          <p class="p">{t("ui.tests.quick.failure")}{level === "Technical" ? ` (${q.failure})` : ""}</p>
+        {:else}
+          <p class="p">{quickCovered(q, level)}</p>
+        {/if}
+        {#if q.errors.length && level !== "Simple"}
+          <table class="tbl">
+            <thead><tr><th>{t("ui.tests.err.where")}</th><th>{t("ui.tests.err.pattern")}</th><th>{t("ui.tests.err.expected")}</th><th>{t("ui.tests.err.read")}</th></tr></thead>
+            <tbody>
+              {#each q.errors as e, i (i)}
+                <tr><td>{t("ui.tests.err.offset", { at: formatBytes(e.offset) })}</td><td>{t(`ui.tests.pattern.${e.pattern}`)}</td><td class="mono">0x{e.expected.toString(16).padStart(16, "0")}</td><td class="mono">0x{e.actual.toString(16).padStart(16, "0")}</td></tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      {:else}
+        <p class="state"><StatusMark kind="info" word={t("ui.memory.on_demand")} /><span>{t("ui.tests.quick.when")}</span></p>
+        <p class="p">{t("ui.tests.quick.never")}</p>
+      {/if}
+      <p class="caveat"><Icon name="info" /><span>{t(q?.error_count ? "ui.tests.quick.honest.errors" : "ui.tests.quick.honest")}</span></p>
+      {#if dto!.memory.quick_bytes === null}
+        <p class="note">{t("ui.tests.quick.low", { free: formatBytes(dto!.memory.available_bytes) })}</p>
+      {:else}
+        <div class="fld">
+          <p class="fld-l">{t("ui.tests.quick.length")}</p>
+          <div class="rds">
+            {#each dto!.memory.minutes as m (m)}
+              <label class="rd">
+                <input type="radio" name="quick-minutes" value={m} checked={minutes === m} onchange={() => (minutes = m)} />
+                <span class="rd-c" aria-hidden="true"></span>
+                <span>{tn("ui.tests.span.min", m)}</span>
+              </label>
+            {/each}
+          </div>
+          <p class="fld-n">{t("ui.tests.quick.will", { tested: formatBytes(dto!.memory.quick_bytes), total: formatBytes(dto!.memory.total_bytes) })}</p>
+        </div>
+        <div class="acts">
+          <button type="button" class="btn" class:accent={!quick && !diag} disabled={busy} onclick={() => void hwtests.memory(minutes).then(started)}>
+            <Icon name="start" />{t("ui.tests.quick.start")}
+          </button>
+        </div>
+      {/if}
+    </Block>
   </div>
 
-  <div class="blk">
-    <h3><Icon name="outside" />{t("ui.tests.memtest.title")}</h3>
-    <p class="note">{t("ui.tests.memtest.body")}</p>
+  <div class="cols2">
+    <Block title={t("ui.tests.memtest.title")} icon="outside">
+      <p class="state"><StatusMark kind="info" word={t("ui.memory.outside")} /><span>{t("ui.memory.memtest.when")}</span></p>
+      <p class="p">{t("ui.tests.memtest.body")}</p>
+    </Block>
+    {@render history("memory")}
   </div>
-  {@render history("memory")}
 {/snippet}
 
 {#snippet diskReport(d: DiskDto)}
   {@const s = withHealth(d.number, diskState(dto!, d, hwtests.details[d.number] ?? null, runDev === d.number))}
-  {@const point = healthPoint(d.number)}
+  {@const st = statusOf(s.mark)}
   {@const detail = hwtests.details[d.number] ?? null}
   {@const scanRun = lastSurface(dto!, d)}
   {@const reads = surfaceRuns(dto!, d)}
   {@const scan = diskSurface(dto!, d)}
   {@const resumable = scanRun?.outcome === "Interrupted" && scan !== null && scan.to_bytes < scan.disk_bytes}
-  <header class="rh">
-    <div>
-      <h2 id="report-title">{diskName(d)}</h2>
-      <p>{t("ui.tests.disk.sub", { n: d.number, bus: t(`ui.tests.bus.${d.bus}`), volumes: d.volumes.map(vol).join(", ") || "—" })}</p>
-    </div>
-  </header>
-  <p class="state"><StatusMark kind={statusOf(s.mark).kind} word={statusOf(s.mark).word} /><span>{s.line}</span></p>
-  {#if point}
-    <a class="health-link" href={href.health(areaOf(point.kind).id)}>{t("ui.tests.health_open")}</a>
-  {/if}
+  {#snippet diskMeta()}
+    <StatusMark kind={st.kind} word={st.word} />
+    <span>{t("ui.tests.disk.sub", { n: d.number, bus: t(`ui.tests.bus.${d.bus}`), volumes: d.volumes.map(vol).join(", ") || "—" })}</span>
+  {/snippet}
+  <PageHead title={diskName(d)} meta={diskMeta} />
+  <p class="lede">{s.line}</p>
+  {#if runDev === d.number}{@render liveBlock()}{/if}
 
-  <div class="blk">
-    <h3><Icon name="smart" />{t("ui.tests.smart.title")}<span class="sub">{t(d.media === "Hdd" ? "ui.tests.smart.when.hdd" : "ui.tests.smart.when")}</span></h3>
-    {#if !detail}
-      <p class="muted">{t(d.media === "Hdd" ? "ui.tests.smart.ask" : "ui.tests.smart.reading")}</p>
-      {#if d.media === "Hdd"}
-        <div class="acts"><button type="button" class="btn" onclick={() => smart(d)}><Icon name="smart" />{t("ui.tests.smart.read")}</button></div>
-      {/if}
-    {:else if detail.nvme}
-      {@const n = detail.nvme}
-      <dl class="facts">
-        <div><dt>{t("ui.tests.nvme.used")}</dt><dd>{#if n.health.percentage_used >= 90}<ConcernMark mark="Attention" word={false} />{/if}<b>{formatPercent(n.health.percentage_used)}</b></dd></div>
-        <div><dt>{t("ui.tests.nvme.spare")}</dt><dd>{#if n.health.available_spare_pct < n.health.spare_threshold_pct}<ConcernMark mark="Attention" word={false} />{/if}<b>{formatPercent(n.health.available_spare_pct)}</b></dd></div>
-        <div><dt>{t("ui.tests.nvme.temp")}</dt><dd><b>{n.health.temperature_c} °C</b></dd></div>
-        {#if level !== "Simple"}
-          <div><dt>{t("ui.tests.nvme.written")}</dt><dd><b>{formatBytes(n.data_written_bytes)}</b></dd></div>
-          <div><dt>{t("ui.tests.nvme.hours")}</dt><dd><b>{formatNumber(n.power_on_hours)}</b></dd></div>
-          <div><dt>{t("ui.tests.nvme.unsafe")}</dt><dd><b>{formatNumber(n.unsafe_shutdowns)}</b></dd></div>
-          <div><dt>{t("ui.tests.nvme.media")}</dt><dd>{#if n.health.media_errors}<ConcernMark mark="Critical" word={false} />{/if}<b>{formatNumber(n.health.media_errors)}</b></dd></div>
-        {/if}
-      </dl>
-      {#if level === "Technical"}<p class="note mono">{t("ui.tests.nvme.tech", { warning: n.health.critical_warning.toString(16).padStart(2, "0"), errors: formatNumber(n.error_log_entries) })}</p>{/if}
-    {:else if detail.health}
-      {@const attrs = detail.health.attributes}
-      {@const flagged = attrs.filter((a) => WATCHED.includes(a.id) && a.raw > 0)}
-      <p class="res">
-        {#if detail.health.predict_failure}
-          <ConcernMark mark="Critical" word={false} /><b>{t("ui.tests.smart.predict")}</b>
-        {:else if flagged.length}
-          <ConcernMark mark="Attention" word={false} /><b>{flagged.map((a) => `${attrName(a.id)}: ${formatNumber(a.raw)}`).join(" · ")}</b>
-        {:else}
-          <ConcernMark mark="Ok" word={false} /><b>{t("ui.tests.smart.ok")}</b>
-        {/if}
+  <Block title={t("ui.tests.surface.title")}>
+    {#if scanRun && scan}
+      {@const w = surfaceWord(scanRun, scan, d)}
+      {@const sw = statusOf(w.mark)}
+      <p class="state">
+        <StatusMark kind={sw.kind} word={sw.word} />
+        <span>{at(scanRun.ended_ms)} · {span(scanRun.ended_ms - scanRun.started_ms)}{scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? ` · ${t("ui.tests.surface.whole")}` : ""}</span>
       </p>
-      {#if level !== "Simple" && attrs.length}
-        <table class="tab num">
-          <thead><tr>{#if level === "Technical"}<th>ID</th>{/if}<th>{t("ui.tests.smart.attr")}</th><th>{t("ui.tests.smart.current")}</th><th>{t("ui.tests.smart.worst")}</th><th>{t("ui.tests.smart.raw")}</th></tr></thead>
+      <div class="map"><DiskMap {scan} diskBytes={scan.disk_bytes} name={diskName(d)} {level} /></div>
+      <p class="p">{w.text}</p>
+      {#if mapView.speed && level !== "Simple" && scan.worst.length}
+        <h3 class="h3">{t("ui.tests.surface.worst")}</h3>
+        <table class="tbl">
           <tbody>
-            {#each attrs as a (a.id)}
-              <tr class:flag={WATCHED.includes(a.id) && a.raw > 0}>{#if level === "Technical"}<td class="mono">{a.id} (0x{a.id.toString(16).toUpperCase().padStart(2, "0")})</td>{/if}<td><a href={href.detail("smart", [d.number, a.id], { from: here(), label: diskName(d) })}>{attrName(a.id)}</a></td><td>{a.current}</td><td>{a.worst}</td><td><b>{formatNumber(a.raw)}</b></td></tr>
+            {#each scan.worst.slice(0, 5) as b, i (i)}
+              <tr><td class="nm">{t("ui.tests.err.offset", { at: formatBytes(b.offset) })}</td><td class="num">{formatNumber(b.ms / 1000, 1)} s</td></tr>
             {/each}
           </tbody>
         </table>
       {/if}
-    {:else}
-      <p class="muted">{t("ui.tests.smart.none")}</p>
-    {/if}
-  </div>
-
-  <div class="blk">
-    <h3><Icon name="scan" />{t("ui.tests.surface.title")}<span class="sub">{t("ui.tests.surface.when")}</span></h3>
-    {#if scanRun && scan}
-      {@const w = surfaceWord(scanRun, scan, d)}
-      <p class="res"><ConcernMark mark={w.mark} word={false} /><b>{w.text}</b><span class="when">{at(scanRun.ended_ms)} · {span(scanRun.ended_ms - scanRun.started_ms)}{scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? ` · ${t("ui.tests.surface.whole")}` : ""}</span></p>
-      <DiskMap {scan} diskBytes={scan.disk_bytes} name={diskName(d)} {level} />
-      {#if mapView.speed && level !== "Simple" && scan.worst.length}
-        <h4>{t("ui.tests.surface.worst")}</h4>
-        <ul class="worst">
-          {#each scan.worst.slice(0, 5) as b, i (i)}
-            <li><span>{t("ui.tests.err.offset", { at: formatBytes(b.offset) })}</span><b>{formatNumber(b.ms / 1000, 1)} s</b></li>
-          {/each}
-        </ul>
-      {/if}
       {#if level === "Technical" && scan.unreadable.length}
         <p class="note mono">{t("ui.tests.surface.sectors", { list: scan.unreadable.slice(0, 20).map((o) => formatNumber(o / scan.sector_bytes)).join(", ") })}</p>
       {/if}
-      {#if mapView.speed && d.media !== "Hdd"}<p class="honest">{t("ui.tests.surface.ssd")}</p>{/if}
+      {#if mapView.speed && d.media !== "Hdd"}<p class="note">{t("ui.tests.surface.ssd")}</p>{/if}
     {:else}
-      <p class="muted">{t("ui.tests.surface.never")}</p>
+      <p class="p">{t("ui.tests.surface.never")}</p>
     {/if}
     <div class="acts">
       {#if resumable && scan}
         <button type="button" class="btn accent" disabled={busy} onclick={() => void hwtests.surface(d.number, Math.floor(scan.to_bytes / 1048576)).then(started)}>
-          <Icon name="shield" />{t("ui.tests.surface.resume", { share: shareOf(scan.to_bytes, scan.disk_bytes) })}
+          <Icon name="scan" />{t("ui.tests.surface.resume", { share: shareOf(scan.to_bytes, scan.disk_bytes) })}
         </button>
       {/if}
-      <button type="button" class="btn" class:accent={!scanRun} disabled={busy} onclick={() => void hwtests.surface(d.number, 0).then(started)}>
-        <Icon name="shield" />{t(resumable ? "ui.tests.surface.restart" : "ui.tests.surface.start")}
+      <button type="button" class="btn" class:accent={!resumable} disabled={busy} onclick={() => void hwtests.surface(d.number, 0).then(started)}>
+        <Icon name="scan" />{t(resumable ? "ui.tests.surface.restart" : scanRun ? "ui.tests.surface.again" : "ui.tests.surface.start")}
       </button>
-      <span class="pills">{@render pills([["clock", surfaceEstimate(d)], ["shield", t("ui.tests.pill.permission")], ["eye", t("ui.tests.pill.read_only")]])}</span>
+      <span class="muted">{surfaceEstimate(d)}</span>
       {#if reads.length > 1}
         <button type="button" class="btn earlier" onclick={() => (reading = d.number)}>
           <Icon name="clock" />{t("ui.tests.reads.open", { count: reads.length })}
         </button>
       {/if}
     </div>
+  </Block>
+
+  <div class="cols2">
+    <Block title={t("ui.tests.smart.title")}>
+      {#if !detail}
+        <p class="p">{t(d.media === "Hdd" ? "ui.tests.smart.ask" : "ui.tests.smart.reading")}</p>
+        {#if d.media === "Hdd"}
+          <div class="acts"><button type="button" class="btn" onclick={() => smart(d)}><Icon name="smart" />{t("ui.tests.smart.read")}</button></div>
+        {/if}
+      {:else if detail.nvme}
+        {@const n = detail.nvme}
+        <RowList>
+          {@render smartRow(t("ui.tests.nvme.used"), formatPercent(n.health.percentage_used), n.health.percentage_used >= 90 ? "attention" : null, null)}
+          {@render smartRow(t("ui.tests.nvme.spare"), formatPercent(n.health.available_spare_pct), n.health.available_spare_pct < n.health.spare_threshold_pct ? "attention" : null, null)}
+          {@render smartRow(t("ui.tests.nvme.temp"), `${n.health.temperature_c} °C`, null, null)}
+          {#if level !== "Simple"}
+            {@render smartRow(t("ui.tests.nvme.written"), formatBytes(n.data_written_bytes), null, null)}
+            {@render smartRow(t("ui.tests.nvme.hours"), formatNumber(n.power_on_hours), null, null)}
+            {@render smartRow(t("ui.tests.nvme.unsafe"), formatNumber(n.unsafe_shutdowns), null, null)}
+            {@render smartRow(t("ui.tests.nvme.media"), formatNumber(n.health.media_errors), n.health.media_errors ? "critical" : null, null)}
+          {/if}
+        </RowList>
+        {#if level === "Technical"}<p class="note mono">{t("ui.tests.nvme.tech", { warning: n.health.critical_warning.toString(16).padStart(2, "0"), errors: formatNumber(n.error_log_entries) })}</p>{/if}
+      {:else if detail.health}
+        {@const attrs = detail.health.attributes}
+        {#if detail.health.predict_failure}
+          <p class="state"><StatusMark kind="critical" word={t("ui.health.mark.Critical")} /><span>{t("ui.tests.smart.predict")}</span></p>
+        {/if}
+        <RowList>
+          {#each attrs.filter((a) => level !== "Simple" || WATCHED.includes(a.id)) as a (a.id)}
+            {@render smartRow(attrName(a.id), formatNumber(a.raw), WATCHED.includes(a.id) && a.raw > 0 ? "attention" : null, href.detail("smart", [d.number, a.id], { from: here(), label: diskName(d) }))}
+          {/each}
+        </RowList>
+      {:else}
+        <p class="p">{t("ui.tests.smart.none")}</p>
+      {/if}
+    </Block>
+
+    <Block title={t("ui.tests.fs.title")}>
+      {#each volumesOf(d) as v (v.root)}
+        {@const check = lastCheck(dto!, v.root)}
+        {@const c = check ? checkOf(check) : null}
+        <div class="vol">
+          {#if v.file_system !== "NTFS"}
+            <p class="p">{t("ui.tests.check.not_ntfs", { fs: v.file_system ?? "?" })}</p>
+          {:else}
+            {#if check && c}
+              {@const cs = statusOf(c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown")}
+              <p class="state"><StatusMark kind={cs.kind} word={t(`ui.tests.check.${c.result}`)} /></p>
+            {/if}
+            <dl class="kv">
+              <div><dt>{t("ui.tests.fs.volume")}</dt><dd>{vol(v.root)}</dd></div>
+              <div><dt>{t("ui.tests.fs.last")}</dt><dd>{check ? at(check.ended_ms) : t("ui.tests.check.never")}</dd></div>
+            </dl>
+            {#if c?.result === "ProblemsFound"}<p class="note">{t("ui.tests.check.repair", { volume: v.root.slice(0, 2) })}</p>{/if}
+            {#if level === "Technical" && c?.output}<pre class="out">{c.output}</pre>{/if}
+            <div class="acts">
+              <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="fsck" />{t("ui.tests.check.start")}</button>
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <p class="empty">{t("ui.tests.fs.none")}</p>
+      {/each}
+    </Block>
   </div>
 
-  {#each volumesOf(d) as v (v.root)}
-    {@const check = lastCheck(dto!, v.root)}
-    {@const c = check ? checkOf(check) : null}
-    {@const benchRun = lastBench(dto!, v.root)}
-    {@const b = benchRun ? benchOf(benchRun) : null}
-    <div class="blk">
-      <h3><Icon name="fsck" />{t("ui.tests.check.title", { volume: vol(v.root) })}<span class="sub">{t("ui.tests.check.when")}</span></h3>
-      {#if v.file_system !== "NTFS"}
-        <p class="muted">{t("ui.tests.check.not_ntfs", { fs: v.file_system ?? "?" })}</p>
-      {:else}
-        {#if check && c}
-          <p class="res"><ConcernMark mark={c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown"} word={false} /><b>{t(`ui.tests.check.${c.result}`)}</b><span class="when">{at(check.ended_ms)}{level === "Technical" && c.exit_code !== null ? ` · chkdsk ${v.root.slice(0, 2)} /scan /forceofflinefix · ${c.exit_code}` : ""}</span></p>
-          {#if c.result === "ProblemsFound"}<p class="note">{t("ui.tests.check.repair", { volume: v.root.slice(0, 2) })}</p>{/if}
-          {#if level === "Technical" && c.output}<pre class="out">{c.output}</pre>{/if}
-        {:else}
-          <p class="muted">{t("ui.tests.check.never")}</p>
-        {/if}
-        <div class="acts">
-          <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="shield" />{t("ui.tests.check.start")}</button>
-          <span class="pills">{@render pills([["clock", t("ui.tests.check.length")], ["shield", t("ui.tests.pill.permission")]])}</span>
-        </div>
-      {/if}
-    </div>
-
-    <div class="blk">
-      <h3><Icon name="gauge" />{t("ui.tests.bench.title", { volume: vol(v.root) })}<span class="sub">{t("ui.tests.bench.when")}</span></h3>
-      {#if benchRun && b}
-        <p class="res"><ConcernMark mark={benchRun.outcome === "Clean" ? "Ok" : "Partial"} word={false} /><b>{t(benchRun.outcome === "Clean" ? "ui.tests.bench.done" : benchRun.outcome === "Failed" ? "ui.tests.result.failed" : "ui.tests.bench.stopped")}</b><span class="when">{at(benchRun.ended_ms)} · {t(`ui.tests.bus.${b.bus}`)}</span></p>
-        <div class="bench">
-          {#each b.results.filter((r) => level !== "Simple" || r.mode === "SeqRead" || r.mode === "RandRead1") as r (r.mode)}
-            {@const rg = d.ranges.find((x) => x.mode === r.mode)}
-            {@const max = Math.max(rg?.high ?? 0, r.mb_per_s) * 1.1 || 1}
-            <div class="brow">
-              <span class="bname">{benchModeName(r.mode, level)}</span>
-              <span class="bbar" role="img" aria-label={rg ? t("ui.tests.bench.against", { value: formatNumber(r.mb_per_s, 1), low: formatNumber(rg.low, 1), high: formatNumber(rg.high, 1) }) : t("ui.tests.bench.value", { value: formatNumber(r.mb_per_s, 1) })}>
-                {#if rg}<i class="rg" style:left="{(rg.low / max) * 100}%" style:width="{((rg.high - rg.low) / max) * 100}%"></i>{/if}
-                <i class="val" style:width="{(r.mb_per_s / max) * 100}%"></i>
-              </span>
-              <span class="bnum"><b>{formatNumber(r.mb_per_s, r.mb_per_s < 10 ? 1 : 0)}</b> MB/s{#if rg && r.mb_per_s < rg.low}<ConcernMark mark="Attention" word={false} />{/if}</span>
+  <div class="cols2">
+    <Block title={t("ui.tests.speed.title")}>
+      {#each volumesOf(d) as v (v.root)}
+        {@const benchRun = lastBench(dto!, v.root)}
+        {@const b = benchRun ? benchOf(benchRun) : null}
+        <div class="vol">
+          {#if benchRun && b}
+            {@const bs = statusOf(benchRun.outcome === "Clean" ? "Ok" : "Partial")}
+            <p class="state"><StatusMark kind={bs.kind} word={t(benchRun.outcome === "Clean" ? "ui.tests.bench.done" : benchRun.outcome === "Failed" ? "ui.tests.result.failed" : "ui.tests.bench.stopped")} /><span>{at(benchRun.ended_ms)} · {vol(v.root)} · {t(`ui.tests.bus.${b.bus}`)}</span></p>
+            <div class="speed">
+              {#each b.results.filter((r) => level !== "Simple" || r.mode === "SeqRead" || r.mode === "RandRead1") as r (r.mode)}
+                {@const rg = d.ranges.find((x) => x.mode === r.mode)}
+                {@const max = Math.max(rg?.high ?? 0, r.mb_per_s) * 1.1 || 1}
+                <div class="sp">
+                  <div class="sp-head">
+                    <span>{benchModeName(r.mode, level)}</span>
+                    <span><b>{formatNumber(r.mb_per_s, r.mb_per_s < 10 ? 1 : 0)}</b> MB/s{#if rg}<small> · {t("ui.tests.speed.typical", { low: formatNumber(rg.low, 0), high: formatNumber(rg.high, 0) })}</small>{/if}</span>
+                  </div>
+                  <span class="sp-track" role="img" aria-label={rg ? t("ui.tests.bench.against", { value: formatNumber(r.mb_per_s, 1), low: formatNumber(rg.low, 1), high: formatNumber(rg.high, 1) }) : t("ui.tests.bench.value", { value: formatNumber(r.mb_per_s, 1) })}>
+                    {#if rg}<i class="sp-typ" style:left="{(rg.low / max) * 100}%" style:width="{((rg.high - rg.low) / max) * 100}%"></i>{/if}
+                    <i class="sp-val" class:low={rg && r.mb_per_s < rg.low} style:width="{(r.mb_per_s / max) * 100}%"></i>
+                  </span>
+                </div>
+              {/each}
             </div>
-          {/each}
+            <p class="note">
+              {d.ranges.length ? t(`ui.tests.bench.range.${d.media}`, { bus: t(`ui.tests.bus.${d.bus}`) }) : t("ui.tests.bench.no_range")}
+              {t("ui.tests.bench.written", { written: formatBytes(b.written_bytes) })}
+              {#if b.outside_io}<b>{t("ui.tests.bench.outside")}</b>{/if}
+            </p>
+          {:else}
+            <p class="p">{t("ui.tests.bench.never")}</p>
+          {/if}
+          <div class="acts">
+            <button type="button" class="btn" disabled={busy} onclick={() => bench(v)}><Icon name="gauge" />{t(benchRun ? "ui.tests.bench.again" : "ui.tests.bench.start")}</button>
+          </div>
         </div>
-        <p class="note">
-          {d.ranges.length ? t(`ui.tests.bench.range.${d.media}`, { bus: t(`ui.tests.bus.${d.bus}`) }) : t("ui.tests.bench.no_range")}
-          {t("ui.tests.bench.written", { written: formatBytes(b.written_bytes) })}
-          {#if b.outside_io}<b>{t("ui.tests.bench.outside")}</b>{/if}
-        </p>
       {:else}
-        <p class="muted">{t("ui.tests.bench.never")}</p>
-      {/if}
-      <div class="acts">
-        <button type="button" class="btn" disabled={busy} onclick={() => bench(v)}><Icon name="gauge" />{t(benchRun ? "ui.tests.bench.again" : "ui.tests.bench.start")}</button>
-        <span class="pills">{@render pills(d.media === "Ssd" ? [["clock", t("ui.tests.bench.length")], ["write", t("ui.tests.bench.writes", { size: formatBytes(dto!.bench_file_bytes * 1.3) })]] : [["clock", t("ui.tests.bench.length")]])}</span>
-      </div>
-    </div>
-  {/each}
-  {@render history(d.number)}
+        <p class="empty">{t("ui.tests.fs.none")}</p>
+      {/each}
+    </Block>
+    {@render history(d.number)}
+  </div>
 {/snippet}
 
-<div class="screen-in">
-  <div class="top">
-    {#if overview}
-      <h1>{t("ui.tests.title")}</h1>
-    {:else}
-      <h1 class="sr">{t("ui.tests.title")}</h1>
-    {/if}
-  </div>
+{#snippet smartRow(name: string, value: string, warn: "attention" | "critical" | null, link: string | null)}
+  <RowCard href={link ?? undefined} title={name} chevron={link !== null} static={link === null}>
+    {#snippet right()}
+      <b class="smart-v">{value}</b>
+      {#if warn}<StatusMark kind={warn} reveal />{/if}
+    {/snippet}
+  </RowCard>
+{/snippet}
 
-  {#if dto === null && hwtests.error !== null}
-    <div class="gap"><ErrorView error={hwtests.error} heading="h2" onretry={retry} /></div>
-  {:else if dto === null}
-    <Loading />
-  {:else}
-    {#if overview && verdict}<p class="lede"><b>{verdict.strong}</b> {verdict.rest}</p>{/if}
-    {#if live && runDev !== null && runDev !== chosen}
-      <button type="button" class="strip" onclick={() => go(href.tests(deviceKey(runDev)))}>
-        <ConcernMark mark="Running" word={false} /><b>{live.title}</b>
-        <span class="prog"><i style:transform="translateX({((live.frac ?? 0.3) - 1) * 100}%)"></i></span>
-        <span>{live.frac === null ? "" : formatPercent(live.frac * 100)}</span>
-        <span class="go">{t("ui.tests.strip.open")}<Icon name="chevron" /></span>
-      </button>
-    {/if}
-    {#if overview}
-      <div class="cols">
-        <Block title={t("ui.tests.group.memory")} first>
-          <RowList>
-            {@render devRow("memory", "memory", t("ui.tests.memory.title"), formatBytes(dto.memory.total_bytes))}
-          </RowList>
-        </Block>
-        <Block title={t("ui.tests.group.disks")} first>
-          <RowList>
-            {#each dto.disks as d (d.number)}
-              {@render devRow(d.number, diskIcon(d), diskName(d), t("ui.tests.disk.short", { n: d.number, volumes: d.volumes.map(vol).join(", ") || "—" }))}
-            {/each}
-          </RowList>
-        </Block>
-      </div>
-    {:else}
-      <div class="pane2">
-        <!-- The report scrolls on its own, so the keyboard needs to reach it. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <section class="report" bind:this={report} tabindex="0" aria-labelledby="report-title">
-          {#if runDev === chosen}{@render liveBlock()}{/if}
-          {#if chosen === "memory"}
-            {@render memoryReport()}
-          {:else if disk}
-            {@render diskReport(disk)}
-          {:else}
-            <p class="muted">{t("ui.tests.disk.gone")}</p>
-          {/if}
-        </section>
-      </div>
-    {/if}
-    {@const readDisk = reading === null ? null : dto.disks.find((d) => d.number === reading)}
-    {#if readDisk}
-      <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
-    {/if}
+{#if dto === null && hwtests.error !== null}
+  <PageHead title={t("ui.tests.title")} />
+  <div class="gap"><ErrorView error={hwtests.error} heading="h2" onretry={retry} /></div>
+{:else if dto === null}
+  <PageHead title={t("ui.tests.title")} />
+  <Loading />
+{:else if overview}
+  <PageHead title={t("ui.tests.title")} sub={t("ui.tests.coverage")} />
+  {#if verdict}<p class="lede"><b>{verdict.strong}</b> {verdict.rest}</p>{/if}
+  {#if live && runDev !== null}
+    <button type="button" class="strip" onclick={() => go(href.tests(deviceKey(runDev)))}>
+      <StatusMark kind="info" word={t("ui.health.mark.Running")} /><b>{live.title}</b>
+      <span class="pbar"><i style:width="{(live.frac ?? 0.3) * 100}%"></i></span>
+      <span>{live.frac === null ? "" : formatPercent(live.frac * 100)}</span>
+      <span class="go">{t("ui.tests.strip.open")}<Icon name="chevron" /></span>
+    </button>
   {/if}
-</div>
+  <Block title={t("ui.tests.devices")}>
+    <RowList>
+      {@render devRow("memory", "memory", t("ui.tests.memory.title"), formatBytes(dto.memory.total_bytes))}
+      {#each dto.disks as d (d.number)}
+        {@render devRow(d.number, diskIcon(d), diskName(d), t("ui.tests.disk.short", { n: d.number, volumes: d.volumes.map(vol).join(", ") || "—" }))}
+      {/each}
+    </RowList>
+  </Block>
+{:else if chosen === "memory"}
+  {@render memoryReport()}
+{:else if disk}
+  {@render diskReport(disk)}
+{:else}
+  <PageHead title={t("ui.tests.title")} />
+  <p class="empty">{t("ui.tests.disk.gone")}</p>
+{/if}
+{#if dto}
+  {@const readDisk = reading === null ? null : dto.disks.find((d) => d.number === reading)}
+  {#if readDisk}
+    <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
+  {/if}
+{/if}
 
 <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => (asking = null)}>
   {#if asking?.kind === "bench"}
@@ -665,216 +666,184 @@
 </dialog>
 
 <style>
-  .acts .earlier {
-    margin-left: auto;
-  }
-  .screen-in {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .top {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-  }
   .gap {
     margin-top: 14px;
   }
-  .lede {
-    flex: none;
-  }
-  .pane2 {
-    display: grid;
-    flex: 1 1 auto;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    min-height: 0;
-  }
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 56px;
-    overflow: auto;
-  }
-  @container content (min-width: 1000px) {
-    .cols {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-  }
-  .report {
-    display: grid;
-    align-content: start;
-    gap: 16px;
-    max-height: 100%;
-    min-height: 0;
-    overflow: auto;
-    outline: none;
-    scrollbar-color: var(--stroke) transparent;
-    scrollbar-gutter: stable;
-  }
-  .report:focus-visible {
-    box-shadow: 0 0 0 2px var(--ink);
-  }
-  .health-link {
-    align-self: start;
-    color: var(--accent);
-    font-size: 13.5px;
-    font-weight: 600;
-  }
-  .rh {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    align-items: center;
-  }
-  .rh h2 {
-    margin: 0;
-    font: 600 28px/1.25 var(--fd);
-    letter-spacing: -0.005em;
-  }
-  .rh p {
-    margin: 3px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .state,
-  .res {
+  .state {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 10px;
     align-items: center;
-    margin: 0;
+    gap: 6px 14px;
+    margin: 0 0 10px;
+    color: var(--ink2);
+    font-size: 13px;
+  }
+  .map {
+    max-width: 760px;
+    margin-bottom: 12px;
+  }
+  .h3 {
+    margin: 20px 0 8px;
+  }
+  .muted {
+    font-size: 13px;
+  }
+  .acts .earlier {
+    margin-left: auto;
+  }
+  .kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 8px 32px;
+    margin: 0 0 10px;
     font-size: 14px;
   }
-  .res b {
+  .kv div {
+    display: contents;
+  }
+  .kv dt {
+    color: var(--ink2);
+  }
+  .kv dd {
+    min-width: 0;
+    margin: 0;
+  }
+  .vol + .vol {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--stroke2);
+  }
+  .smart-v {
+    color: var(--ink);
+    font-size: 14px;
     font-weight: 600;
   }
-  .when {
-    color: var(--ink2);
-    font-size: 13px;
-  }
-  .blk {
-    display: grid;
-    gap: 8px;
-    margin-top: 16px;
-    padding-top: 28px;
-    border-top: 1px solid var(--rule);
-  }
-  .blk h3 {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin: 0 0 4px;
-    font: 400 20px/1.3 var(--fd);
-  }
-  .blk h3 :global(svg) {
-    color: var(--accent);
-  }
-  .blk h3 .sub {
-    margin-left: auto;
-    color: var(--ink2);
-    font: 400 12.5px/1.35 var(--f);
-  }
-  h4 {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font: 600 13px/1.3 var(--f);
-  }
-  .muted,
-  .note {
-    max-width: 70ch;
-    margin: 0;
-    color: var(--ink2);
-    font-size: 13.5px;
-    line-height: 1.45;
-  }
-  .note b {
-    color: var(--ink);
-  }
-  .honest {
-    max-width: 70ch;
-    margin: 0;
-    padding-left: 12px;
-    border-left: 1px solid var(--stroke);
-    color: var(--ink2);
-    font-size: 13px;
-    line-height: 1.45;
-  }
-  .wait {
+  .caveat {
     display: flex;
     gap: 10px;
-    align-items: flex-start;
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--card2);
-    font-size: 14px;
-    line-height: 1.45;
-  }
-  .wait :global(svg) {
-    flex: none;
-    margin-top: 3px;
+    max-width: 72ch;
+    margin: 12px 0 0;
     color: var(--ink2);
+    font-size: 13px;
+    line-height: 1.5;
   }
-  .acts {
+  .caveat :global(svg) {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+  }
+  .tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-top: 2px;
-  }
-  .acts.end {
-    justify-content: flex-end;
-  }
-  .pills {
-    display: inline-flex;
-    flex-wrap: wrap;
     gap: 6px;
+    margin: 14px 0 0;
   }
-  .pill2 {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 1px 8px;
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
     border-radius: 999px;
-    background: var(--card2);
+    background: var(--hover);
     color: var(--ink2);
-    font: 600 12px/1.6 var(--f);
+    font-size: 12px;
+    white-space: nowrap;
   }
-  .pill2 :global(svg) {
-    width: 13px;
-    height: 13px;
+  .fld {
+    margin: 14px 0 0;
   }
-  .cov,
-  .prog {
-    height: 8px;
+  .fld-l {
+    margin: 0 0 8px;
+    font-size: 14px;
+  }
+  .fld-n {
+    max-width: 64ch;
+    margin: 8px 0 0;
+    color: var(--ink2);
+    font-size: 13px;
+  }
+  .rds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 28px;
+  }
+  .rd {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 5px 0;
+    font-size: 14px;
+    line-height: 20px;
+    cursor: pointer;
+  }
+  .rd input {
+    position: absolute;
+    top: 5px;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .rd-c {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--ink2);
+    border-radius: 50%;
+    background: var(--field);
+  }
+  .rd:hover .rd-c {
+    border-color: var(--ink);
+  }
+  .rd input:checked + .rd-c {
+    border: 6px solid var(--accent);
+    background: var(--on-accent);
+  }
+  .rd input:focus-visible + .rd-c {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+  .running {
+    margin-top: 24px;
+  }
+  .run {
+    display: grid;
+    grid-template-columns: minmax(200px, 360px) auto;
+    gap: 6px 16px;
+    align-items: center;
+  }
+  .run-l {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--ink2);
+    font-size: 13px;
+  }
+  .run-l b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .run .btn {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+  .pbar {
+    display: block;
+    height: 4px;
     overflow: hidden;
-    border: 1px solid var(--stroke2);
-    border-radius: 999px;
-    background: var(--card2);
+    border-radius: 2px;
+    background: var(--stroke);
   }
-  .cov i,
-  .prog i {
+  .pbar i {
     display: block;
     height: 100%;
-    border-radius: 999px;
-    background: var(--ink2);
-  }
-  .prog {
-    height: 10px;
-  }
-  /* The fill is the whole track slid in from the left, so progress moves without relayout. */
-  .prog i {
-    width: 100%;
+    border-radius: 2px;
     background: var(--accent);
-    transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+    transition: width 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
-  .prog.indeterminate i {
+  .pbar.indeterminate i {
     width: 30%;
     animation: slide 1.4s ease-in-out infinite;
   }
@@ -887,45 +856,17 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .prog i {
+    .pbar i {
       transition: none;
     }
-    .prog.indeterminate i {
+    .pbar.indeterminate i {
       animation: none;
     }
-  }
-  .running {
-    display: grid;
-    gap: 8px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--stroke2);
-  }
-  .rhead {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    justify-content: space-between;
-  }
-  .rhead h3 {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin: 0;
-    font: 600 18px/1.3 var(--fd);
-  }
-  .rhead p {
-    margin: 2px 0 0;
-    color: var(--ink2);
-    font-size: 13px;
   }
   .facts-line {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 18px;
-    margin: 0;
-    color: var(--ink2);
-    font-size: 14px;
-    font-variant-numeric: tabular-nums;
   }
   .facts-line.bad span:nth-child(3) {
     color: var(--freeze);
@@ -933,16 +874,15 @@
   }
   .strip {
     display: grid;
-    flex: none;
-    grid-template-columns: 16px auto minmax(80px, 1fr) auto auto;
+    grid-template-columns: auto auto minmax(80px, 1fr) auto auto;
     gap: 12px;
     align-items: center;
     width: 100%;
-    margin: 0 0 10px;
-    padding: 10px 14px;
-    border: 1px solid var(--stroke);
-    border-radius: 10px;
-    background: var(--card);
+    margin: 16px 0 0;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--row);
     color: var(--ink);
     font: inherit;
     font-size: 14px;
@@ -950,10 +890,7 @@
     cursor: pointer;
   }
   .strip:hover {
-    background: var(--card2);
-  }
-  .strip .prog {
-    height: 6px;
+    background: var(--row-hover);
   }
   .strip .go {
     display: inline-flex;
@@ -961,169 +898,79 @@
     align-items: center;
     color: var(--ink2);
     font-size: 13px;
-    font-weight: 600;
   }
-  .facts {
+  .speed {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 8px;
-    margin: 0;
+    gap: 14px;
+    max-width: 760px;
   }
-  .facts div {
-    padding: 9px 12px;
-    border-radius: 10px;
-    background: var(--card2);
-  }
-  .facts dt {
-    color: var(--ink2);
-    font-size: 12.5px;
-  }
-  .facts dd {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    margin: 2px 0 0;
-  }
-  .facts dd b {
-    font: 600 16px var(--f);
-    font-variant-numeric: tabular-nums;
-  }
-  .tab {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13.5px;
-    font-variant-numeric: tabular-nums;
-  }
-  .tab th {
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--stroke2);
-    color: var(--ink2);
-    font-size: 12.5px;
-    font-weight: 600;
-    text-align: left;
-  }
-  .tab td {
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--stroke2);
-  }
-  .tab.num td:nth-last-child(-n + 3),
-  .tab.num th:nth-last-child(-n + 3) {
-    text-align: right;
-  }
-  .tab tr.flag td {
-    background: var(--press-t);
-  }
-  .mono,
-  .out {
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-size: 12.5px;
-  }
-  .out {
-    max-height: 220px;
-    margin: 0;
-    padding: 10px 12px;
-    overflow: auto;
-    border-radius: 10px;
-    background: var(--card2);
-    color: var(--ink2);
-    white-space: pre-wrap;
-  }
-  .worst {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: 0;
-    font-size: 13.5px;
-    list-style: none;
-  }
-  .worst li {
+  .sp-head {
     display: flex;
     justify-content: space-between;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--stroke2);
-  }
-  .bench {
-    display: grid;
-    gap: 6px;
-  }
-  .brow {
-    display: grid;
-    grid-template-columns: minmax(150px, 1fr) minmax(0, 1.4fr) 112px;
-    gap: 12px;
-    align-items: center;
-    font-size: 13.5px;
-  }
-  .bname {
+    align-items: baseline;
+    margin-bottom: 6px;
     color: var(--ink2);
+    font-size: 13px;
   }
-  .bbar {
+  .sp-head b {
+    color: var(--ink);
+    font: 600 20px var(--fd);
+  }
+  .sp-head small {
+    color: var(--ink2);
+    font: 400 12.5px var(--f);
+  }
+  .sp-track {
     position: relative;
-    height: 12px;
-    border-radius: 999px;
+    display: block;
+    height: 10px;
+    overflow: hidden;
+    border-radius: 6px;
     background: var(--card2);
   }
-  .bbar .rg {
+  .sp-typ {
     position: absolute;
     top: 0;
     bottom: 0;
-    border-radius: 999px;
-    background: var(--calm-t);
-    box-shadow: inset 0 0 0 1px var(--calm);
+    background: var(--stroke);
   }
-  .bbar .val {
+  .sp-val {
     position: absolute;
     top: 3px;
     bottom: 3px;
     left: 0;
-    border-radius: 999px;
-    background: var(--ink);
+    border-radius: 3px;
+    background: var(--press);
   }
-  .bnum {
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
-    justify-content: flex-end;
-    font-variant-numeric: tabular-nums;
-  }
-  .hlist {
-    display: grid;
-    gap: 2px;
-  }
-  .hline {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-    padding: 8px 4px;
-    border-bottom: 1px solid var(--stroke2);
-    font-size: 14px;
-  }
-  .hline:last-child {
-    border-bottom: 0;
-  }
-  .hline b {
-    display: block;
-    font-weight: 600;
-  }
-  .hline small {
-    color: var(--ink2);
+  .mono,
+  .out {
+    font-family: var(--mono);
     font-size: 12.5px;
+  }
+  .out {
+    max-height: 220px;
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    overflow: auto;
+    border-radius: 6px;
+    background: var(--hover);
+    color: var(--ink2);
+    white-space: pre-wrap;
   }
   .confirm {
     max-width: min(520px, calc(100vw - 32px));
     padding: 18px 20px;
     border: 1px solid var(--stroke);
-    border-radius: 14px;
+    border-radius: 8px;
     background: var(--card);
     color: var(--ink);
-    box-shadow: 0 18px 60px #0006;
+    box-shadow: var(--shadow-float);
   }
   .confirm::backdrop {
     background: #0008;
   }
   .confirm h2 {
     margin: 0 0 10px;
-    font: 600 18px/1.3 var(--fd);
   }
   .confirm p {
     margin: 0 0 12px;
@@ -1131,21 +978,12 @@
     font-size: 14px;
     line-height: 1.5;
   }
-  @container content (max-width: 680px) {
-    .pane2 {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-  @media (max-height: 520px) {
-    .report {
-      max-height: none;
-      overflow: visible;
-    }
+  .acts.end {
+    justify-content: flex-end;
   }
   @media (forced-colors: active) {
-    .cov i,
-    .prog i,
-    .bbar .val {
+    .pbar i,
+    .sp-val {
       forced-color-adjust: none;
       background: CanvasText;
     }

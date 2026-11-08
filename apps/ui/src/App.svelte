@@ -39,7 +39,7 @@
 
   let content: HTMLElement | undefined = $state();
   /** Screens whose page holds still while their panes scroll inside. */
-  const STILL = new Set(["tests"]);
+  const STILL = new Set<string>();
 
   let main: HTMLElement | undefined = $state();
   let shown = "";
