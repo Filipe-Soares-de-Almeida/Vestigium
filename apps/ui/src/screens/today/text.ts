@@ -1,9 +1,10 @@
 import type { IconName } from "../../components/Icon.svelte";
+import type { StatusKind } from "../../components/StatusMark.svelte";
 import { formatClock, formatDuration, formatPercent, formatTime } from "../../lib/format";
 import { t, tn } from "../../lib/i18n.svelte";
 import type { Cause, DetailLevel, Episode, OccurrenceSummary } from "../../lib/types";
 import { formatMs } from "../occurrence/format";
-import { type Day, diskLabel, mostlyOf, worstOf } from "./day";
+import { type Day, diskLabel, mostlyOf, type Tone, toneOf, worstOf } from "./day";
 
 const KEY = "ui.today";
 
@@ -64,6 +65,19 @@ export function causeIcon(cause: Cause): IconName {
   if ("Memory" in cause) return "memory";
   if ("Cpu" in cause || "Driver" in cause || "DriverModule" in cause) return "chip";
   return "app";
+}
+
+const MARK: Record<Tone, { kind: StatusKind; severity: "Severe" | "Medium" | "Light" }> = {
+  freeze: { kind: "critical", severity: "Severe" },
+  press: { kind: "overload", severity: "Medium" },
+  busy: { kind: "attention", severity: "Light" },
+};
+
+/** The status symbol of an occurrence in a list, with its gravity as the word: "Grave". */
+export function occurrenceMark(o: OccurrenceSummary): { kind: StatusKind; word: string } {
+  const mark = MARK[toneOf(o)];
+  const word = t(`ui.common.severity.${mark.severity}`);
+  return { kind: mark.kind, word: word.charAt(0).toLocaleUpperCase() + word.slice(1) };
 }
 
 /** An occurrence's kind, a freeze with its severity: "Severe freeze". */

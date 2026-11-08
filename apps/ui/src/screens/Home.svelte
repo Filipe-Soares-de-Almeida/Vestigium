@@ -1,8 +1,13 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import Finder from "../components/Finder.svelte";
   import Icon from "../components/Icon.svelte";
   import Mark from "../components/Mark.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
+  import { marks } from "../lib/api";
+  import { app } from "../lib/app.svelte";
+  import { formatDuration, formatTime } from "../lib/format";
   import { health } from "../lib/health.svelte";
   import { buildGroups, entryHref } from "../lib/groups";
   import { t, tn } from "../lib/i18n.svelte";
@@ -10,6 +15,9 @@
   import { href } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
+  import type { OccurrenceSummary } from "../lib/types";
+  import { dayStart, worstOf } from "./today/day";
+  import { occurrenceMark } from "./today/text";
 
   const status = $derived(shellStatus());
   const tiles = $derived(buildGroups().filter((g) => !g.hidden));
@@ -28,10 +36,42 @@
     tweaks.recommended ? tn("ui.shell.nav.tweaks.signals", tweaks.recommended) : t("ui.home.tweaks.none"),
   );
   const tweakKind: StatusKind = $derived(tweaks.recommended ? "attention" : "ok");
+
+  let worst = $state.raw<OccurrenceSummary | null>(null);
+  const worstMark = $derived(worst ? occurrenceMark(worst) : { kind: "ok" as StatusKind, word: "" });
+  const activityLine = $derived(
+    worst
+      ? t("ui.home.activity.worst", {
+          time: formatTime(worst.kind === "PostMortem" ? worst.end_ms : worst.start_ms),
+          duration: formatDuration(worst.end_ms - worst.start_ms),
+        })
+      : t("ui.home.activity.none"),
+  );
+
+  /** Today's gravest occurrence, for the Activity card; a failed read keeps the last one. */
+  async function loadWorst(): Promise<void> {
+    const now = Date.now();
+    try {
+      worst = worstOf((await marks(dayStart(now), now)).occurrences);
+    } catch {
+      // The card keeps what it showed.
+    }
+  }
+
+  $effect(() => {
+    if (app.history !== "ready") return;
+    untrack(() => void loadWorst());
+    const onvisible = () => {
+      if (!document.hidden) void loadWorst();
+    };
+    document.addEventListener("visibilitychange", onvisible);
+    return () => document.removeEventListener("visibilitychange", onvisible);
+  });
 </script>
 
 <div class="home" data-morph-base>
   <header class="band" data-morph-base>
+    <div class="tb" data-tauri-drag-region></div>
     <div class="head">
       <div class="id">
         <span class="mark"><Mark /></span>
@@ -49,10 +89,16 @@
           </a>
         </li>
         <li>
-          <a class="card" href={href.activity()} data-morph="qs:today" onclick={() => morph.remember("qs:today")}>
-            <span class="ic"><Icon name="today" /></span>
+          <a
+            class="card"
+            href={worst ? href.occurrence(worst.id) : href.activity()}
+            data-morph="qs:today"
+            onclick={() => morph.remember("qs:today")}
+            aria-label="{t('ui.group.activity')}: {activityLine}"
+          >
+            <span class="ic"><Icon name="today" /><span class="dot"><StatusMark kind={worstMark.kind} word={worstMark.word || undefined} size={14} reveal /></span></span>
             <b>{t("ui.group.activity")}</b>
-            <small>{t("ui.home.activity")}</small>
+            <small>{activityLine}</small>
           </a>
         </li>
         <li>
@@ -96,7 +142,10 @@
   }
   .band {
     padding-bottom: 30px;
-    background: var(--card2);
+    background: var(--band);
+  }
+  .tb {
+    height: 40px;
   }
   .head {
     display: flex;
@@ -147,11 +196,9 @@
   .state i.ok {
     background: var(--good);
   }
-  .state i.paused {
-    background: var(--press);
-  }
+  .state i.paused,
   .state i.off {
-    border: 1.5px solid var(--ink3);
+    box-shadow: inset 0 0 0 2px var(--ink3);
   }
   .quick {
     display: flex;
@@ -171,11 +218,12 @@
   .card:hover,
   .tile:hover {
     background: var(--row-hover);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink3) 55%, transparent);
+    box-shadow: inset 0 0 0 1px var(--edge);
+    text-decoration: none;
   }
   .card:active,
   .tile:active {
-    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    background: var(--hover);
   }
   .card:focus-visible,
   .tile:focus-visible {
@@ -225,7 +273,10 @@
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--card2), var(--ink) 4%);
+    background: color-mix(in srgb, var(--band), var(--ink) 4%);
+  }
+  .card:hover .dot {
+    background: color-mix(in srgb, var(--band), var(--ink) 9%);
   }
   .dot :global(.word) {
     display: none;
@@ -286,11 +337,49 @@
     margin-top: 3px;
     line-height: 1.45;
   }
+  @media (max-height: 820px) {
+    .band {
+      padding-bottom: 20px;
+    }
+    .head {
+      padding-top: 8px;
+    }
+    .mark,
+    .mark :global(svg) {
+      width: 56px;
+      height: 56px;
+    }
+    .card {
+      padding: 8px 12px;
+    }
+    .ic {
+      margin-bottom: 6px;
+    }
+    .find {
+      padding: 22px 48px 16px;
+    }
+    .tile {
+      padding: 12px 14px 14px;
+    }
+  }
+  @media (max-width: 1180px) {
+    .head {
+      padding-left: 32px;
+      padding-right: 32px;
+    }
+    .card {
+      width: 192px;
+    }
+  }
   @media (forced-colors: active) {
-    .state i.ok,
-    .state i.paused {
+    .state i.ok {
       forced-color-adjust: none;
       background: CanvasText;
+    }
+    .state i.paused,
+    .state i.off {
+      forced-color-adjust: none;
+      box-shadow: inset 0 0 0 2px CanvasText;
     }
   }
 </style>

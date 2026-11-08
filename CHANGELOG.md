@@ -238,6 +238,9 @@ How to use this file:
 
 ### Changed
 
+- The home screen's Activity card shows today's worst freeze, with its time and length, and opens its
+  report; with none today it says so. The header band, its cards and the search sit closer together on
+  short windows, and the cards narrow on windows under 1180 px.
 - The window now has the Windows Settings look on every page: the navigation pane is a lighter band
   with the app's name at its top, the page sits on a flat plane instead of a framed card, page titles
   are light, links show no underline until pointed at, and buttons are plain Windows buttons. At 1500
