@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  import Icon, { type IconName } from "../../components/Icon.svelte";
+  import type { IconName } from "../../components/Icon.svelte";
   import { focusHere } from "../../lib/focus";
 
   let {
@@ -13,8 +13,7 @@
   }: { id: string; icon: IconName; title: string; body: string; children?: Snippet } = $props();
 </script>
 
-<section class="card notice" aria-labelledby="{id}-title">
-  <span class="icochip"><Icon name={icon} /></span>
+<section class="notice" aria-labelledby="{id}-title" data-icon={icon}>
   <div>
     <h2 id="{id}-title" tabindex="-1" use:focusHere>{title}</h2>
     <p>{body}</p>
@@ -26,18 +25,11 @@
 
 <style>
   .notice {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-  }
-  .icochip {
-    background: var(--card2);
-    border: 1px solid var(--stroke2);
-    color: var(--ink2);
+    margin-top: 24px;
   }
   h2 {
-    margin: 2px 0 6px;
+    margin: 0 0 8px;
+    font: 400 20px/1.3 var(--fd);
     outline: none;
   }
   p {

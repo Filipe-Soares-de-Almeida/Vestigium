@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import Icon from "../components/Icon.svelte";
+  import BackLink from "../components/BackLink.svelte";
   import Loading from "../components/Loading.svelte";
   import { occurrence } from "../lib/api";
   import { captures } from "../lib/capture.svelte";
@@ -36,7 +36,7 @@
 </script>
 
 {#if from}
-  <a class="back" href={href.occurrence(from.id)}><Icon name="back" />{t("ui.captures.back")}</a>
+  <BackLink href={href.occurrence(from.id)} label={t("ui.captures.back")} />
 {/if}
 <h1>{t("ui.captures.title")}</h1>
 <p class="lede">{t("ui.captures.lede")}</p>
@@ -78,20 +78,10 @@
 </div>
 
 <style>
-  .back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 10px;
-    border-radius: 6px;
+  .lede {
+    max-width: 70ch;
+    margin: 6px 0 18px;
     color: var(--ink2);
-    font: 600 14px/1.5 var(--f);
-    text-decoration: none;
-  }
-  .back:hover {
-    color: var(--ink);
-  }
-  .history {
-    margin-top: 14px;
+    font-size: 16px;
   }
 </style>

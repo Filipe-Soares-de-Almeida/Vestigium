@@ -51,7 +51,7 @@
   ] as const);
 </script>
 
-<section class="card start" aria-labelledby="start-title">
+<section class="start" aria-labelledby="start-title">
   <h2 id="start-title" tabindex="-1" use:focusHere>{t("ui.captures.start.title")}</h2>
   {#if context}
     <p class="context">{context}</p>
@@ -131,7 +131,7 @@
 
   <ul class="facts">
     {#each facts as fact (fact.icon)}
-      <li><Icon name={fact.icon} /><span>{fact.text}</span></li>
+      <li class:admin={fact.icon === "shield"}><Icon name={fact.icon} /><span>{fact.text}</span></li>
     {/each}
   </ul>
 
@@ -153,9 +153,24 @@
     display: grid;
     gap: 14px;
   }
+  .start {
+    margin-top: 24px;
+  }
   .start h2 {
     margin: 0;
+    font: 400 20px/1.3 var(--fd);
     outline: none;
+  }
+  .facts li.admin {
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .facts li.admin :global(svg) {
+    color: var(--accent);
   }
   .context {
     margin: -8px 0 0;

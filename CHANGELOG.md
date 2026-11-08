@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- Captures has a new layout: the permission note of a new capture is highlighted, past captures are rows
+  with their result and time, and a capture's report is made of titled sections with a back link to the
+  list. The navigation pane keeps a single Captures entry, highlighted on the report too.
 - Dumps are now browsed from the navigation pane: the overview, and one list each for blue screens,
   kernel reports and apps that crashed, with their counts. A dump opens on a page of its own with a back
   link to its list. Reading the dumps shows the administrator badge, a group's check box ticks or clears

@@ -3,7 +3,8 @@
 
   import ErrorView from "../components/ErrorView.svelte";
   import Icon from "../components/Icon.svelte";
-  import LevelHead from "../components/LevelHead.svelte";
+  import BackLink from "../components/BackLink.svelte";
+  import Block from "../components/Block.svelte";
   import Loading from "../components/Loading.svelte";
   import Steps from "../components/Steps.svelte";
   import { marks } from "../lib/api";
@@ -66,11 +67,7 @@
   }
 </script>
 
-<LevelHead
-  parent={{ href: href.captures(), name: t("ui.shell.nav.captures") }}
-  current={view?.crumb ?? t("ui.captures.crumb")}
-  label={t("ui.captures.path")}
-/>
+<BackLink href={href.captures()} label={t("ui.common.back_to", { place: t("ui.captures.title") })} />
 
 {#if failure !== null}
   <div class="failure">
@@ -116,8 +113,7 @@
   {/if}
 
   <div class="split">
-    <section class="card" aria-labelledby="cap-cause">
-      <h2 id="cap-cause" class="sub">{t("ui.captures.conclusion.title")}</h2>
+    <Block title={t("ui.captures.conclusion.title")}>
       {#if view.main}
         <div class="cause">
           <span class="icochip"><Icon name={view.main.icon} /></span>
@@ -154,21 +150,19 @@
           <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
         </div>
       {/if}
-    </section>
+    </Block>
 
     <div class="stack">
-      <section class="card" aria-labelledby="cap-todo">
-        <h2 id="cap-todo" class="sub">{t("ui.captures.todo.title")}</h2>
+      <Block title={t("ui.captures.todo.title")}>
         {#if view.steps.length}
           <Steps steps={view.steps} />
         {:else}
           <p class="muted">{t("ui.captures.todo.none")}</p>
         {/if}
-      </section>
+      </Block>
 
       {#if during.length}
-        <section class="card list" aria-labelledby="cap-during">
-          <h2 id="cap-during" class="sub">{t("ui.captures.during.title")}</h2>
+        <Block title={t("ui.captures.during.title")}>
           <ul>
             {#each during as o (o.id)}
               <li>
@@ -181,32 +175,29 @@
               </li>
             {/each}
           </ul>
-        </section>
+        </Block>
       {/if}
     </div>
   </div>
 
   {#if view.drivers && view.drivers.rows.length}
-    <section class="card wide" aria-labelledby="cap-drivers">
-      <h2 id="cap-drivers" class="sub">{t("ui.captures.drivers.title")}</h2>
+    <Block title={t("ui.captures.drivers.title")}>
       <Drivers table={view.drivers} {level} />
-    </section>
+    </Block>
   {/if}
 
-  <section class="card wide" aria-labelledby="cap-align">
-    <h2 id="cap-align" class="sub">{t("ui.captures.align.title")}</h2>
+  <Block title={t("ui.captures.align.title")}>
     {#if view.hasMarks}
       <Alignment {dto} {level} summary={view.alignSummary} />
     {:else}
       <p class="muted flat">{view.alignSummary}</p>
     {/if}
-  </section>
+  </Block>
 
   {#if view.apps}
-    <section class="card wide" aria-labelledby="cap-apps">
-      <h2 id="cap-apps" class="sub">{t("ui.captures.apps.title")}</h2>
+    <Block title={t("ui.captures.apps.title")}>
       <Apps rows={view.apps.rows} quiet={view.apps.quiet} all={dto.apps} {level} />
-    </section>
+    </Block>
   {/if}
 {/if}
 
@@ -356,14 +347,6 @@
   }
   .list {
     padding: 10px;
-  }
-  .list .sub {
-    padding: 6px 10px 2px;
-  }
-  .list ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
   }
   .row {
     display: grid;

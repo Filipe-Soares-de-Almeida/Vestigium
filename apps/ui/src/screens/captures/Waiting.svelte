@@ -13,7 +13,7 @@
   );
 </script>
 
-<section class="card wait" aria-labelledby="wait-title">
+<section class="wait" aria-labelledby="wait-title">
   <div class="head">
     <h2 id="wait-title" tabindex="-1" use:focusHere>{t("ui.captures.wait.title")}</h2>
     <span class="left">{left > 0 ? t("ui.captures.wait.left", { time: formatDuration(left) }) : t("ui.captures.wait.finishing")}</span>
@@ -26,6 +26,7 @@
   .wait {
     display: grid;
     gap: 10px;
+    margin-top: 24px;
   }
   .head {
     display: flex;
@@ -36,6 +37,7 @@
   }
   h2 {
     margin: 0;
+    font: 400 20px/1.3 var(--fd);
     outline: none;
   }
   .left {

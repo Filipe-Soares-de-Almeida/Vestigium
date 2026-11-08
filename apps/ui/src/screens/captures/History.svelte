@@ -1,5 +1,7 @@
 <script lang="ts">
-  import Icon from "../../components/Icon.svelte";
+  import Block from "../../components/Block.svelte";
+  import RowCard from "../../components/RowCard.svelte";
+  import RowList from "../../components/RowList.svelte";
   import type { Entry } from "../../lib/capture.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
@@ -10,114 +12,55 @@
   const compare = $derived(compareLine(entries));
 </script>
 
-<section class="card list" aria-labelledby="history-title">
-  <h2 id="history-title">{t("ui.captures.history.title")}</h2>
+<Block title={t("ui.captures.history.title")}>
   {#if entries.length === 0}
     <p class="empty">{t("ui.captures.history.empty")}</p>
   {:else}
     {#if compare}
       <p class="compare"><span>{t("ui.captures.compare.label")}</span><b>{compare}</b></p>
     {/if}
-    <ul>
+    <RowList>
       {#each entries as entry (entry.summary.id)}
         {@const row = rowOf(entry)}
-        <li>
-          <a class="row" href={href.capture(row.id)}>
-            <span class="icochip" class:quiet={row.quiet}><Icon name={row.icon} /></span>
-            <span class="what">
-              <b>{row.title}{#if fresh === row.id}<span class="pill">{t("ui.captures.history.new")}</span>{/if}</b>
-              <small>{row.sub}</small>
-            </span>
-            <span class="when">{row.day}<br />{row.time}</span>
-            <span class="chev"><Icon name="chevron" /></span>
-          </a>
-        </li>
+        <RowCard href={href.capture(row.id)} icon={row.icon} title={row.title} sub={row.sub}>
+          {#snippet right()}
+            {#if fresh === row.id}<span class="new">{t("ui.captures.history.new")}</span>{/if}
+            <span class="when">{row.day}, {row.time}</span>
+          {/snippet}
+        </RowCard>
       {/each}
-    </ul>
+    </RowList>
   {/if}
-</section>
+</Block>
 
 <style>
-  .list {
-    padding: 10px;
-  }
-  h2 {
-    margin: 0;
-    padding: 6px 10px 2px;
-    font-size: 15px;
-    font-family: var(--f);
-  }
-  ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
   .empty {
     margin: 0;
-    padding: 6px 10px 8px;
     color: var(--ink2);
-    font-size: 13.5px;
+    font-size: 14px;
   }
   .compare {
     display: grid;
     gap: 2px;
-    margin: 6px 10px 8px;
-    padding: 8px 12px;
-    border: 1px solid var(--stroke2);
-    border-radius: 10px;
-    background: var(--card2);
+    margin: 0 0 12px;
+    font-size: 14px;
   }
   .compare span {
     color: var(--ink2);
     font-size: 12.5px;
   }
   .compare b {
-    font-weight: 600;
+    font-weight: 400;
   }
-  .row {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) auto 14px;
-    gap: 12px;
-    align-items: center;
-    padding: 9px 10px;
-    border-radius: 8px;
-    color: inherit;
-    text-decoration: none;
-  }
-  .row:hover {
-    background: var(--card2);
-  }
-  .icochip {
-    background: var(--busy-t);
-    color: var(--busy);
-  }
-  .icochip.quiet {
-    background: var(--card2);
-    border: 1px solid var(--stroke2);
-    color: var(--ink2);
-  }
-  .what b {
-    display: block;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  .what b .pill {
-    margin-left: 8px;
-    vertical-align: 1px;
-  }
-  small {
-    color: var(--ink2);
-    font-size: 12.5px;
+  .new {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--ink);
+    font: 600 12px/1.6 var(--f);
   }
   .when {
     color: var(--ink2);
     font-size: 12.5px;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-  }
-  .chev {
-    display: grid;
-    color: var(--ink3);
   }
 </style>
