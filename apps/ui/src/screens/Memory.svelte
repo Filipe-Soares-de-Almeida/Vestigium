@@ -2,23 +2,27 @@
   import { onMount, untrack } from "svelte";
 
   import Block from "../components/Block.svelte";
+  import HistList from "../components/HistList.svelte";
+  import PageHead from "../components/PageHead.svelte";
   import RowCard from "../components/RowCard.svelte";
   import RowList from "../components/RowList.svelte";
   import StatusMark from "../components/StatusMark.svelte";
   import { marks } from "../lib/api";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
-  import { lang, t } from "../lib/i18n.svelte";
+  import { formatTime } from "../lib/format";
+  import { lang, t, tn } from "../lib/i18n.svelte";
+  import { relatedLinks } from "../lib/related.svelte";
   import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import type { Episode } from "../lib/types";
   import { AREAS, areaState } from "./health/areas";
   import { checkText, findingTitle } from "./health/words";
-  import { formatBytes } from "./occurrence/format";
+  import { formatBytes, formatDayShort } from "./occurrence/format";
   import { statusOf } from "./tests/status";
   import { diagnosticWord, kindOf, memoryState, outcomeMark, quickOf } from "./tests/words";
   import { dayStart, isPressure } from "./today/day";
-  import EpisodeRow from "./today/EpisodeRow.svelte";
+  import { episodeMeta, episodeTitle } from "./today/text";
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const dto = $derived(hwtests.dto);
@@ -78,143 +82,148 @@
   });
 
   const to = (path: string) => `${path}${path.includes("?") ? "&" : "?"}g=memory`;
+
+  /** The three memory tests, each with how it last ended. */
+  const tests = $derived.by(() => {
+    const diag = dto?.diagnostics[0] ?? null;
+    const quick = dto?.runs.filter((r) => kindOf(r) === "MemoryQuick").sort((a, b) => b.ended_ms - a.ended_ms)[0] ?? null;
+    const diagWord = diag ? diagnosticWord(diag) : null;
+    const quickMark = quick ? statusOf(outcomeMark(quick)) : null;
+    return [
+      {
+        key: "diag",
+        icon: "windows" as const,
+        title: t("ui.tests.diag.title"),
+        sub: diag ? stamp.format(diag.ts_ms) : t("ui.tests.diag.when"),
+        mark: diagWord ? { ...statusOf(diagWord.mark), word: diagWord.text } : { kind: "info" as const, word: t("ui.memory.on_demand") },
+      },
+      {
+        key: "quick",
+        icon: "memory" as const,
+        title: t("ui.tests.quick.title"),
+        sub: quick ? stamp.format(quick.ended_ms) : t("ui.tests.quick.when"),
+        mark: quickMark ?? { kind: "info" as const, word: t("ui.memory.on_demand") },
+      },
+      {
+        key: "memtest",
+        icon: "outside" as const,
+        title: t("ui.tests.memtest.title"),
+        sub: t("ui.memory.memtest.when"),
+        mark: { kind: "info" as const, word: t("ui.memory.outside") },
+      },
+    ];
+  });
+
+  relatedLinks(() => [
+    { label: t("ui.related.live_now"), href: href.activity("now") },
+    { label: t("ui.item.memory_tests"), href: href.tests("memory") },
+  ]);
 </script>
 
-<header class="head">
-  <h1>{t("ui.group.memory")}</h1>
-  <p class="sub">
-    {dto
-      ? t("ui.memory.sub", { total: formatBytes(dto.memory.total_bytes), free: formatBytes(dto.memory.available_bytes) })
-      : t("ui.group.memory.sub")}
-  </p>
-</header>
+<PageHead
+  title={t("ui.group.memory")}
+  sub={dto
+    ? t("ui.memory.sub", { total: formatBytes(dto.memory.total_bytes), free: formatBytes(dto.memory.available_bytes) })
+    : t("ui.group.memory.sub")}
+/>
 
-<div class="cols">
-  <Block title={t("ui.item.memory_health")} first>
+<div class="cols2">
+  <Block title={t("ui.item.memory_health")}>
     {#if area}
+      {@const kind = area.mark === "Critical" ? "critical" : area.mark === "Attention" ? "attention" : area.mark === "Unknown" ? "info" : "ok"}
+      <p class="state">
+        <StatusMark {kind} word={t(`ui.health.mark.${area.mark}`)} />
+        <span>{area.open.length ? tn("ui.health.area.points", area.open.length) : tn("ui.health.area.fine", area.checks.length)}</span>
+      </p>
       {#if area.open.length}
         <RowList>
           {#each area.open as f (f.id)}
-            <RowCard href={to(href.health("memory"))} icon="memory" title={findingTitle(f, level)}>
+            <RowCard href={to(href.health("memory"))} title={findingTitle(f, level)}>
               {#snippet right()}<StatusMark kind={f.concern === "Critical" ? "critical" : "attention"} reveal />{/snippet}
             </RowCard>
           {/each}
         </RowList>
       {:else}
-        <ul class="oks">
+        <ul class="okl">
           {#each area.checks as check (check.kind)}
-            <li>
-              <StatusMark kind={check.mark === "Ok" ? "ok" : "info"} size={20} reveal />
-              <span>{checkText(check)}</span>
-            </li>
+            <li><StatusMark kind={check.mark === "Ok" ? "ok" : "info"} size={20} reveal /><span>{checkText(check)}</span></li>
           {/each}
         </ul>
       {/if}
     {/if}
-    <p class="more"><a href={to(href.health("memory"))}>{t("ui.memory.open_health")}</a></p>
   </Block>
 
-  <Block title={t("ui.memory.tests")} first>
-    {#if standing && st}
-      <p class="state"><StatusMark kind={st.kind} word={st.word} /><span>{standing.line}</span></p>
-    {/if}
-    <p class="more"><a href={to(href.tests("memory"))}>{t("ui.memory.open_tests")}</a></p>
-  </Block>
-</div>
-
-<Block title={t("ui.memory.today")}>
-  {#if today.length}
-    <ul class="list">
-      {#each today as e (e.start_ms)}
-        <li><EpisodeRow {e} {level} /></li>
-      {/each}
-    </ul>
-  {:else}
-    <p class="muted">{t("ui.memory.today.none")}</p>
-  {/if}
-</Block>
-
-<Block title={t("ui.memory.history")}>
-  {#if history.length}
+  <Block title={t("ui.memory.tests")}>
     <RowList>
-      {#each history as h (h.title + h.at)}
-        {@const s = statusOf(h.mark)}
-        <RowCard
-          href={h.run === null ? to(href.tests("memory")) : href.detail("test", h.run, { from: here(), label: t("ui.group.memory") })}
-          icon="tests"
-          title={h.title}
-          sub={[stamp.format(h.at), h.text].filter(Boolean).join(" · ")}
-        >
-          {#snippet right()}<StatusMark kind={s.kind} word={s.word} reveal />{/snippet}
+      {#each tests as test (test.key)}
+        <RowCard href={to(href.tests("memory"))} icon={test.icon} title={test.title} sub={test.sub}>
+          {#snippet right()}<StatusMark kind={test.mark.kind} word={test.mark.word} reveal />{/snippet}
         </RowCard>
       {/each}
     </RowList>
-  {:else}
-    <p class="muted">{t("ui.memory.history.none")}</p>
-  {/if}
-</Block>
+  </Block>
+</div>
+
+<div class="cols2">
+  <Block title={t("ui.memory.today")}>
+    {#if today.length}
+      <RowList>
+        {#each today as e (e.start_ms)}
+          <RowCard
+            href={href.period(e.start_ms)}
+            icon="memory"
+            title={episodeTitle(e, level)}
+            sub="{episodeMeta(e)} · {formatTime(e.start_ms)}"
+          >
+            {#snippet right()}<StatusMark kind="overload" reveal />{/snippet}
+          </RowCard>
+        {/each}
+      </RowList>
+    {:else}
+      <p class="empty">{t("ui.memory.today.none")}</p>
+    {/if}
+  </Block>
+
+  <Block title={t("ui.memory.history")}>
+    {#if history.length}
+      <HistList
+        entries={history.map((h) => ({
+          key: h.title + h.at,
+          date: formatDayShort(h.at),
+          title: h.title,
+          sub: h.text,
+          mark: statusOf(h.mark),
+          href: h.run === null ? to(href.tests("memory")) : href.detail("test", h.run, { from: here(), label: t("ui.group.memory") }),
+        }))}
+      />
+    {:else}
+      <p class="empty">{t("ui.memory.history.none")}</p>
+    {/if}
+  </Block>
+</div>
 
 <style>
-  .head {
-    margin-bottom: 4px;
-  }
-  .sub {
-    margin: 4px 0 0;
-    color: var(--ink2);
-    font-size: 14px;
-  }
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 56px;
-  }
-  @container content (min-width: 1000px) {
-    .cols {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-  }
   .state {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px 14px;
-    margin: 0 0 14px;
-    font-size: 14px;
-  }
-  .oks {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .oks li {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
-    padding: 6px 0;
-    font-size: 14px;
-    line-height: 1.45;
-  }
-  .list {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .muted {
-    margin: 0;
+    gap: 6px 14px;
+    margin: 0 0 10px;
     color: var(--ink2);
-    font-size: 14px;
+    font-size: 13px;
   }
-  .more {
-    margin: 14px 0 0;
+  .okl {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
     font-size: 14px;
+    list-style: none;
   }
-  .more a {
-    font-weight: 600;
+  .okl li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    line-height: 20px;
   }
 </style>

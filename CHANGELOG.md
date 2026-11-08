@@ -238,6 +238,15 @@ How to use this file:
 
 ### Changed
 
+- Health shows when the last full scan ran under its title and opens with the overall status beside
+  its summary. Each area row shows its status, a green check when it has no alert, then the count; the
+  full scan and a History of new, resolved and scanned alerts sit side by side. An area page carries
+  its status and count under its title and no back link; each alert has its signs, what to do and, for
+  a disk, its surface beside it, with the measure now and before in one box, and the checks with no
+  alert close the page. Disks names each disk with its icon, its connection and letter, lists the
+  SMART values read as rows that open them, and shows each alert with its measure. Memory sets its
+  health beside the three memory tests and its overloads of the day beside the history of tests. Tests
+  read Has failures, No errors or Partial.
 - A freeze report opens with its title, date and Copy report at the right, then a line with its
   severity, duration and where it happened. The probable cause and what to do sit side by side, with
   what may also have contributed listed under the cause instead of folded away; the chart of the

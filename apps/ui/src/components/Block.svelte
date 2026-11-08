@@ -1,8 +1,11 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
+  import Icon, { type IconName } from "./Icon.svelte";
+
   let {
     title,
+    icon,
     first = false,
     tight = false,
     fill = false,
@@ -10,6 +13,8 @@
     children,
   }: {
     title: string;
+    /** A line icon before the title, in the accent colour. */
+    icon?: IconName;
     /** The block right under the page header has no divider above it. */
     first?: boolean;
     /** Less space around the divider, for dense pages. */
@@ -23,7 +28,7 @@
 
 <section class="block" class:first class:tight class:fill>
   <header>
-    <h2>{title}</h2>
+    <h2>{#if icon}<span class="ic"><Icon name={icon} /></span>{/if}{title}</h2>
     {#if actions}<div class="actions">{@render actions()}</div>{/if}
   </header>
   {@render children()}
@@ -62,8 +67,22 @@
     margin-bottom: 12px;
   }
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin: 0;
     font: 400 20px/1.3 var(--fd);
+  }
+  .ic {
+    display: flex;
+    color: var(--accent);
+  }
+  .ic :global(svg) {
+    width: 22px;
+    height: 22px;
+  }
+  .ic :global(svg *) {
+    vector-effect: non-scaling-stroke;
   }
   .actions {
     display: flex;

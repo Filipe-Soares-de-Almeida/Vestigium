@@ -16,68 +16,58 @@
 </script>
 
 <Block title={t("ui.health.scan.title")}>
-  <div class="body">
-    {#if health.phase === "running"}
-      <p class="status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.health.scan.running")}</p>
-    {:else}
-      {#if health.phase === "declined"}
-        <p role="status"><b>{t("ui.health.scan.declined.title")}</b> {t("ui.health.scan.declined.body")}</p>
-      {:else if health.phase === "failed"}
-        <p role="status"><b>{t("ui.health.scan.failed.title")}</b> {t("ui.health.scan.failed.body")}</p>
-      {:else if health.phase === "done"}
-        <p role="status">
-          <b>{t("ui.health.scan.done")}</b>
-          {health.found ? tn("ui.health.scan.done.found", health.found) : t("ui.health.scan.done.none")}
-        </p>
-      {/if}
-      <p>{t(level === "Technical" ? "ui.health.scan.lede.tech" : "ui.health.scan.lede")}</p>
-      <div class="line">
-        <AdminPill />
-        <button
-          type="button"
-          class="btn"
-          class:accent={health.phase !== "done"}
-          disabled={blocked}
-          onclick={() => void health.scan()}
-        >
-          <Icon name="shield" />
-          {health.phase === "declined" || health.phase === "failed"
-            ? t("ui.health.scan.again")
-            : t("ui.health.scan.start")}
-        </button>
-        <span>
-          {blocked
-            ? t("ui.health.scan.blocked")
-            : last === null
-              ? t("ui.health.scan.never")
-              : t("ui.health.scan.last", { when: when(last) })}
-        </span>
-      </div>
+  {#if health.phase === "running"}
+    <p class="p status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.health.scan.running")}</p>
+  {:else}
+    {#if health.phase === "declined"}
+      <p class="p" role="status"><b>{t("ui.health.scan.declined.title")}</b> {t("ui.health.scan.declined.body")}</p>
+    {:else if health.phase === "failed"}
+      <p class="p" role="status"><b>{t("ui.health.scan.failed.title")}</b> {t("ui.health.scan.failed.body")}</p>
+    {:else if health.phase === "done"}
+      <p class="p" role="status">
+        <b>{t("ui.health.scan.done")}</b>
+        {health.found ? tn("ui.health.scan.done.found", health.found) : t("ui.health.scan.done.none")}
+      </p>
     {/if}
-  </div>
+    <p class="p">{t(level === "Technical" ? "ui.health.scan.lede.tech" : "ui.health.scan.lede")}</p>
+    <p class="last">
+      {blocked
+        ? t("ui.health.scan.blocked")
+        : last === null
+          ? t("ui.health.scan.never")
+          : t("ui.health.scan.last", { when: when(last) })}
+    </p>
+    <div class="acts">
+      <button
+        type="button"
+        class="btn"
+        class:accent={health.phase !== "done"}
+        disabled={blocked}
+        onclick={() => void health.scan()}
+      >
+        <Icon name="lock" />
+        {health.phase === "declined" || health.phase === "failed"
+          ? t("ui.health.scan.again")
+          : t("ui.health.scan.start")}
+      </button>
+      <AdminPill />
+    </div>
+  {/if}
 </Block>
 
 <style>
-  .body {
-    display: grid;
-    gap: 10px;
+  .p b {
+    font-weight: 600;
   }
-  p {
-    max-width: 75ch;
+  .last {
     margin: 0;
     color: var(--ink2);
-    font-size: 14px;
-    line-height: 1.45;
-  }
-  p b {
-    color: var(--ink);
-    font-weight: 600;
+    font-size: 13px;
   }
   .status {
     display: flex;
     gap: 10px;
     align-items: center;
-    color: var(--ink);
   }
   .spin {
     flex: none;
@@ -92,14 +82,6 @@
     to {
       transform: rotate(360deg);
     }
-  }
-  .line {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    align-items: center;
-    color: var(--ink2);
-    font-size: 13px;
   }
   @media (prefers-reduced-motion: reduce) {
     .spin {

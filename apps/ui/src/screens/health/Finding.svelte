@@ -10,7 +10,8 @@
   import type { DetailLevel, FindingDto, TweakId } from "../../lib/types";
   import DiskMap from "../tests/DiskMap.svelte";
   import { diskSurface } from "../tests/words";
-  import { findingView, valueText } from "./words";
+  import { diskName } from "../../lib/groups";
+  import { findingView, subjectName, valueText } from "./words";
 
   let { finding, level, first = false }: { finding: FindingDto; level: DetailLevel; first?: boolean } = $props();
 
@@ -53,7 +54,9 @@
     const number = typeof s === "object" && "Disk" in s ? Number(s.Disk.split(" ")[0]) : NaN;
     const disk = hwtests.dto?.disks.find((d) => d.number === number);
     const scan = disk && hwtests.dto ? diskSurface(hwtests.dto, disk) : null;
-    return scan && scan.from_bytes === 0 && scan.to_bytes >= scan.disk_bytes ? { scan, name: disk!.name } : null;
+    if (!scan || scan.from_bytes !== 0 || scan.to_bytes < scan.disk_bytes) return null;
+    const letter = subjectName(finding.subject);
+    return { scan, name: disk!.name, title: letter ? `${diskName(disk!)} (${letter})` : diskName(disk!) };
   });
   /** Steps already link to Tests, so a test needs no button of its own. */
   const linked = $derived(view.steps.some((s) => s.key === "RunDiskTest" || s.key === "RunMemoryDiagnostic"));
@@ -71,58 +74,51 @@
 </script>
 
 <section class="finding" class:first aria-labelledby="finding-{finding.id}">
-  <header>
+  <header class="sec-h">
     <h2 id="finding-{finding.id}">{view.title}</h2>
-    <p class="meta">
-      <StatusMark kind={finding.concern === "Critical" ? "critical" : "attention"} />
-      <span>{view.since}</span>
-    </p>
   </header>
-  <p class="why">{view.why}</p>
-  <p class="lab">
-    <span>{t("ui.health.ruler.now")} <b>{view.value}</b></span>
-    {#if then}<span>{then.label} <b>{then.value}</b></span>{/if}
-  </p>
-  {#if map}
-    <DiskMap scan={map.scan} diskBytes={map.scan.disk_bytes} name={map.name} {level} />
-  {/if}
-  <div class="two">
-    <div>
-      <h3>{t("ui.health.evidence")}</h3>
-      <ul class="ev">
+  <div class="grid" class:map={map !== null}>
+    <div class="text">
+      <p class="state">
+        <StatusMark kind={finding.concern === "Critical" ? "critical" : "attention"} />
+        <span>{view.since}</span>
+      </p>
+      <p class="p">{view.why}</p>
+      <p class="trend">
+        <span><b>{t("ui.health.ruler.now")}</b> {view.value}</span>
+        {#if then}<span class="sep" aria-hidden="true">·</span><span><b>{then.label}</b> {then.value}</span>{/if}
+      </p>
+      <h3 class="h3">{t("ui.health.evidence")}</h3>
+      <ul class="ev-l">
         {#each view.evidence as line, i (i)}
-          <li>
-            <span class="bullet" class:first={i === 0} aria-hidden="true"></span>
-            <span>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</span>
-          </li>
+          <li>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</li>
         {/each}
       </ul>
-    </div>
-    <div>
-      <h3>{t("ui.occurrence.todo.title")}</h3>
+      <h3 class="h3">{t("ui.occurrence.todo.title")}</h3>
       {#if view.steps.length}
         <Steps steps={view.steps.map((s) => (s.key === "RunDiskTest" && test ? { ...s, href: test } : s))} />
       {:else}
-        <p class="muted none">{t("ui.health.todo.none")}</p>
+        <p class="empty">{t("ui.health.todo.none")}</p>
       {/if}
       {#if view.security}
-        <p class="secure"><Icon name="shield" /><span>{t("ui.health.secure")}</span></p>
+        <p class="note secure"><Icon name="shield" /><span>{t("ui.health.secure")}</span></p>
       {/if}
-    </div>
-  </div>
-  {#if actions.length}
-    <div class="foot">
       {#each actions as action (action.key)}
-        <a class="btn" href={action.href}><Icon name={action.icon} />{action.label}</a>
+        <p class="more"><a href={action.href}>{action.label}</a></p>
       {/each}
     </div>
-  {/if}
+    {#if map}
+      <div class="side">
+        <h3 class="h3">{t("ui.health.surface", { name: map.title })}</h3>
+        <DiskMap scan={map.scan} diskBytes={map.scan.disk_bytes} name={map.name} {level} />
+      </div>
+    {/if}
+  </div>
 </section>
 
 <style>
   .finding {
-    display: grid;
-    gap: 14px;
+    min-width: 0;
     margin-top: 32px;
     padding-top: 28px;
     border-top: 1px solid var(--rule);
@@ -132,110 +128,72 @@
     padding-top: 0;
     border-top: 0;
   }
+  .sec-h {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    margin-bottom: 12px;
+  }
   h2 {
     margin: 0;
-    font: 400 20px/1.3 var(--fd);
   }
-  .meta {
+  .grid {
+    display: grid;
+    gap: 24px 48px;
+  }
+  @container content (min-width: 900px) {
+    .grid.map {
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+    }
+  }
+  .text {
+    min-width: 0;
+  }
+  .side .h3 {
+    margin-top: 0;
+  }
+  .state {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 12px;
     align-items: center;
-    margin: 4px 0 0;
+    gap: 6px 14px;
+    margin: 0 0 10px;
     color: var(--ink2);
     font-size: 13px;
   }
-  .why {
-    max-width: 75ch;
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.55;
-  }
-  .lab {
-    display: flex;
+  .trend {
+    display: inline-flex;
     flex-wrap: wrap;
-    gap: 4px 24px;
-    margin: 0;
-    color: var(--ink2);
-    font-size: 13px;
+    gap: 4px 10px;
+    margin: 2px 0 4px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--hover);
+    font-size: 14px;
   }
-  .lab b {
-    color: var(--ink);
+  .trend b {
     font-weight: 600;
   }
-  .two {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    gap: 18px;
+  .sep {
+    color: var(--ink3);
   }
-  h3 {
-    margin: 0 0 8px;
-    color: var(--ink2);
-    font: 600 13px/1.35 var(--f);
+  .h3 {
+    margin: 20px 0 8px;
   }
-  .ev {
-    display: grid;
-    gap: 8px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .ev li {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 8px;
-    line-height: 1.45;
-    overflow-wrap: anywhere;
-  }
-  .ev small {
+  .ev-l small {
     display: block;
     color: var(--ink2);
     font-size: 13px;
   }
-  .bullet {
-    width: 6px;
-    height: 6px;
-    margin: 0.5em 0 0 6px;
-    border-radius: 50%;
-    background: var(--ink3);
-  }
-  .bullet.first {
-    background: var(--accent);
-  }
-  .none {
-    margin: 0;
-  }
   .secure {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: flex-start;
-    margin: 12px 0 0;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: var(--card2);
-    color: var(--ink2);
-    font-size: 13px;
-    line-height: 1.45;
   }
   .secure :global(svg) {
     flex: none;
     width: 16px;
     height: 16px;
-  }
-  .foot {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  @container content (max-width: 720px) {
-    .two {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-  @media (forced-colors: active) {
-    .bullet {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
+    margin-top: 1px;
   }
 </style>
