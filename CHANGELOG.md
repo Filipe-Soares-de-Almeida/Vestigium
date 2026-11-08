@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- The watcher stores each disk's SMART attributes once a day, from the health pass that already reads
+  them; an idle hard disk is still never woken for it.
 - The database keeps one reading a day of each SMART attribute of each disk, deleted with the records
   retention and by Clear history.
 - A process in an occurrence's technical tables opens its own page with its peak CPU, memory and disk

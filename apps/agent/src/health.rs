@@ -39,6 +39,8 @@ pub struct HealthPass<S> {
     source: S,
     /// Last reading of each disk, kept while an HDD sleeps.
     disks: BTreeMap<String, DiskHealth>,
+    /// The UTC day of each disk's last stored SMART reading.
+    smart_day: BTreeMap<String, i64>,
     antivirus: Option<Vec<SecurityProduct>>,
     antivirus_read_ms: Option<i64>,
 }
@@ -48,6 +50,7 @@ impl<S: HealthSource> HealthPass<S> {
         HealthPass {
             source,
             disks: BTreeMap::new(),
+            smart_day: BTreeMap::new(),
             antivirus: None,
             antivirus_read_ms: None,
         }
@@ -69,6 +72,11 @@ impl<S: HealthSource> HealthPass<S> {
                 continue;
             }
             if let Some(health) = self.source.disk(index, &disk.name, now.ts_ms) {
+                let day = health.read_ms.div_euclid(DAY_MS);
+                if !health.attributes.is_empty() && self.smart_day.get(&disk.name) != Some(&day) {
+                    store.record_smart(&health)?;
+                    self.smart_day.insert(disk.name.clone(), day);
+                }
                 self.disks.insert(disk.name.clone(), health);
             }
         }
@@ -148,6 +156,7 @@ mod tests {
     use vestigium_core::{DiskInfo, Episode};
 
     use super::*;
+    use vestigium_core::health::SmartAttribute;
 
     const GB: u64 = 1 << 30;
     const NOW: i64 = 100 * DAY_MS;
@@ -168,7 +177,12 @@ mod tests {
                 name: name.to_string(),
                 read_ms: now_ms,
                 predict_failure: self.failing_disk,
-                attributes: Vec::new(),
+                attributes: vec![SmartAttribute {
+                    id: 9,
+                    current: 100,
+                    worst: 100,
+                    raw: now_ms.div_euclid(DAY_MS) as u64,
+                }],
                 nvme: None,
             })
         }
@@ -264,6 +278,32 @@ mod tests {
         assert_eq!(second.changes, 1);
         assert_eq!(second.critical, 0);
         assert!(store.open_findings().unwrap().is_empty());
+    }
+
+    #[test]
+    fn smart_is_stored_once_a_day_per_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let mut pass = HealthPass::new(FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        });
+
+        run(&mut pass, &mut store, NOW, &[]);
+        run(&mut pass, &mut store, NOW + DAY_MS / 24, &[]);
+        run(&mut pass, &mut store, NOW + DAY_MS, &[]);
+
+        let days: Vec<i64> = store
+            .smart_history("0 C:", 9, 0)
+            .unwrap()
+            .iter()
+            .map(|r| r.read_ms)
+            .collect();
+        assert_eq!(days, [NOW, NOW + DAY_MS], "the first reading of each day");
+        assert!(
+            store.smart_history("1 D:", 9, 0).unwrap().is_empty(),
+            "an idle HDD is never read"
+        );
     }
 
     #[test]
