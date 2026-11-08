@@ -2082,5 +2082,11 @@
   "ui.health.kind.VolumeErrors.count.zero": "nenhuma verificação com problemas",
   "ui.occurrence.step.RunMemoryDiagnostic": "Rode o Diagnóstico de Memória do Windows em Testes; ele roda no próximo reinício.",
   "ui.occurrence.step.RunMemTest86": "Confirme com o MemTest86 (pendrive de boot) para achar o pente com defeito.",
-  "ui.occurrence.step.RepairVolume": "Repare o volume: Propriedades › Ferramentas › Verificar, e reinicie quando o Windows pedir."
+  "ui.occurrence.step.RepairVolume": "Repare o volume: Propriedades › Ferramentas › Verificar, e reinicie quando o Windows pedir.",
+  "ui.status.critical": "Crítico",
+  "ui.status.overload": "Sobrecarga",
+  "ui.status.attention": "Atenção",
+  "ui.status.ok": "Sem alerta",
+  "ui.status.info": "Informativo",
+  "ui.admin.required": "Requer administrador"
 }

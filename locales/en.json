@@ -2082,5 +2082,11 @@
   "ui.health.kind.VolumeErrors.count.zero": "no check with problems",
   "ui.occurrence.step.RunMemoryDiagnostic": "Run Windows Memory Diagnostic from Tests; it runs at the next restart.",
   "ui.occurrence.step.RunMemTest86": "Confirm with MemTest86 (bootable USB stick) to find the faulty module.",
-  "ui.occurrence.step.RepairVolume": "Repair the volume: Properties › Tools › Check, and restart when Windows asks."
+  "ui.occurrence.step.RepairVolume": "Repair the volume: Properties › Tools › Check, and restart when Windows asks.",
+  "ui.status.critical": "Critical",
+  "ui.status.overload": "Overload",
+  "ui.status.attention": "Attention",
+  "ui.status.ok": "No alert",
+  "ui.status.info": "Info",
+  "ui.admin.required": "Requires administrator"
 }
