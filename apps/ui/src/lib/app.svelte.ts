@@ -1,5 +1,5 @@
 import { agentStatus, setPaused, setSettings, settings, startAgent, timeline } from "./api";
-import { errorText } from "./errors";
+import { errorKind, errorText } from "./errors";
 import { t } from "./i18n.svelte";
 import { applySettings } from "./prefs";
 import { toast } from "./toast.svelte";
@@ -54,8 +54,13 @@ class App {
 
   async load(): Promise<void> {
     this.failure = null;
-    const [link, history] = await Promise.allSettled([agentStatus(), probeHistory()]);
+    let [link, history] = await Promise.allSettled([agentStatus(), probeHistory()]);
     if (link.status === "fulfilled") this.link = link.value;
+    // The window only reads; a history left mid-write needs the watcher to open it, so start it and ask again.
+    if (history.status === "rejected" && errorKind(history.reason) === "store" && this.link?.link === "stopped") {
+      await this.startWatcher();
+      [history] = await Promise.allSettled([probeHistory()]);
+    }
     try {
       if (link.status === "rejected") throw link.reason;
       if (history.status === "rejected") throw history.reason;
