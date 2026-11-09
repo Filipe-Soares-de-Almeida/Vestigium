@@ -263,6 +263,8 @@ How to use this file:
 
 ### Changed
 
+- The installer and uninstaller speak the Windows language, English or Brazilian Portuguese, and
+  Apps & features lists Vestigium as the publisher with a link to the project.
 - Every drop-down list, in Settings (language, data retention, pause length) and on the Events,
   History and program screens, opens the same list drawn like the search panel instead of the Windows
   one, with the arrow inside the field, the chosen option marked and the keyboard keys of a list box.

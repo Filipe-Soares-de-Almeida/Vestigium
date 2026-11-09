@@ -9,6 +9,7 @@ fn main() {
         .set_icon(ICON)
         .set("FileDescription", "Vestigium")
         .set("ProductName", "Vestigium")
+        .set("CompanyName", "Vestigium")
         .set("InternalName", "Vestigium")
         .set("OriginalFilename", "Vestigium.exe");
     resource

@@ -22,6 +22,7 @@ fn main() {
         .set_manifest(MANIFEST)
         .set("FileDescription", "Vestigium elevated helper")
         .set("ProductName", "Vestigium")
+        .set("CompanyName", "Vestigium")
         .set("InternalName", "Vestigium.Helper")
         .set("OriginalFilename", "Vestigium.Helper.exe");
     // Only the binary asks for elevation; the library's test executable must run without it.
