@@ -116,10 +116,10 @@
       {@const from = formatTime(points[0].ts_ms)}
       {@const to = t("ui.detail.process.now_word")}
       <Block title={t("ui.detail.process.cpu_recent")}>
-        <Spark values={points.map((p) => p.cpu_pct)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.cpu_of", { name })} {from} {to} />
+        <Spark values={points.map((p) => p.cpu_pct)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.cpu_of", { name })} {from} {to} format={(v) => formatPercent(v, 1)} />
       </Block>
       <Block title={t("ui.detail.process.mem_recent")}>
-        <Spark values={points.map((p) => p.private_bytes)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.mem_of", { name })} {from} {to} />
+        <Spark values={points.map((p) => p.private_bytes)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.mem_of", { name })} {from} {to} format={formatBytes} />
       </Block>
     {:else}
       <Block title={t("ui.detail.process.cpu_recent")}>

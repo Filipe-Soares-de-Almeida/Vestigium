@@ -259,6 +259,9 @@ How to use this file:
 
 ### Changed
 
+- The small line charts on the program, process and SMART pages read out the time and value under the
+  pointer or the arrow keys, zoom like the other time charts (Ctrl + wheel, + and −, drag, 0 resets)
+  and break the line where readings are missing.
 - A program's page shows its PID, when it started, its threads and processes, the path of its file,
   who signed it, the user it runs as, and today's freezes and overloads that involve it.
 - A program's page shows lines of its CPU use and memory over the last 10 minutes, refreshed every 5

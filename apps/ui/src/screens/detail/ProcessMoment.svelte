@@ -74,10 +74,10 @@
       {@const from = formatClock(readings[0].ts)}
       {@const to = formatClock(readings[readings.length - 1].ts)}
       <Block title={t("ui.detail.process.cpu_window")}>
-        <Spark values={readings.map((r) => r.e.cpu_pct)} at={readings.map((r) => r.ts)} label={t("ui.detail.process.cpu_of", { name })} {from} {to} />
+        <Spark values={readings.map((r) => r.e.cpu_pct)} at={readings.map((r) => r.ts)} label={t("ui.detail.process.cpu_of", { name })} {from} {to} format={(v) => formatPercent(v, 1)} />
       </Block>
       <Block title={t("ui.detail.process.mem_window")}>
-        <Spark values={readings.map((r) => r.e.private_bytes)} at={readings.map((r) => r.ts)} label={t("ui.detail.process.mem_of", { name })} {from} {to} />
+        <Spark values={readings.map((r) => r.e.private_bytes)} at={readings.map((r) => r.ts)} label={t("ui.detail.process.mem_of", { name })} {from} {to} format={formatBytes} />
       </Block>
     {:else}
       <Block title={t("ui.detail.process.cpu_window")}>

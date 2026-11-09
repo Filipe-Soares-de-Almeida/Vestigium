@@ -73,6 +73,7 @@
           label={t("ui.detail.smart.course", { name: attrName(attr), from: formatNumber(points[0].raw), to: formatNumber(points[points.length - 1].raw) })}
           from={formatDayShort(points[0].read_ms)}
           to={formatDayShort(points[points.length - 1].read_ms)}
+          when={formatDayShort}
         />
       {:else if points}
         <p class="p">{t("ui.detail.smart.days_none")}</p>
