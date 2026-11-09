@@ -480,6 +480,10 @@ How to use this file:
 
 ### Fixed
 
+- Texts match what Vestigium does: the update dialog says monitoring pauses for the few seconds the
+  install takes; the two-antivirus step says to uninstall the one you do not need, never to turn
+  protection off; the technical stutter line gives the real range, 8 to 250 ms; and a few screens say
+  Vestigium monitors the PC, not that it watches it.
 - The report chart no longer shows a solid red block where the PC stopped responding: the span is
   striped, a note under the chart says the lines break there because nothing could be read, and
   pointing inside it lists what Windows logged in that second. Events a second apart share one dot.
