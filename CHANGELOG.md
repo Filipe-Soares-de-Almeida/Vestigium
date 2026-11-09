@@ -268,6 +268,8 @@ How to use this file:
 
 ### Changed
 
+- When a screen cannot load, "Technical details" under the message shows what failed, to paste into
+  a bug report.
 - The first time the window opens, it starts monitoring by itself instead of showing "Vestigium is not
   running" and waiting for a click. Later, if you exit the monitor, the window still asks first.
 - The README is a short page that shows Vestigium at work, in a screenshot and an 11-second video, and
