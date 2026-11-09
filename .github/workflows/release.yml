@@ -1,7 +1,7 @@
 name: Release
 
-# A v* tag on main publishes the release. Run by hand, it builds and signs the installer and keeps it
-# as a workflow artifact, publishing nothing.
+# A v* tag on main builds a draft release to check and publish by hand. Run by hand, it builds and signs
+# the installer and keeps it as a workflow artifact, publishing nothing.
 on:
   push:
     tags: ["v*"]
@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -57,12 +59,28 @@ jobs:
         shell: pwsh
         run: ./tools/release.ps1 -Version $env:VERSION -Out release
 
-      - name: Publish the release
+      - name: Write the checksums
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $setup = "target/release/bundle/nsis/Vestigium_$($env:VERSION)_x64-setup.exe"
+          $lines = foreach ($file in @($setup, "$setup.sig", 'release/latest.json')) {
+              "$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $file -Leaf)"
+          }
+          [System.IO.File]::WriteAllText("$PWD/release/SHA256SUMS.txt", ($lines -join "`n") + "`n")
+
+      - name: Attest where the installer was built
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/release/bundle/nsis/*-setup.exe
+
+      - name: Draft the release
         if: github.event_name == 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $setup = "target/release/bundle/nsis/Vestigium_$($env:VERSION)_x64-setup.exe"
-          gh release create $env:GITHUB_REF_NAME $setup "$setup.sig" release/latest.json `
-            --title "Vestigium $env:VERSION" --notes-file release/release-notes.md --verify-tag
+          gh release create $env:GITHUB_REF_NAME $setup "$setup.sig" release/latest.json release/SHA256SUMS.txt `
+            --title "Vestigium $env:VERSION" --notes-file release/release-notes.md --verify-tag --draft

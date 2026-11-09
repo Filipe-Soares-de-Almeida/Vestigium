@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- Each release lists the SHA-256 of its files in `SHA256SUMS.txt` and carries a build attestation, and
+  its notes say how to install it and check the download.
 - New issues open from forms: a bug report, help with a diagnosis (paste the app's Copy report),
   a feature request, a translation problem and an accessibility barrier.
 - The repository has a contributing guide, a code of conduct, a security policy with private

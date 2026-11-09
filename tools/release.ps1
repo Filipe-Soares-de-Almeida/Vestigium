@@ -67,6 +67,33 @@ $feed = [ordered]@{
 
 New-Item -ItemType Directory -Force $Out | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $Out 'latest.json'), ($feed | ConvertTo-Json -Depth 5), $utf8)
-[System.IO.File]::WriteAllText((Join-Path $Out 'release-notes.md'), "$english`n", $utf8)
+# The page's notes add how to install and verify; the in-app dialog shows only the changelog section.
+$footer = @'
+
+---
+
+### Install
+
+Download `{installer}` below and run it. It installs for your user only and needs no administrator rights.
+
+Vestigium {version} is not code-signed yet. Windows may show "Windows protected your PC": check that the file
+came from this page and that its SHA-256 matches `SHA256SUMS.txt`, then choose **More info**, then
+**Run anyway**. Windows asks for administrator rights only when you start a task that needs them, and that
+prompt names an unknown publisher. On Windows 11 with Smart App Control turned on, Windows blocks apps that
+are not signed.
+
+### Verify your download
+
+```powershell
+(Get-FileHash .\{installer} -Algorithm SHA256).Hash
+```
+
+The result must match the installer's line in `SHA256SUMS.txt`, ignoring letter case. With the GitHub CLI,
+`gh attestation verify {installer} -R {repo}` checks that this repository's release workflow built it.
+
+[Full changelog](https://github.com/{repo}/blob/v{version}/CHANGELOG.md)
+'@
+$footer = $footer.Replace('{installer}', $installer).Replace('{version}', $Version).Replace('{repo}', $Repo)
+[System.IO.File]::WriteAllText((Join-Path $Out 'release-notes.md'), "$english`n$footer", $utf8)
 $languages = if ($portuguese) { 'en, pt-BR' } else { 'en' }
 "Release $Version ($languages): $(Join-Path $Out 'latest.json'), $(Join-Path $Out 'release-notes.md')"
