@@ -1,0 +1,25 @@
+name: Wiki
+
+# Publishes the wiki/ folder to the repository's wiki when it changes on dev.
+# Page links written as ./Page.md become wiki links on the way.
+on:
+  push:
+    branches: [dev]
+    paths: [wiki/**]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish the wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: Andrew-Chen-Wang/github-wiki-action@1bbb4280446f9630e8e21a18012cbacf3b0f992e # v5.0.6

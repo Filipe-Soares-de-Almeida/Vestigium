@@ -1,0 +1,42 @@
+What Vestigium keeps, where it keeps it, what leaves the PC, and how to delete it.
+
+## What leaves the PC
+
+Nothing, unless you allow the update check. There is no account and no telemetry.
+
+- **The update check**, when on, asks GitHub for the newest version when the window opens, at most once a day. It sends no PC data; like any request on the internet, it reaches GitHub from your connection's address.
+- **Reading crash dumps** happens on the PC, with no internet connection.
+- **Copy report** and **Copy result** put text on your clipboard. Where it goes next is up to you; see [Reporting a problem](./Reporting-a-problem.md).
+
+## What Vestigium keeps
+
+- Readings of the CPU, the memory, the disks and the GPU, once a second, and a summary of each minute.
+- The busiest programs every few seconds: their names, and how much CPU, memory, disk and GPU each used.
+- The Windows events that matter for freezes and crashes, read from Windows' own logs: disk errors, shutdowns, blue screens, crashes and hardware errors.
+- Reports, overload periods, Health alerts, test results, captures and what each dump said.
+- The Windows settings changed in Optimizations, with their previous values.
+- Your settings, and the PC's processor count, memory size and disk list.
+
+**Settings › Data retention** sets how long each kind of data is kept. See [Settings](./Settings.md#data-retention).
+
+## Where the data lives
+
+| Path | What it is |
+|---|---|
+| `%LOCALAPPDATA%\Vestigium\data\vestigium.db` | The history and the settings. Two companion files, ending in `-wal` and `-shm`, sit beside it while Vestigium runs. |
+| `%LOCALAPPDATA%\Vestigium\data\blackbox.ring` | The last few minutes of readings, kept on disk so a report after an unexpected shutdown can show what came before it. |
+| The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of tests, captures, scans and administrator tasks, waiting to be read into the history. Each file is removed once read. |
+| `%LOCALAPPDATA%\app.vestigium\updates.json` | Whether to check for updates, when it last checked, and the last version whose notes you saw. |
+| `%LOCALAPPDATA%\app.vestigium\EBWebView` | The window's own browser files. |
+
+**Settings › Privacy and data › Open the data folder** opens the first folder.
+
+## Delete the history
+
+In **Settings › Privacy and data**, select **Delete the history…**, then **Delete everything**. It deletes the timeline, freezes, reports, Health alerts, tests, captures, what the dumps said and the Windows events read. It cannot be undone.
+
+Your settings stay, and so does the list of Windows settings changed in Optimizations, so each change can still be undone.
+
+## Delete everything
+
+Uninstall Vestigium with **Delete the application data** ticked, or delete both folders above after uninstalling. See [Uninstalling](./Uninstalling.md).

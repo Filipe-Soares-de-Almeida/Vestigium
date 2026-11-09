@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- A user guide in the repository's wiki: installing, the first run, the Windows security warnings, the
+  administrator prompts, updating and uninstalling, every screen, an FAQ, troubleshooting, how to report
+  a problem, privacy and data, and a glossary.
 - Each release lists the SHA-256 of its files in `SHA256SUMS.txt` and carries a build attestation, and
   its notes say how to install it and check the download.
 - New issues open from forms: a bug report, help with a diagnosis (paste the app's Copy report),
