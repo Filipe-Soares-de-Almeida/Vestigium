@@ -12,6 +12,8 @@ permissions:
 jobs:
   title:
     name: Title follows Conventional Commits
+    # Dependabot writes its own titles, already prefixed build(deps) or build(ci), often past 50 characters.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
