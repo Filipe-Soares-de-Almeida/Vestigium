@@ -3,6 +3,7 @@ name: Changelog
 on:
   pull_request:
     branches: [main, dev]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   entry-present:
