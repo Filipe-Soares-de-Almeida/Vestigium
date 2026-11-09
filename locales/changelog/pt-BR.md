@@ -7,7 +7,7 @@ At release time, copy the version's section from CHANGELOG.md, keep its headings
 entries. A version missing here shows its English notes.
 -->
 
-## [0.1.0] - 2026-11-08
+## [0.1.0] - 2026-11-09
 
 A primeira versão.
 
