@@ -259,48 +259,48 @@ function storageFreeze(): OccurrenceDto {
       return { ...base, c: { active: 8 + n(3), latency: 3 + n(0.8), bps: 2 * MB } };
     },
     procs: (rel) => [
-      proc(9120, "steam.exe", 6.2, 410 * MB, rel >= -26 && rel < 0 ? 205 * MB : 1 * MB),
-      proc(4412, "chrome.exe", 4.1, 3.2 * GB, 1 * MB),
+      proc(9120, "Launcher.exe", 6.2, 410 * MB, rel >= -26 && rel < 0 ? 205 * MB : 1 * MB),
+      proc(4412, "Browser.exe", 4.1, 3.2 * GB, 1 * MB),
       proc(3876, "MsMpEng.exe", 2.3, 220 * MB, 12 * MB),
-      proc(7312, "Discord.exe", 0.9, 498 * MB, 0),
+      proc(7312, "Chatter.exe", 0.9, 498 * MB, 0),
       proc(5520, "explorer.exe", 0.4, 98 * MB, 0),
     ],
     events: [reset, retry],
-    hangs: [{ pid: 7312, name: "Discord.exe", start_ms: start + 8000, end_ms: start + 11000, outcome: "Recovered" }],
+    hangs: [{ pid: 7312, name: "Chatter.exe", start_ms: start + 8000, end_ms: start + 11000, outcome: "Recovered" }],
     suspects: [
       suspect({ Storage: { disk: "0 C:" } }, "High", [
         { Event: { ts_ms: reset.ts_ms, provider: "storahci", id: 129, meaning: "StorageReset" } },
         { Event: { ts_ms: retry.ts_ms, provider: "disk", id: 153, meaning: "DiskRetry" } },
         m(start - 1000, "DiskLatencyMs", 2140, 200, "0 C:"),
       ], ["UpdateStorageDriver", "CheckDiskCable", "RunDiskTest"]),
-      suspect({ DiskIo: { disk: "0 C:", hdd: false, process: "steam.exe" } }, "Medium", [
+      suspect({ DiskIo: { disk: "0 C:", hdd: false, process: "Launcher.exe" } }, "Medium", [
         m(start - 1000, "DiskLatencyMs", 2140, 200, "0 C:"),
         m(start - 1000, "DiskQueue", 31, 8, "0 C:"),
         m(start - 5000, "DiskActivePct", 100, 90, "0 C:"),
-        { Process: { pid: 9120, name: "steam.exe", metric: "IoBytesPerS", value: 162 * MB } },
+        { Process: { pid: 9120, name: "Launcher.exe", metric: "IoBytesPerS", value: 162 * MB } },
       ], ["FindDiskHeavyApp"]),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "CpuPct", name: "steam.exe", value: 6.2 } }],
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "chrome.exe", value: 3.2 * GB } }],
-      [-26_000, { Busiest: { metric: "IoBytesPerS", name: "steam.exe", value: 205 * MB } }],
+      [-60_000, { Busiest: { metric: "CpuPct", name: "Launcher.exe", value: 6.2 } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 3.2 * GB } }],
+      [-26_000, { Busiest: { metric: "IoBytesPerS", name: "Launcher.exe", value: 205 * MB } }],
       [-9000, { Crossed: { metric: "DiskLatencyMs", value: 2140, threshold: 200, subject: "0 C:" } }],
       [-9000, { Crossed: { metric: "DiskQueue", value: 31, threshold: 8, subject: "0 C:" } }],
       [0, { FreezeStarted: { duration_ms: 6812 } }],
       [1000, { Event: { meaning: "StorageReset", provider: "storahci", id: 129 } }],
       [2000, { Event: { meaning: "DiskRetry", provider: "disk", id: 153 } }],
       [6800, "FreezeEnded"],
-      [8000, { AppHung: { name: "Discord.exe" } }],
-      [11_000, { AppRecovered: { name: "Discord.exe" } }],
+      [8000, { AppHung: { name: "Chatter.exe" } }],
+      [11_000, { AppRecovered: { name: "Chatter.exe" } }],
     ],
   });
 }
 
-/** Discord stopped answering for 12 s while the rest of the PC was calm. */
+/** Chatter stopped answering for 12 s while the rest of the PC was calm. */
 function appHang(): OccurrenceDto {
   const start = at(9, 14, 7);
   const calm = steady(2, 9, 55);
-  const span: HangSpan = { pid: 7312, name: "Discord.exe", start_ms: start, end_ms: start + 12_000, outcome: "Recovered" };
+  const span: HangSpan = { pid: 7312, name: "Chatter.exe", start_ms: start, end_ms: start + 12_000, outcome: "Recovered" };
   return build({
     id: 2,
     start,
@@ -310,24 +310,24 @@ function appHang(): OccurrenceDto {
     triggers: [{ AppHang: span }],
     moment: calm,
     procs: () => [
-      proc(7312, "Discord.exe", 0.4, 512 * MB, 0),
-      proc(4412, "chrome.exe", 3.1, 2.8 * GB, 120 * 1024),
+      proc(7312, "Chatter.exe", 0.4, 512 * MB, 0),
+      proc(4412, "Browser.exe", 3.1, 2.8 * GB, 120 * 1024),
       proc(5520, "explorer.exe", 0.8, 96 * MB, 0),
     ],
     hangs: [span],
     suspects: [
-      suspect({ App: { name: "Discord.exe" } }, "High", [
-        { Hang: { name: "Discord.exe", duration_ms: 12_000 } },
-        { Process: { pid: 7312, name: "Discord.exe", metric: "CpuPct", value: 0.4 } },
-        { Process: { pid: 7312, name: "Discord.exe", metric: "IoBytesPerS", value: 0 } },
+      suspect({ App: { name: "Chatter.exe" } }, "High", [
+        { Hang: { name: "Chatter.exe", duration_ms: 12_000 } },
+        { Process: { pid: 7312, name: "Chatter.exe", metric: "CpuPct", value: 0.4 } },
+        { Process: { pid: 7312, name: "Chatter.exe", metric: "IoBytesPerS", value: 0 } },
       ], ["ReportToAppVendor"]),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "CpuPct", name: "chrome.exe", value: 3.1 } }],
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "chrome.exe", value: 2.8 * GB } }],
-      [-60_000, { Busiest: { metric: "IoBytesPerS", name: "chrome.exe", value: 120 * 1024 } }],
-      [0, { AppHung: { name: "Discord.exe" } }],
-      [12_000, { AppRecovered: { name: "Discord.exe" } }],
+      [-60_000, { Busiest: { metric: "CpuPct", name: "Browser.exe", value: 3.1 } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 2.8 * GB } }],
+      [-60_000, { Busiest: { metric: "IoBytesPerS", name: "Browser.exe", value: 120 * 1024 } }],
+      [0, { AppHung: { name: "Chatter.exe" } }],
+      [12_000, { AppRecovered: { name: "Chatter.exe" } }],
     ],
   });
 }
@@ -354,24 +354,24 @@ function diskEpisode(): OccurrenceDto {
       };
     },
     procs: (rel) => [
-      proc(6204, "msedge.exe", 6, 1.4 * GB, rel >= -50 ? 25 * MB : 2 * MB),
-      proc(9930, "Code.exe", 3.2, 1.8 * GB, 0.2 * MB),
+      proc(6204, "Browser.exe", 6, 1.4 * GB, rel >= -50 ? 25 * MB : 2 * MB),
+      proc(9930, "Editor.exe", 3.2, 1.8 * GB, 0.2 * MB),
       proc(3344, "SearchIndexer.exe", 2, 120 * MB, 9 * MB),
-      proc(8812, "OneDrive.exe", 1.5, 210 * MB, 6 * MB),
+      proc(8812, "CloudSync.exe", 1.5, 210 * MB, 6 * MB),
     ],
     suspects: [
-      suspect({ DiskIo: { disk: "1 D:", hdd: true, process: "msedge.exe" } }, "High", [
+      suspect({ DiskIo: { disk: "1 D:", hdd: true, process: "Browser.exe" } }, "High", [
         m(start - 3000, "DiskLatencyMs", 912, 200, "1 D:"),
         m(start - 3000, "DiskQueue", 19, 8, "1 D:"),
         m(start - 8000, "DiskActivePct", 100, 90, "1 D:"),
-        { Process: { pid: 6204, name: "msedge.exe", metric: "IoBytesPerS", value: 24.6 * MB } },
+        { Process: { pid: 6204, name: "Browser.exe", metric: "IoBytesPerS", value: 24.6 * MB } },
       ], ["FindDiskHeavyApp", "RunDiskTest"]),
       suspect({ Driver: { core: 0 } }, "Low", [m(start - 2000, "CoreDpcIsrPct", 23, 20, "0")], ["DeepCapture"]),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "CpuPct", name: "msedge.exe", value: 6 } }],
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Code.exe", value: 1.8 * GB } }],
-      [-50_000, { Busiest: { metric: "IoBytesPerS", name: "msedge.exe", value: 25 * MB } }],
+      [-60_000, { Busiest: { metric: "CpuPct", name: "Browser.exe", value: 6 } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Editor.exe", value: 1.8 * GB } }],
+      [-50_000, { Busiest: { metric: "IoBytesPerS", name: "Browser.exe", value: 25 * MB } }],
       [-50_000, { Crossed: { metric: "DiskLatencyMs", value: 912, threshold: 200, subject: "1 D:" } }],
       [-50_000, { Crossed: { metric: "DiskQueue", value: 19, threshold: 8, subject: "1 D:" } }],
       [-3000, { Crossed: { metric: "CoreDpcIsrPct", value: 23, threshold: 20, subject: "0" } }],
@@ -404,24 +404,24 @@ function memoryEpisode(): OccurrenceDto {
       };
     },
     procs: () => [
-      proc(4412, "chrome.exe", 3.5, 9.1 * GB, 200 * 1024),
-      proc(9930, "Code.exe", 1.2, 1.8 * GB, 0),
+      proc(4412, "Browser.exe", 3.5, 9.1 * GB, 200 * 1024),
+      proc(9930, "Editor.exe", 1.2, 1.8 * GB, 0),
       proc(3876, "MsMpEng.exe", 2, 230 * MB, 1 * MB),
-      proc(7312, "Discord.exe", 0.6, 520 * MB, 0),
+      proc(7312, "Chatter.exe", 0.6, 520 * MB, 0),
     ],
     gaps: [{ start_ms: start + 21_000, end_ms: start + 120_000, reason: "Paused" }],
     sensitive: true,
     truncated: true,
     suspects: [
-      suspect({ Memory: { process: "chrome.exe" } }, "Medium", [
+      suspect({ Memory: { process: "Browser.exe" } }, "Medium", [
         m(start - 4000, "MemAvailPct", 3.1, 5),
         m(start - 2000, "HardFaultsPerS", 2680, 1000),
-        { Process: { pid: 4412, name: "chrome.exe", metric: "PrivateBytes", value: 9.1 * GB } },
+        { Process: { pid: 4412, name: "Browser.exe", metric: "PrivateBytes", value: 9.1 * GB } },
       ], ["CloseMemoryHeavyApp"]),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "CpuPct", name: "chrome.exe", value: 3.5 } }],
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "chrome.exe", value: 9.1 * GB } }],
+      [-60_000, { Busiest: { metric: "CpuPct", name: "Browser.exe", value: 3.5 } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 9.1 * GB } }],
       [-60_000, { Busiest: { metric: "IoBytesPerS", name: "MsMpEng.exe", value: 1 * MB } }],
       [-30_000, { Crossed: { metric: "HardFaultsPerS", value: 2680, threshold: 1000, subject: null } }],
       [-30_000, { Crossed: { metric: "MemAvailPct", value: 3.1, threshold: 5, subject: null } }],
@@ -448,7 +448,7 @@ function reported(): OccurrenceDto {
     procs: () => [
       proc(11220, "Starfall.exe", 28, 6.2 * GB, 3 * MB, 97),
       proc(1312, "dwm.exe", 2, 140 * MB, 0, 4),
-      proc(7312, "Discord.exe", 1.2, 520 * MB, 0, 2),
+      proc(7312, "Chatter.exe", 1.2, 520 * MB, 0, 2),
     ],
     events: [tdr],
     suspects: [
@@ -479,7 +479,7 @@ function unclear(): OccurrenceDto {
     severity: "Light",
     triggers: [{ Freeze: { start_ms: start, end_ms: start + 400, lag_ms: 412 } }],
     moment: (rel) => (rel === 0 ? null : { ...calm(), lag: rel === 1 ? 412 : undefined }),
-    procs: () => [proc(4412, "chrome.exe", 4, 2.6 * GB, 300 * 1024), proc(5520, "explorer.exe", 0.6, 96 * MB, 0)],
+    procs: () => [proc(4412, "Browser.exe", 4, 2.6 * GB, 300 * 1024), proc(5520, "explorer.exe", 0.6, 96 * MB, 0)],
     suspects: [
       suspect("Unclear", "Low", [
         m(start - 12_000, "CpuPct", 19, 95),
@@ -488,9 +488,9 @@ function unclear(): OccurrenceDto {
       ], ["EnableSensitiveMode", "DeepCapture"]),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "CpuPct", name: "chrome.exe", value: 4 } }],
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "chrome.exe", value: 2.6 * GB } }],
-      [-60_000, { Busiest: { metric: "IoBytesPerS", name: "chrome.exe", value: 300 * 1024 } }],
+      [-60_000, { Busiest: { metric: "CpuPct", name: "Browser.exe", value: 4 } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 2.6 * GB } }],
+      [-60_000, { Busiest: { metric: "IoBytesPerS", name: "Browser.exe", value: 300 * 1024 } }],
       [0, { FreezeStarted: { duration_ms: 412 } }],
       [400, "FreezeEnded"],
     ],
@@ -515,22 +515,22 @@ function stutters(): OccurrenceDto {
       c: { active: rel >= -20 ? 24 + n(8) : 5, latency: 2.4, bps: 38 * MB },
     }),
     procs: (rel) => [
-      proc(11840, "ffmpeg.exe", rel >= -20 ? 92.4 : 0.1, 640 * MB, 38 * MB),
-      proc(4412, "chrome.exe", 3.1, 2.9 * GB, 40 * 1024),
+      proc(11840, "Encoder.exe", rel >= -20 ? 92.4 : 0.1, 640 * MB, 38 * MB),
+      proc(4412, "Browser.exe", 3.1, 2.9 * GB, 40 * 1024),
       proc(3876, "MsMpEng.exe", 1.1, 210 * MB, 2 * MB),
     ],
     sensitive: true,
     suspects: [
-      suspect({ Cpu: { processes: ["ffmpeg.exe", "chrome.exe"] } }, "Medium", [
+      suspect({ Cpu: { processes: ["Encoder.exe", "Browser.exe"] } }, "Medium", [
         m(start + 2000, "CpuPct", 99.6, 95),
-        { Process: { pid: 11840, name: "ffmpeg.exe", metric: "CpuPct", value: 92.4 } },
-        { Process: { pid: 4412, name: "chrome.exe", metric: "CpuPct", value: 3.1 } },
+        { Process: { pid: 11840, name: "Encoder.exe", metric: "CpuPct", value: 92.4 } },
+        { Process: { pid: 4412, name: "Browser.exe", metric: "CpuPct", value: 3.1 } },
       ], []),
     ],
     facts: [
-      [-60_000, { Busiest: { metric: "PrivateBytes", name: "chrome.exe", value: 2.9 * GB } }],
-      [-20_000, { Busiest: { metric: "CpuPct", name: "ffmpeg.exe", value: 92.4 } }],
-      [-20_000, { Busiest: { metric: "IoBytesPerS", name: "ffmpeg.exe", value: 38 * MB } }],
+      [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 2.9 * GB } }],
+      [-20_000, { Busiest: { metric: "CpuPct", name: "Encoder.exe", value: 92.4 } }],
+      [-20_000, { Busiest: { metric: "IoBytesPerS", name: "Encoder.exe", value: 38 * MB } }],
       [-20_000, { Crossed: { metric: "CpuPct", value: 99.6, threshold: 95, subject: null } }],
       [0, { Stutter: { count: 7, worst_ms: 230 } }],
     ],
@@ -609,9 +609,9 @@ export const handlers: Record<string, Handler> = {
         end_ms: found.start_ms + 240_000,
         suspects: [
           {
-            cause: { DriverModule: { module: "nvlddmkm.sys", intermediary: false } },
+            cause: { DriverModule: { module: "gfxdriver.sys", intermediary: false } },
             confidence: "High",
-            evidence: [{ LongRoutine: { ts_ms: found.start_ms, module: "nvlddmkm.sys", kind: "Dpc", us: 1_240 } }],
+            evidence: [{ LongRoutine: { ts_ms: found.start_ms, module: "gfxdriver.sys", kind: "Dpc", us: 1_240 } }],
             next_steps: ["UpdateDriver"],
           },
         ],

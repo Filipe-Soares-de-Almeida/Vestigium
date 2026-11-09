@@ -6,24 +6,28 @@ import type { Handler } from "../mock";
 
 const query = new URLSearchParams(location.search);
 const mode = query.get("update");
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 const NOTES = [
   {
-    version: "0.1.0",
+    version: "0.1.1",
     date: "2026-11-18",
     groups: [
       { kind: "Added", items: ["Holding Ctrl on the Now screen pauses it on the second it was pressed."] },
-      { kind: "Fixed", items: ["Health, Dumps, Optimizations and Tests open with their data."] },
+      { kind: "Fixed", items: ["A freeze report opens on the part you clicked in the day's timeline."] },
     ],
   },
-  { version: "0.0.9", date: "2026-11-06", groups: [{ kind: "Fixed", items: ["Installing over a running copy replaces the watcher too."] }] },
+  {
+    version: "0.1.0",
+    date: "2026-11-11",
+    groups: [{ kind: "Added", items: ["The first release: freeze reports, crash dumps, driver captures, Health, Tests and Optimizations."] }],
+  },
 ];
 
 let prefs = {
   check: mode === "ask" ? null : mode === "found" || mode === "offline",
   last_check_ms: null as number | null,
-  seen_version: mode === "news" ? "0.0.8" : VERSION,
+  seen_version: mode === "news" ? "0.1.0" : VERSION,
 };
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -40,8 +44,8 @@ export const handlers: Record<string, Handler> = {
       version: "0.2.0",
       date_ms: Date.now(),
       groups: [
-        { kind: "Added", items: ["A dialog says when a newer version is out, with what changed in it."] },
-        { kind: "Changed", items: ["The side menu groups its screens by what you want to do."] },
+        { kind: "Changed", items: ["Reports explain storage stalls in simpler words."] },
+        { kind: "Fixed", items: ["The day's timeline keeps its zoom when the day rolls over."] },
       ],
     };
   },

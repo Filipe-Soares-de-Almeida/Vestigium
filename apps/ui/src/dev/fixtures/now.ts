@@ -60,16 +60,37 @@ function clamp(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
+/** A slow drift between -1 and 1, the same for the same second, so the history and live ticks join up. */
+function wave(seconds: number, phase: number): number {
+  return (
+    Math.sin(seconds / 23 + phase) * 0.5 +
+    Math.sin(seconds / 61 + phase * 2.1) * 0.35 +
+    Math.sin(seconds / 7.3 + phase * 3.7) * 0.15
+  );
+}
+
+/** The heavy stretch builds up over 45 s instead of switching on. */
+function targetAt(agoS: number): Target {
+  const into = (HEAVY_FOR_S[scenario] - agoS) / 45;
+  const x = Math.min(1, Math.max(0, into));
+  const eased = x * x * (3 - 2 * x);
+  const heavy = HEAVY[scenario];
+  const mix = (key: keyof Target) => CALM[key] + (heavy[key] - CALM[key]) * eased;
+  return { cpu: mix("cpu"), memory: mix("memory"), disk: mix("disk"), gpu: mix("gpu"), latency: mix("latency") };
+}
+
 function readingAt(tsMs: number, agoS: number): Reading {
-  const target = agoS < HEAVY_FOR_S[scenario] ? HEAVY[scenario] : CALM;
+  const target = targetAt(agoS);
+  const s = tsMs / 1000;
+  const burst = wave(s, 4.1) > 0.8 ? 14 : 0;
   return {
     ts_ms: tsMs,
-    cpu_pct: clamp(target.cpu + noise(target.cpu > 90 ? 2 : 4)),
-    mem_used_pct: clamp(target.memory + noise(0.6)),
-    disk_active_pct: clamp(target.disk + noise(2.5)),
-    disk_latency_ms: Math.max(0.2, target.latency + noise(0.3)),
-    gpu_pct: clamp(target.gpu + noise(2)),
-    probe_lag_ms: Math.max(0.1, 0.4 + noise(0.2)),
+    cpu_pct: clamp(target.cpu + wave(s, 0.3) * (target.cpu > 90 ? 2 : target.cpu * 0.35 + 2) + noise(1)),
+    mem_used_pct: clamp(target.memory + wave(s, 1.7) * 1.2 + noise(0.15)),
+    disk_active_pct: clamp(target.disk * (1 + wave(s, 2.9) * 0.7) + burst + noise(0.8)),
+    disk_latency_ms: Math.max(0.2, target.latency + wave(s, 3.3) * 0.3 + (burst ? 1.4 : 0)),
+    gpu_pct: clamp(target.gpu + wave(s, 5.3) * 3 + noise(0.8)),
+    probe_lag_ms: Math.max(0.1, 0.4 + wave(s, 6.1) * 0.15 + noise(0.05)),
   };
 }
 
@@ -112,17 +133,17 @@ function process(
 
 function top(): ProcessSample[] {
   const list = [
-    process(4120, "chrome.exe", 2.1, 0.9, 0.2, 3),
-    process(4188, "chrome.exe", 1.2, 0.6, 0.1),
-    process(4302, "chrome.exe", 0.5, 0.4, 0),
-    process(8812, "Discord.exe", 1.4, 0.61, 0.1, 1),
+    process(4120, "Browser.exe", 2.1, 0.9, 0.2, 3),
+    process(4188, "Browser.exe", 1.2, 0.6, 0.1),
+    process(4302, "Browser.exe", 0.5, 0.4, 0),
+    process(8812, "Chatter.exe", 1.4, 0.61, 0.1, 1),
     process(1544, "MsMpEng.exe", 0.8, 0.31, 0.4),
     process(6020, "explorer.exe", 0.5, 0.18, 0),
-    process(9310, "steam.exe", 0.4, 0.24, 0),
+    process(9310, "Launcher.exe", 0.4, 0.24, 0),
     process(7702, "Vestigium.exe", 0.1, 0.04, 0.02),
   ];
   if (scenario === "busy" || scenario === "pressure") {
-    list.push(process(5566, "ffmpeg.exe", scenario === "pressure" ? 91 : 52, 0.9, 12));
+    list.push(process(5566, "Encoder.exe", scenario === "pressure" ? 91 : 52, 0.9, 12));
   }
   return programs(list);
 }
@@ -130,7 +151,7 @@ function top(): ProcessSample[] {
 /** Every program, as the watcher lists them for the full table: the ranking plus a long quiet tail. */
 const QUIET = ["svchost.exe", "RuntimeBroker.exe", "dllhost.exe", "conhost.exe", "SearchHost.exe", "sihost.exe",
   "ctfmon.exe", "audiodg.exe", "fontdrvhost.exe", "WmiPrvSE.exe", "TextInputHost.exe", "Widgets.exe",
-  "OneDrive.exe", "Spotify.exe", "Code.exe", "node.exe", "python.exe", "git.exe", "WindowsTerminal.exe", "Notepad.exe"];
+  "CloudSync.exe", "Player.exe", "Editor.exe", "Backup.exe", "Notes.exe", "Scanner.exe", "WindowsTerminal.exe", "Notepad.exe"];
 function everything(ranking: ProcessSample[]): ProcessSample[] {
   const tail = Array.from({ length: 140 }, (_, i) =>
     process(20_000 + i * 4, i < QUIET.length ? QUIET[i] : `helper${i}.exe`, 0.3 / (i + 1), 0.4 / (i + 2), i % 9 === 0 ? 0.05 : 0),
@@ -160,12 +181,12 @@ const latest: OccurrenceSummary | null =
   firstUse || query.get("last") === "none"
     ? null
     : {
-        id: 33,
+        id: 1,
         kind: "Freeze",
-        start_ms: new Date().setHours(14, 32, 10, 0) - (new Date().getHours() < 15 ? 86_400_000 : 0),
-        end_ms: new Date().setHours(14, 32, 16, 200) - (new Date().getHours() < 15 ? 86_400_000 : 0),
+        start_ms: new Date().setHours(14, 32, 18, 0) - (new Date().getHours() < 15 ? 86_400_000 : 0),
+        end_ms: new Date().setHours(14, 32, 24, 800) - (new Date().getHours() < 15 ? 86_400_000 : 0),
         severity: "Severe",
-        cause: { DiskIo: { disk: "0 C:", hdd: false, process: "steam.exe" } },
+        cause: { Storage: { disk: "0 C:" } },
       };
 
 function refuse(kind: UiError["kind"]): Promise<never> {
@@ -254,7 +275,7 @@ export const handlers: Record<string, Handler> = {
         },
         top: ticks < 3 && firstUse ? null : { ts_ms: now, entries: ranking ?? [] },
         programs: ticks < 3 && firstUse ? null : { ts_ms: now, entries: everything(ranking ?? []) },
-        hung: scenario === "hung" && ticks >= 3 ? [{ pid: 8812, name: "Discord.exe" }] : [],
+        hung: scenario === "hung" && ticks >= 3 ? [{ pid: 8812, name: "Chatter.exe" }] : [],
         latest,
         pressure,
       };

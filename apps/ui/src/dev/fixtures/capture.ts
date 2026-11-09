@@ -40,7 +40,7 @@ const empty: RoutineStats = { count: 0, total_us: 0, max_us: 0, buckets: new Arr
 function drivers(slow: number): DriverLatency[] {
   return [
     { module: "storport.sys", dpc: stats(219_000, 974_000, 57, 0), isr: stats(224_000, 829_000, 247, 6) },
-    { module: "nvlddmkm.sys", dpc: stats(31_000, 182_000, 1_240, slow), isr: empty },
+    { module: "gfxdriver.sys", dpc: stats(31_000, 182_000, 1_240, slow), isr: empty },
     { module: "dxgkrnl.sys", dpc: stats(23_800, 176_000, 97, 0), isr: stats(25_000, 641_000, 256, 8) },
     { module: "ntoskrnl.exe", dpc: stats(12_600, 76_000, 115, 1), isr: empty },
     { module: "tcpip.sys", dpc: stats(415, 10_400, 100, 1), isr: empty },
@@ -50,13 +50,13 @@ function drivers(slow: number): DriverLatency[] {
 /** Drivers that all stayed inside the recommended limits. */
 const CALM_DRIVERS: DriverLatency[] = [
   { module: "storport.sys", dpc: stats(21_000, 94_000, 41, 0), isr: stats(22_000, 83_000, 18, 0) },
-  { module: "nvlddmkm.sys", dpc: stats(9_000, 52_000, 63, 0), isr: empty },
+  { module: "gfxdriver.sys", dpc: stats(9_000, 52_000, 63, 0), isr: empty },
   { module: "ntoskrnl.exe", dpc: stats(12_600, 76_000, 88, 0), isr: empty },
 ];
 
 const HITCHES: FrameHitch[] = [62_000, 141_500, 141_520, 203_000, 244_000].map((offset, i) => ({
   ts_ms: START + offset,
-  app: "jogo.exe",
+  app: "Starfall.exe",
   pid: 9124,
   frame_ms: [166, 48, 41, 92, 35][i],
   median_ms: 6.9,
@@ -79,16 +79,16 @@ function routine(module: string, us: number, maxUs: number, count: number, slow:
 function findings(slow: number): Suspect[] {
   return [
     {
-      cause: { DriverModule: { module: "nvlddmkm.sys", intermediary: false } },
+      cause: { DriverModule: { module: "gfxdriver.sys", intermediary: false } },
       confidence: "High",
-      evidence: [routine("nvlddmkm.sys", 1_240, 1_240, 31_000, slow, 0.06)],
+      evidence: [routine("gfxdriver.sys", 1_240, 1_240, 31_000, slow, 0.06)],
       next_steps: ["UpdateDriver"],
     },
     {
-      cause: { Frames: { app: "jogo.exe" } },
+      cause: { Frames: { app: "Starfall.exe" } },
       confidence: "Medium",
       evidence: [
-        { Frames: { app: "jogo.exe", frames: 18_000, hitches: 14, worst_ms: 166, median_ms: 6.9 } },
+        { Frames: { app: "Starfall.exe", frames: 18_000, hitches: 14, worst_ms: 166, median_ms: 6.9 } },
         ...HITCHES.slice(0, 3).map((h) => ({ Hitch: { ts_ms: h.ts_ms, app: h.app, frame_ms: h.frame_ms } })),
       ],
       next_steps: [],
@@ -113,12 +113,12 @@ function capture(id: number, start: number, slow = 380): CaptureDto {
     lost_events: 0,
     drivers: drivers(slow),
     longest: [
-      { ts_ms: start + 141_480, core: 0, module: "nvlddmkm.sys", kind: "Dpc", us: 1_240 },
-      { ts_ms: start + 62_010, core: 0, module: "nvlddmkm.sys", kind: "Dpc", us: 1_090 },
-      { ts_ms: start + 203_000, core: 0, module: "nvlddmkm.sys", kind: "Dpc", us: 1_010 },
+      { ts_ms: start + 141_480, core: 0, module: "gfxdriver.sys", kind: "Dpc", us: 1_240 },
+      { ts_ms: start + 62_010, core: 0, module: "gfxdriver.sys", kind: "Dpc", us: 1_090 },
+      { ts_ms: start + 203_000, core: 0, module: "gfxdriver.sys", kind: "Dpc", us: 1_010 },
       { ts_ms: start + 90_300, core: 0, module: "dxgkrnl.sys", kind: "Isr", us: 256 },
     ],
-    apps: [{ name: "jogo.exe", pid: 9124, frames: 18_000, median_ms: 6.9, p99_ms: 13.1, worst_ms: 166, hitches: 14 }],
+    apps: [{ name: "Starfall.exe", pid: 9124, frames: 18_000, median_ms: 6.9, p99_ms: 13.1, worst_ms: 166, hitches: 14 }],
     hitches: HITCHES.map((h) => ({ ...h, ts_ms: h.ts_ms - START + start })),
     hiccups: [
       { ts_ms: start + 62_004, lag_ms: 12.4 },
@@ -132,7 +132,7 @@ function capture(id: number, start: number, slow = 380): CaptureDto {
       ...base,
       drivers: CALM_DRIVERS,
       longest: [],
-      apps: [{ name: "jogo.exe", pid: 9124, frames: 18_000, median_ms: 6.9, p99_ms: 9.4, worst_ms: 14, hitches: 0 }],
+      apps: [{ name: "Starfall.exe", pid: 9124, frames: 18_000, median_ms: 6.9, p99_ms: 9.4, worst_ms: 14, hitches: 0 }],
       hitches: [],
       hiccups: [],
       findings: [],

@@ -8,7 +8,7 @@ import { type Day, diskLabel, mostlyOf, type Tone, toneOf, worstOf } from "./day
 
 const KEY = "ui.today";
 
-/** A short name for a cause: "C: disk", "Discord", "Display driver". */
+/** A short name for a cause: "C: disk", "Chatter.exe", "Display driver". */
 export function causeName(cause: Cause): string {
   if (typeof cause === "string") return t(`${KEY}.cause.${cause}`);
   if ("Storage" in cause) {

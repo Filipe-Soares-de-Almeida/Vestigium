@@ -100,12 +100,13 @@ function occurrence(
 const todays: OccurrenceSummary[] =
   shape === "full"
     ? [
-        occurrence(31, "AppHang", at(9, 14, 7), 12, "Severe", { App: { name: "Chatter" } }),
-        occurrence(32, "Stutter", at(11, 40, 2), 10, "Light", { Driver: { core: 0 } }),
-        occurrence(33, "Freeze", at(13, 5, 44), 1.9, "Medium", "GpuDriver"),
-        occurrence(34, "Freeze", at(14, 32, 18), 6.8, "Severe", { Storage: { disk: "0 C:" } }),
-        occurrence(35, "Stutter", at(20, 41, 2), 10, "Light", { Cpu: { processes: ["Game.exe"] } }),
-        occurrence(36, "Freeze", at(22, 10, 5), 2.4, "Medium", { Memory: { process: "Browser.exe" } }),
+        occurrence(2, "AppHang", at(9, 14, 7), 12, "Severe", { App: { name: "Chatter.exe" } }),
+        occurrence(3, "Freeze", at(11, 2, 40), 1.9, "Medium", { DiskIo: { disk: "1 D:", hdd: true, process: "Browser.exe" } }),
+        occurrence(7, "Stutter", at(12, 40, 10), 8, "Light", { Cpu: { processes: ["Encoder.exe", "Browser.exe"] } }),
+        occurrence(1, "Freeze", at(14, 32, 18), 6.8, "Severe", { Storage: { disk: "0 C:" } }),
+        occurrence(4, "Freeze", at(16, 10, 5), 0.6, "Light", { Memory: { process: "Browser.exe" } }),
+        occurrence(5, "Reported", at(19, 5, 46), 0, "Light", "GpuDriver"),
+        occurrence(6, "Freeze", at(21, 47, 3), 0.4, "Light", "Unclear"),
         ...(query.get("fall") === "1"
           ? [occurrence(8, "PostMortem", at(7, 12, 25), 5, "Severe", { BlueScreen: { code: 0x50 } })]
           : []),
