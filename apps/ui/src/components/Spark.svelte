@@ -12,6 +12,9 @@
     to,
     format = formatNumber,
     when = formatClock,
+    floor,
+    ceiling,
+    ceilingLabel,
   }: {
     values: number[];
     /** When each value was read; without it the values are evenly spaced. */
@@ -24,6 +27,12 @@
     format?: (value: number) => string;
     /** How the readout and a zoomed axis write a moment of `at`. */
     when?: (at: number) => string;
+    /** The value at the bottom of the plot; without it, the lowest value on screen. */
+    floor?: number;
+    /** The value at the top of the plot, such as 100 for a share; without it, the highest on screen. */
+    ceiling?: number;
+    /** Names the top of a fixed scale, such as "100%". */
+    ceilingLabel?: string;
   } = $props();
 
   const W = 600;
@@ -66,8 +75,9 @@
   });
   const scale = $derived.by(() => {
     const seen = shown.map((i) => values[i]);
-    const min = Math.min(...seen);
-    return { min, span: Math.max(...seen) - min };
+    const min = floor ?? Math.min(...seen);
+    const max = Math.max(ceiling ?? Math.max(...seen), min);
+    return { min, span: max - min };
   });
 
   const cursor = $derived(cursorAt === null || !xs.length ? null : indexNear(cursorAt));
@@ -77,8 +87,12 @@
   }
 
   const xOf = (i: number) => ((xs[i] - lo) / span) * W;
-  // A value that never moves draws at mid height.
-  const yOf = (v: number) => (scale.span ? H - 8 - ((v - scale.min) / scale.span) * (H - 20) : H / 2);
+  // Without a fixed scale, a value that never moves draws at mid height.
+  const yOf = (v: number) => {
+    if (!scale.span) return H / 2;
+    const share = Math.min(1, Math.max(0, (v - scale.min) / scale.span));
+    return H - 8 - share * (H - 20);
+  };
 
   /** The line in stretches with no gap, and the area under each. */
   const paths = $derived.by(() => {
@@ -154,6 +168,7 @@
     onblur={() => (cursorAt = null)}
     {onkeydown}
   >
+    {#if ceilingLabel}<span class="ceiling" aria-hidden="true">{ceilingLabel}</span>{/if}
     <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
       <path d={paths.area} class="area" />
       <path d={paths.line} class="stroke" />
@@ -199,6 +214,15 @@
     stroke: var(--accent);
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
+  }
+  .ceiling {
+    position: absolute;
+    top: -2px;
+    left: 0;
+    color: var(--ink3);
+    font-size: 11px;
+    line-height: 12px;
+    pointer-events: none;
   }
   .rule {
     position: absolute;

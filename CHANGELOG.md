@@ -466,6 +466,9 @@ How to use this file:
 
 ### Fixed
 
+- The small CPU and memory charts on the program and process pages draw on a fixed scale, 0 to 100%
+  and 0 to the PC's memory, named at the top, instead of stretching between their lowest and highest
+  values; SMART lines start at zero.
 - Opening a page from a home tile no longer flashes a light grey card in the dark theme: the card that
   grows into the page keeps the colour the tile shows.
 - A surface check that was stopped and then continued shows on the Tests screen as one map of the
