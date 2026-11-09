@@ -61,29 +61,4 @@
     padding-top: 0;
     border-top: 0;
   }
-  .setlist :global(select) {
-    height: 34px;
-    min-width: 0;
-    padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--ink3) 55%, transparent);
-    border-radius: 6px;
-    background: var(--field);
-    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ink3) 55%, transparent);
-    color: var(--ink);
-    font: 400 14px/1.4 var(--f);
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-  .setlist :global(select:hover:enabled) {
-    border-color: var(--ink3);
-  }
-  .setlist :global(select:focus) {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-    outline: none;
-  }
-  .setlist :global(select:disabled) {
-    color: var(--ink3);
-    cursor: default;
-  }
 </style>

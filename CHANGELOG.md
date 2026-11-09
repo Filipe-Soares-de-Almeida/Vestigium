@@ -259,6 +259,9 @@ How to use this file:
 
 ### Changed
 
+- Every drop-down list, in Settings (language, data retention, pause length) and on the Events,
+  History and program screens, opens the same list drawn like the search panel instead of the Windows
+  one, with the arrow inside the field, the chosen option marked and the keyboard keys of a list box.
 - The small line charts on the program, process and SMART pages read out the time and value under the
   pointer or the arrow keys, zoom like the other time charts (Ctrl + wheel, + and −, drag, 0 resets)
   and break the line where readings are missing.

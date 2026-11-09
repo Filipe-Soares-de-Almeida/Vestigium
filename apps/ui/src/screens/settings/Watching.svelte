@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SelectField from "../../components/SelectField.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
   import { setAutostart, setPaused, setSensitive } from "../../lib/api";
   import { app } from "../../lib/app.svelte";
@@ -112,11 +113,13 @@
       >{t("ui.settings.watching.pause.resume")}</button
     >
   {:else}
-    <select bind:value={pauseFor} aria-label={t("ui.settings.watching.pause.for")} disabled={!app.running}>
-      {#each PAUSE_FOR as length (length)}
-        <option value={length}>{t(`ui.settings.watching.pause.for.${length}`)}</option>
-      {/each}
-    </select>
+    <SelectField
+      value={pauseFor}
+      options={PAUSE_FOR.map((length) => ({ value: length, text: t(`ui.settings.watching.pause.for.${length}`) }))}
+      label={t("ui.settings.watching.pause.for")}
+      disabled={!app.running}
+      onchange={(value) => (pauseFor = value as (typeof PAUSE_FOR)[number])}
+    />
     <button
       type="button"
       class="btn"

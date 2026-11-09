@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SelectField from "../../components/SelectField.svelte";
   import { app } from "../../lib/app.svelte";
   import { errorKind, errorText } from "../../lib/errors";
   import { t, tn } from "../../lib/i18n.svelte";
@@ -69,21 +70,17 @@
       {@const wrong = rejected?.field === field ? rejected : null}
       <div class="ret-r">
         <label class="ret-n" for="retention-{key}">{t(`ui.settings.history.${key}`)}</label>
-        <span class="sel">
-          <select
-            id="retention-{key}"
-            value={String(shown[field])}
-            disabled={!app.editable}
-            aria-invalid={wrong ? true : undefined}
-            aria-describedby={wrong ? `retention-${key}-error` : undefined}
-            data-focus="retention:{field}"
-            onchange={(event) => change(field, Number(event.currentTarget.value))}
-          >
-            {#each choices(field) as value (value)}
-              <option value={String(value)}>{label(field, value)}</option>
-            {/each}
-          </select>
-        </span>
+        <SelectField
+          full
+          id="retention-{key}"
+          value={String(shown[field])}
+          options={choices(field).map((value) => ({ value: String(value), text: label(field, value) }))}
+          disabled={!app.editable}
+          aria-invalid={wrong ? true : undefined}
+          aria-describedby={wrong ? `retention-${key}-error` : undefined}
+          data-focus="retention:{field}"
+          onchange={(value) => change(field, Number(value))}
+        />
         <span class="ret-mb">{t("ui.settings.history.predicted", { size: formatSize(sizes[field]) })}</span>
         {#if wrong}
           <span class="invalid" id="retention-{key}-error" role="status">{reason(field, wrong.error)}</span>
@@ -109,9 +106,6 @@
     gap: 8px 20px;
     align-items: center;
     font-size: 14px;
-  }
-  .sel select {
-    width: 100%;
   }
   .ret-mb {
     color: var(--ink2);

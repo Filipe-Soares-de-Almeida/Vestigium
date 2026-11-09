@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SelectField from "../../components/SelectField.svelte";
   import { app } from "../../lib/app.svelte";
   import { errorText } from "../../lib/errors";
   import { lang, langFor, t } from "../../lib/i18n.svelte";
@@ -23,16 +24,13 @@
 </script>
 
 <Row id="language" title={t("ui.settings.language.section")} hint={t("ui.settings.language.app.hint")}>
-  <select
+  <SelectField
     value={settings.language}
+    options={LANGUAGES.map((language) => ({ value: language, text: t(`ui.settings.language.${language}`) }))}
     disabled={!app.editable}
     aria-labelledby="language-name"
     aria-describedby="language-hint"
     data-focus="language"
-    onchange={(event) => choose(event.currentTarget.value as LanguagePref)}
-  >
-    {#each LANGUAGES as language (language)}
-      <option value={language}>{t(`ui.settings.language.${language}`)}</option>
-    {/each}
-  </select>
+    onchange={(value) => choose(value as LanguagePref)}
+  />
 </Row>
