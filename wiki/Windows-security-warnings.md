@@ -1,5 +1,3 @@
-**Note:** No release has been published yet.
-
 Why Windows warns about Vestigium, what each warning means, and how to check that your download is the published file. Nothing on this page asks you to turn off a security feature.
 
 ## Why the warnings appear

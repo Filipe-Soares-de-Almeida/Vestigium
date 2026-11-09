@@ -10,6 +10,8 @@
 
 <p align="center">
   <a href="https://github.com/Filipe-Soares-de-Almeida/Vestigium/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Filipe-Soares-de-Almeida/Vestigium/actions/workflows/ci.yml/badge.svg?branch=dev"></a>
+  <a href="https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Filipe-Soares-de-Almeida/Vestigium"></a>
+  <a href="https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Filipe-Soares-de-Almeida/Vestigium/total"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d6.svg">
   <img alt="Built with Rust and Tauri" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-b7410e.svg">
@@ -37,10 +39,6 @@ It runs on Windows 10 22H2 and Windows 11 (x64), in English and Brazilian Portug
 chasing a freeze that is gone by the time Task Manager opens. It monitors the one PC it is installed
 on.
 
-> [!WARNING]
-> Vestigium is in early development and there is no build to install yet. Built from source, as the
-> [contributing guide](.github/CONTRIBUTING.md) describes, everything on this page works.
-
 ## Highlights
 
 - **Every freeze gets a report, with evidence.** It says when the PC stopped, for how long, what was
@@ -59,6 +57,38 @@ on.
 - **Light, local, no account.** The agent runs as your user and the window exits when it closes.
   Tasks that need administrator rights ask one at a time. No telemetry: the only request that leaves
   the PC is the update check, which the window asks about first.
+
+---
+
+## Install
+
+Download `Vestigium_<version>_x64-setup.exe` from the
+[latest release](https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest) and run it. It
+installs for your user, with no administrator prompt, and adds Vestigium to the Start menu.
+[First run](../../wiki/First-run) covers the first minutes: starting the monitor, the tray icon and
+the question about update checks.
+
+> [!IMPORTANT]
+> Vestigium is not code-signed yet. Windows may show "Windows protected your PC": check the download
+> as below, then choose **More info** and **Run anyway**. On Windows 11 with Smart App Control turned
+> on, Windows blocks apps that are not signed. [Windows security warnings](../../wiki/Windows-security-warnings)
+> explains each warning.
+
+<details>
+<summary><b>Verify your download</b> — check the installer against the published hash</summary>
+
+Each release lists the SHA-256 of its files in `SHA256SUMS.txt`. In PowerShell, in the folder that
+holds the installer:
+
+```powershell
+Get-FileHash .\Vestigium_*_x64-setup.exe -Algorithm SHA256
+```
+
+The hash must match the installer's line in `SHA256SUMS.txt`, ignoring letter case. With the
+[GitHub CLI](https://cli.github.com/), `gh attestation verify <installer> -R Filipe-Soares-de-Almeida/Vestigium`
+confirms that this repository's release workflow built it.
+
+</details>
 
 ---
 

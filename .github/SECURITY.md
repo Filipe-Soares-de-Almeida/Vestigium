@@ -35,8 +35,6 @@ update check.
 | The latest release | Yes |
 | Older releases | No: update to the latest |
 
-Until the first release, fixes land on the `dev` branch.
-
 ## Scope
 
 Vestigium runs as your user, with an elevated helper that Windows asks you to approve each time it is needed.

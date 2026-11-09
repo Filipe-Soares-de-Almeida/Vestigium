@@ -1,5 +1,3 @@
-**Note:** No release has been published yet.
-
 How Vestigium checks for a newer version, installs it, and tells you what changed.
 
 ## The automatic check
