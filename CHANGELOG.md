@@ -33,7 +33,7 @@ The first release.
   explained after it is gone.
 - A report for every freeze, program that stopped responding, stutter and unexpected shutdown: when it
   happened, how long it lasted, the likely cause with the evidence behind it, the steps to try, what
-  happened second by second and a chart of the minute before. **Copy report** puts it on the
+  happened second by second and a chart of the minute before. The Copy report button puts it on the
   clipboard as Markdown.
 - A sensitive mode that checks the PC far more often for 30 minutes, to catch the short stutters that
   break games, audio and calls.

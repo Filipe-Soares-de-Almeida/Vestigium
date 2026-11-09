@@ -18,7 +18,7 @@ A primeira versão.
   que um travamento possa ser explicado depois que passou.
 - Um relatório para cada travamento, programa que parou de responder, engasgo e desligamento
   inesperado: quando aconteceu, quanto durou, a causa provável com a evidência por trás dela, o que
-  tentar, o que aconteceu segundo a segundo e um gráfico do minuto anterior. **Copiar relatório**
+  tentar, o que aconteceu segundo a segundo e um gráfico do minuto anterior. O botão Copiar relatório
   coloca tudo na área de transferência em Markdown.
 - Um modo sensível que verifica o PC com muito mais frequência por 30 minutos, para pegar os engasgos
   curtos que atrapalham jogos, áudio e chamadas.
