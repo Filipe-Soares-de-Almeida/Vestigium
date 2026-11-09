@@ -41,6 +41,8 @@
   const TICK_STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
   const TICK_ROOM_PX = 56;
   const MIN_VIEW_S = 10;
+  /** The space one event dot needs before the next gets its own. */
+  const MARK_ROOM_PX = 10;
   const uid = `occ-chart-${Math.random().toString(36).slice(2, 8)}`;
 
   let wrap = $state<HTMLDivElement>();
@@ -82,6 +84,20 @@
     return out;
   });
   const range = $derived(t("ui.zoom.range", { from: tickLabel(lo), to: tickLabel(hi) }));
+  /** Events on screen; two closer than one dot's room share a dot, so they never pile up. */
+  const marks = $derived.by(() => {
+    const out: { at: number; label: string }[] = [];
+    const room = (MARK_ROOM_PX / Math.max(1, width)) * 100;
+    for (const m of [...view.markers].sort((a, b) => a.at - b.at)) {
+      const at = pct(m.at);
+      if (at < 0 || at > 100) continue;
+      const near = out.at(-1);
+      if (near && at - near.at < room) near.label += `
+${m.label}`;
+      else out.push({ at, label: m.label });
+    }
+    return out;
+  });
 
   /** A place on the axis: seconds from the origin, or the time of day, to the second while steps are short. */
   function tickLabel(s: number): string {
@@ -180,7 +196,8 @@
 
   function readout(i: number): string {
     const values = view.lanes.map((lane) => `${lane.name} ${value(lane, i)}`);
-    return `${heading(i)} — ${values.join(" · ")}`;
+    const extra = context(i).map((row) => row.label);
+    return `${heading(i)} — ${[...extra, ...values].join(" · ")}`;
   }
 
   function show(i: number | null): void {
@@ -195,6 +212,14 @@
     const s = view.x[i];
     const time = formatClock(view.originMs + s * 1000);
     return clock ? time : `${formatOffset(s)} · ${time}`;
+  }
+
+  /** What the readout adds at a point: the span it is in, then the events of that second. */
+  function context(i: number): { key: string; label: string; value: string }[] {
+    const s = view.x[i];
+    const spans = view.bands.filter((b) => s >= b.from - 0.5 && s <= b.to + 0.5).map((b) => b.label);
+    const events = view.markers.filter((m) => Math.abs(m.at - s) < 0.5).map((m) => m.label);
+    return [...spans, ...events].map((label, n) => ({ key: `context-${n}`, label, value: "" }));
   }
 
   function value(lane: Lane, i: number): string {
@@ -270,7 +295,7 @@
     {#each view.bands as band, i (i)}
       {@const at = place(band.from, band.to)}
       {#if at}
-        <span class="band {band.tone}" style:left="{at.left}%" style:width="{at.width}%"></span>
+        <span class="band {band.tone}" class:blank={band.blank} style:left="{at.left}%" style:width="{at.width}%"></span>
       {/if}
     {/each}
     {#each view.lanes as lane, i (lane.key)}
@@ -282,10 +307,8 @@
         <div class="plot" bind:this={nodes[i]}></div>
       </div>
     {/each}
-    {#each view.markers as marker, i (i)}
-      {#if pct(marker.at) >= 0 && pct(marker.at) <= 100}
-        <span class="marker" style:left="{pct(marker.at)}%" title={marker.label}></span>
-      {/if}
+    {#each marks as mark (mark.at)}
+      <span class="marker" style:left="{mark.at}%" title={mark.label}></span>
     {/each}
     {#if cursor !== null}
       {@const at = cursor}
@@ -294,12 +317,15 @@
         bound={width}
         heading={heading(at)}
         top={22}
-        rows={view.lanes.map((lane) => ({
-          key: lane.key,
-          label: lane.name,
-          value: value(lane, at),
-          dot: `var(--${lane.tone})`,
-        }))}
+        rows={[
+          ...context(at),
+          ...view.lanes.map((lane) => ({
+            key: lane.key,
+            label: lane.name,
+            value: value(lane, at),
+            dot: `var(--${lane.tone})`,
+          })),
+        ]}
       />
     {/if}
   </div>
@@ -380,6 +406,16 @@
   }
   .band.freeze {
     background: var(--freeze-t);
+  }
+  /* Nothing was read here, so the lines break: a light stripe instead of a solid block. */
+  .band.freeze.blank {
+    border-radius: 2px;
+    background:
+      repeating-linear-gradient(135deg, color-mix(in srgb, var(--freeze) 26%, transparent) 0 1.5px, transparent 1.5px 6px),
+      color-mix(in srgb, var(--freeze) 6%, transparent);
+    box-shadow:
+      inset 1px 0 0 color-mix(in srgb, var(--freeze) 55%, transparent),
+      inset -1px 0 0 color-mix(in srgb, var(--freeze) 55%, transparent);
   }
   .band.press {
     background: color-mix(in srgb, var(--press) 12%, transparent);

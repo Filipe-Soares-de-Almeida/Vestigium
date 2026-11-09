@@ -477,6 +477,10 @@ How to use this file:
 
 ### Fixed
 
+- The report chart no longer shows a solid red block where the PC stopped responding: the span is
+  striped, a note under the chart says the lines break there because nothing could be read, and
+  pointing inside it lists what Windows logged in that second. Events a second apart share one dot.
+- The report's sequence no longer ends a line in "disk C:.".
 - The time of each freeze and overload period in the day's events stays on one line in English, instead
   of breaking into "9:14" over "AM" at the window's default size.
 - The day's summary no longer ends in "disk C:.": it says "likely cause: the C: disk.", and the technical

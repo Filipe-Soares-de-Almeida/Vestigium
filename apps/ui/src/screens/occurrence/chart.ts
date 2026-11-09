@@ -27,6 +27,8 @@ export interface Band {
   from: number;
   to: number;
   tone: "freeze" | "press";
+  /** Nothing could be read in it: the PC did not respond or was down, so the lines break. */
+  blank: boolean;
   label: string;
 }
 
@@ -138,6 +140,7 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
       from: rel(f.start_ms),
       to: rel(f.end_ms),
       tone: "freeze",
+      blank: true,
       label: t("ui.occurrence.chart.band.Freeze", { duration: formatDuration(f.end_ms - f.start_ms) }),
     });
   }
@@ -146,6 +149,7 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
       from: rel(h.start_ms),
       to: rel(h.end_ms),
       tone: "freeze",
+      blank: false,
       label: t("ui.occurrence.chart.band.AppHang", { app: appName(h.name) }),
     });
   }
@@ -155,6 +159,7 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
         from: rel(tr.Crash.last_ms),
         to: rel(Math.max(tr.Crash.down_ms, tr.Crash.last_ms + 1000)),
         tone: "freeze",
+        blank: true,
         label: t("ui.occurrence.chart.band.PostMortem"),
       });
     }
@@ -163,6 +168,7 @@ export function chartView(dto: OccurrenceDto, level: DetailLevel, cause: CauseKi
         from: rel(tr.Stutter.start_ms),
         to: rel(tr.Stutter.end_ms),
         tone: "press",
+        blank: false,
         label: t("ui.occurrence.chart.band.Stutter"),
       });
     }

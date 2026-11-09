@@ -204,6 +204,7 @@
 
   {#if chart.lanes.length}
     <WindowChart view={chart} title={t(`ui.occurrence.chart.title${fall}`)}>
+      {#if !fall && chart.bands.some((band) => band.blank)}<p class="note">{t("ui.occurrence.chart.blank")}</p>{/if}
       {#if dto.truncated}<p class="note">{t(`ui.occurrence.chart.truncated${fall}`)}</p>{/if}
     </WindowChart>
   {:else}
