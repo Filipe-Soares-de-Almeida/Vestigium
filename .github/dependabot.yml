@@ -45,6 +45,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # svelte-check accepts TypeScript 5 and 6 only.
+      - dependency-name: "typescript"
+        versions: [">=7"]
     groups:
       tauri-js:
         patterns: ["@tauri-apps/*"]
