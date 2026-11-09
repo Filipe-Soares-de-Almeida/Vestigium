@@ -4,10 +4,7 @@ Vestigium has two parts. The **monitor** runs in the background, with an icon in
 
 ## Start monitoring
 
-The installer's last page opens the window, and so does **Vestigium** in the Start menu. The first time, the monitor is not running yet, so the window says **Vestigium is not running.**
-
-1. Select **Start Vestigium**.
-2. The Vestigium icon appears in the notification area, and the window says **Monitoring started**.
+The installer's last page opens the window, and so does **Vestigium** in the Start menu. The first time the window opens, it starts the monitor by itself: the Vestigium icon appears in the notification area, and the window says **Monitoring started**.
 
 **Activity › Today** then shows when monitoring started. Freezes appear there from that moment on, each with the data of the minute before.
 
@@ -22,7 +19,7 @@ The first time the window opens, it asks **Check for updates automatically?**
 
 ## Turn on Start with Windows
 
-Vestigium does not start with Windows until you ask it to. Until then, monitoring stops when you sign out or restart, and starts again only when you open Vestigium and select **Start Vestigium**.
+Vestigium does not start with Windows until you ask it to. Until then, monitoring stops when you sign out or restart, and starts again only when you open Vestigium and select **Start Vestigium** in the banner at the top of the window.
 
 Turn it on with **Start with Windows** in the tray menu, or in **Settings › Monitoring**. It needs no administrator rights.
 
