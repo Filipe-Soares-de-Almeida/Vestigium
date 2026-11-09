@@ -484,6 +484,9 @@ How to use this file:
 
 ### Fixed
 
+- When the history cannot be read and the monitor is stopped, as right after an install that
+  stopped the old monitor mid-write, the window starts the monitor and reads again instead of
+  staying on "Could not read the history".
 - Texts match what Vestigium does: the update dialog says monitoring pauses for the few seconds the
   install takes; the two-antivirus step says to uninstall the one you do not need, never to turn
   protection off; the technical stutter line gives the real range, 8 to 250 ms; and a few screens say
