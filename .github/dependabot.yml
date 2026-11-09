@@ -1,0 +1,72 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels: [dependencies, no-changelog]
+    commit-message:
+      prefix: build(deps)
+    # Majors never come as a bump; neither does a new minor of a 0.x crate, which breaks like a major.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "windows"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "rusqlite"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "tray-icon"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "miniz_oxide"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "winresource"
+        update-types: ["version-update:semver-minor"]
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /apps/ui
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels: [dependencies, no-changelog]
+    commit-message:
+      prefix: build(deps)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # svelte-check accepts TypeScript 5 and 6 only.
+      - dependency-name: "typescript"
+        versions: [">=7"]
+    groups:
+      tauri-js:
+        patterns: ["@tauri-apps/*"]
+      ui-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    labels: [dependencies, no-changelog]
+    commit-message:
+      prefix: build(ci)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      actions:
+        patterns: ["*"]

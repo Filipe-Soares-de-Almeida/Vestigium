@@ -22,6 +22,44 @@ How to use this file:
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.1.0] - 2026-11-09
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/WatchMyPC/commits/main
+The first release.
+
+### Added
+
+- A light agent that monitors the PC from the tray, as your user and with no network connection. It
+  keeps the last minutes of load, the busiest programs and Windows events, so a freeze can be
+  explained after it is gone.
+- A report for every freeze, program that stopped responding, stutter and unexpected shutdown: when it
+  happened, how long it lasted, the likely cause with the evidence behind it, the steps to try, what
+  happened second by second and a chart of the minute before. The Copy report button puts it on the
+  clipboard as Markdown.
+- A sensitive mode that checks the PC far more often for 30 minutes, to catch the short stutters that
+  break games, audio and calls.
+- Activity: the PC's states since midnight with every freeze and overload period marked, the history
+  of past days, and what weighs on the PC right now, by program.
+- Health: the PC checked by area every hour (disks, unexpected shutdowns, memory, startup, hardware
+  and graphics, protection), with alerts that show whether they grew since they opened, and a full
+  scan with administrator rights.
+- Tests: the Windows Memory Diagnostic, a quick memory test, each disk's SMART or NVMe health, a
+  read-only surface scan, a file system check and a speed test, with each disk's earlier scans kept.
+- Dumps: the blue-screen, graphics-reset and app crash dumps Windows keeps, explained on the PC
+  without the internet, with the stop code in plain words and the driver most likely at fault, and
+  deleted once you confirm.
+- Captures: a measurement of every driver's DPC/ISR latency and the frame times of the apps on screen,
+  from 2 minutes to 24 hours, that names the driver or app behind stutters; each capture stays in a
+  history.
+- Optimizations: Windows settings worth changing on this PC, suggested only when a sign showed they
+  would help, each applied and undone in one click. Security software, Windows Update and the page
+  file are never offered.
+- Tasks that need administrator rights run in a separate helper that asks for them one at a time.
+- Updates in the window: with your permission it checks GitHub for a newer version at most once a
+  day, shows what changed and installs it.
+- The window in English and Brazilian Portuguese, light or dark, in four colour themes, at a Simple,
+  Detailed or Technical detail level.
+- A per-user installer in English and Brazilian Portuguese that needs no administrator rights and, when
+  you ask, deletes the history on uninstall.
+
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.0

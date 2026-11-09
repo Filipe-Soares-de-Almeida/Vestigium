@@ -1,0 +1,147 @@
+<script lang="ts">
+  import SelectField from "../../components/SelectField.svelte";
+  import StatusMark from "../../components/StatusMark.svelte";
+  import { setAutostart, setPaused, setSensitive } from "../../lib/api";
+  import { app } from "../../lib/app.svelte";
+  import { errorText } from "../../lib/errors";
+  import { keepFocus } from "../../lib/focus";
+  import { formatTime } from "../../lib/format";
+  import { t } from "../../lib/i18n.svelte";
+  import { toast } from "../../lib/toast.svelte";
+  import Row from "./Row.svelte";
+  import Toggle from "./Toggle.svelte";
+
+  const autostart = $derived(app.settings?.autostart ?? null);
+  const sensitiveUntil = $derived(
+    app.link?.link === "running" ? app.link.sensitive_until_ms : null,
+  );
+  let busy = $state(false);
+
+  /** Pause lengths in minutes; `restart` holds until resumed or until the PC restarts. */
+  const PAUSE_FOR = ["15", "60", "240", "restart"] as const;
+  let pauseFor = $state<(typeof PAUSE_FOR)[number]>("60");
+
+  /** Runs one change at a time and toasts what failed; the controls stay focusable meanwhile. */
+  async function run(change: () => Promise<void>): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try {
+      await change();
+    } catch (error) {
+      toast.show(errorText(error));
+    } finally {
+      busy = false;
+    }
+  }
+
+  const changeAutostart = (on: boolean) =>
+    run(async () => {
+      await setAutostart(on);
+      await app.loadSettings();
+      toast.show(t(on ? "ui.settings.watching.autostart.on" : "ui.settings.watching.autostart.off"));
+    });
+
+  const changeSensitive = (on: boolean) =>
+    run(async () => {
+      await setSensitive(on);
+      await app.refresh();
+      toast.show(
+        sensitiveUntil !== null
+          ? t("ui.settings.watching.sensitive.on", { time: formatTime(sensitiveUntil) })
+          : t("ui.settings.watching.sensitive.off"),
+      );
+    });
+
+  /** Pausing swaps the button for Resume; focus moves to the new one. */
+  function changePaused(paused: boolean): void {
+    const main = document.getElementById("main");
+    const change = () =>
+      run(async () => {
+        if (!paused) return app.resume();
+        const until = pauseFor === "restart" ? null : Date.now() + Number(pauseFor) * 60_000;
+        await setPaused(true, until);
+        await app.refresh();
+        toast.show(
+          until === null
+            ? t("ui.settings.watching.pause.done")
+            : t("ui.settings.watching.pause.done_until", { time: formatTime(until) }),
+        );
+      });
+    if (main) void keepFocus(main, change);
+    else void change();
+  }
+</script>
+
+<Row id="autostart" title={t("ui.settings.watching.startup")} label={t("ui.settings.watching.autostart")} hint={t("ui.settings.watching.autostart.hint")}>
+  {#if autostart === null}
+    <span class="unknown">{t("ui.settings.watching.autostart.unknown")}</span>
+  {:else}
+    <Toggle
+      id="autostart"
+      checked={autostart}
+      disabled={!app.editable}
+      onchange={changeAutostart}
+    />
+  {/if}
+</Row>
+<Row
+  id="sensitive"
+  title={t("ui.settings.watching.sensitivity")}
+  label={t("ui.settings.watching.sensitive")}
+  hint={sensitiveUntil !== null
+    ? t("ui.settings.watching.sensitive.until", { time: formatTime(sensitiveUntil) })
+    : t("ui.settings.watching.sensitive.hint")}
+>
+  <Toggle
+    id="sensitive"
+    checked={sensitiveUntil !== null}
+    disabled={!app.running}
+    onchange={changeSensitive}
+  />
+</Row>
+<Row id="pause" title={t("ui.settings.watching.pause")} hint={app.paused ? undefined : t("ui.settings.watching.pause.hint")}>
+  {#if app.paused}
+    <p class="state">
+      <StatusMark kind="attention" word={t("ui.settings.watching.pause.state")} />
+      <span>
+        {app.pausedUntil !== null
+          ? t("ui.settings.watching.pause.until", { time: formatTime(app.pausedUntil) })
+          : t("ui.settings.watching.pause.until_restart")}
+      </span>
+    </p>
+    <button type="button" class="btn accent" data-focus="pause" onclick={() => changePaused(false)}
+      >{t("ui.settings.watching.pause.resume")}</button
+    >
+  {:else}
+    <SelectField
+      value={pauseFor}
+      options={PAUSE_FOR.map((length) => ({ value: length, text: t(`ui.settings.watching.pause.for.${length}`) }))}
+      label={t("ui.settings.watching.pause.for")}
+      disabled={!app.running}
+      onchange={(value) => (pauseFor = value as (typeof PAUSE_FOR)[number])}
+    />
+    <button
+      type="button"
+      class="btn"
+      data-focus="pause"
+      aria-describedby="pause-hint"
+      disabled={!app.running}
+      onclick={() => changePaused(true)}>{t("ui.settings.watching.pause.action")}</button
+    >
+  {/if}
+</Row>
+
+<style>
+  .state {
+    display: flex;
+    flex-basis: 100%;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 4px;
+    color: var(--ink2);
+  }
+  .unknown {
+    color: var(--ink2);
+    font: 400 13px/1.4 var(--f);
+  }
+</style>

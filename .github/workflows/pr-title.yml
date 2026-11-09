@@ -1,0 +1,47 @@
+name: Pull request title
+
+# The title becomes the squash commit, so it must read as a Conventional Commit subject.
+# It runs from the base branch and reads only the title.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    name: Title follows Conventional Commits
+    # Dependabot writes its own titles, already prefixed build(deps) or build(ci), often past 50 characters.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            test
+            docs
+            build
+            chore
+            spike
+          scopes: |
+            core
+            collect
+            store
+            ipc
+            agent
+            helper
+            ui
+            ci
+            project
+            deps
+          requireScope: true
+          subjectPattern: ^(?![A-Z])(?!.*\.$).{1,50}$
+          subjectPatternError: |
+            The subject "{subject}" must be lowercase, at most 50 characters and have no trailing period.

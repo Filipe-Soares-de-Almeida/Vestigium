@@ -1,0 +1,56 @@
+[package]
+name = "vestigium-helper"
+description = "Elevated job runner of Vestigium."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vestigium-helper"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+winresource = { workspace = true }
+
+[dependencies]
+vestigium-collect = { workspace = true }
+vestigium-core = { workspace = true }
+postcard = { workspace = true }
+
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_Debug_Extensions",
+    "Win32_System_Diagnostics_Etw",
+    "Win32_System_EventLog",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Restore",
+    "Win32_System_Rpc",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
+]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

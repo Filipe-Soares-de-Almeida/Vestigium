@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/Vestigium",
+      "binaries/Vestigium.Helper",
+      "binaries/PresentMon-2.6.0-x64"
+    ],
+    "resources": {
+      "binaries/licenses/PresentMon/LICENSE.txt": "licenses/PresentMon/LICENSE.txt",
+      "binaries/licenses/PresentMon/THIRD_PARTY.txt": "licenses/PresentMon/THIRD_PARTY.txt"
+    }
+  }
+}

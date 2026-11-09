@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vestigium",
+  "mainBinaryName": "Vestigium.Window",
+  "identifier": "app.vestigium",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vestigium",
+        "width": 1100,
+        "height": 720,
+        "decorations": false,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Vestigium",
+    "homepage": "https://github.com/Filipe-Soares-de-Almeida/Vestigium",
+    "category": "Utility",
+    "shortDescription": "Freeze diagnostics for Windows PCs",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh",
+        "languages": ["English", "PortugueseBR"]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwMEUwQTFEQTMyMzc4NEEKUldSS2VDT2pIUW9PRUdXSis2dExxNXo5bGxleUpsYUIzOEhqNk5UaDZmKzVGamZrNlpqL3JqWTQK",
+      "endpoints": [
+        "https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

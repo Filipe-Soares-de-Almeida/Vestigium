@@ -3,13 +3,14 @@ name: Changelog
 on:
   pull_request:
     branches: [main, dev]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   entry-present:
     name: Changelog entry present
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

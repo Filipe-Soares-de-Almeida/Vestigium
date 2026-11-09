@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/agent",
+    "apps/helper",
+    "apps/ui/src-tauri",
+    "crates/brand",
+    "crates/collect",
+    "crates/core",
+    "crates/i18n",
+    "crates/ipc",
+    "crates/store",
+    "tools/budget",
+    "tools/icons",
+    "tools/scenarios",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+vestigium-brand = { path = "crates/brand" }
+vestigium-collect = { path = "crates/collect" }
+vestigium-core = { path = "crates/core" }
+vestigium-i18n = { path = "crates/i18n" }
+vestigium-ipc = { path = "crates/ipc" }
+vestigium-store = { path = "crates/store" }
+windows = "0.62"
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+thiserror = "2"
+miniz_oxide = "0.9"
+tray-icon = "0.26"
+tempfile = "3"
+tauri = "2.12"
+tauri-build = "2.7"
+winresource = "0.1"
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-updater = "2.14"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

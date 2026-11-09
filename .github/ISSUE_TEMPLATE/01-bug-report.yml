@@ -1,0 +1,83 @@
+name: Bug report
+description: "Vestigium itself misbehaves: a crash, wrong data, a broken screen or a failed update."
+title: "[Bug]: "
+labels: ["bug", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If Vestigium ran fine but its report about a freeze looks wrong or missing,
+        use **Diagnosis help** instead. For a security problem, do not open an issue: use
+        **Report a vulnerability** on the Security tab.
+  - type: input
+    id: version
+    attributes:
+      label: Vestigium version
+      description: Settings › Updates shows the installed version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11
+        - Windows 10 22H2
+        - Other or not sure
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Windows build
+      description: Open winver, or type ver in Command Prompt, and copy the version and build number.
+      placeholder: "10.0.19045.5000"
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where does it happen?
+      options:
+        - The window (any screen)
+        - The tray icon or its menu
+        - The background monitor (it stopped, or data is missing)
+        - A task that asks for administrator rights
+        - The installer or the updater
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, in order, starting from opening Vestigium.
+      placeholder: |
+        1. Open Health.
+        2. Select ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the text of any error message. You can attach a screenshot, but check it for anything personal first.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I searched the existing issues and did not find this one.
+          required: true
+        - label: Nothing I wrote or attached contains information I want to keep private.
+          required: true

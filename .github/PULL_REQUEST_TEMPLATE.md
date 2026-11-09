@@ -1,30 +1,40 @@
+<!--
+Target the dev branch. The title becomes the squash commit, so write it as
+type(scope): subject, for example fix(collect): read the event log from the saved bookmark.
+Types, scopes and the 50-character subject limit are in .github/CONTRIBUTING.md.
+-->
+
 ## What
 
-One paragraph, in behavior terms. What does this change do?
+<!-- One paragraph, in behavior terms: what does this change do? -->
 
-## Breaking changes
+## Linked issue
 
-Anything a user would notice change: behavior, configuration keys, file formats, command names,
-minimum requirements. Write "None" if there are none.
+<!-- Closes #123. For a small fix with no issue, write "None". -->
 
 ## How to test
 
+<!--
 The exact commands to run and what a correct result looks like. Numbers for anything
-performance-related — a performance claim without a measurement is not a verification.
+performance-related: a performance claim without a measurement is not a verification.
+-->
 
-## Migration
+## Breaking changes and migration
 
-What a user must do to move from the previous version: settings to change, files to delete, data to
-re-sync. Write "None required" if the update is transparent.
+<!--
+Anything a user would notice change: behavior, configuration keys, file formats, command names,
+minimum requirements, and what they must do to move over. Write "None" if there is nothing.
+-->
 
 ## Risk
 
-What could break, and what is explicitly out of scope for this change.
+<!-- What could break, and what is explicitly out of scope for this change. -->
 
 ---
 
-- [ ] `CHANGELOG.md` updated under `## [Unreleased]`
-- [ ] Commits follow Conventional Commits
-- [ ] This description stands alone and cites nothing outside this repository
-- [ ] No personal data in source, comments, commit messages, or test fixtures
-- [ ] No assistant attribution trailer or footer in commits or in this description
+- [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, or this change has no visible effect and I said so above (a maintainer adds `no-changelog`)
+- [ ] The pull request title and the commits follow Conventional Commits
+- [ ] `cargo fmt`, `cargo clippy`, `cargo test` and `npm run check --prefix apps/ui` pass
+- [ ] New or changed texts are in both `locales/en.json` and `locales/pt-BR.json`
+- [ ] The description makes sense to someone who only has this repository
+- [ ] No personal data, real captures or machine-specific paths in source, fixtures or this description

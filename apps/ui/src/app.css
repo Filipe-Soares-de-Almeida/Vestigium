@@ -1,0 +1,595 @@
+/* Tokens: Red (no data-scheme) on :root; the other colour themes by data-scheme; mode by data-theme.
+   data-swatch draws an element in one colour theme while another is current. */
+:root,
+[data-swatch="red"] {
+  --base: #ebebeb;
+  --layer: #f6f6f6;
+  --card: #ffffff;
+  --card2: #f1f1f1;
+  --stroke: #dfdfdf;
+  --stroke2: #0000000f;
+  --ink: #161616;
+  --ink2: #4f4f4f;
+  --ink3: #646464;
+  --calm: #efb9b5;
+  --busy: #db706b;
+  --press: #ab1323;
+  --freeze: #c21628;
+  --susp: #e2e2e2;
+  --calm-t: #fdedec;
+  --busy-t: #fce1de;
+  --press-t: #fad4d0;
+  --freeze-t: #ffdfdd;
+  --accent: #9a011a;
+  --on-accent: #ffffff;
+  --accent-t: #fddad7;
+  --ok: #ab1323;
+  --shadow: 0 1px 2px #0000000a, 0 4px 14px #0000000d;
+  --caption-close: #c42b1c;
+  --on-caption-close: #ffffff;
+  --facet-1: #ff5355;
+  --facet-2: #ffa09a;
+  --facet-3: #f51c35;
+  --facet-4: #c50124;
+  --facet-5: #e30e2d;
+  --facet-6: #9b0e1e;
+  --mark-1: var(--press);
+  --mark-2: var(--ink);
+  --mark-3: var(--busy);
+  --mark-4: color-mix(in srgb, var(--busy) 55%, var(--calm));
+  --f: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --fd: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+  --shadow-float: 0 8px 28px #00000029;
+  --good: #1b7f45;
+  --row: color-mix(in srgb, var(--ink) 4%, transparent);
+  --row-hover: color-mix(in srgb, var(--ink) 9%, transparent);
+  --row-press: color-mix(in srgb, var(--ink) 10%, transparent);
+  --rule: color-mix(in srgb, var(--ink) 20%, transparent);
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --edge: color-mix(in srgb, var(--ink3) 55%, transparent);
+  --main: var(--card);
+  --band: var(--card2);
+  --field: var(--card);
+  --ctl: var(--card2);
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+}
+:root:not([data-scheme]) {
+  --mark-1: var(--facet-1);
+  --mark-2: var(--facet-2);
+  --mark-3: var(--facet-4);
+  --mark-4: var(--facet-6);
+}
+:root[data-theme="dark"],
+[data-theme="dark"] [data-swatch="red"] {
+  --base: #121212;
+  --layer: #171717;
+  --card: #1e1e1e;
+  --card2: #252525;
+  --stroke: #323232;
+  --stroke2: #ffffff10;
+  --ink: #eeeeee;
+  --ink2: #b2b2b2;
+  --ink3: #989898;
+  --calm: #772c2b;
+  --busy: #b23c3c;
+  --press: #fa7b76;
+  --freeze: #f65254;
+  --susp: #2c2c2c;
+  --calm-t: #3a1514;
+  --busy-t: #461616;
+  --press-t: #541919;
+  --freeze-t: #4b1d1c;
+  --accent: #fe8a85;
+  --on-accent: #121212;
+  --accent-t: #4b1a19;
+  --ok: #fa7b76;
+  --shadow: 0 1px 2px #0008, 0 6px 18px #0006;
+  --good: #4cc27d;
+  --main: var(--base);
+  --band: var(--card);
+  --field: var(--base);
+  color-scheme: dark;
+}
+:root[data-scheme="graphite"],
+[data-swatch="graphite"] {
+  --base: #e9e9e9; --layer: #f5f5f5; --card: #ffffff; --card2: #f1f1f1; --stroke: #dedede; --stroke2: #0000000f;
+  --ink: #141414; --ink2: #4c4c4c; --ink3: #636363;
+  --calm: #c2c2c2; --busy: #8c8c8c; --press: #555555; --freeze: #141414; --susp: #e1e1e1;
+  --calm-t: #f0f0f0; --busy-t: #e8e8e8; --press-t: #dedede; --freeze-t: #d4d4d4;
+  --accent: #141414; --on-accent: #ffffff; --accent-t: #e6e6e6; --ok: #4c4c4c;
+}
+:root[data-scheme="graphite"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="graphite"] {
+  --base: #111111; --layer: #171717; --card: #1e1e1e; --card2: #252525; --stroke: #2f2f2f; --stroke2: #ffffff12;
+  --ink: #f2f2f2; --ink2: #b5b5b5; --ink3: #9c9c9c;
+  --calm: #5f5f5f; --busy: #8f8f8f; --press: #c4c4c4; --freeze: #ffffff; --susp: #333333;
+  --calm-t: #292929; --busy-t: #2e2e2e; --press-t: #363636; --freeze-t: #3d3d3d;
+  --accent: #f2f2f2; --on-accent: #111111; --accent-t: #303030; --ok: #bdbdbd;
+  --shadow: 0 1px 2px #0007, 0 6px 18px #0005;
+}
+:root[data-scheme="slate"],
+[data-swatch="slate"] {
+  --base: #ebeaf0; --layer: #f6f5f9; --card: #ffffff; --card2: #f1f0f6; --stroke: #dfdde8; --stroke2: #1211170f;
+  --ink: #16151c; --ink2: #4f4c5e; --ink3: #646176;
+  --calm: #c9c4e0; --busy: #958bc4; --press: #5b4f97; --freeze: #16151c; --susp: #e3e1ea;
+  --calm-t: #f2f0f8; --busy-t: #e9e6f4; --press-t: #dfdbef; --freeze-t: #d4cfe8;
+  --accent: #4f438c; --on-accent: #ffffff; --accent-t: #e5e1f3; --ok: #5b4f97;
+}
+:root[data-scheme="slate"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="slate"] {
+  --base: #121117; --layer: #17161d; --card: #1e1d26; --card2: #25242e; --stroke: #32303d; --stroke2: #ffffff10;
+  --ink: #eeedf3; --ink2: #b2afc1; --ink3: #9895a9;
+  --calm: #47426a; --busy: #6b609e; --press: #a79ce0; --freeze: #efeaff; --susp: #2c2a36;
+  --calm-t: #221f33; --busy-t: #28243d; --press-t: #302b4a; --freeze-t: #393357;
+  --accent: #b0a5f2; --on-accent: #121117; --accent-t: #2c2842; --ok: #a79ce0;
+}
+:root[data-scheme="indigo"],
+[data-swatch="indigo"] {
+  --base: #e8eaf3; --layer: #f4f5fb; --card: #ffffff; --card2: #eef0f9; --stroke: #dadeee; --stroke2: #1315200f;
+  --ink: #131520; --ink2: #484d67; --ink3: #5c6281;
+  --calm: #c1c7e4; --busy: #848fcf; --press: #484fac; --freeze: #131520; --susp: #dfe2ef;
+  --calm-t: #eff1f9; --busy-t: #e4e8f6; --press-t: #d9ddf1; --freeze-t: #ccd2eb;
+  --accent: #3d42a3; --on-accent: #ffffff; --accent-t: #dfe3f5; --ok: #484fac;
+}
+:root[data-scheme="indigo"][data-theme="dark"],
+[data-theme="dark"] [data-swatch="indigo"] {
+  --base: #10111a; --layer: #141621; --card: #1b1d2b; --card2: #222433; --stroke: #2d3144; --stroke2: #ffffff10;
+  --ink: #ebedf6; --ink2: #abb0cb; --ink3: #9096b4;
+  --calm: #3c4378; --busy: #5962af; --press: #94a1eb; --freeze: #e9edff; --susp: #272b3c;
+  --calm-t: #1b1f3d; --busy-t: #202448; --press-t: #262b57; --freeze-t: #2e3365;
+  --accent: #9caafc; --on-accent: #10111a; --accent-t: #23284d; --ok: #94a1eb;
+}
+
+/* Type and base elements. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  /* The window never scrolls, not even from script; its panes do. */
+  overflow: clip;
+}
+body {
+  background: var(--main);
+  color: var(--ink);
+  font: 400 15px/1.5 var(--f);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  /* An app, not a page: text is not selectable outside text fields. */
+  user-select: none;
+}
+input,
+textarea {
+  user-select: text;
+}
+input,
+select,
+textarea {
+  caret-color: var(--accent);
+}
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--stroke);
+  border-radius: 12px;
+  border: 4px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink3) 55%, var(--stroke));
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+h1 {
+  font: 350 28px/1.2 var(--fd);
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+h2 {
+  font: 400 20px/1.3 var(--fd);
+  margin: 0 0 10px;
+}
+h3 {
+  font: 600 14px/1.35 var(--f);
+  margin: 0 0 8px;
+}
+:where(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+:where(a):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.muted {
+  color: var(--ink2);
+}
+.lede {
+  max-width: 74ch;
+  margin: 16px 0 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.55;
+}
+.lede b,
+.lede strong {
+  font-weight: 600;
+}
+/* A short paragraph of body text, a quiet note under a chart or list, and a link line under a block. */
+.p {
+  max-width: 72ch;
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.note {
+  max-width: 80ch;
+  margin: 10px 0 0;
+  color: var(--ink2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.empty {
+  margin: 0;
+  color: var(--ink2);
+  font-size: 14px;
+}
+.more {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Shared components. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 18px;
+  border-radius: 6px;
+  border: 1px solid var(--stroke);
+  background: var(--ctl);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--f);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:hover {
+  background: color-mix(in srgb, var(--ink) 8%, var(--ctl));
+  text-decoration: none;
+}
+.btn:active {
+  background: color-mix(in srgb, var(--ink) 14%, var(--ctl));
+}
+.btn.accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn.accent:hover {
+  background: color-mix(in srgb, var(--accent) 86%, var(--ink));
+}
+.btn.accent:active {
+  background: color-mix(in srgb, var(--accent) 76%, var(--ink));
+}
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.45;
+}
+.btn.accent:disabled,
+.btn.accent[aria-disabled="true"] {
+  background: var(--accent);
+}
+.btn:not(.accent):disabled,
+.btn:not(.accent)[aria-disabled="true"] {
+  background: var(--ctl);
+}
+/* A row of buttons under a block, with a quiet note beside them. */
+.acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 14px;
+}
+.state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+/* A table's name cell: its column takes the spare width and a long name ends in an ellipsis,
+   so the table never grows past its box. It keeps 8em when the other columns crowd it out. */
+td.fill,
+th.fill {
+  width: 100%;
+  min-width: 8em;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A label beside its control, such as "Sort by" before a list. */
+.inl {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink2);
+  font-size: 13.5px;
+}
+/* The tool row above a list: a filter field, a sort list. */
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin: 24px 0 14px;
+}
+/* Data tables: a name column that takes the spare width, numbers at the right. */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.tbl th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--stroke);
+  color: var(--ink2);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--stroke2);
+  white-space: nowrap;
+}
+.tbl .num {
+  text-align: right;
+}
+.tbl .nm {
+  width: 100%;
+  max-width: 0;
+  min-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tbl .empty-cell {
+  color: var(--ink2);
+}
+/* A row that opens a page: its name is a link whose hit area covers the row. */
+.tbl tbody tr:has(.row-a) {
+  position: relative;
+  cursor: pointer;
+}
+.tbl tbody tr:has(.row-a):hover td {
+  background: var(--row-hover);
+}
+.row-a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.row-a:hover {
+  text-decoration: none;
+}
+.row-a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.row-a:focus-visible {
+  outline: none;
+}
+.row-a:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+/* Event tables: each row a light card, 4 px apart. */
+.tbl-ev {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+.tbl-ev tbody td {
+  background: var(--row);
+  border-bottom: 0;
+}
+.tbl-ev tbody td:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.tbl-ev tbody td:last-child {
+  border-radius: 0 6px 6px 0;
+}
+.wide {
+  max-width: 1060px;
+}
+/* A bulleted list of plain lines: evidence, hung programs. */
+.ev-l {
+  display: grid;
+  gap: 6px;
+  max-width: 72ch;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  list-style: none;
+}
+.ev-l li {
+  position: relative;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.ev-l li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink3);
+}
+/* Windows radio buttons: a ring that fills with the accent, a label and an optional hint under it. */
+.rds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+}
+.rds.v {
+  flex-direction: column;
+}
+.rd {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rd input {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.rd-c {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--ink2);
+  border-radius: 50%;
+  background: var(--field);
+}
+.rd:hover .rd-c {
+  border-color: var(--ink);
+}
+.rd input:checked + .rd-c {
+  border: 6px solid var(--accent);
+  background: var(--on-accent);
+}
+.rd input:focus-visible + .rd-c {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.rd-l {
+  display: grid;
+  line-height: 20px;
+}
+.rd-l small {
+  color: var(--ink2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+/* A labelled setting: its name, the control and a note under it. */
+.fld {
+  margin: 0 0 18px;
+}
+.fld-l {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.fld-n {
+  max-width: 64ch;
+  margin: 8px 0 0;
+  color: var(--ink2);
+  font-size: 13px;
+}
+
+/* The live dot of a chart that updates every second. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.live i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  transition: opacity 0.3s;
+}
+
+/* The content column is the container: two columns from 900 px, one below. */
+.cols2 {
+  display: grid;
+  gap: 0 56px;
+}
+@container content (min-width: 900px) {
+  .cols2 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.screen {
+  animation: enter 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .state-dot {
+    forced-color-adjust: none;
+  }
+}
