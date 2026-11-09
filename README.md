@@ -22,6 +22,8 @@
   </picture>
 </p>
 
+https://github.com/user-attachments/assets/65bff8c4-c8fe-4162-b73c-b7a4e73343c4
+
 ---
 
 Vestigium is a free, open-source app that finds out why a Windows PC freezes, stutters or crashes

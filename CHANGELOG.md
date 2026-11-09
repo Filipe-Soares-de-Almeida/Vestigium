@@ -268,8 +268,8 @@ How to use this file:
 
 ### Changed
 
-- The README is a short page that shows Vestigium at work and links each screen to its page in the
-  wiki, where the full guide now lives.
+- The README is a short page that shows Vestigium at work, in a screenshot and an 11-second video, and
+  links each screen to its page in the wiki, where the full guide now lives.
 - The installer and uninstaller speak the Windows language, English or Brazilian Portuguese, and
   Apps & features lists Vestigium as the publisher with a link to the project.
 - Every drop-down list, in Settings (language, data retention, pause length) and on the Events,
