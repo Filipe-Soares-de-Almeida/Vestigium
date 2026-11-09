@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest something Vestigium should do, or do better.
+title: "[Feature]: "
+labels: ["enhancement", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Vestigium monitors the one PC it is installed on and keeps its data there. Ideas that need an account,
+        a server or telemetry are unlikely to fit.
+        For an open question or a rough idea, start a discussion instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to find out or fix, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How it could work, in terms of what you would see or do in the app.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you tried
+      description: Other tools, Windows settings or workarounds.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where would it live?
+      options:
+        - A screen of the window
+        - The tray icon or its menu
+        - The background monitor
+        - Tasks that need administrator rights
+        - Something new
+        - Not sure
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to work on this myself.
+        - label: I searched the existing issues and did not find this one.
+          required: true

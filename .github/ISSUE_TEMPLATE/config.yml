@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or share an idea
+    url: https://github.com/Filipe-Soares-de-Almeida/Vestigium/discussions
+    about: Questions about using Vestigium, and ideas that are not ready to be a feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/Filipe-Soares-de-Almeida/Vestigium/security/advisories/new
+    about: Private report. Do not open a public issue for a vulnerability.
+  - name: Read the guide
+    url: https://github.com/Filipe-Soares-de-Almeida/Vestigium/wiki
+    about: How each screen works and what the reports mean.

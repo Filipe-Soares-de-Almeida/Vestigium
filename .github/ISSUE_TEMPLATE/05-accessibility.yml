@@ -1,0 +1,53 @@
+name: Accessibility barrier
+description: Something in Vestigium is hard or impossible to use with your keyboard, screen reader, display settings or other assistive technology.
+title: "[Accessibility]: "
+labels: ["accessibility", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for telling us. You do not need to know the cause or the fix; describe what got in your way.
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What got in your way
+      description: What you tried to do, what happened, and what would have made it possible.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where it happens
+      description: The screen and the element.
+      placeholder: "Activity › Today, the timeline"
+    validations:
+      required: true
+  - type: input
+    id: tools
+    attributes:
+      label: Assistive technology and settings
+      description: For example Narrator, NVDA, Magnifier, voice control, keyboard only, a Windows contrast theme, text size or reduced animations. Add versions if you know them.
+  - type: input
+    id: version
+    attributes:
+      label: Vestigium version
+      description: Settings › Updates shows the installed version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11
+        - Windows 10 22H2
+        - Other or not sure
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Windows build
+      description: Open winver, or type ver in Command Prompt, and copy the version and build number.
+      placeholder: "10.0.19045.5000"

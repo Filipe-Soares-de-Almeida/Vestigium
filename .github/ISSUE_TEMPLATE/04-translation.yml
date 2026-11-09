@@ -1,0 +1,65 @@
+name: Translation problem
+description: A wrong, unclear, missing or cut-off text in the window or the tray menu.
+title: "[Translation]: "
+labels: ["translation", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The window and the tray menu are written in English and Brazilian Portuguese. Every text lives in
+        `locales/en.json` and `locales/pt-BR.json`, so a fix is a one-line change that you are welcome to send
+        as a pull request.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language of the text
+      options:
+        - Brazilian Portuguese
+        - English
+        - A language Vestigium does not have yet
+    validations:
+      required: true
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What is wrong
+      options:
+        - It is wrong or misleading
+        - It is unclear or awkward
+        - It is not translated
+        - It is cut off or overlaps
+        - I would like another language
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where it appears
+      description: The screen and the element, so it can be found.
+      placeholder: "Health › the title of an alert"
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current text
+      description: Copy it exactly as shown. Skip this for a new language.
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested text
+      description: How it should read. Skip this if you only want to flag the problem.
+  - type: input
+    id: version
+    attributes:
+      label: Vestigium version
+      description: Settings › Updates shows the installed version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to send the fix as a pull request.

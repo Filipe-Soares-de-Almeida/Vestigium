@@ -1,0 +1,78 @@
+name: Diagnosis help
+description: A freeze, stutter or crash, and a Vestigium report that is wrong, empty or unclear about the cause.
+title: "[Diagnosis]: "
+labels: ["diagnosis", "status: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        To share a report, open the freeze and select **Copy report**. For a capture, open it in
+        **Captures** and select **Copy result**. Then paste it below.
+
+        The report names programs and drivers that were running. Read it before posting and remove anything
+        you do not want to be public.
+  - type: input
+    id: version
+    attributes:
+      label: Vestigium version
+      description: Settings › Updates shows the installed version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11
+        - Windows 10 22H2
+        - Other or not sure
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Windows build
+      description: Open winver, or type ver in Command Prompt, and copy the version and build number.
+      placeholder: "10.0.19045.5000"
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: What did the report say?
+      options:
+        - It named a cause that looks wrong
+        - It named no cause
+        - It named a cause, but I do not know what to do about it
+        - There is no report for the freeze I saw
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: What you saw
+      description: What the PC was doing, how long it stopped, how often it happens and since when.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: The report
+      description: Paste the Markdown copied from Vestigium. Leave this empty only when there is no report.
+      render: markdown
+  - type: textarea
+    id: changes
+    attributes:
+      label: Recent changes
+      description: Windows or driver updates, new hardware or software, and the models of your CPU, graphics card and disks if you know them.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I searched the existing issues and did not find this one.
+          required: true
+        - label: I read the pasted report and removed anything I want to keep private.
+          required: true

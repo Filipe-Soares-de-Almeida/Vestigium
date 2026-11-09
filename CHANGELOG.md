@@ -24,6 +24,8 @@ How to use this file:
 
 ### Added
 
+- New issues open from forms: a bug report, help with a diagnosis (paste the app's Copy report),
+  a feature request, a translation problem and an accessibility barrier.
 - The repository has a contributing guide, a code of conduct, a security policy with private
   vulnerability reports, a support page and an accessibility statement.
 - An occurrence tells whether it involves a program: named by a suspect's cause or evidence, or by a
