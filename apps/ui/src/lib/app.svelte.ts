@@ -60,6 +60,8 @@ class App {
       if (link.status === "rejected") throw link.reason;
       if (history.status === "rejected") throw history.reason;
       this.history = history.value;
+      // With no history at all this is the first launch, so monitoring starts without waiting for a click.
+      if (this.link?.link === "stopped" && this.history === "empty") await this.startWatcher();
       await this.loadSettings();
     } catch (error) {
       this.failure = error;

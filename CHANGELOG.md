@@ -268,6 +268,8 @@ How to use this file:
 
 ### Changed
 
+- The first time the window opens, it starts monitoring by itself instead of showing "Vestigium is not
+  running" and waiting for a click. Later, if you exit the monitor, the window still asks first.
 - The README is a short page that shows Vestigium at work, in a screenshot and an 11-second video, and
   links each screen to its page in the wiki, where the full guide now lives.
 - The installer and uninstaller speak the Windows language, English or Brazilian Portuguese, and
