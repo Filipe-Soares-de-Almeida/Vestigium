@@ -1,5 +1,3 @@
-**Note:** No release has been published yet.
-
 How to download Vestigium and install it for your Windows user.
 
 ## Requirements
