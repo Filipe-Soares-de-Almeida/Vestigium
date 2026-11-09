@@ -469,6 +469,10 @@ How to use this file:
 
 ### Fixed
 
+- The time of each freeze and overload period in the day's events stays on one line in English, instead
+  of breaking into "9:14" over "AM" at the window's default size.
+- The day's summary no longer ends in "disk C:.": it says "likely cause: the C: disk.", and the technical
+  line ends on the cause without a stray period.
 - The small CPU and memory charts on the program and process pages draw on a fixed scale, 0 to 100%
   and 0 to the PC's memory, named at the top, instead of stretching between their lowest and highest
   values; SMART lines start at zero.

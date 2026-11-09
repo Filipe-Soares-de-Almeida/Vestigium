@@ -37,7 +37,7 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 44px 20px minmax(0, 1fr) auto;
+    grid-template-columns: 60px 20px minmax(0, 1fr) auto;
     gap: 14px;
     align-items: center;
     width: 100%;
@@ -61,6 +61,7 @@
   .time {
     color: var(--ink2);
     font-size: 13px;
+    white-space: nowrap;
   }
   .ico {
     display: flex;
