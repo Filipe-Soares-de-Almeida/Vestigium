@@ -56,9 +56,16 @@ class App {
     this.failure = null;
     let [link, history] = await Promise.allSettled([agentStatus(), probeHistory()]);
     if (link.status === "fulfilled") this.link = link.value;
-    // The window only reads; a history left mid-write needs the watcher to open it, so start it and ask again.
-    if (history.status === "rejected" && errorKind(history.reason) === "store" && this.link?.link === "stopped") {
-      await this.startWatcher();
+    // A history from an older version is unreadable until the watcher updates it: start the watcher if it
+    // is stopped, then ask again for a few seconds while it does.
+    let started = false;
+    for (let attempt = 0; attempt < 6 && history.status === "rejected" && errorKind(history.reason) === "store"; attempt++) {
+      if (this.link?.link === "stopped" && !started) {
+        started = true;
+        await this.startWatcher();
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
       [history] = await Promise.allSettled([probeHistory()]);
     }
     try {
