@@ -666,6 +666,44 @@ fn failures_rising_against_the_weeks_before() {
 }
 
 #[test]
+fn failures_rising_stays_open_inside_the_margin() {
+    let rising = (FindingKind::FailuresRising, Subject::Pc);
+    let mut inputs = healthy();
+    // Four failures in the four weeks before: one a week.
+    inputs.events = vec![app_crash(10), app_crash(17), app_crash(24), app_crash(31)];
+    inputs.events.extend([app_crash(1), app_crash(2)]);
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising),
+        None,
+        "two in a week do not open the finding"
+    );
+
+    inputs.open = vec![rising.clone()];
+    assert!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising).is_some(),
+        "one below the floor keeps an open finding"
+    );
+
+    // Eight in the four weeks before: two a week, so three is 1.5 times the average.
+    inputs.events = (0..8).map(|i| app_crash(8 + i * 3)).collect();
+    inputs
+        .events
+        .extend([app_crash(1), app_crash(2), app_crash(3)]);
+    inputs.open = Vec::new();
+    assert_eq!(find(&evaluate(&inputs), FindingKind::FailuresRising), None);
+    inputs.open = vec![rising.clone()];
+    assert!(find(&evaluate(&inputs), FindingKind::FailuresRising).is_some());
+
+    inputs.events.truncate(8);
+    inputs.events.push(app_crash(1));
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising),
+        None,
+        "one failure in the week closes it"
+    );
+}
+
+#[test]
 fn no_crash_dump_warning() {
     let mut inputs = healthy();
     inputs.events = vec![event(6, "volmgr", 46, EventMeaning::NoCrashDump, "")];

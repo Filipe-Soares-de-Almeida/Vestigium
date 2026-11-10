@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- The failures-rising finding no longer closes and reopens as the weekly count of crashes and hangs
+  moves around its threshold. Once open it stays open until the week falls below two failures or
+  below one and a half times the weekly average of the weeks before, so its history is one
+  entry instead of many.
 - A solid-state disk no longer gets an attention finding from the SMART counters that only mean a
   failing sector on a hard disk, and a SMART block whose checksum is wrong, as some USB bridges
   return, is ignored instead of being read as attributes.

@@ -29,6 +29,11 @@ const HEALTHY_BOOT_S: f32 = 60.0;
 const DIRTY_RESTARTS: u32 = 2;
 const UNFINISHED_SHUTDOWNS: u32 = 2;
 const FAILURE_FLOOR: u32 = 3;
+/// An open failures-rising finding closes only below this count in the last week...
+const FAILURE_CLOSE_FLOOR: u32 = FAILURE_FLOOR - 1;
+/// ...or below this multiple of the weekly average before it; opening needs twice that average.
+const FAILURE_CLOSE_FACTOR: f32 = 1.5;
+const FAILURE_OPEN_FACTOR: f32 = 2.0;
 /// Blocks of an HDD slow twice in a row, from which its surface asks for attention.
 const SLOW_BLOCKS: u64 = 10;
 const TREND_DAYS: i64 = 35;
@@ -533,7 +538,12 @@ fn failures_rising(inputs: &HealthInputs) -> Option<Finding> {
     let last_week = failures_between(&inputs.events, week_start, now + 1);
     let before = failures_between(&inputs.events, now - TREND_DAYS * DAY_MS, week_start);
     let weekly_before = before as f32 / ((TREND_DAYS - 7) / 7) as f32;
-    if last_week < FAILURE_FLOOR || (last_week as f32) < 2.0 * weekly_before {
+    let (floor, factor) = if inputs.is_open(FindingKind::FailuresRising, &Subject::Pc) {
+        (FAILURE_CLOSE_FLOOR, FAILURE_CLOSE_FACTOR)
+    } else {
+        (FAILURE_FLOOR, FAILURE_OPEN_FACTOR)
+    };
+    if last_week < floor || (last_week as f32) < factor * weekly_before {
         return None;
     }
     Some(finding(
