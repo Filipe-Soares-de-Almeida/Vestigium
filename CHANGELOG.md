@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- A program started from a very deep folder now shows its full path. The path used to be lost when it
+  was longer than about 1,000 characters, so the program appeared with no file.
 - A boot log that fails while it is being read is no longer taken for a boot with nothing slow in
   it. The scan now counts as not read, so the health page shows no boot result instead of a clean
   one, and the scan keeps a count of the boot events it could not read. Scans saved by the earlier
