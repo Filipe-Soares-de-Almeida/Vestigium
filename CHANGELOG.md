@@ -41,6 +41,11 @@ How to use this file:
 
 ### Fixed
 
+- A deep capture now credits each slow driver routine to the driver that was loaded at its address when
+  it ran, so a driver that took the place of an unloaded one is no longer blamed for the earlier one's
+  routines. A stalled frame is also matched with the stall the probe saw over the time each one lasted,
+  so stalls longer than 50 ms back each other, and the capture's times follow the wall clock over a long
+  run.
 - Searching the Programs list now looks through every program the monitor reports, not only the 100
   with the highest processor use, so a program further down the list is found by name.
 - Undo no longer overwrites a setting you changed yourself after applying a tweak. If Windows now holds

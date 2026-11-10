@@ -25,7 +25,14 @@ struct Clock {
     qpc0: i64,
     wall0: i64,
     freq: f64,
+    /// Wall milliseconds that pass per QPC millisecond over the run, 1.0 until the run ends.
+    scale: f64,
 }
+
+/// The counter and the wall clock may not drift apart by more than this share over one run.
+const MAX_DRIFT: f64 = 0.01;
+/// A run shorter than this, in milliseconds, is too short to measure a drift.
+const MIN_RUN_MS: i64 = 1_000;
 
 impl Clock {
     fn now() -> Clock {
@@ -39,7 +46,35 @@ impl Clock {
             qpc0: qpc,
             wall0: wall_ms(),
             freq: freq.max(1) as f64,
+            scale: 1.0,
         }
+    }
+
+    /// Reads the counter and the wall clock again and sets the scale between them over the run.
+    fn ended(mut self) -> Clock {
+        let mut qpc = 0i64;
+        // SAFETY: writes into a local.
+        unsafe {
+            let _ = QueryPerformanceCounter(&mut qpc);
+        }
+        self.scale = self.scale_to(qpc, wall_ms());
+        self
+    }
+
+    /// The wall milliseconds per counter millisecond given the counter and wall clock at the end.
+    fn scale_to(&self, qpc: i64, wall: i64) -> f64 {
+        let counted = (qpc - self.qpc0) as f64 * 1000.0 / self.freq;
+        let scale = (wall - self.wall0) as f64 / counted;
+        if counted < MIN_RUN_MS as f64 || (scale - 1.0).abs() > MAX_DRIFT {
+            1.0
+        } else {
+            scale
+        }
+    }
+
+    /// A time converted with the start pair only, moved to where the scaled clock puts it.
+    fn corrected(&self, ts_ms: i64) -> i64 {
+        self.wall0 + ((ts_ms - self.wall0) as f64 * self.scale).round() as i64
     }
 
     fn wall_ms(&self, qpc: i64) -> i64 {
@@ -70,6 +105,7 @@ impl EventSink for Kernel {
                 let ticks = event.timestamp - initial;
                 if ticks >= 0 {
                     self.routines.add(
+                        &self.modules,
                         routine,
                         kind,
                         self.clock.us(ticks),
@@ -84,6 +120,7 @@ impl EventSink for Kernel {
                 pid: 0,
                 path,
             }) => self.modules.insert(base, size, &path),
+            Some(KernelRecord::ImageUnload { base, pid: 0 }) => self.modules.remove(base),
             _ => {}
         }
     }
@@ -143,7 +180,7 @@ fn capture(length: Duration, etl: Option<&Path>) -> DeepCapture {
                             kernel = CaptureSource::Unavailable(why);
                         }
                         let sink = read.sink;
-                        (drivers, longest) = sink.routines.finish(&sink.modules);
+                        (drivers, longest) = sink.routines.finish();
                     }
                     Err(_) => kernel = CaptureSource::Unavailable("the trace reader failed".into()),
                 },
@@ -152,13 +189,20 @@ fn capture(length: Duration, etl: Option<&Path>) -> DeepCapture {
             }
         }
     }
-    let (frames, apps, hitches) = frames.join().unwrap_or_else(|_| {
+    let (frames, apps, mut hitches) = frames.join().unwrap_or_else(|_| {
         (
             CaptureSource::Unavailable("the frame reader failed".into()),
             vec![],
             vec![],
         )
     });
+    let clock = clock.ended();
+    for routine in &mut longest {
+        routine.ts_ms = clock.corrected(routine.ts_ms);
+    }
+    for hitch in &mut hitches {
+        hitch.ts_ms = clock.corrected(hitch.ts_ms);
+    }
     DeepCapture {
         start_ms: clock.wall0,
         end_ms: wall_ms(),
@@ -272,9 +316,29 @@ mod tests {
             qpc0: 1_000_000,
             wall0: 5_000,
             freq: 10_000_000.0,
+            scale: 1.0,
         };
         assert_eq!(clock.wall_ms(1_000_000 + 25_000_000), 7_500);
         assert_eq!(clock.us(1_234), 123);
         assert_eq!(clock.wall_ms(990_000), 4_999);
+    }
+
+    #[test]
+    fn times_follow_the_wall_clock_over_the_run() {
+        let mut clock = Clock {
+            qpc0: 0,
+            wall0: 10_000,
+            freq: 1_000.0,
+            scale: 1.0,
+        };
+        // 3,600 s counted, 3,600.18 s on the wall: the counter runs 50 ppm slow.
+        let scale = clock.scale_to(3_600_000, 10_000 + 3_600_180);
+        assert!((scale - 1.00005).abs() < 1e-9);
+        clock.scale = scale;
+        assert_eq!(clock.corrected(10_000), 10_000);
+        assert_eq!(clock.corrected(10_000 + 3_600_000), 10_000 + 3_600_180);
+        // A wall clock that jumped, or a run too short to tell, leaves times as counted.
+        assert_eq!(clock.scale_to(3_600_000, 10_000 + 3_000_000), 1.0);
+        assert_eq!(clock.scale_to(500, 10_000 + 900), 1.0);
     }
 }
