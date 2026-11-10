@@ -41,6 +41,10 @@ How to use this file:
 
 ### Fixed
 
+- A history write that fails, for example on a full disk or a locked file, no longer loses the data
+  of that moment: the batch is kept and written with the next one, up to three batches, and the
+  Windows events it held are still read after it, so none is skipped. A crash, freeze or pressure
+  episode that could not be stored is tried again too, and the tray counts it only once it is saved.
 - A watcher that stops answering no longer leaves the window waiting forever: a request to it now
   gives up after three seconds. A program that connects to the watcher's channel and says nothing, or
   sends half a request, is dropped after a few seconds instead of blocking the window.

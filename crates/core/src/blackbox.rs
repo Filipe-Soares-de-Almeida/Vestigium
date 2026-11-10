@@ -322,6 +322,32 @@ impl Blackbox {
         self.notable.push_back((at_ms, notable));
     }
 
+    /// Takes back the count of an occurrence or episode that could not be stored.
+    pub fn forget_notable(&mut self, output: &Output) {
+        let counted = match output {
+            Output::Occurrence(occurrence) => Some((
+                occurrence.end_ms,
+                Notable::Occurrence {
+                    severe: occurrence.severity == Severity::Severe,
+                },
+            )),
+            Output::Episode(episode)
+                if !matches!(
+                    episode.kind,
+                    EpisodeKind::DpcIsrHint { .. } | EpisodeKind::DiskLatencyHint { .. }
+                ) =>
+            {
+                Some((episode.end_ms, Notable::Episode))
+            }
+            _ => None,
+        };
+        if let Some(counted) = counted
+            && let Some(at) = self.notable.iter().position(|n| *n == counted)
+        {
+            self.notable.remove(at);
+        }
+    }
+
     pub fn samples(&self) -> impl DoubleEndedIterator<Item = &Sample> {
         self.samples.iter()
     }

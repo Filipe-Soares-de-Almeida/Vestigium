@@ -313,6 +313,25 @@ fn recent_state_counts_the_last_day() {
 }
 
 #[test]
+fn an_output_that_was_never_stored_leaves_the_recent_count() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    late(&mut bb, T + 6_000, 6_000.0);
+    late(&mut bb, T + 200_000, 400.0);
+    let outputs = bb.poll(T + 300_000);
+    assert_eq!(bb.recent(T + 3_600_000).occurrences, 2);
+
+    let severe = outputs
+        .iter()
+        .find(|o| matches!(o, Output::Occurrence(occ) if occ.severity == Severity::Severe))
+        .unwrap();
+    bb.forget_notable(severe);
+
+    let state = bb.recent(T + 3_600_000);
+    assert_eq!((state.occurrences, state.severe), (1, 0));
+}
+
+#[test]
 fn pressure_lasts_until_drained() {
     let mut bb = blackbox();
     for s in 0..=130 {
