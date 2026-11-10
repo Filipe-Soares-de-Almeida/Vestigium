@@ -8,6 +8,7 @@ mod dumps;
 mod etw;
 mod events;
 mod gpu;
+mod hash;
 mod health;
 mod hung;
 mod hwtest;
@@ -34,6 +35,7 @@ pub use etw::{
 };
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};
+pub use hash::sha256_hex;
 pub use health::{
     HealthSource, WindowsHealth, antivirus, disk_bus, disk_health, disk_nvme, disk_size,
     file_system, page_files, system_drive, volume_drive, volumes,

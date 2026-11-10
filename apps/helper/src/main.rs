@@ -22,7 +22,7 @@ fn main() -> ExitCode {
         job::Job::HealthScan { out } => scan::run(&out),
         job::Job::DumpScan { out } => dumps::run(&out),
         job::Job::DeleteDumps { list } => delete::run(&list),
-        job::Job::Tweak { plan } => tweak::run(&plan),
+        job::Job::Tweak { plan, sha256 } => tweak::run(&plan, &sha256),
         job::Job::DiskScan {
             disk,
             from_mib,

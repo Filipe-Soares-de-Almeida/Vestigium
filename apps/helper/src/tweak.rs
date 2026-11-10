@@ -5,7 +5,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use vestigium_collect::{
-    RESTORE_CREATED, RESTORE_SKIPPED, WindowsSettings, restore_events, wall_ms,
+    RESTORE_CREATED, RESTORE_SKIPPED, WindowsSettings, restore_events, sha256_hex, wall_ms,
 };
 use vestigium_core::{
     Applier, PlanItem, RestorePoint, SettingResult, SettingStore, TWEAK_PLAN_VERSION, TweakChange,
@@ -42,12 +42,13 @@ const DAY_MS: i64 = 24 * 60 * 60_000;
 const ERROR_RESTORE_DROPPED: u32 = 1168;
 
 /// Carries out a `.plan` of elevated tweaks and writes what happened to a `.tweaked` file beside it.
-pub fn run(plan_path: &Path) -> ExitCode {
+/// The plan is read once and must hash to `sha256`, which the window computed when it wrote it.
+pub fn run(plan_path: &Path, sha256: &str) -> ExitCode {
     let Ok(mut input) = output::open_existing(plan_path, "tweaks", "plan") else {
         return ExitCode::from(job::REFUSED);
     };
     let mut bytes = Vec::new();
-    if input.read_to_end(&mut bytes).is_err() {
+    if input.read_to_end(&mut bytes).is_err() || !plan_has_hash(&bytes, sha256) {
         return ExitCode::from(job::REFUSED);
     }
     let Some(plan) = read_plan(&bytes) else {
@@ -67,6 +68,11 @@ pub fn run(plan_path: &Path) -> ExitCode {
         return ExitCode::from(job::WRITE_FAILED);
     }
     ExitCode::SUCCESS
+}
+
+/// Whether the plan's bytes hash to the SHA-256 the window passed, in either letter case.
+pub fn plan_has_hash(bytes: &[u8], expected: &str) -> bool {
+    sha256_hex(bytes).is_ok_and(|found| found.eq_ignore_ascii_case(expected))
 }
 
 /// A plan file: its version byte, then the plan; `None` for another version or too many items.
@@ -521,6 +527,15 @@ mod tests {
         };
         let results = apply(&plan, &mut store, || panic!("no point for refused items"));
         assert_eq!(results.changes[0].restore_point, None);
+    }
+
+    #[test]
+    fn a_plan_runs_only_under_the_hash_the_window_computed() {
+        let right = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(plan_has_hash(b"abc", right));
+        assert!(plan_has_hash(b"abc", &right.to_uppercase()));
+        assert!(!plan_has_hash(b"abd", right));
+        assert!(!plan_has_hash(b"abc", ""));
     }
 
     #[test]

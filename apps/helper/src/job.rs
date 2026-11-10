@@ -24,7 +24,7 @@ pub enum Job {
     /// Deletes the dumps a list file names, each checked again.
     DeleteDumps { list: PathBuf },
     /// Applies or undoes the tweaks a plan file names, each checked against the catalog.
-    Tweak { plan: PathBuf },
+    Tweak { plan: PathBuf, sha256: String },
     /// Reads physical drive `disk` from `from_mib` to its end, never writing, into `out`.
     DiskScan {
         disk: u32,
@@ -89,12 +89,15 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
         };
     }
     if name == "tweak" {
-        return match rest {
-            [flag, plan] if flag == "--plan" => Ok(Job::Tweak {
-                plan: PathBuf::from(plan),
-            }),
-            _ => Err("tweak takes --plan <file> and nothing else".to_string()),
-        };
+        let found = pairs(rest, &["--plan", "--sha256"])?;
+        let sha256 = value(&found, "--sha256").ok_or("--sha256 is required")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("--sha256 takes 64 hexadecimal digits".to_string());
+        }
+        return Ok(Job::Tweak {
+            plan: PathBuf::from(value(&found, "--plan").ok_or("--plan is required")?),
+            sha256: sha256.to_ascii_lowercase(),
+        });
     }
     if name == "disk-scan" {
         let found = pairs(rest, &["--disk", "--out", "--from"])?;
@@ -167,7 +170,23 @@ mod tests {
         assert!(parse(&args(&["delete-dumps", "--list", "a", "--list", "b"])).is_err());
         assert!(parse(&args(&["tweak", "--list", "a"])).is_err());
         assert!(parse(&args(&["tweak", "--plan", "a", "--plan", "b"])).is_err());
+        assert!(parse(&args(&["tweak", "--plan", "a"])).is_err());
         assert!(parse(&args(&[])).is_err());
+    }
+
+    #[test]
+    fn tweak_takes_a_plan_and_its_hash() {
+        let hash = "AB".repeat(32);
+        assert_eq!(
+            parse(&args(&["tweak", "--plan", "a", "--sha256", &hash])),
+            Ok(Job::Tweak {
+                plan: PathBuf::from("a"),
+                sha256: "ab".repeat(32),
+            })
+        );
+        for bad in ["", "abc", &"zz".repeat(32), &"ab".repeat(33)] {
+            assert!(parse(&args(&["tweak", "--plan", "a", "--sha256", bad])).is_err());
+        }
     }
 
     #[test]

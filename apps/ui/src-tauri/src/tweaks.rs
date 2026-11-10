@@ -1,9 +1,12 @@
+use std::fs::{File, OpenOptions};
+use std::io::Read;
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use vestigium_collect::{
     RESTORE_CREATED, WindowsSettings, has_battery, hiberfile_bytes, monitor_count, physical_drive,
-    read_setting, restore_events, startup_entries, system_drive,
+    read_setting, restore_events, sha256_hex, startup_entries, system_drive,
 };
 use vestigium_core::{
     Advice, Applier, Helped, PlanItem, Status, TWEAK_PLAN_VERSION, TWEAKS, TweakChange, TweakId,
@@ -11,6 +14,7 @@ use vestigium_core::{
 };
 use vestigium_ipc::{Request, Response};
 use vestigium_store::TweakChangeRow;
+use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 use crate::agent::{Link, UiError, refused};
 use crate::capture::{launch_elevated, sibling_helper};
@@ -232,11 +236,16 @@ fn carry(
             .data_dir()
             .map(|dir| dir.join("tweaks").join(format!("{now_ms}.plan")))
             .ok_or_else(|| UiError::Failed("no data folder".into()))?;
-        write_plan(&path, &plan)?;
+        let held = write_plan(&path, &plan)?;
         let helper = sibling_helper()
             .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
-        let args = format!("tweak --plan \"{}\"", path.display());
+        let args = format!(
+            "tweak --plan \"{}\" --sha256 {}",
+            path.display(),
+            held.sha256
+        );
         exit_code = launch_elevated(&helper, &args)?.wait();
+        drop(held);
         if let Ok(Response::Imported { tweaks, .. }) = link.call(&Request::ImportResults) {
             ids.extend(tweaks);
         }
@@ -244,12 +253,69 @@ fn carry(
     Ok(TweaksApplied { ids, exit_code })
 }
 
-fn write_plan(path: &Path, plan: &TweakPlan) -> Result<(), UiError> {
+/// A plan file kept open without write sharing, with the SHA-256 of the bytes written to it.
+struct HeldPlan {
+    _file: File,
+    sha256: String,
+}
+
+/// Opens the plan at `path` so nobody can write to it, and checks that it holds `written`.
+fn hold_plan(path: &Path, written: &[u8]) -> Result<HeldPlan, UiError> {
+    let failed = |err: &dyn std::fmt::Display| UiError::Failed(err.to_string());
+    let mut file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(path)
+        .map_err(|e| failed(&e))?;
+    let mut found = Vec::new();
+    file.read_to_end(&mut found).map_err(|e| failed(&e))?;
+    if found != written {
+        return Err(UiError::Failed(
+            "the plan file changed after it was written".into(),
+        ));
+    }
+    Ok(HeldPlan {
+        _file: file,
+        sha256: sha256_hex(written).map_err(|e| failed(&e))?,
+    })
+}
+
+/// Writes the plan and holds the file until the helper has read it.
+fn write_plan(path: &Path, plan: &TweakPlan) -> Result<HeldPlan, UiError> {
     let failed = |err: &dyn std::fmt::Display| UiError::Failed(err.to_string());
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).map_err(|e| failed(&e))?;
     }
     let mut bytes = vec![TWEAK_PLAN_VERSION];
     bytes.extend(postcard::to_allocvec(plan).map_err(|e| failed(&e))?);
-    std::fs::write(path, bytes).map_err(|e| failed(&e))
+    std::fs::write(path, &bytes).map_err(|e| failed(&e))?;
+    hold_plan(path, &bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_held_plan_cannot_be_rewritten_and_must_match_what_was_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.plan");
+        std::fs::write(&path, b"abc").unwrap();
+
+        assert!(hold_plan(&path, b"abd").is_err(), "swapped before the hold");
+
+        let held = hold_plan(&path, b"abc").unwrap();
+        assert_eq!(
+            held.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(std::fs::write(&path, b"changed").is_err());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"abc",
+            "readers still get in"
+        );
+        drop(held);
+        assert!(std::fs::write(&path, b"changed").is_ok());
+    }
 }

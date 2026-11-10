@@ -24,6 +24,9 @@ How to use this file:
 
 ### Security
 
+- A tweak plan can no longer be swapped while the administrator permission prompt is open. The window
+  now keeps the plan file locked against writing and passes the helper its SHA-256, and the helper
+  refuses to run a plan that does not match it.
 - The administrator helper now loads the Windows libraries it needs from the Windows system folder
   only, so a file with the name of one of them left beside the helper is never run with administrator
   rights.
