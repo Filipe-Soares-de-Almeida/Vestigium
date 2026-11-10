@@ -1852,6 +1852,43 @@ mod tests {
     }
 
     #[test]
+    fn a_suspend_records_its_own_instant() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), NEVER_DUE);
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
+
+        let (done, answered) = mpsc::channel();
+        running.power_tx.send(PowerNotice::Suspend(done)).unwrap();
+        running.wake.set();
+        assert!(answered.recv_timeout(PATIENCE).is_ok());
+        let suspended_at = wall_ms();
+        thread::sleep(Duration::from_millis(1_500));
+        running.power_tx.send(PowerNotice::Resume).unwrap();
+        running.wake.set();
+        let resumed_at = wall_ms();
+        assert!(wait_until(PATIENCE, || {
+            lock(&running.status)
+                .last_sample_ms
+                .is_some_and(|ms| ms >= resumed_at)
+        }));
+        stop(&running);
+
+        let gaps = history(dir.path()).gaps(i64::MIN, i64::MAX).unwrap();
+        let gap = gaps
+            .iter()
+            .find(|g| g.reason == GapReason::Suspended)
+            .expect("the suspend left a gap");
+        assert!(gap.start_ms <= suspended_at, "it starts at the suspend");
+        assert!(
+            gap.end_ms - gap.start_ms >= 1_400,
+            "it lasts until the resume"
+        );
+    }
+
+    #[test]
     fn suspend_is_acknowledged_after_the_batch_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let running = start(dir.path(), NEVER_DUE);
