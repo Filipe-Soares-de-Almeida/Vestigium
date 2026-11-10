@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A volume check can now be stopped, and it no longer runs without a limit. Stopping it ends
+  chkdsk within a second or two and the check is recorded as not completed; a check that is still
+  running after six hours is ended the same way.
 - The crash dump scan no longer hangs on a dump the Windows debugger engine cannot load. Each dump
   gets at most one minute, the whole scan at most ten minutes, and a dump left out of the analysis is
   still listed with its size and date.

@@ -1,6 +1,10 @@
+use std::io::Read;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Child, Command, ExitCode, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use vestigium_collect::wall_ms;
 use vestigium_core::health::Subject;
@@ -25,6 +29,63 @@ use crate::{job, output};
 const DRIVE_FIXED: u32 = 3;
 /// chkdsk's text kept for the technical level, from its end.
 const OUTPUT_KEPT: usize = 16 * 1024;
+/// Longest a volume check may run; a scan of a big volume can take hours.
+const CEILING: Duration = Duration::from_secs(6 * 3600);
+/// How often the stop file and the clock are looked at while chkdsk runs.
+const POLL: Duration = Duration::from_millis(500);
+/// How long the text still in the pipe is waited for once chkdsk has ended.
+const TEXT_WAIT: Duration = Duration::from_secs(2);
+
+/// How the wait for a child process ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Waited {
+    Exited(Option<i32>),
+    Stopped,
+    TimedOut,
+}
+
+/// The part of a child process the wait loop needs.
+trait Running {
+    /// The exit code once the process has ended; `None` while it runs.
+    fn try_exit(&mut self) -> std::io::Result<Option<Option<i32>>>;
+    fn kill(&mut self);
+}
+
+impl Running for Child {
+    fn try_exit(&mut self) -> std::io::Result<Option<Option<i32>>> {
+        Ok(self.try_wait()?.map(|status| status.code()))
+    }
+
+    fn kill(&mut self) {
+        let _ = Child::kill(self);
+        let _ = self.wait();
+    }
+}
+
+/// Waits for `child`, ending it when `stop` says so or `ceiling` passes; a process that has
+/// already ended is never reported as stopped.
+fn wait_for_exit(
+    child: &mut impl Running,
+    stop: &mut dyn FnMut() -> bool,
+    ceiling: Duration,
+    poll: Duration,
+) -> std::io::Result<Waited> {
+    let started = Instant::now();
+    loop {
+        if let Some(code) = child.try_exit()? {
+            return Ok(Waited::Exited(code));
+        }
+        if stop() {
+            child.kill();
+            return Ok(Waited::Stopped);
+        }
+        if started.elapsed() >= ceiling {
+            child.kill();
+            return Ok(Waited::TimedOut);
+        }
+        thread::sleep(poll);
+    }
+}
 
 /// Whether a volume may be checked: a local fixed disk holding NTFS.
 pub fn check_volume(drive_type: u32, file_system: &str) -> Result<(), String> {
@@ -133,8 +194,9 @@ fn volume_facts(letter: char) -> Result<(), String> {
 }
 
 /// Runs `chkdsk <letter>: /scan /forceofflinefix` at below-normal priority, without a window, and
-/// keeps its exit code and the end of its text.
-pub fn check(letter: char) -> (Outcome, VolumeCheck) {
+/// keeps its exit code and the end of its text. It is ended when `stop` says so or after the
+/// ceiling, and then counts as not checked.
+pub fn check(letter: char, stop: &mut dyn FnMut() -> bool) -> (Outcome, VolumeCheck) {
     let mut found = VolumeCheck {
         volume: format!("{letter}:\\"),
         exit_code: None,
@@ -152,22 +214,52 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
     };
     let (exe, args) = chkdsk_command(&system, letter);
     found.dirty_before = volume_dirty(letter);
-    let ran = Command::new(exe)
+    let spawned = Command::new(exe)
         .args(args)
         .current_dir(&system)
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW.0 | BELOW_NORMAL_PRIORITY_CLASS.0)
-        .output();
-    let ran = match ran {
-        Ok(ran) => ran,
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
         Err(e) => {
             found.output = e.to_string();
             return (Outcome::Failed, found);
         }
     };
-    found.output = tail(&oem_text(&ran.stdout));
+    let mut pipe = child.stdout.take();
+    let (sender, text) = mpsc::channel();
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(pipe) = pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        let _ = sender.send(bytes);
+    });
+    let waited = wait_for_exit(&mut child, stop, CEILING, POLL);
+    let bytes = text.recv_timeout(TEXT_WAIT).unwrap_or_default();
     found.dirty_after = volume_dirty(letter);
-    let Some(code) = ran.status.code().and_then(|c| u32::try_from(c).ok()) else {
+    // A check ended half way is only a scan that repairs nothing; the volume flag read above
+    // says whether it left the volume marked for a repair.
+    let code = match waited {
+        Err(e) => {
+            found.output = e.to_string();
+            return (Outcome::Failed, found);
+        }
+        Ok(Waited::Stopped) => {
+            found.output = "stopped".into();
+            return (Outcome::Failed, found);
+        }
+        Ok(Waited::TimedOut) => {
+            found.output = "stopped: the time limit passed".into();
+            return (Outcome::Failed, found);
+        }
+        Ok(Waited::Exited(code)) => code,
+    };
+    found.output = tail(&oem_text(&bytes));
+    let Some(code) = code.and_then(|c| u32::try_from(c).ok()) else {
         return (Outcome::Failed, found);
     };
     found.exit_code = Some(code);
@@ -180,13 +272,15 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
     (outcome, found)
 }
 
-/// Checks the file system of volume `letter` into a new `.chkdsk` file.
+/// Checks the file system of volume `letter` into a new `.chkdsk` file, stopping when a `.stop`
+/// file appears beside it.
 pub fn run(letter: char, out: &Path) -> ExitCode {
     let Ok(file) = output::create(out, "tests", "chkdsk") else {
         return ExitCode::from(job::REFUSED);
     };
+    let stop_path = out.with_extension("stop");
     let started_ms = wall_ms();
-    let (outcome, found) = check(letter);
+    let (outcome, found) = check(letter, &mut || stop_path.exists());
     let run = TestRun {
         subject: Subject::Volume(found.volume.clone()),
         started_ms,
@@ -229,6 +323,80 @@ mod tests {
         let kept = tail(&long);
         assert!(kept.len() <= OUTPUT_KEPT);
         assert!(kept.chars().all(|c| c == 'é'));
+    }
+
+    /// A process that ends after `ends_after` looks, or never.
+    struct Fake {
+        looks: u32,
+        ends_after: Option<u32>,
+        killed: bool,
+    }
+
+    impl Fake {
+        fn new(ends_after: Option<u32>) -> Fake {
+            Fake {
+                looks: 0,
+                ends_after,
+                killed: false,
+            }
+        }
+    }
+
+    impl Running for Fake {
+        fn try_exit(&mut self) -> std::io::Result<Option<Option<i32>>> {
+            self.looks += 1;
+            Ok(self.ends_after.filter(|n| self.looks > *n).map(|_| Some(0)))
+        }
+
+        fn kill(&mut self) {
+            self.killed = true;
+        }
+    }
+
+    #[test]
+    fn a_stop_file_ends_the_check() {
+        let mut child = Fake::new(None);
+        let mut asked = 0;
+        let waited = wait_for_exit(
+            &mut child,
+            &mut || {
+                asked += 1;
+                asked > 3
+            },
+            Duration::from_secs(60),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(waited, Waited::Stopped);
+        assert!(child.killed);
+    }
+
+    #[test]
+    fn a_check_that_passes_its_ceiling_is_ended() {
+        let mut child = Fake::new(None);
+        let waited = wait_for_exit(
+            &mut child,
+            &mut || false,
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+        )
+        .unwrap();
+        assert_eq!(waited, Waited::TimedOut);
+        assert!(child.killed);
+    }
+
+    #[test]
+    fn a_check_that_ends_first_is_not_stopped() {
+        let mut child = Fake::new(Some(0));
+        let waited = wait_for_exit(
+            &mut child,
+            &mut || true,
+            Duration::from_secs(60),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(waited, Waited::Exited(Some(0)));
+        assert!(!child.killed);
     }
 
     #[test]

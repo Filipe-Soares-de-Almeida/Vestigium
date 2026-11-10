@@ -724,7 +724,7 @@ pub async fn start_volume_check(
             TestKind::VolumeCheck,
             Subject::Volume(format!("{letter}:\\")),
             None,
-            None,
+            Some(out.with_extension("stop")),
         )?;
         let process = match launch_elevated(&helper, &volume_check_args(letter, &out)) {
             Ok(process) => process,
