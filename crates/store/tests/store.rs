@@ -147,6 +147,135 @@ fn reopen_keeps_version() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
 }
 
+/// Bytes that are not a database: no SQLite header, a size of a few pages.
+fn garbage() -> Vec<u8> {
+    (0..4096u32)
+        .map(|n| (n.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+fn corrupt_siblings(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".corrupt-"))
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_file_that_is_not_a_database_is_set_aside_and_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let bytes = garbage();
+    std::fs::write(&path, &bytes).unwrap();
+    std::fs::write(dir.path().join("vestigium.db-wal"), b"wal").unwrap();
+    std::fs::write(dir.path().join("vestigium.db-shm"), b"shm").unwrap();
+
+    let (store, aside) = Store::open_recovering(&path).unwrap();
+
+    let aside = aside.expect("the damaged file is named");
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(store.journal_mode().unwrap(), "wal");
+    assert_eq!(aside.parent(), Some(dir.path()));
+    assert!(
+        aside
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("vestigium.db.corrupt-")
+    );
+    assert_eq!(std::fs::read(&aside).unwrap(), bytes);
+    let wal = std::path::PathBuf::from(format!("{}-wal", aside.display()));
+    let shm = std::path::PathBuf::from(format!("{}-shm", aside.display()));
+    assert_eq!(std::fs::read(wal).unwrap(), b"wal");
+    assert_eq!(std::fs::read(shm).unwrap(), b"shm");
+    assert_eq!(corrupt_siblings(dir.path()).len(), 3);
+}
+
+#[test]
+fn a_damaged_file_that_cannot_be_renamed_stays_where_it_is() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let bytes = garbage();
+    std::fs::write(&path, &bytes).unwrap();
+    // Open for reading and writing but not for deleting, as a reader that holds the file does.
+    let _holder = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x3)
+        .open(&path)
+        .unwrap();
+
+    let err = Store::open_recovering(&path).expect_err("the rename is refused");
+
+    assert!(matches!(err, StoreError::Sqlite(_)));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_file_with_a_valid_magic_and_a_broken_header_is_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes[16..40].fill(0xFF);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let (store, aside) = Store::open_recovering(&path).unwrap();
+
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(std::fs::read(aside.unwrap()).unwrap(), bytes);
+}
+
+#[test]
+fn a_healthy_file_is_opened_without_setting_anything_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+
+    let (_, aside) = Store::open_recovering(&path).unwrap();
+
+    assert_eq!(aside, None);
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_newer_schema_is_not_taken_for_damage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.pragma_update(None, "user_version", 99).unwrap();
+    }
+
+    let err = Store::open_recovering(&path).expect_err("newer schema must be refused");
+
+    assert!(matches!(err, StoreError::NewerSchema { found: 99, .. }));
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_locked_file_is_not_taken_for_damage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    // A rollback-journal file under an exclusive lock refuses even a read.
+    let holder = rusqlite::Connection::open(&path).unwrap();
+    holder
+        .execute_batch("CREATE TABLE t (x); BEGIN EXCLUSIVE")
+        .unwrap();
+
+    let result = Store::open_recovering(&path);
+
+    assert!(matches!(result, Err(StoreError::Sqlite(_))));
+    assert!(corrupt_siblings(dir.path()).is_empty());
+    holder.execute_batch("ROLLBACK").unwrap();
+    assert!(Store::open(&path).is_ok());
+}
+
 #[test]
 fn newer_schema_is_refused() {
     let dir = tempfile::tempdir().unwrap();

@@ -41,6 +41,10 @@ How to use this file:
 
 ### Fixed
 
+- A history file with a damaged header no longer keeps the watcher from starting at every logon: the
+  watcher moves the file, with its -wal and -shm files, to a name ending in .corrupt and the time, never
+  deletes it, and starts a new empty history. A file that is only locked, or that a newer version
+  wrote, is left alone.
 - A history write that fails, for example on a full disk or a locked file, no longer loses the data
   of that moment: the batch is kept and written with the next one, up to three batches, and the
   Windows events it held are still read after it, so none is skipped. A crash, freeze or pressure

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, params};
 use vestigium_core::{Gap, WinEvent};
@@ -230,6 +230,28 @@ impl Store {
         Ok(Store { conn })
     }
 
+    /// Like `open`, but a file the database engine rejects as damaged is renamed aside, with its
+    /// `-wal` and `-shm` files, and a new database takes its place; returns the new name of the
+    /// file set aside. A file that cannot be renamed keeps its place and the original error.
+    pub fn open_recovering(path: &Path) -> Result<(Store, Option<PathBuf>), StoreError> {
+        // A file with no database header is moved before the engine sees it, which would
+        // delete the -wal file of a database it cannot read.
+        if has_foreign_header(path)
+            && let Some(aside) = set_aside(path)
+        {
+            return Ok((Store::open(path)?, Some(aside)));
+        }
+        match Store::open(path) {
+            Err(StoreError::Sqlite(err)) if is_damage(&err) => {
+                let Some(aside) = set_aside(path) else {
+                    return Err(StoreError::Sqlite(err));
+                };
+                Ok((Store::open(path)?, Some(aside)))
+            }
+            opened => opened.map(|store| (store, None)),
+        }
+    }
+
     /// Opens an existing database without writing to it, as the UI does while the agent runs.
     pub fn open_read_only(path: &Path) -> Result<Store, StoreError> {
         if !path.is_file() {
@@ -350,6 +372,70 @@ impl Store {
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+}
+
+/// True when the file exists, holds bytes and does not begin with the SQLite header.
+fn has_foreign_header(path: &Path) -> bool {
+    use std::io::Read;
+
+    const MAGIC: &[u8; 16] = b"SQLite format 3\0";
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = Vec::with_capacity(MAGIC.len());
+    if file
+        .by_ref()
+        .take(MAGIC.len() as u64)
+        .read_to_end(&mut head)
+        .is_err()
+    {
+        return false;
+    }
+    !head.is_empty() && head != MAGIC
+}
+
+/// True when the engine says the file is not a database or is corrupt.
+fn is_damage(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(failure, _)
+            if matches!(
+                failure.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            )
+    )
+}
+
+/// Renames the database and its `-wal` and `-shm` files to `<name>.corrupt-<unix ms>` and returns
+/// the new name; when a rename fails the ones already done are undone and nothing is left moved.
+fn set_aside(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let mut stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    let aside = loop {
+        let candidate = path.with_file_name(format!("{name}.corrupt-{stamp}"));
+        if !candidate.exists() {
+            break candidate;
+        }
+        stamp += 1;
+    };
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for suffix in ["", "-wal", "-shm"] {
+        let from = path.with_file_name(format!("{name}{suffix}"));
+        let to = path.with_file_name(format!("{}{suffix}", aside.file_name()?.to_string_lossy()));
+        if suffix.is_empty() || from.exists() {
+            if std::fs::rename(&from, &to).is_err() {
+                for (from, to) in moved.iter().rev() {
+                    let _ = std::fs::rename(to, from);
+                }
+                return None;
+            }
+            moved.push((from, to));
+        }
+    }
+    Some(aside)
 }
 
 fn user_version(conn: &Connection) -> Result<u32, StoreError> {

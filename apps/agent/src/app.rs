@@ -373,7 +373,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         None => paths::data_dir().ok_or_else(|| failed("the LOCALAPPDATA folder is not set"))?,
     };
     let db = data_dir.join("vestigium.db");
-    let store = Store::open(&db).map_err(failed)?;
+    let (store, set_aside) = Store::open_recovering(&db).map_err(failed)?;
     let shared = Arc::new(Shared {
         gate: RunGate::new(),
         status: Arc::new(Mutex::new(AgentStatus {
@@ -401,6 +401,13 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         pipe_lost: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
+
+    if let Some(name) = set_aside.as_deref().and_then(Path::file_name) {
+        lock(&shared.status).last_error = Some(format!(
+            "the history file was damaged and set aside as {}",
+            name.to_string_lossy()
+        ));
+    }
 
     for dir in [
         &shared.captures_dir,
