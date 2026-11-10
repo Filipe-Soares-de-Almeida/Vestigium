@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- A program page whose read of today's events fails now shows the error with a Retry button, instead
+  of saying the program had no events today.
 - A file system check whose chkdsk run ends with exit code 3, which Windows uses for "could not
   check" (access denied, or a volume that cannot be opened), is now always shown as a failed check.
   Before, a volume that happened to be marked dirty made it read as file system errors.

@@ -39,6 +39,7 @@ features = [
 ]
 
 [dev-dependencies]
+rusqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

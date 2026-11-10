@@ -33,6 +33,8 @@
   let facts = $state<ProcessFacts | null>(null);
   /** Today's occurrences and overload periods that involve it. */
   let marks = $state<ProgramMarks | null>(null);
+  /** Why today's occurrences could not be read, so a failed read is not shown as a calm day. */
+  let marksFailure = $state<unknown>(null);
 
   const pid = $derived(program?.pid ?? null);
   /** The PC's memory, the top of the memory chart. */
@@ -62,13 +64,24 @@
     return () => clearInterval(timer);
   });
 
-  $effect(() => {
+  const loadMarks = () => {
     const wanted = name;
     const now = Date.now();
+    marksFailure = null;
     void programMarks(wanted, dayStart(now), now).then(
-      (found) => (marks = found),
-      () => (marks = { occurrences: [], episodes: [] }),
+      (found) => {
+        if (wanted === name) marks = found;
+      },
+      (err: unknown) => {
+        if (wanted === name) marksFailure = err ?? new Error("read failed");
+      },
     );
+  };
+
+  $effect(() => {
+    void name;
+    marks = null;
+    loadMarks();
   });
 
   $effect(() => {
@@ -140,7 +153,9 @@
       {/if}
     </Block>
     <Block title={t("ui.detail.process.today")}>
-      {#if marks === null}
+      {#if marksFailure !== null}
+        <ErrorView error={marksFailure} heading="h2" onretry={loadMarks} />
+      {:else if marks === null}
         <Loading />
       {:else if moments.length}
         <ul class="rows">

@@ -1327,6 +1327,23 @@ mod tests {
     }
 
     #[test]
+    fn program_marks_reports_a_failed_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + HOUR_MS;
+        let id = store.insert_occurrence(&freeze_at(start_ms)).unwrap();
+        let path = dir.path().join("vestigium.db");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE occurrence SET data = x'ff' WHERE id = ?1", [id])
+            .unwrap();
+
+        let read = history.program_marks("game.exe", DAY_START_MS, DAY_START_MS + 24 * HOUR_MS);
+
+        assert!(read.is_err(), "an unreadable row must fail the read");
+    }
+
+    #[test]
     fn episode_detail_lists_what_stalled_inside_it() {
         let dir = tempfile::tempdir().unwrap();
         let (mut store, mut history) = history(dir.path());
