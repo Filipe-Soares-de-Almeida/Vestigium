@@ -251,12 +251,13 @@ impl Tray {
         if shutdown::display_changed() {
             self.taskbar.set(Taskbar::read());
         }
+        let (suggest_capture, recent, theme) = read_shared(shared);
         let now = Shown {
             paused: shared.gate.state() == GateState::Paused,
             sensitive: shared.sensitive.is_on(),
-            suggest_capture: lock(&shared.status).suggest_capture,
-            recent: Level::of(&lock(&shared.recent)),
-            theme: lock(&shared.settings).color_theme,
+            suggest_capture,
+            recent,
+            theme,
             taskbar: self.taskbar.get(),
         };
         let before = self.shown.replace(Some(now));
@@ -279,12 +280,26 @@ impl Tray {
     }
 }
 
+/// Reads what the icon shows from the shared state: the capture hint, the level and the theme.
+pub(crate) fn read_shared(shared: &Shared) -> (bool, Level, ColorTheme) {
+    let suggest_capture = lock(&shared.status).suggest_capture;
+    let recent = Level::of(&lock(&shared.recent));
+    let theme = lock(&shared.settings).color_theme;
+    (suggest_capture, recent, theme)
+}
+
 #[cfg(test)]
 mod tests {
     use vestigium_brand::Badge;
     use vestigium_core::{ColorTheme, RecentState};
 
-    use super::{Level, Shown, Texts};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::{Level, Shown, Texts, read_shared};
+    use crate::app::lock;
+    use crate::app::tests::{both_finish, shared};
     use crate::icon::Taskbar;
 
     fn shown(paused: bool, sensitive: bool, recent: Level) -> Shown {
@@ -381,6 +396,29 @@ mod tests {
             }),
             Level::Attention(3),
             "slowdowns speak first"
+        );
+    }
+
+    #[test]
+    fn tray_state_read_never_deadlocks_with_a_recent_then_status_writer() {
+        let shared = Arc::new(shared());
+        let reading = Arc::clone(&shared);
+        let writing = Arc::clone(&shared);
+
+        both_finish(
+            move || {
+                for _ in 0..3_000 {
+                    read_shared(&reading);
+                }
+            },
+            move || {
+                for _ in 0..300 {
+                    let recent = lock(&writing.recent);
+                    thread::sleep(Duration::from_millis(1));
+                    let status = lock(&writing.status);
+                    drop((recent, status));
+                }
+            },
         );
     }
 }

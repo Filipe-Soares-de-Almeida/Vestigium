@@ -485,15 +485,16 @@ impl Sampler {
             );
             // The live screen ranks programs; detection and history keep each process.
             let mut all = programs(&rates);
+            let heaviest_programs = heaviest(all.clone(), TOP_PER_METRIC);
+            all.sort_by(|a, b| b.cpu_pct.total_cmp(&a.cpu_pct));
+            all.truncate(PROGRAMS_LISTED);
+            lock(&self.programs).push(ts_ms, &all);
             {
                 let mut now = lock(&self.now);
                 now.top = Some(ProcessTop {
                     ts_ms,
-                    entries: heaviest(all.clone(), TOP_PER_METRIC),
+                    entries: heaviest_programs,
                 });
-                all.sort_by(|a, b| b.cpu_pct.total_cmp(&a.cpu_pct));
-                all.truncate(PROGRAMS_LISTED);
-                lock(&self.programs).push(ts_ms, &all);
                 now.programs = Some(ProcessTop {
                     ts_ms,
                     entries: all,

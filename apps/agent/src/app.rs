@@ -86,6 +86,7 @@ fn failed(err: impl std::fmt::Display) -> StartError {
 }
 
 /// What the pipe answers from and acts on, shared with the tray and the sampler.
+/// No code holds two of these mutexes at once.
 pub struct Shared {
     pub gate: Arc<RunGate>,
     pub status: Arc<Mutex<AgentStatus>>,
@@ -177,11 +178,15 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             ErrorCode::Protocol,
             format!("protocol {protocol} is not supported; this agent speaks {PROTOCOL_VERSION}"),
         ),
-        Request::Status => Response::Status(AgentStatus {
-            sensitive_until_ms: shared.sensitive.until_ms(),
-            state: Level::of(&lock(&shared.recent)).state(),
-            ..lock(&shared.status).clone()
-        }),
+        Request::Status => {
+            let state = Level::of(&lock(&shared.recent)).state();
+            let base = lock(&shared.status).clone();
+            Response::Status(AgentStatus {
+                sensitive_until_ms: shared.sensitive.until_ms(),
+                state,
+                ..base
+            })
+        }
         Request::Now => Response::Now(Box::new(lock(&shared.now).clone())),
         Request::Recent => {
             let since_ms = wall_ms() - RING_MS;
@@ -453,7 +458,7 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use vestigium_core::{EpisodeKind, HungWindow, Retention};
     use vestigium_ipc::{PROTOCOL_VERSION, TrayState};
 
@@ -560,7 +565,7 @@ mod tests {
         assert_eq!(options.flush, DEFAULT_FLUSH);
     }
 
-    fn shared() -> Shared {
+    pub(crate) fn shared() -> Shared {
         Shared {
             gate: RunGate::new(),
             status: Arc::new(Mutex::new(AgentStatus::default())),
@@ -630,6 +635,51 @@ mod tests {
         assert_eq!(status.started_at_ms, 42);
         assert_eq!(status.sensitive_until_ms, Some(1_000 + 30 * 60 * 1_000));
         assert_eq!(status.state, TrayState::Problem);
+    }
+
+    /// Runs two closures on their own threads and fails if either is still stuck after five seconds.
+    pub(crate) fn both_finish(
+        first: impl FnOnce() + Send + 'static,
+        second: impl FnOnce() + Send + 'static,
+    ) {
+        let (done, finished) = mpsc::channel();
+        let sender = done.clone();
+        thread::spawn(move || {
+            first();
+            let _ = sender.send("first");
+        });
+        thread::spawn(move || {
+            second();
+            let _ = done.send("second");
+        });
+        for _ in 0..2 {
+            finished
+                .recv_timeout(Duration::from_secs(5))
+                .expect("a thread is stuck: the two locks were taken in opposite orders");
+        }
+    }
+
+    #[test]
+    fn status_answer_never_deadlocks_with_a_status_then_recent_reader() {
+        let shared = Arc::new(shared());
+        let answering = Arc::clone(&shared);
+        let reading = Arc::clone(&shared);
+
+        both_finish(
+            move || {
+                for _ in 0..3_000 {
+                    handle(Request::Status, &answering, None);
+                }
+            },
+            move || {
+                for _ in 0..300 {
+                    let status = lock(&reading.status);
+                    thread::sleep(Duration::from_millis(1));
+                    let recent = lock(&reading.recent);
+                    drop((status, recent));
+                }
+            },
+        );
     }
 
     #[test]

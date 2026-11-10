@@ -38,6 +38,10 @@ How to use this file:
 
 ### Fixed
 
+- The watcher can no longer freeze for good when the window asks for its status at the very moment the
+  tray icon refreshes. Before, two of its threads could each wait for the other, which stopped the
+  tray menu and the icon, kept suspend notices from being handled and left the window showing a
+  stale state until Windows ended the watcher.
 - An install, update or uninstall that finds the monitor still running after asking it to quit and
   ending it now stops with a message, before any file changes, instead of going on. The message says
   to choose Exit on the tray icon and run the installer again.
