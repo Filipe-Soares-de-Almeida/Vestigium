@@ -202,7 +202,7 @@ impl Link {
                 }
                 return Err(err.into());
             }
-            match open.receive() {
+            match open.receive(request.answer_deadline()) {
                 Ok(response) => {
                     *client = Some(open);
                     return Ok(response);
@@ -465,6 +465,31 @@ mod tests {
         ));
         assert!(started.elapsed() < Duration::from_secs(7));
         drop(release);
+    }
+
+    #[test]
+    fn a_slow_request_that_changes_history_is_answered_not_dropped() {
+        let name = unique_pipe();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || {
+            server.serve(|request| match request {
+                Request::ImportResults => {
+                    std::thread::sleep(Duration::from_secs(4));
+                    Response::Done
+                }
+                other => answer(other),
+            })
+        });
+        let link = link_to(&name);
+
+        let result = link.call(&Request::ImportResults);
+
+        assert!(matches!(result, Ok(Response::Done)), "got {result:?}");
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+        assert!(
+            lock(&link.client).is_some(),
+            "the connection is kept after a slow answer"
+        );
     }
 
     #[test]

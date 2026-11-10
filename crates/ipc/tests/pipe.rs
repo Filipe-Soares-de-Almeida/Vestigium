@@ -223,3 +223,78 @@ fn owner_of_a_pipe_made_here_is_this_program() {
 fn a_missing_pipe_has_no_owner() {
     assert_eq!(pipe_owner(&unique_name()), None);
 }
+
+#[test]
+fn a_slow_request_that_may_take_long_is_answered_after_the_short_deadline() {
+    let name = unique_name();
+    let server = PipeServer::bind(&name).unwrap();
+    thread::spawn(move || {
+        server.serve(|request| match request {
+            Request::ClearHistory => {
+                thread::sleep(Duration::from_secs(4));
+                Response::Done
+            }
+            other => answer(other),
+        })
+    });
+    let exe = std::env::current_exe().unwrap();
+    let mut client = PipeClient::connect(&name, &exe).unwrap();
+
+    let started = Instant::now();
+    let result = client.call(&Request::ClearHistory);
+
+    assert_eq!(result.unwrap(), Response::Done);
+    assert!(started.elapsed() >= Duration::from_secs(4));
+}
+
+#[test]
+fn a_mute_server_still_times_out_a_short_request_among_long_ones() {
+    let name = unique_name();
+    let (release, hold) = mpsc::channel::<()>();
+    let server = PipeServer::bind(&name).unwrap();
+    thread::spawn(move || {
+        server.serve(move |request| match request {
+            Request::Hello { .. } => answer(request),
+            _ => {
+                let _ = hold.recv();
+                Response::Done
+            }
+        })
+    });
+    let exe = std::env::current_exe().unwrap();
+    let mut client = PipeClient::connect(&name, &exe).unwrap();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .unwrap();
+
+    let started = Instant::now();
+    let result = client.call(&Request::Recent);
+
+    assert!(matches!(&result, Err(IpcError::Io(err)) if err.kind() == ErrorKind::TimedOut));
+    assert!(started.elapsed() < Duration::from_secs(6));
+    drop(release);
+}
+
+#[test]
+fn requests_that_work_on_the_history_get_the_long_deadline() {
+    use vestigium_ipc::{ANSWER_LONG, ANSWER_SHORT};
+    for request in [
+        Request::ClearHistory,
+        Request::ImportResults,
+        Request::SetSettings(Default::default()),
+    ] {
+        assert_eq!(request.answer_deadline(), ANSWER_LONG, "{request:?}");
+    }
+    for request in [
+        Request::Status,
+        Request::Now,
+        Request::Recent,
+        Request::Settings,
+        Request::SetSensitive { on: true },
+    ] {
+        assert_eq!(request.answer_deadline(), ANSWER_SHORT, "{request:?}");
+    }
+    assert!(ANSWER_LONG > ANSWER_SHORT);
+}

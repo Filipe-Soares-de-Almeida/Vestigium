@@ -11,7 +11,8 @@ mod timed;
 pub use frame::{MAX_FRAME, read_frame, write_frame};
 pub use pipe::{PipeClient, PipeServer, pipe_name, pipe_owner};
 pub use protocol::{
-    AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
+    ANSWER_LONG, ANSWER_SHORT, AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request,
+    Response, TrayState,
 };
 pub use security::{current_user_sid, user_only_sddl};
 

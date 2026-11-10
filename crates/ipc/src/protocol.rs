@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use vestigium_core::{
     EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, ProgramPoint,
@@ -6,6 +8,11 @@ use vestigium_core::{
 
 /// Version of the messages below; both ends refuse a different one.
 pub const PROTOCOL_VERSION: u32 = 14;
+
+/// How long the watcher may take to answer a request that only reads memory or flips a flag.
+pub const ANSWER_SHORT: Duration = Duration::from_secs(3);
+/// How long it may take to answer a request that works on the history or on Windows.
+pub const ANSWER_LONG: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -46,6 +53,27 @@ pub enum Request {
     ApplyUserTweak {
         item: PlanItem,
     },
+}
+
+impl Request {
+    /// How long the answer to this request may take before the sender calls the watcher mute.
+    pub fn answer_deadline(&self) -> Duration {
+        match self {
+            Request::SetSettings(_)
+            | Request::ClearHistory
+            | Request::ImportResults
+            | Request::ApplyUserTweak { .. } => ANSWER_LONG,
+            Request::Hello { .. }
+            | Request::Status
+            | Request::Now
+            | Request::Recent
+            | Request::ProgramRecent { .. }
+            | Request::SetPaused { .. }
+            | Request::SetSensitive { .. }
+            | Request::Settings
+            | Request::SetAutostart { .. } => ANSWER_SHORT,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

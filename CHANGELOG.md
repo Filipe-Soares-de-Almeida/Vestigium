@@ -44,6 +44,10 @@ How to use this file:
 - A watcher that stops answering no longer leaves the window waiting forever: a request to it now
   gives up after three seconds. A program that connects to the watcher's channel and says nothing, or
   sends half a request, is dropped after a few seconds instead of blocking the window.
+- Clearing the history, importing results, saving settings or applying a tweak that takes several
+  seconds no longer makes the window report a silent watcher: these requests now wait up to a minute
+  for the answer, while a request that only reads the watcher's memory still gives up after three
+  seconds.
 - If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
   it again after a second, and exits only when that keeps failing, instead of carrying on with no
   channel while the window says it is not running.

@@ -28,7 +28,7 @@ use crate::{ErrorCode, IpcError, Request, Response, read_frame, write_frame};
 
 const BUFFER_BYTES: u32 = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-/// The client's limit for one read or one write.
+/// The client's limit for one write, and for a read that is not the answer to a request.
 const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a new client may stay silent before the server drops it.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(2);
@@ -149,10 +149,11 @@ impl PipeClient {
         Ok(PipeClient { pipe })
     }
 
-    /// Sends one request and reads its answer; either step fails with `TimedOut` after 3 s.
+    /// Sends one request and reads its answer; the write fails with `TimedOut` after 3 s and the
+    /// read after the request's own `answer_deadline`.
     pub fn call(&mut self, request: &Request) -> Result<Response, IpcError> {
         self.send(request)?;
-        self.receive()
+        self.receive(request.answer_deadline())
     }
 
     /// Writes one request; when this fails the caller can tell the request was not read.
@@ -160,9 +161,11 @@ impl PipeClient {
         write_frame(&mut self.timed()?, request)
     }
 
-    /// Reads the answer to the request last sent.
-    pub fn receive(&mut self) -> Result<Response, IpcError> {
-        read_frame(&mut self.timed()?)
+    /// Reads the answer to the request last sent, giving up with `TimedOut` after `deadline`.
+    pub fn receive(&mut self, deadline: Duration) -> Result<Response, IpcError> {
+        let mut pipe = self.timed()?;
+        pipe.first_read_within(deadline);
+        read_frame(&mut pipe)
     }
 
     fn timed(&self) -> Result<TimedPipe, IpcError> {
