@@ -14,6 +14,8 @@
   "tray.exit": "Sair",
   "error.startup.title": "O Vestigium não conseguiu iniciar",
   "error.startup.body": "O monitoramento parou antes de iniciar: {error}",
+  "error.startup.pipe_taken": "Outro programa está usando o canal de conexão do Vestigium: {owner}. Feche-o e abra o Vestigium novamente.",
+  "error.startup.pipe_taken_unknown": "Outro programa está usando o canal de conexão do Vestigium. Feche-o e abra o Vestigium novamente.",
 
   "ui.common.loading": "Carregando…",
   "ui.common.retry": "Tentar novamente",

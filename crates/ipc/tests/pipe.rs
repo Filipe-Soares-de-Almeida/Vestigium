@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeClient, PipeServer, Request, Response,
-    current_user_sid, pipe_name,
+    current_user_sid, pipe_name, pipe_owner,
 };
 
 fn unique_name() -> String {
@@ -203,4 +203,23 @@ fn half_a_frame_is_dropped() {
         Response::Status(_)
     ));
     drop(half);
+}
+
+#[test]
+fn owner_of_a_pipe_made_here_is_this_program() {
+    let name = unique_name();
+    let _server = PipeServer::bind(&name).unwrap();
+
+    let owner = pipe_owner(&name).unwrap();
+
+    let this = std::env::current_exe().unwrap();
+    assert_eq!(
+        owner.to_string_lossy().to_lowercase(),
+        this.to_string_lossy().to_lowercase()
+    );
+}
+
+#[test]
+fn a_missing_pipe_has_no_owner() {
+    assert_eq!(pipe_owner(&unique_name()), None);
 }

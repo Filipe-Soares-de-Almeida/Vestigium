@@ -9,7 +9,7 @@ mod security;
 mod timed;
 
 pub use frame::{MAX_FRAME, read_frame, write_frame};
-pub use pipe::{PipeClient, PipeServer, pipe_name};
+pub use pipe::{PipeClient, PipeServer, pipe_name, pipe_owner};
 pub use protocol::{
     AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
 };

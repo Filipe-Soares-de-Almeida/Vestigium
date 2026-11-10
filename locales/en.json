@@ -14,6 +14,8 @@
   "tray.exit": "Exit",
   "error.startup.title": "Vestigium could not start",
   "error.startup.body": "Monitoring stopped before it started: {error}",
+  "error.startup.pipe_taken": "Another program is using Vestigium's connection channel: {owner}. Close it and open Vestigium again.",
+  "error.startup.pipe_taken_unknown": "Another program is using Vestigium's connection channel. Close it and open Vestigium again.",
 
   "ui.common.loading": "Loading…",
   "ui.common.retry": "Try again",

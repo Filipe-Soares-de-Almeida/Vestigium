@@ -49,6 +49,8 @@ How to use this file:
   channel while the window says it is not running.
 - Starting Vestigium a second time no longer starts a second watcher, even when the first one has lost
   its connection channel to the window, so two watchers never record into the same history.
+- When another program is already using Vestigium's connection channel, Vestigium now says so in a
+  message, naming the program when Windows allows it, instead of closing without a word.
 - A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
   result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
   attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now

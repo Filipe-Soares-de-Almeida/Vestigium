@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::VecDeque;
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
@@ -18,7 +18,7 @@ use vestigium_core::{
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
     AgentStatus, ErrorCode, IpcError, NowFrame, PROTOCOL_VERSION, PipeServer, Request, Response,
-    current_user_sid, pipe_name,
+    current_user_sid, pipe_name, pipe_owner,
 };
 use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
@@ -82,6 +82,8 @@ impl Options {
 #[derive(Debug)]
 pub enum StartError {
     AlreadyRunning,
+    /// Another program owns the pipe name; its image, when it could be read.
+    PipeTaken(Option<PathBuf>),
     Failed(String),
 }
 
@@ -358,8 +360,12 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
 /// Starts the agent and runs it until Exit or the end of the session.
 pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     let _instance = Instance::acquire()?;
-    let server = match PipeServer::bind(&pipe_name(&current_user_sid().map_err(failed)?)) {
-        Err(IpcError::AlreadyRunning) => return Err(StartError::AlreadyRunning),
+    let pipe = pipe_name(&current_user_sid().map_err(failed)?);
+    let server = match PipeServer::bind(&pipe) {
+        Err(IpcError::AlreadyRunning) => {
+            let this = std::env::current_exe().map_err(failed)?;
+            return Err(pipe_taken(pipe_owner(&pipe), &this));
+        }
         bound => bound.map_err(failed)?,
     };
     let data_dir = match options.data_dir {
@@ -457,7 +463,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
 
     {
         let shared = shared.clone();
-        let pipe = pipe_name(&current_user_sid().map_err(failed)?);
+        let pipe = pipe.clone();
         // Settings are written through a connection of the pipe's own.
         let mut settings_store = Store::open(&db).ok();
         if let Some(store) = settings_store.as_mut() {
@@ -521,9 +527,40 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     Ok(())
 }
 
+/// What a held pipe name means once the per-user guard is ours: no watcher of this user runs in this
+/// session, so the owner is either this program in another session or a stranger.
+fn pipe_taken(owner: Option<PathBuf>, this: &Path) -> StartError {
+    match owner {
+        Some(owner) if same_program(&owner, this) => StartError::AlreadyRunning,
+        other => StartError::PipeTaken(other),
+    }
+}
+
+fn same_program(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+/// Says that another program holds the pipe name.
+pub fn show_pipe_taken(catalog: &Catalog, owner: Option<&Path>) {
+    let body = match owner {
+        Some(owner) => catalog.format(
+            "error.startup.pipe_taken",
+            &[("owner", &owner.to_string_lossy())],
+        ),
+        None => catalog.get("error.startup.pipe_taken_unknown").to_string(),
+    };
+    message_box(catalog, &body);
+}
+
 /// Shows why the agent could not start.
 pub fn show_error(catalog: &Catalog, reason: &str) {
-    let body = catalog.format("error.startup.body", &[("error", reason)]);
+    message_box(
+        catalog,
+        &catalog.format("error.startup.body", &[("error", reason)]),
+    );
+}
+
+fn message_box(catalog: &Catalog, body: &str) {
     // SAFETY: a modal box with two strings that outlive the call.
     unsafe {
         MessageBoxW(
@@ -669,6 +706,32 @@ pub(crate) mod tests {
             pipe_lost: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
+    }
+
+    #[test]
+    fn a_pipe_held_by_this_program_is_a_running_watcher() {
+        let this = Path::new(r"C:\Apps\Vestigium\Vestigium.exe");
+        let same = Path::new(r"c:\apps\vestigium\vestigium.exe");
+
+        assert!(matches!(
+            pipe_taken(Some(same.to_path_buf()), this),
+            StartError::AlreadyRunning
+        ));
+    }
+
+    #[test]
+    fn a_pipe_held_by_another_program_is_an_error() {
+        let this = Path::new(r"C:\Apps\Vestigium\Vestigium.exe");
+        let other = PathBuf::from(r"C:\Tools\other.exe");
+
+        assert!(matches!(
+            pipe_taken(Some(other.clone()), this),
+            StartError::PipeTaken(Some(found)) if found == other
+        ));
+        assert!(matches!(
+            pipe_taken(None, this),
+            StartError::PipeTaken(None)
+        ));
     }
 
     #[test]

@@ -25,6 +25,10 @@ fn main() {
     let system = Lang::from_langid(unsafe { GetUserDefaultUILanguage() });
     match app::run(system, app::Options::parse(std::env::args().skip(1))) {
         Ok(()) | Err(app::StartError::AlreadyRunning) => {}
+        Err(app::StartError::PipeTaken(owner)) => {
+            app::show_pipe_taken(&Catalog::load(system), owner.as_deref());
+            std::process::exit(1);
+        }
         Err(app::StartError::Failed(reason)) => {
             app::show_error(&Catalog::load(system), &reason);
             std::process::exit(1);

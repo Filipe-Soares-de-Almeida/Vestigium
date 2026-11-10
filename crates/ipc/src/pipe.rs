@@ -141,26 +141,7 @@ pub struct PipeClient {
 
 impl PipeClient {
     pub fn connect(name: &str, expected_server: &Path) -> Result<PipeClient, IpcError> {
-        let deadline = Instant::now() + CONNECT_TIMEOUT;
-        let pipe = loop {
-            let opened = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .custom_flags(FILE_FLAG_OVERLAPPED.0)
-                .security_qos_flags(SECURITY_IDENTIFICATION.0)
-                .open(name);
-            match opened {
-                Ok(pipe) => break pipe,
-                Err(err)
-                    if err.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32)
-                        && Instant::now() < deadline =>
-                {
-                    // SAFETY: the name outlives the call; the result only shortens the wait.
-                    let _ = unsafe { WaitNamedPipeW(&HSTRING::from(name), 250) };
-                }
-                Err(err) => return Err(err.into()),
-            }
-        };
+        let pipe = open_pipe(name)?;
         let found = server_image(&pipe)?;
         if !same_path(&found, expected_server) {
             return Err(IpcError::ServerMismatch { found });
@@ -175,6 +156,35 @@ impl PipeClient {
         write_frame(&mut pipe, request)?;
         read_frame(&mut pipe)
     }
+}
+
+/// Opens the client end, waiting a short while when the single instance is in use.
+fn open_pipe(name: &str) -> io::Result<File> {
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        let opened = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED.0)
+            .security_qos_flags(SECURITY_IDENTIFICATION.0)
+            .open(name);
+        match opened {
+            Err(err)
+                if err.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32)
+                    && Instant::now() < deadline =>
+            {
+                // SAFETY: the name outlives the call; the result only shortens the wait.
+                let _ = unsafe { WaitNamedPipeW(&HSTRING::from(name), 250) };
+            }
+            other => return other,
+        }
+    }
+}
+
+/// The program that owns the pipe `name`, or `None` when it cannot be opened or its image read.
+/// Nothing is sent to it.
+pub fn pipe_owner(name: &str) -> Option<PathBuf> {
+    server_image(&open_pipe(name).ok()?).ok()
 }
 
 /// Full path of the program that created the pipe.
