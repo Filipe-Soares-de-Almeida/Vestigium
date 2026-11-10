@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- The report after an unexpected shutdown, and the health checks that read the stored events, now
+  judge each stored event again with the rules of the installed version. An event saved by another
+  version that today's rules no longer recognise is no longer shown as a fact.
 - Two different programs that were given the same process number within one occurrence are no longer
   added together when the heaviest process is picked, so the suspect names the right program.
 - The timeline of an occurrence now names the disk, or the processor core, that reached the peak

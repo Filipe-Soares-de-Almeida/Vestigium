@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use vestigium_core::{
-    Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
+    CURATED, Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
     EventMeaning, Gap, GapReason, LanguagePref, MachineInfo, Occurrence, OccurrenceKind, Retention,
     Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
 };
@@ -124,6 +124,21 @@ fn memory_diagnostic(ts_ms: i64, record_id: u64) -> WinEvent {
         level: 4,
         meaning: EventMeaning::MemoryDiagnostic,
         ..event(ts_ms, record_id)
+    }
+}
+
+/// The first event the watcher curates for `meaning`, as it would be stored.
+fn curated_event(meaning: EventMeaning, n: i64) -> WinEvent {
+    let entry = CURATED
+        .iter()
+        .find(|entry| entry.meaning == meaning)
+        .expect("every meaning is curated");
+    WinEvent {
+        channel: entry.channel,
+        provider: entry.providers[0].to_string(),
+        id: entry.ids[0],
+        meaning,
+        ..event(n * 1_000, n as u64)
     }
 }
 
@@ -271,10 +286,7 @@ fn every_event_meaning_round_trips() {
     let stored: Vec<WinEvent> = EventMeaning::ALL
         .into_iter()
         .zip(1..)
-        .map(|(meaning, n)| WinEvent {
-            meaning,
-            ..event(n * 1_000, n as u64)
-        })
+        .map(|(meaning, n)| curated_event(meaning, n))
         .collect();
 
     store
@@ -299,16 +311,36 @@ fn stored(dir: &Path, sql: &str) -> Vec<i64> {
 }
 
 #[test]
+fn a_stored_event_that_no_rule_recognises_is_not_read_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let unknown = WinEvent {
+        provider: "Some-Retired-Provider".to_string(),
+        id: 77,
+        ..event(1_000, 1)
+    };
+    let misjudged = WinEvent {
+        meaning: EventMeaning::DisplayReset,
+        ..event(2_000, 2)
+    };
+    store
+        .append_batch(&Batch {
+            events: vec![unknown, misjudged],
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.events(0, 10_000).unwrap(), vec![event(2_000, 2)]);
+}
+
+#[test]
 fn every_event_meaning_is_stored_under_its_own_code() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = open(dir.path());
     let events = EventMeaning::ALL
         .into_iter()
         .zip(1..)
-        .map(|(meaning, n)| WinEvent {
-            meaning,
-            ..event(n * 1_000, n as u64)
-        })
+        .map(|(meaning, n)| curated_event(meaning, n))
         .collect();
     store
         .append_batch(&Batch {
@@ -330,9 +362,13 @@ fn every_channel_round_trips() {
     let stored_events: Vec<WinEvent> = Channel::ALL
         .into_iter()
         .zip(1..)
-        .map(|(channel, n)| WinEvent {
-            channel,
-            ..event(n * 1_000, n as u64)
+        .map(|(channel, n)| {
+            let meaning = CURATED
+                .iter()
+                .find(|entry| entry.channel == channel)
+                .expect("every channel is curated")
+                .meaning;
+            curated_event(meaning, n)
         })
         .collect();
     store

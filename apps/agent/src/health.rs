@@ -697,7 +697,7 @@ mod tests {
         let raw = rusqlite::Connection::open(dir.path().join("vestigium.db")).unwrap();
         raw.execute(
             "INSERT INTO event (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
-             VALUES (?1, 1, 'provider', 1, 1, 2, 99, '<EventData/>')",
+             VALUES (?1, 99, 'provider', 1, 1, 2, 1, '<EventData/>')",
             [NOW - DAY_MS],
         )
         .unwrap();
@@ -714,7 +714,7 @@ mod tests {
         assert!(matches!(
             pass.run(&mut store, &now),
             Err(StoreError::UnknownCode {
-                what: "event meaning",
+                what: "channel",
                 code: 99
             })
         ));

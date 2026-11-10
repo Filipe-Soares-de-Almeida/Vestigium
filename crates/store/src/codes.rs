@@ -14,6 +14,8 @@ macro_rules! stored_codes {
             }
         }
 
+        // The reverse of a code goes unused where the stored column is not read back.
+        #[allow(dead_code)]
         pub(crate) fn $from(code: i64) -> Result<$ty, StoreError> {
             match code {
                 $($code => Ok($ty::$variant),)+

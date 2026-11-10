@@ -1,12 +1,11 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
     Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, LanguagePref,
-    MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref, WinEvent,
+    MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref, WinEvent, classify,
 };
 
 use crate::codes::{
-    channel_from_code, gap_from_code, kind_code, kind_from_code, meaning_from_code, severity_code,
-    severity_from_code,
+    channel_from_code, gap_from_code, kind_code, kind_from_code, severity_code, severity_from_code,
 };
 use crate::{Store, StoreError, decode, encode};
 
@@ -169,19 +168,24 @@ impl Store {
         Ok(found)
     }
 
-    /// Curated events logged in `[from_ms, to_ms]`, oldest first.
+    /// Curated events logged in `[from_ms, to_ms]`, oldest first, each meaning judged again by the
+    /// current rules; a stored event the rules no longer recognise is left out.
     pub fn events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<WinEvent>, StoreError> {
         let mut query = self.conn.prepare_cached(
-            "SELECT ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml
+            "SELECT ts_ms, channel, provider, event_id, record_id, level, data_xml
              FROM event WHERE ts_ms BETWEEN ?1 AND ?2 ORDER BY ts_ms, id",
         )?;
         let rows = query.query_map(params![from_ms, to_ms], event_row)?;
         let mut found = Vec::new();
         for row in rows {
-            let (event, channel, meaning) = row?;
+            let (event, channel) = row?;
+            let channel = channel_from_code(channel)?;
+            let Some(meaning) = classify(channel, &event.provider, event.id) else {
+                continue;
+            };
             found.push(WinEvent {
-                channel: channel_from_code(channel)?,
-                meaning: meaning_from_code(meaning)?,
+                channel,
+                meaning,
                 ..event
             });
         }
@@ -323,7 +327,7 @@ fn retention_from(value: &str, notes: &mut Vec<String>) -> Retention {
     }
 }
 
-type EventRow = (WinEvent, i64, i64);
+type EventRow = (WinEvent, i64);
 
 fn event_row(row: &Row<'_>) -> rusqlite::Result<EventRow> {
     let event = WinEvent {
@@ -334,9 +338,9 @@ fn event_row(row: &Row<'_>) -> rusqlite::Result<EventRow> {
         record_id: row.get::<_, i64>(4)?.max(0) as u64,
         level: row.get(5)?,
         meaning: EventMeaning::StorageReset,
-        data_xml: row.get(7)?,
+        data_xml: row.get(6)?,
     };
-    Ok((event, row.get(1)?, row.get(6)?))
+    Ok((event, row.get(1)?))
 }
 
 /// Decodes a record BLOB of the given layout version.
