@@ -127,3 +127,19 @@ fn the_ring_keeps_only_the_newest_records() {
         Some(BASE + (RING_RECORDS as i64 + 59) * 1000)
     );
 }
+
+#[test]
+fn a_cleared_ring_holds_no_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("blackbox.ring");
+    {
+        let (mut ring, _) = BlackboxRing::open(&path).unwrap();
+        write_seconds(&mut ring, BASE, 20);
+        ring.clear();
+        write_seconds(&mut ring, BASE + 60_000, 3);
+    }
+    let (_ring, held) = BlackboxRing::open(&path).unwrap();
+    assert_eq!(held.samples.len(), 3);
+    assert_eq!(held.samples.first().map(|s| s.ts_ms), Some(BASE + 60_000));
+    assert_eq!(held.tops.len(), 1);
+}

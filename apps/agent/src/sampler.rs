@@ -471,9 +471,7 @@ impl Sampler {
 
     fn tick(&mut self, sources: &mut Sources, woke: f64, sampler_lag_ms: f32, ticks: usize) {
         let ts_ms = wall_ms();
-        if self.cleared.swap(false, Ordering::AcqRel) {
-            self.forget(ts_ms);
-        }
+        self.forget_if_cleared();
         self.blackbox.cut_gaps_to(ts_ms);
         self.watch_clock(ts_ms, woke);
         let sensitive = self.sensitive.is_on();
@@ -860,6 +858,10 @@ impl Sampler {
         self.waiting.clear();
         self.unstored.clear();
         self.blackbox = self.blackbox.emptied();
+        if let Some(ring) = self.ring.as_mut() {
+            ring.clear();
+        }
+        self.health.forget();
         lock(&self.readings).clear();
         lock(&self.pressure).clear();
         lock(&self.hiccups).clear();
@@ -1027,14 +1029,23 @@ impl Sampler {
             && now_ms.saturating_sub(self.last_write_ms) >= self.flush_ms
     }
 
+    /// Drops what was buffered before a clear that finished since the last look.
+    fn forget_if_cleared(&mut self) {
+        if self.cleared.swap(false, Ordering::AcqRel) {
+            self.forget(wall_ms());
+        }
+    }
+
     /// Writes whatever is buffered except the minute still open.
     fn flush(&mut self) {
+        self.forget_if_cleared();
         let segments = self.batcher.take();
         self.write(segments);
     }
 
     /// Writes everything buffered, the open minute included.
     fn flush_final(&mut self) {
+        self.forget_if_cleared();
         let segments = self.batcher.take_final();
         self.write(segments);
     }
@@ -2454,6 +2465,34 @@ mod tests {
         let store = history(dir.path());
         assert!(store.events(i64::MIN, i64::MAX).unwrap().is_empty());
         assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("held"));
+    }
+
+    #[test]
+    fn a_batch_from_before_a_clear_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let ts = wall_ms();
+        sampler.batcher.push_sample(quiet(ts));
+        sampler.events.push(disk_event(1));
+        sampler.gaps.push(Gap {
+            start_ms: ts,
+            end_ms: ts + 1,
+            reason: GapReason::Paused,
+        });
+        sampler.cleared.store(true, Ordering::Release);
+
+        sampler.flush_final();
+
+        let store = history(dir.path());
+        assert!(store.events(i64::MIN, i64::MAX).unwrap().is_empty());
+        assert!(store.gaps(i64::MIN, i64::MAX).unwrap().is_empty());
+        assert!(
+            store
+                .segments(Series::Samples, i64::MIN, i64::MAX)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!sampler.cleared.load(Ordering::Acquire));
     }
 
     #[test]

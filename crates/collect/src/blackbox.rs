@@ -111,6 +111,12 @@ impl BlackboxRing {
         }
     }
 
+    /// Empties the records, so a fall after this holds nothing from before it.
+    pub fn clear(&mut self) {
+        self.bytes_mut()[HEADER..].fill(0);
+        self.next = 0;
+    }
+
     /// Writes the records to disk.
     pub fn flush(&self) -> Result<(), CollectError> {
         // SAFETY: flushes the dirty pages of the live view, which stays mapped until drop.

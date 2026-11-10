@@ -53,6 +53,10 @@ How to use this file:
 
 ### Fixed
 
+- A Clear history that fails, for example because the database is busy, no longer discards the
+  minutes of samples and events the watcher still holds in memory, and nothing recorded before a
+  successful clear is written after it. The black box, the daily SMART reading and the live graph
+  start over together after a clear.
 - After clearing the history, the Memory, Disks, test detail, captures and health screens, and the
   counts in the navigation pane, no longer keep showing the deleted test runs, captures, findings
   and events until the window is reopened.

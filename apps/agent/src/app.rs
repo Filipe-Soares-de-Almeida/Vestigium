@@ -248,10 +248,10 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             let Some(store) = store else {
                 return error(ErrorCode::Failed, "the history database is not open");
             };
-            shared.cleared.store(true, Ordering::Release);
             if let Err(err) = store.clear_history() {
                 return error(ErrorCode::Failed, err);
             }
+            shared.cleared.store(true, Ordering::Release);
             lock(&shared.readings).clear();
             lock(&shared.programs).clear();
             lock(&shared.pressure).clear();
@@ -1139,6 +1139,43 @@ pub(crate) mod tests {
         assert!(shared.cleared.load(Ordering::Acquire));
         assert_eq!(lock(&shared.readings).iter().count(), 0);
         assert_eq!(*lock(&shared.recent), RecentState::default());
+    }
+
+    #[test]
+    fn a_failed_clear_keeps_the_live_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        let mut store = Store::open(&db).unwrap();
+        let shared = shared();
+        lock(&shared.readings).push(Reading {
+            ts_ms: wall_ms(),
+            cpu_pct: 5.0,
+            mem_used_pct: Some(30.0),
+            disk_active_pct: 1.0,
+            disk_latency_ms: 0.5,
+            gpu_pct: None,
+            probe_lag_ms: 1.0,
+        });
+        let refuser = rusqlite::Connection::open(&db).unwrap();
+        refuser
+            .execute_batch(
+                "INSERT INTO gap (start_ms, end_ms, reason) VALUES (1, 2, 0);
+                 CREATE TRIGGER refuse_clear BEFORE DELETE ON gap
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END",
+            )
+            .unwrap();
+
+        let answer = handle(Request::ClearHistory, &shared, Some(&mut store));
+
+        assert!(matches!(
+            answer,
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert!(!shared.cleared.load(Ordering::Acquire));
+        assert_eq!(lock(&shared.readings).iter().count(), 1);
     }
 
     #[test]

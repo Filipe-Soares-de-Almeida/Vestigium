@@ -67,6 +67,11 @@ impl<S: HealthSource> HealthPass<S> {
             }
     }
 
+    /// Forgets the days of the stored SMART readings, which a cleared history no longer holds.
+    pub fn forget(&mut self) {
+        self.smart_day.clear();
+    }
+
     pub fn run(&mut self, store: &mut Store, now: &PassNow) -> Result<PassOutcome, StoreError> {
         // A failed read is asked again on the next pass; only an answer is kept for a day.
         let asked_security_center = self.antivirus.is_none()
@@ -364,6 +369,23 @@ mod tests {
             store.smart_history("1 D:", 9, 0).unwrap().is_empty(),
             "an idle HDD is never read"
         );
+    }
+
+    #[test]
+    fn smart_is_stored_again_after_the_history_is_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let mut pass = HealthPass::new(FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        });
+        run(&mut pass, &mut store, NOW, &[]);
+        store.clear_history().unwrap();
+
+        pass.forget();
+        run(&mut pass, &mut store, NOW + DAY_MS / 24, &[]);
+
+        assert_eq!(store.smart_history("0 C:", 9, 0).unwrap().len(), 1);
     }
 
     #[test]
