@@ -49,12 +49,12 @@ export function episodeDetail(episode: Episode): Promise<EpisodeDetailDto> {
   return invoke("episode_detail", { episode });
 }
 
-/** Streams the last ten minutes, then one second a second; resolves to the function that stops it. */
+/** Streams the last ten minutes, then one second a second; resolves to the function that stops this stream and no later one. */
 export async function liveStart(onMessage: (message: LiveMessage) => void): Promise<() => Promise<void>> {
   const channel = new Channel<LiveMessage>();
   channel.onmessage = onMessage;
-  await invoke("live_start", { onFrame: channel });
-  return () => invoke("live_stop");
+  const id = await invoke<number>("live_start", { onFrame: channel });
+  return () => invoke("live_stop", { id });
 }
 
 export function agentStatus(): Promise<AgentLink> {

@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- Moving quickly between screens that show the live view can no longer stop the new screen's
+  live stream, which left it frozen on its first second.
 - A program page whose read of today's events fails now shows the error with a Retry button, instead
   of saying the program had no events today.
 - A file system check whose chkdsk run ends with exit code 3, which Windows uses for "could not

@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -9,6 +9,29 @@ use crate::agent::UiError;
 
 /// How often the live screen asks for the latest second.
 pub const LIVE_PERIOD: Duration = Duration::from_secs(1);
+
+/// The one running live stream: its id and the sender whose drop ends it.
+#[derive(Default)]
+pub struct LiveSlot {
+    current: Option<(u64, Sender<()>)>,
+    last_id: u64,
+}
+
+impl LiveSlot {
+    /// Makes `stop` the current stream, ending the one before it; returns the new stream's id.
+    pub fn replace(&mut self, stop: Sender<()>) -> u64 {
+        self.last_id = self.last_id.wrapping_add(1);
+        self.current = Some((self.last_id, stop));
+        self.last_id
+    }
+
+    /// Ends the stream `id` if it is still the current one; a stale id does nothing.
+    pub fn stop(&mut self, id: u64) {
+        if self.current.as_ref().is_some_and(|(held, _)| *held == id) {
+            self.current = None;
+        }
+    }
+}
 
 /// What the live screen receives, in order.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -207,6 +230,29 @@ mod tests {
         assert_eq!(sent.len(), 3);
         assert!(matches!(sent[0], LiveMessage::Recent { .. }));
         assert!(matches!(sent[2], LiveMessage::Now { point: None, .. }));
+    }
+
+    #[test]
+    fn slot_stop_for_an_old_stream_keeps_the_new_one() {
+        let mut slot = LiveSlot::default();
+        let (a_tx, a_rx) = mpsc::channel::<()>();
+        let (b_tx, b_rx) = mpsc::channel::<()>();
+
+        let a = slot.replace(a_tx);
+        let b = slot.replace(b_tx);
+        slot.stop(a);
+
+        assert_ne!(a, b);
+        assert!(matches!(
+            a_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(matches!(b_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        slot.stop(b);
+        assert!(matches!(
+            b_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
     }
 
     #[test]

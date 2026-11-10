@@ -301,7 +301,7 @@ export const handlers: Record<string, Handler> = {
     };
     setTimeout(tick, 60);
     timer = setInterval(tick, 1000);
-    return null;
+    return counts.starts;
   },
   live_stop: () => {
     if (timer) clearInterval(timer);

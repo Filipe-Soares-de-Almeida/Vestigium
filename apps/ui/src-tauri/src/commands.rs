@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -28,7 +28,7 @@ use crate::hwtests::{
     run_memory_test, scan_under_way, stop_file_of, tests_file, volume_check_args, volume_list,
     write_versioned,
 };
-use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
+use crate::live::{LIVE_PERIOD, LiveMessage, LiveSlot, run_live};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
@@ -39,8 +39,8 @@ use vestigium_core::hwtest::{
 pub struct AppState {
     history: Arc<Mutex<History>>,
     link: Arc<Link>,
-    /// Dropping it ends the live stream.
-    live_stop: Mutex<Option<Sender<()>>>,
+    /// The running live stream; dropping its sender ends it.
+    live: Mutex<LiveSlot>,
     /// The deep capture this window started, until its helper exits.
     capture_run: Arc<Mutex<Option<CaptureRun>>>,
     /// The hardware test this window started, until it ends.
@@ -54,7 +54,7 @@ impl Default for AppState {
         AppState {
             history: Arc::new(Mutex::new(History::new(History::default_path()))),
             link: Arc::new(Link::new(Link::sibling_agent())),
-            live_stop: Mutex::new(None),
+            live: Mutex::new(LiveSlot::default()),
             capture_run: Arc::new(Mutex::new(None)),
             test: Arc::new(Mutex::new(None)),
             test_thread: Arc::new(Mutex::new(None)),
@@ -134,14 +134,15 @@ pub async fn episode_detail(
     .await
 }
 
-/// Streams the last ten minutes, then one second a second; replaces any running stream.
+/// Streams the last ten minutes, then one second a second; replaces any running stream and
+/// returns the id that stops this one.
 #[tauri::command]
 pub fn live_start(
     state: State<'_, AppState>,
     on_frame: Channel<LiveMessage>,
-) -> Result<(), UiError> {
+) -> Result<u64, UiError> {
     let (stop_tx, stop_rx) = mpsc::channel();
-    *lock(&state.live_stop) = Some(stop_tx);
+    let id = lock(&state.live).replace(stop_tx);
     let link = state.link.clone();
     std::thread::Builder::new()
         .name("live".to_string())
@@ -153,13 +154,14 @@ pub fn live_start(
                 LIVE_PERIOD,
             )
         })
-        .map(drop)
+        .map(|_| id)
         .map_err(|err| UiError::Failed(err.to_string()))
 }
 
+/// Ends the live stream `id`; does nothing when a newer stream has replaced it.
 #[tauri::command]
-pub fn live_stop(state: State<'_, AppState>) {
-    lock(&state.live_stop).take();
+pub fn live_stop(state: State<'_, AppState>, id: u64) {
+    lock(&state.live).stop(id);
 }
 
 #[tauri::command]
