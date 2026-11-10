@@ -40,6 +40,12 @@ pub const DISK_ACCESS: u32 = GENERIC_READ.0;
 const PROGRESS_EVERY_MS: f64 = 5_000.0;
 /// Sectors of one block narrowed down before the rest of the block counts as unreadable too.
 const SECTORS_NARROWED: usize = 64;
+/// Win32 errors a disk that was removed or stopped answering returns.
+const DEVICE_GONE: [u32; 7] = [6, 21, 55, 433, 1006, 1112, 1167];
+/// Blocks in a row that fail whole before the disk is asked whether it still answers.
+const FAILING_STREAK: usize = 3;
+/// Why a scan ended when the disk went away.
+const GONE_REASON: &str = "the disk stopped answering";
 
 /// A disk read in place, block by block.
 pub trait Disk {
@@ -47,6 +53,8 @@ pub trait Disk {
     fn sector_bytes(&self) -> u32;
     /// Reads `len` bytes at `offset`, both multiples of the sector size; `Err` carries the Win32 error.
     fn read(&mut self, offset: u64, len: u32) -> Result<(), u32>;
+    /// Whether the disk still reports its length; read-only, and false once it is gone.
+    fn answers(&mut self) -> bool;
 }
 
 /// A physical drive opened for reading only, with I/O at the lowest priority.
@@ -182,6 +190,17 @@ impl Disk for PhysicalDisk {
         unsafe { ReadFile(self.handle, Some(buf), Some(&mut read), None) }.map_err(code)?;
         if read == len { Ok(()) } else { Err(0) }
     }
+
+    fn answers(&mut self) -> bool {
+        let mut length = GET_LENGTH_INFORMATION::default();
+        self.ask(
+            IOCTL_DISK_GET_LENGTH_INFO,
+            &[],
+            (&raw mut length).cast(),
+            size_of_val(&length),
+        )
+        .is_ok()
+    }
 }
 
 impl Drop for PhysicalDisk {
@@ -214,6 +233,9 @@ pub fn scan(
     let ms = |since: Instant| since.elapsed().as_secs_f64() * 1000.0;
     let mut last_progress = 0.0;
     let mut stopped = false;
+    let mut gone = false;
+    // Blocks that failed whole and are not recorded until the disk is known to still answer.
+    let mut streak: Vec<(u64, Vec<u64>)> = Vec::new();
     while offset < size {
         if stop() {
             stopped = true;
@@ -233,20 +255,41 @@ pub fn scan(
             }
         }
         if first.is_ok() {
+            flush(&mut scan, &mut streak);
             scan.block(offset, took);
         } else {
             let mut bad = Vec::new();
+            let mut vanished = first.is_err_and(|code| DEVICE_GONE.contains(&code));
             for at in (offset..offset + u64::from(len)).step_by(sector as usize) {
-                if disk.read(at, sector).is_err() {
+                if vanished {
+                    break;
+                }
+                if let Err(code) = disk.read(at, sector) {
+                    vanished = DEVICE_GONE.contains(&code);
                     bad.push(at);
                     if bad.len() >= SECTORS_NARROWED {
                         break;
                     }
                 }
             }
+            if vanished {
+                gone = true;
+                break;
+            }
             if bad.is_empty() {
+                flush(&mut scan, &mut streak);
                 scan.block(offset, took);
+            } else if bad.len() >= SECTORS_NARROWED {
+                streak.push((offset, bad));
+                if streak.len() >= FAILING_STREAK {
+                    if !disk.answers() {
+                        gone = true;
+                        break;
+                    }
+                    flush(&mut scan, &mut streak);
+                }
             } else {
+                flush(&mut scan, &mut streak);
                 scan.unreadable(offset, &bad);
             }
         }
@@ -256,7 +299,20 @@ pub fn scan(
             progress(scan.progress(wall_ms(), offset));
         }
     }
+    if gone {
+        // A later scan resumes at the first block that was not recorded.
+        let resume = streak.first().map_or(offset, |(at, _)| *at);
+        return (scan.finish(resume, Some(GONE_REASON.into())), stopped);
+    }
+    flush(&mut scan, &mut streak);
     (scan.finish(offset, None), stopped)
+}
+
+/// Records the blocks held back as unreadable once the disk is known to answer.
+fn flush(scan: &mut SurfaceAggregator, streak: &mut Vec<(u64, Vec<u64>)>) {
+    for (at, bad) in streak.drain(..) {
+        scan.unreadable(at, &bad);
+    }
 }
 
 /// The run a scan makes, with its outcome.
@@ -366,6 +422,10 @@ mod tests {
         bad_sector: Option<u64>,
         slow_once: Vec<u64>,
         reads: u32,
+        /// Every read from this offset on fails with this Win32 error.
+        fails_from: Option<(u64, u32)>,
+        /// What the length query says once reads fail.
+        answers: bool,
     }
 
     impl FakeDisk {
@@ -375,6 +435,8 @@ mod tests {
                 bad_sector: None,
                 slow_once: Vec::new(),
                 reads: 0,
+                fails_from: None,
+                answers: true,
             }
         }
     }
@@ -394,10 +456,19 @@ mod tests {
                 self.slow_once.remove(at);
                 std::thread::sleep(Duration::from_millis(600));
             }
+            if let Some((from, code)) = self.fails_from
+                && offset + u64::from(len) > from
+            {
+                return Err(code);
+            }
             match self.bad_sector {
                 Some(bad) if (offset..offset + u64::from(len)).contains(&bad) => Err(23),
                 _ => Ok(()),
             }
+        }
+
+        fn answers(&mut self) -> bool {
+            self.answers
         }
     }
 
@@ -464,6 +535,52 @@ mod tests {
         assert_eq!(scan.unreadable_blocks, 1);
         assert_eq!(scan.unreadable, vec![bad]);
         assert_eq!(scan.bands.iter().sum::<u64>(), 7);
+        assert_eq!(as_run(scan, false, 0).outcome, Outcome::Problems);
+    }
+
+    #[test]
+    fn a_disk_that_vanishes_ends_the_scan_as_failed() {
+        let mut disk = FakeDisk::new(8);
+        disk.fails_from = Some((3 * MIB, 1167));
+        let (scan, _) = scan_all(&mut disk, 0);
+        assert_eq!(scan.unreadable_blocks, 0);
+        assert_eq!(
+            scan.to_bytes,
+            3 * MIB,
+            "a later scan resumes at the failed block"
+        );
+        assert!(scan.failure.is_some());
+        assert_eq!(as_run(scan, false, 0).outcome, Outcome::Failed);
+    }
+
+    #[test]
+    fn a_silent_disk_ends_the_scan_as_failed_without_unreadable_blocks() {
+        let mut disk = FakeDisk::new(12);
+        disk.fails_from = Some((2 * MIB, 23));
+        disk.answers = false;
+        let (scan, _) = scan_all(&mut disk, 0);
+        assert_eq!(scan.unreadable_blocks, 0);
+        assert_eq!(scan.to_bytes, 2 * MIB);
+        assert_eq!(as_run(scan, false, 0).outcome, Outcome::Failed);
+    }
+
+    #[test]
+    fn a_damaged_area_of_a_disk_that_answers_is_still_problems() {
+        let mut disk = FakeDisk::new(12);
+        disk.fails_from = Some((2 * MIB, 23));
+        let (scan, _) = scan_all(&mut disk, 0);
+        assert_eq!(scan.unreadable_blocks, 10);
+        assert!(scan.failure.is_none());
+        assert_eq!(as_run(scan, false, 0).outcome, Outcome::Problems);
+    }
+
+    #[test]
+    fn a_plain_bad_sector_is_still_problems() {
+        let mut disk = FakeDisk::new(8);
+        disk.bad_sector = Some(2 * MIB + 512);
+        disk.answers = false;
+        let (scan, _) = scan_all(&mut disk, 0);
+        assert!(scan.failure.is_none());
         assert_eq!(as_run(scan, false, 0).outcome, Outcome::Problems);
     }
 

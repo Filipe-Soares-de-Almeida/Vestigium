@@ -38,6 +38,10 @@ How to use this file:
 
 ### Fixed
 
+- A disk surface scan on a disk that disappears halfway, as when a USB cable is pulled or the port
+  is suspended, now ends as failed because the disk stopped answering, and a later scan resumes where
+  it stopped. Before, every block after that point was recorded as unreadable and the disk was told to
+  be replaced. A really damaged area of a disk that still answers is still reported as unreadable.
 - A Seagate hard disk that logged a single command timeout no longer shows an impossible count of
   4294967295 damaged sectors. The command timeout attribute is now read as the 16-bit counter it holds,
   and the number on a disk-health alert is the highest of the watched counters instead of their sum.
