@@ -1071,6 +1071,10 @@ export interface VolumeCheck {
   result: VolumeResult;
   /** chkdsk's own text, for the technical level. */
   output: string;
+  /** Whether the volume was marked for a full check before the run; null when it could not be asked. */
+  dirty_before: boolean | null;
+  /** The same after the run. */
+  dirty_after: boolean | null;
 }
 
 export type TestData =

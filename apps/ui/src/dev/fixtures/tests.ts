@@ -116,6 +116,8 @@ function runs(errors: boolean): TestRunDto[] {
           exit_code: errors ? 3 : 0,
           result: errors ? "ProblemsFound" : "NoProblems",
           output: "Stage 1: Examining basic file system structure ...\r\nWindows has scanned the file system.",
+          dirty_before: false,
+          dirty_after: errors,
         },
       },
     }),

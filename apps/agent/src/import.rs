@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
-use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, disk_subject};
+use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, disk_subject};
 use vestigium_core::{
     Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
     DeepCapture, DumpDeletion, DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
@@ -132,7 +132,7 @@ pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
             if fs::metadata(&path).map_or(true, |m| m.len() > MAX_TEST_FILE) {
                 continue;
             }
-            let Some(mut run) = read_versioned::<TestRun>(&path, TEST_RUN_VERSION) else {
+            let Some(mut run) = read_test_run(&path) else {
                 continue;
             };
             if let Subject::Disk(name) = &run.subject
@@ -183,6 +183,12 @@ fn read_capture(path: &Path) -> Option<DeepCapture> {
         return None;
     }
     postcard::from_bytes(body).ok()
+}
+
+/// A test file of the current layout or of version 1, which has no dirty state in a volume check.
+fn read_test_run(path: &Path) -> Option<TestRun> {
+    read_versioned::<TestRun>(path, TEST_RUN_VERSION)
+        .or_else(|| read_versioned::<TestRunV1>(path, 1).map(TestRun::from))
 }
 
 /// A file written as one version byte and a postcard body; `None` for another version.
@@ -498,6 +504,31 @@ mod tests {
         assert!(tests.join("41.chkdsk").exists(), "another version stays");
         let runs = store.test_runs(0, 100).unwrap();
         assert_eq!(runs[0].run.subject, Subject::Disk("1 D:".into()));
+    }
+
+    #[test]
+    fn a_volume_check_file_of_layout_version_one_is_imported() {
+        use vestigium_core::hwtest::{Outcome, TestDataV1, TestRunV1, VolumeCheckV1, VolumeResult};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        let old = TestRunV1 {
+            subject: Subject::Volume(r"D:\".into()),
+            started_ms: 10,
+            ended_ms: 20,
+            outcome: Outcome::Clean,
+            data: TestDataV1::VolumeCheck(VolumeCheckV1 {
+                volume: r"D:\".into(),
+                exit_code: Some(0),
+                result: VolumeResult::NoProblems,
+                output: String::new(),
+            }),
+        };
+        write_versioned(&tests.join("60.chkdsk"), 1, &old);
+        assert_eq!(import_tests(&tests, &mut store).len(), 1);
+        assert!(!tests.join("60.chkdsk").exists());
+        assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use rusqlite::{OptionalExtension, params};
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{Outcome, TEST_RUN_VERSION, TestKind, TestRun};
+use vestigium_core::hwtest::{Outcome, TEST_RUN_VERSION, TestKind, TestRun, TestRunV1};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -75,7 +75,8 @@ impl Store {
         Ok(id)
     }
 
-    /// Runs that ended in `[from_ms, to_ms]`, oldest first; a row of an unknown layout is skipped.
+    /// Runs that ended in `[from_ms, to_ms]`, oldest first; a row of an unknown layout is skipped and
+    /// one of version 1 is read as a run with no dirty state.
     pub fn test_runs(&self, from_ms: i64, to_ms: i64) -> Result<Vec<TestRunRow>, StoreError> {
         let mut statement = self.conn.prepare(
             "SELECT id, version, data FROM test_run WHERE ended_ms BETWEEN ?1 AND ?2
@@ -91,10 +92,14 @@ impl Store {
         let mut runs = Vec::new();
         for row in rows {
             let (id, version, data) = row?;
-            if version != i64::from(TEST_RUN_VERSION) {
+            let run = if version == i64::from(TEST_RUN_VERSION) {
+                decode::<TestRun>(&data)?.pop()
+            } else if version == 1 {
+                decode::<TestRunV1>(&data)?.pop().map(TestRun::from)
+            } else {
                 continue;
-            }
-            if let Some(run) = decode::<TestRun>(&data)?.pop() {
+            };
+            if let Some(run) = run {
                 runs.push(TestRunRow { id, run });
             }
         }

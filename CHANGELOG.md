@@ -56,6 +56,9 @@ How to use this file:
 - The disk speed test now deletes the 1 GiB temporary file an earlier run left behind (after a power
   cut, for instance), and when the disk stops answering it waits for the cancelled reads and writes
   to finish before releasing the memory they use.
+- The volume check now records whether Windows had the volume marked for repair before and after the
+  run, which shows when the check itself marked it. The test result format changes, so the window,
+  the monitor and the helper must be updated together; results saved earlier are still read.
 
 ## [0.1.0] - 2026-11-09
 

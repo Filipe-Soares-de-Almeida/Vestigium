@@ -901,6 +901,8 @@ fn volume_errors_follow_the_last_check() {
             exit_code: Some(3),
             result,
             output: String::new(),
+            dirty_before: None,
+            dirty_after: None,
         })
     };
     let volume = Subject::Volume(r"D:\".into());

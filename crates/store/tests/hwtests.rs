@@ -1,8 +1,11 @@
 use vestigium_core::Media;
 use vestigium_core::Retention;
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{MemoryQuick, Outcome, Region, SurfaceAggregator, TestData, TestRun};
-use vestigium_store::{SCHEMA_VERSION, Store};
+use vestigium_core::hwtest::{
+    MemoryQuick, Outcome, Region, SurfaceAggregator, TestData, TestDataV1, TestRun, TestRunV1,
+    VolumeCheck, VolumeCheckV1, VolumeResult,
+};
+use vestigium_store::{SCHEMA_VERSION, Store, encode};
 
 const DAY: i64 = 24 * 60 * 60_000;
 
@@ -105,4 +108,66 @@ fn runs_follow_the_records_retention_and_the_history_clear() {
     assert_eq!(store.test_runs(0, 500 * DAY).unwrap().len(), 1);
     store.clear_history().unwrap();
     assert!(store.test_runs(0, 500 * DAY).unwrap().is_empty());
+}
+
+#[test]
+fn a_volume_check_keeps_its_dirty_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let run = TestRun {
+        subject: Subject::Volume(r"D:\".into()),
+        started_ms: DAY,
+        ended_ms: DAY + 60_000,
+        outcome: Outcome::Problems,
+        data: TestData::VolumeCheck(VolumeCheck {
+            volume: r"D:\".into(),
+            exit_code: Some(13),
+            result: VolumeResult::ProblemsFound,
+            output: "text".into(),
+            dirty_before: Some(false),
+            dirty_after: Some(true),
+        }),
+    };
+    store.record_test_run(&run).unwrap();
+    assert_eq!(store.test_runs(0, 2 * DAY).unwrap()[0].run, run);
+}
+
+#[test]
+fn a_run_stored_with_layout_version_one_still_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let old = TestRunV1 {
+        subject: Subject::Volume(r"D:\".into()),
+        started_ms: DAY,
+        ended_ms: DAY + 60_000,
+        outcome: Outcome::Problems,
+        data: TestDataV1::VolumeCheck(VolumeCheckV1 {
+            volume: r"D:\".into(),
+            exit_code: Some(13),
+            result: VolumeResult::ProblemsFound,
+            output: "text".into(),
+        }),
+    };
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute(
+            "INSERT INTO test_run (version, kind, subject, started_ms, ended_ms, outcome, data)
+             VALUES (1, 2, 'volume:D:\', ?1, ?2, 1, ?3)",
+            rusqlite::params![
+                old.started_ms,
+                old.ended_ms,
+                encode(std::slice::from_ref(&old))
+            ],
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let runs = store.test_runs(0, 2 * DAY).unwrap();
+    assert_eq!(runs.len(), 1);
+    let TestData::VolumeCheck(check) = &runs[0].run.data else {
+        panic!("a volume check");
+    };
+    assert_eq!(check.exit_code, Some(13));
+    assert_eq!((check.dirty_before, check.dirty_after), (None, None));
 }

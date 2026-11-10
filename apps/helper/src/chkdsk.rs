@@ -57,8 +57,8 @@ pub fn chkdsk_command(system: &Path, letter: char) -> (PathBuf, [String; 3]) {
     )
 }
 
-/// Whether NTFS marks the volume as needing a full chkdsk; false when it cannot be asked.
-fn volume_dirty(letter: char) -> bool {
+/// Whether NTFS marks the volume as needing a full chkdsk; `None` when it cannot be asked.
+fn volume_dirty(letter: char) -> Option<bool> {
     let path = HSTRING::from(format!(r"\\.\{letter}:"));
     // SAFETY: opens the volume for reading only; the handle is closed below.
     let Ok(handle) = (unsafe {
@@ -72,7 +72,7 @@ fn volume_dirty(letter: char) -> bool {
             None,
         )
     }) else {
-        return false;
+        return None;
     };
     let mut flags = 0u32;
     let mut returned = 0u32;
@@ -91,7 +91,7 @@ fn volume_dirty(letter: char) -> bool {
     };
     // SAFETY: the handle came from CreateFileW above and is closed once.
     let _ = unsafe { CloseHandle(handle) };
-    asked.is_ok() && flags & VOLUME_IS_DIRTY != 0
+    asked.is_ok().then_some(flags & VOLUME_IS_DIRTY != 0)
 }
 
 fn oem_text(bytes: &[u8]) -> String {
@@ -140,6 +140,8 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
         exit_code: None,
         result: VolumeResult::CouldNotCheck,
         output: String::new(),
+        dirty_before: None,
+        dirty_after: None,
     };
     if let Err(reason) = volume_facts(letter) {
         found.output = reason;
@@ -149,6 +151,7 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
         return (Outcome::Failed, found);
     };
     let (exe, args) = chkdsk_command(&system, letter);
+    found.dirty_before = volume_dirty(letter);
     let ran = Command::new(exe)
         .args(args)
         .current_dir(&system)
@@ -163,11 +166,12 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
         }
     };
     found.output = tail(&oem_text(&ran.stdout));
+    found.dirty_after = volume_dirty(letter);
     let Some(code) = ran.status.code().and_then(|c| u32::try_from(c).ok()) else {
         return (Outcome::Failed, found);
     };
     found.exit_code = Some(code);
-    found.result = volume_result(code, volume_dirty(letter));
+    found.result = volume_result(code, found.dirty_after.unwrap_or(false));
     let outcome = match found.result {
         VolumeResult::NoProblems => Outcome::Clean,
         VolumeResult::ProblemsFound => Outcome::Problems,

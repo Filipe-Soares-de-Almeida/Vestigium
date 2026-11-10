@@ -371,6 +371,10 @@ pub struct VolumeCheck {
     pub result: VolumeResult,
     /// chkdsk's own text, in the console code page and language, for the technical level.
     pub output: String,
+    /// Whether the volume was marked for a full check before the run; `None` when it could not be asked.
+    pub dirty_before: Option<bool>,
+    /// The same after the run: `true` while `dirty_before` is `false` means the check marked it.
+    pub dirty_after: Option<bool>,
 }
 
 /// `chkdsk /scan` exit codes: 0 and 2 clean; 1, 5 and 13 problems found. 3 and any other code may

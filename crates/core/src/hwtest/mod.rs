@@ -1,4 +1,5 @@
 mod disk;
+mod legacy;
 mod memory;
 
 use serde::{Deserialize, Serialize};
@@ -13,14 +14,16 @@ pub use disk::{
     VolumeResult, WORST_KEPT, bench_has_room, bench_reference, bench_verdict, combined_surface,
     latency_band, volume_result,
 };
+pub use legacy::{TestDataV1, TestRunV1, VolumeCheckV1};
 pub use memory::{
     DiagnosticDetail, DiagnosticResult, ERRORS_KEPT, MemoryDiagnostic, MemoryError, MemoryQuick,
     PATTERNS, Pattern, QUICK_CHUNK, QUICK_LEAVE_FREE, QUICK_MIN, QUICK_MINUTES, QUICK_USE_CAP,
     memory_diagnostics, quick_test_size,
 };
 
-/// Layout of the `TestRun` the window and the helper write and the store keeps.
-pub const TEST_RUN_VERSION: u8 = 1;
+/// Layout of the `TestRun` the window and the helper write and the store keeps; version 1 is
+/// still read through `TestRunV1`.
+pub const TEST_RUN_VERSION: u8 = 2;
 /// How far back the health pass looks at test runs.
 pub const TEST_REACH_DAYS: i64 = 90;
 /// The Vestigium processes that run tests: the window and the elevated helper.
