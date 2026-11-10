@@ -41,6 +41,8 @@ How to use this file:
 
 ### Fixed
 
+- Searching the Programs list now looks through every program the monitor reports, not only the 100
+  with the highest processor use, so a program further down the list is found by name.
 - Undo no longer overwrites a setting you changed yourself after applying a tweak. If Windows now holds
   another value than the one Vestigium set, the undo is refused with a message and nothing is written,
   and a refused undo no longer marks the original change as undone. The administrator helper also

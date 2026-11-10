@@ -10,7 +10,7 @@
   import { relatedLinks } from "../lib/related.svelte";
   import { here, href } from "../lib/router.svelte";
   import { formatBytes, formatRate } from "./now/lanes";
-  import { type ProgramSort, sortPrograms } from "./now/sort";
+  import { type ProgramSort, visiblePrograms } from "./now/sort";
   import { NowStream } from "./now/stream.svelte";
 
   /** Rows the table shows at most, after the filter and the sort. */
@@ -22,11 +22,8 @@
   let sort = $state<ProgramSort>("cpu");
   let query = $state("");
 
-  const ranked = $derived(sortPrograms(programs?.entries ?? [], sort).slice(0, SHOWN));
-  const rows = $derived.by(() => {
-    const needle = query.trim().toLowerCase();
-    return needle ? ranked.filter((p) => p.name.toLowerCase().includes(needle)) : ranked;
-  });
+  const found = $derived(visiblePrograms(programs?.entries ?? [], sort, query, SHOWN));
+  const rows = $derived(found.rows);
   const options = $derived([
     { value: "cpu", text: t("ui.now.top.cpu") },
     { value: "memory", text: t("ui.now.top.memory") },
@@ -54,7 +51,7 @@
 {:else}
   <PageHead
     title={t("ui.item.programs")}
-    sub={programs ? t("ui.now.all.sub", { total, shown: ranked.length }) : t("ui.now.top.waiting")}
+    sub={programs ? t("ui.now.all.sub", { total, shown: Math.min(total, SHOWN) }) : t("ui.now.top.waiting")}
   />
   <div class="tools">
     <div class="filter">
@@ -92,7 +89,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">{t("ui.now.all.count", { shown: rows.length, total: ranked.length })}</p>
+  <p class="note">{t("ui.now.all.count", { shown: rows.length, total: found.matched })}</p>
 {/if}
 
 <style>
