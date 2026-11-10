@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
 
   import Block from "../../components/Block.svelte";
+  import ErrorView from "../../components/ErrorView.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
   import Steps from "../../components/Steps.svelte";
   import { app } from "../../lib/app.svelte";
@@ -27,9 +28,16 @@
   onMount(() => {
     if (hwtests.dto === null) void hwtests.load();
   });
+
+  function retry(): void {
+    hwtests.error = null;
+    void hwtests.load();
+  }
 </script>
 
-{#if hwtests.dto === null}
+{#if hwtests.dto === null && hwtests.error !== null}
+  <DetailPage fallback={href.tests("memory")} title={t("ui.tests.diag.title")}><ErrorView error={hwtests.error} heading="h2" onretry={retry} /></DetailPage>
+{:else if hwtests.dto === null}
   <DetailPage fallback={href.tests("memory")} title={t("ui.tests.diag.title")}><span></span></DetailPage>
 {:else if run && word}
   <DetailPage fallback={href.tests("memory")} title={t("ui.tests.diag.title")} sub={at(run.ts_ms)}>

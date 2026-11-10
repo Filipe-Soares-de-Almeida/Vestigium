@@ -50,6 +50,8 @@ How to use this file:
 
 ### Fixed
 
+- A test or Windows Memory Diagnostic detail page whose read of the tests fails now shows the error
+  with a Retry button, instead of an empty page.
 - The time a window has been not responding on the Now screen now starts again when the same program
   hangs a second time while the live view was stopped, instead of counting from the first hang.
 - An update check that the release feed answers with an error, such as a server problem or a rate
