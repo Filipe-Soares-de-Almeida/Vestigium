@@ -146,7 +146,7 @@
   "ui.today.cause.SleepTransition": "Sleep or wake",
   "ui.today.cause.PowerCut": "No cause logged",
   "ui.today.cause.HardwareFault": "Hardware error",
-  "ui.today.because.Storage": "likely cause: the {disk} disk",
+  "ui.today.because.Storage": "likely cause: the {disk} disk and its controller",
   "ui.today.because.Storage.any": "likely cause: disk",
   "ui.today.because.DiskIo": "likely cause: heavy use of the {disk} disk",
   "ui.today.because.Memory": "likely cause: low memory",

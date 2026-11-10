@@ -45,6 +45,8 @@ How to use this file:
 - The README, the privacy page and the questions page no longer say the update check is the only
   request the app makes: they now also say that the installer downloads the WebView2 runtime when it
   is missing and that an update downloads its installer after you confirm.
+- The English Today line for a storage cause now reads "likely cause: the C: disk and its controller",
+  as the Portuguese line and the report already said.
 
 ### Security
 
