@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::health::{DelayKind, Finding, FindingKind, HealthFact, Subject, is_security};
+use crate::hwtest::{TestRun, caused_by_test};
 use crate::{
     Cause, Episode, EpisodeKind, EventMeaning, OccurrenceKind, OccurrenceSummary, SHUTTING_DOWN,
     WinEvent, power_loss_detail,
@@ -472,6 +473,8 @@ pub struct TweakInputs {
     pub episodes: Vec<Episode>,
     pub captures: Vec<CaptureCauses>,
     pub events: Vec<WinEvent>,
+    /// Hardware test runs over the same span, whose load is not evidence for a tweak.
+    pub tests: Vec<TestRun>,
 }
 
 /// One thing Vestigium observed that backs a tweak; the UI words it.
@@ -829,6 +832,13 @@ fn on_system_disk(inputs: &TweakInputs, e: &Episode) -> bool {
     matches!(&e.kind, EpisodeKind::DiskBusy { disk } if inputs.system_disk.as_ref() == Some(disk))
 }
 
+/// Busy-disk episodes on the system disk that no Vestigium test caused.
+fn system_disk_episodes(inputs: &TweakInputs, from: i64, to: i64) -> (u32, Option<String>) {
+    episodes(inputs, from, to, |e| {
+        on_system_disk(inputs, e) && !caused_by_test(e, &inputs.tests)
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Bus {
     Storage,
@@ -949,7 +959,7 @@ fn signals(tweak: TweakId, inputs: &TweakInputs) -> Vec<Signal> {
         }
         TweakId::UsbSuspend => out.extend(capture_drivers(inputs, 14, &[Bus::Usb])),
         TweakId::SysMain => {
-            let (count, culprit) = episodes(inputs, week, now, |e| on_system_disk(inputs, e));
+            let (count, culprit) = system_disk_episodes(inputs, week, now);
             if has_finding(inputs, FindingKind::WindowsOnHdd) && count >= 2 {
                 out.push(Signal::Finding(FindingKind::WindowsOnHdd));
                 out.push(Signal::DiskBusy { count, culprit });
@@ -1074,7 +1084,7 @@ pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<H
             | TweakId::UsbSuspend
             | TweakId::GameDvr
             | TweakId::Mpo => stutters(inputs, from, to),
-            TweakId::SysMain => episodes(inputs, from, to, |e| on_system_disk(inputs, e)).0,
+            TweakId::SysMain => system_disk_episodes(inputs, from, to).0,
             TweakId::WindowsSearch => episodes(inputs, from, to, is_search).0,
             TweakId::GpuScheduling => events(inputs, from, to, EventMeaning::DisplayReset),
             TweakId::Hibernation | TweakId::StartupApp | TweakId::AppDumps | TweakId::CrashDump => {

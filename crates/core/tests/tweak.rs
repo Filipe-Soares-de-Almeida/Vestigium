@@ -2,6 +2,7 @@ use vestigium_core::SettingStore as _;
 use vestigium_core::health::{
     BootDelay, Concern, DelayKind, Finding, FindingKind, HealthFact, Measure, Reference, Subject,
 };
+use vestigium_core::hwtest::{Outcome, TestData, TestRun, VolumeCheck, VolumeResult};
 use vestigium_core::{
     CaptureCauses, Cause, Channel, Culprit, Episode, EpisodeKind, EventMeaning, Hive,
     OccurrenceKind, OccurrenceSummary, SCHEME_BALANCED, SCHEME_POWER_SAVER, Setting, SettingChange,
@@ -28,6 +29,7 @@ fn inputs() -> TweakInputs {
         episodes: Vec::new(),
         captures: Vec::new(),
         events: Vec::new(),
+        tests: Vec::new(),
     }
 }
 
@@ -336,6 +338,67 @@ fn wsearch_needs_the_indexer_as_culprit() {
         count: 1,
         culprit: Some("SearchIndexer.exe".into()),
     }));
+}
+
+fn volume_test_at(at: i64) -> TestRun {
+    TestRun {
+        subject: Subject::Volume(r"C:\".into()),
+        started_ms: at - 30_000,
+        ended_ms: at + 30_000,
+        outcome: Outcome::Clean,
+        data: TestData::VolumeCheck(VolumeCheck {
+            volume: r"C:\".into(),
+            exit_code: Some(0),
+            result: VolumeResult::NoProblems,
+            output: String::new(),
+            dirty_before: None,
+            dirty_after: None,
+        }),
+    }
+}
+
+#[test]
+fn system_disk_episodes_caused_by_a_test_are_not_disk_evidence() {
+    let on = Value::Service {
+        start: 2,
+        delayed: true,
+        running: true,
+    };
+    let mut busy = with(inputs(), TweakId::SysMain, &[on]);
+    busy.findings = vec![finding(
+        FindingKind::WindowsOnHdd,
+        Subject::Disk("0 C:".into()),
+        Vec::new(),
+    )];
+    let disk = EpisodeKind::DiskBusy {
+        disk: "0 C:".into(),
+    };
+    busy.episodes = vec![
+        episode(NOW - DAY, disk.clone(), "Updater.exe"),
+        episode(NOW - 2 * DAY, disk.clone(), "Updater.exe"),
+    ];
+    let signals = |inputs: &TweakInputs| advice_for(inputs, TweakId::SysMain).signals;
+    assert!(
+        signals(&busy)
+            .iter()
+            .any(|s| matches!(s, Signal::DiskBusy { count: 2, .. })),
+        "two ordinary episodes are evidence"
+    );
+
+    busy.tests = vec![volume_test_at(NOW - DAY), volume_test_at(NOW - 2 * DAY)];
+    assert!(
+        !signals(&busy)
+            .iter()
+            .any(|s| matches!(s, Signal::DiskBusy { .. })),
+        "the load of a test is not"
+    );
+    assert!(!advice_for(&busy, TweakId::SysMain).recommended());
+
+    // The same episodes in the before window do not count toward "helped" either.
+    busy.episodes = vec![episode(NOW - 8 * DAY, disk, "chkdsk.exe")];
+    busy.tests = vec![volume_test_at(NOW - 8 * DAY)];
+    let result = helped(TweakId::SysMain, NOW - 5 * DAY, &busy).unwrap();
+    assert_eq!((result.before, result.after), (0, 0));
 }
 
 #[test]

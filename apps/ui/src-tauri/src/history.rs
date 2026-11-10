@@ -367,6 +367,8 @@ pub struct TweakHistory {
     pub episodes: Vec<Episode>,
     pub captures: Vec<CaptureCauses>,
     pub events: Vec<WinEvent>,
+    /// Test runs over the evidence span.
+    pub tests: Vec<TestRun>,
     pub machine: Option<MachineInfo>,
     /// Newest first: those of the shown span and every one still in place.
     pub changes: Vec<TweakChangeRow>,
@@ -432,6 +434,10 @@ impl History {
                 episodes: store.episodes(from, now_ms)?,
                 captures,
                 events: store.events(from, now_ms)?,
+                tests: test_spans(store, from, now_ms)?
+                    .into_iter()
+                    .map(|(_, run)| run)
+                    .collect(),
                 machine: store.machine()?,
                 changes,
             })

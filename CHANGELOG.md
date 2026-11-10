@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- A busy system disk during one of the app's own disk tests no longer counts as a reason to suggest
+  turning off SysMain, and no longer shows as a busy disk in the "did it help" count of that change.
 - PCI Express power saving is no longer suggested because of high driver time alone. It now needs a
   deep capture that pointed at a disk or network driver, and its explanation says so.
 - The failures-rising finding no longer closes and reopens as the weekly count of crashes and hangs
