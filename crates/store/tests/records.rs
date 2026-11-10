@@ -195,6 +195,31 @@ fn migration_repairs_memory_diagnostics_stored_without_a_meaning() {
 }
 
 #[test]
+fn a_storm_occurrence_is_stored_and_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let mut stored = occurrence(10_000, 12_500);
+    stored.triggers = (0..40_000)
+        .map(|i| Trigger::Reported {
+            event: WinEvent {
+                ts_ms: 10_000 + i,
+                channel: Channel::System,
+                provider: "disk".to_string(),
+                id: 153,
+                record_id: i as u64,
+                level: 2,
+                meaning: EventMeaning::DiskRetry,
+                data_xml: "x".repeat(500),
+            },
+        })
+        .collect();
+
+    let id = store.insert_occurrence(&stored).unwrap();
+
+    assert_eq!(store.occurrence(id).unwrap(), Some(stored));
+}
+
+#[test]
 fn occurrence_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = open(dir.path());

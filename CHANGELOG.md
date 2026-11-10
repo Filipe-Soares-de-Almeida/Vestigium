@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A report with a very large number of entries, such as one made by thousands of repeated Windows
+  events, is no longer written to the history in a form that could not be opened again: the history now
+  reads reports up to four times larger than before, so one that was stored but showed an error opens.
 - A storm of repeated Windows events, such as a disk or storage controller logging the same error
   many times a second, no longer fills one report with thousands of entries or splits into a report
   every few minutes. A report now keeps the first 16 events of each provider and event number, and

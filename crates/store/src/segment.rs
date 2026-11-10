@@ -7,8 +7,9 @@ use crate::StoreError;
 const FORMAT_POSTCARD: u8 = 1;
 const FORMAT_DEFLATE: u8 = 2;
 const DEFLATE_LEVEL: u8 = 6;
-/// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory.
-const MAX_INFLATED: usize = 16 << 20;
+/// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory;
+/// well above what a record the watcher writes can reach.
+const MAX_INFLATED: usize = 64 << 20;
 
 /// Which kind of item a segment holds; an item whose layout changes gets a new code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
