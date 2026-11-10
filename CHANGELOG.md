@@ -38,6 +38,10 @@ How to use this file:
   history stop, and each one reads again as soon as the window is restored.
 - The Tests, Capture and Dumps screens load the first time they are opened instead of at startup,
   which makes the script the window loads at startup about 8% smaller.
+- The wiki no longer lists a power cut during shutdown among the kinds of headline an unexpected
+  shutdown report can have, since a shutdown that did not finish gets no report, and the window's
+  text for that kind is gone. The privacy page now says that a result file the monitor cannot read
+  stays in the data folder.
 
 ### Security
 

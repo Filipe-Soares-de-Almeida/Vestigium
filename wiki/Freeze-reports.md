@@ -29,7 +29,7 @@ If a report points at a driver or at stutters, it offers **Investigate stutters*
 
 ## Unexpected shutdowns
 
-The monitor keeps its last few minutes on disk, so a report after an unexpected shutdown shows what the PC was doing in the two minutes before it went off. The headline says which kind it was: a blue screen, the PC turned off with the power button while not responding, a shutdown during sleep or wake, a power cut during shutdown, or a shutdown with nothing logged. When Windows saved a crash dump, the report links to what [Dumps](./Dumps.md) read from it.
+The monitor keeps its last few minutes on disk, so a report after an unexpected shutdown shows what the PC was doing in the two minutes before it went off. The headline says which kind it was: a blue screen, the PC turned off with the power button while not responding, a shutdown during sleep or wake, or a shutdown with nothing logged. When Windows saved a crash dump, the report links to what [Dumps](./Dumps.md) read from it.
 
 ## Copy report
 
