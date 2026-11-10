@@ -50,6 +50,9 @@ How to use this file:
 
 ### Fixed
 
+- After clearing the history, the Memory, Disks, test detail, captures and health screens, and the
+  counts in the navigation pane, no longer keep showing the deleted test runs, captures, findings
+  and events until the window is reopened.
 - Pressing Cancel on a running test or disk scan now shows the reason in a message when the stop
   request fails, instead of doing nothing.
 - A test or Windows Memory Diagnostic detail page whose read of the tests fails now shows the error

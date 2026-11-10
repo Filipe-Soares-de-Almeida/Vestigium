@@ -112,6 +112,12 @@ class Captures {
     return dto;
   }
 
+  /** Drops what this window read and reads the list again, after the stored captures were deleted. */
+  async forget(): Promise<void> {
+    this.#cache.clear();
+    await this.#load();
+  }
+
   async #ended(done: CaptureFinished): Promise<void> {
     this.#setRun(null);
     const ok = done.exit_code === 0 && done.ids.length > 0;
