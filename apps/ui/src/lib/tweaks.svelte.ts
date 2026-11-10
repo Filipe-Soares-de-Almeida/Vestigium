@@ -59,7 +59,12 @@ class Tweaks {
       const blocked = rows.some((r) => {
         const p = r.change.restore_point;
         const refused = r.change.results.some((x) => x.error !== null);
-        return refused && (p === "Off" || (p !== null && typeof p === "object" && "Failed" in p));
+        return (
+          refused &&
+          (p === "Off" ||
+            p === "Unconfirmed" ||
+            (p !== null && typeof p === "object" && "Failed" in p))
+        );
       });
       return blocked ? { kind: "no_point", rows } : { kind: "done", rows };
     } catch (error) {

@@ -38,6 +38,9 @@ How to use this file:
 
 ### Fixed
 
+- A tweak is no longer written to Windows when the restore point it asked for was not confirmed,
+  unless you agreed to go on without one. Before, a point that Windows logged and then dropped, or
+  one that Windows never confirmed, let the change through while the history said a point was made.
 - A disk surface scan on a disk that disappears halfway, as when a USB cable is pulled or the port
   is suspended, now ends as failed because the disk stopped answering, and a later scan resumes where
   it stopped. Before, every block after that point was recorded as unreadable and the disk was told to

@@ -38,6 +38,8 @@ const RESTORE_LOG_WAIT: Duration = Duration::from_secs(10);
 /// How long after "created" a point is looked for in the list: Windows drops a failed one within ~6 s.
 const RESTORE_SETTLE: Duration = Duration::from_secs(10);
 const DAY_MS: i64 = 24 * 60 * 60_000;
+/// Win32 error recorded for a point Windows logged as created and then dropped (ERROR_NOT_FOUND).
+const ERROR_RESTORE_DROPPED: u32 = 1168;
 
 /// Carries out a `.plan` of elevated tweaks and writes what happened to a `.tweaked` file beside it.
 pub fn run(plan_path: &Path) -> ExitCode {
@@ -94,8 +96,10 @@ pub fn apply(
         .map(|item| check_item(item, Applier::Elevated).is_ok())
         .collect();
     let point = checked.contains(&true).then(restore_point);
-    let blocked = matches!(point, Some(RestorePoint::Off | RestorePoint::Failed { .. }))
-        && !plan.without_restore_point;
+    let blocked = matches!(
+        point,
+        Some(RestorePoint::Off | RestorePoint::Failed { .. } | RestorePoint::Unconfirmed)
+    ) && !plan.without_restore_point;
     let changes = plan
         .items
         .iter()
@@ -156,27 +160,40 @@ fn ask_restore_point() -> RestorePoint {
             .iter()
             .find(|e| e.ts_ms >= started - 1000 && e.description == description)
         {
-            return match ours.id {
-                RESTORE_CREATED => {
-                    sleep(RESTORE_SETTLE);
-                    match restore_point_listed(&description) {
-                        Ok(false) => RestorePoint::Unconfirmed,
-                        _ => RestorePoint::Created,
-                    }
-                }
-                RESTORE_SKIPPED => RestorePoint::Reused {
-                    at_ms: events
-                        .iter()
-                        .filter(|e| e.id == RESTORE_CREATED)
-                        .map(|e| e.ts_ms)
-                        .max(),
-                },
-                _ => RestorePoint::Unconfirmed,
+            let listed = if ours.id == RESTORE_CREATED {
+                sleep(RESTORE_SETTLE);
+                restore_point_listed(&description)
+            } else {
+                Ok(false)
             };
+            let last_created = events
+                .iter()
+                .filter(|e| e.id == RESTORE_CREATED)
+                .map(|e| e.ts_ms)
+                .max();
+            return settle(ours.id, listed, last_created);
         }
         sleep(Duration::from_millis(500));
     }
     RestorePoint::Unconfirmed
+}
+
+/// What the log event and the list query say about a point: a point logged as created but absent
+/// from the list was dropped, and a list that cannot be read leaves it unconfirmed.
+fn settle<E>(event_id: u16, listed: Result<bool, E>, last_created: Option<i64>) -> RestorePoint {
+    match event_id {
+        RESTORE_CREATED => match listed {
+            Ok(true) => RestorePoint::Created,
+            Ok(false) => RestorePoint::Failed {
+                error: ERROR_RESTORE_DROPPED,
+            },
+            Err(_) => RestorePoint::Unconfirmed,
+        },
+        RESTORE_SKIPPED => RestorePoint::Reused {
+            at_ms: last_created,
+        },
+        _ => RestorePoint::Unconfirmed,
+    }
 }
 
 fn int_variant(value: i32) -> VARIANT {
@@ -418,6 +435,79 @@ mod tests {
         let results = apply(&plan, &mut store, || RestorePoint::Off);
         assert_eq!(results.changes[0].results[0].error, None);
         assert_eq!(store.writes, 1);
+    }
+
+    #[test]
+    fn a_point_the_list_does_not_hold_is_failed() {
+        assert_eq!(
+            settle(RESTORE_CREATED, Ok::<bool, ()>(false), None),
+            RestorePoint::Failed {
+                error: ERROR_RESTORE_DROPPED
+            }
+        );
+    }
+
+    #[test]
+    fn a_point_the_list_cannot_confirm_is_unconfirmed() {
+        assert_eq!(
+            settle(RESTORE_CREATED, Err::<bool, ()>(()), None),
+            RestorePoint::Unconfirmed
+        );
+    }
+
+    #[test]
+    fn a_listed_point_is_created_and_a_skipped_one_is_reused() {
+        assert_eq!(
+            settle(RESTORE_CREATED, Ok::<bool, ()>(true), None),
+            RestorePoint::Created
+        );
+        assert_eq!(
+            settle(RESTORE_SKIPPED, Err::<bool, ()>(()), Some(7)),
+            RestorePoint::Reused { at_ms: Some(7) }
+        );
+        assert_eq!(
+            settle(1, Ok::<bool, ()>(true), None),
+            RestorePoint::Unconfirmed
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_restore_point_blocks_the_write() {
+        let (setting, item) = mpo();
+        let mut plan = TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        };
+        let mut store = Fake {
+            values: vec![(setting, Value::Absent)],
+            writes: 0,
+        };
+        let results = apply(&plan, &mut store, || RestorePoint::Unconfirmed);
+        assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
+        assert_eq!(
+            results.changes[0].restore_point,
+            Some(RestorePoint::Unconfirmed)
+        );
+        assert_eq!(store.writes, 0);
+        plan.without_restore_point = true;
+        apply(&plan, &mut store, || RestorePoint::Unconfirmed);
+        assert_eq!(store.writes, 1);
+    }
+
+    #[test]
+    fn a_created_or_reused_point_lets_the_write_through() {
+        let (setting, item) = mpo();
+        let plan = TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        };
+        let mut store = Fake {
+            values: vec![(setting, Value::Absent)],
+            writes: 0,
+        };
+        apply(&plan, &mut store, || RestorePoint::Created);
+        apply(&plan, &mut store, || RestorePoint::Reused { at_ms: None });
+        assert_eq!(store.writes, 2);
     }
 
     #[test]
