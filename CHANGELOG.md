@@ -76,6 +76,11 @@ How to use this file:
 - The volume check now records whether Windows had the volume marked for repair before and after the
   run, which shows when the check itself marked it. The test result format changes, so the window,
   the monitor and the helper must be updated together; results saved earlier are still read.
+- The watcher no longer stops measuring for the whole session when the Windows performance counters
+  are missing or damaged at start, or when its precise timer cannot be created. It keeps recording
+  freezes, crashes and events, tries to open the counters again with a growing wait of up to a
+  minute, and resumes the per-second readings as soon as they open. Before, nothing was recorded
+  until the watcher was restarted, and the fall of the previous session was lost.
 
 ## [0.1.0] - 2026-11-09
 

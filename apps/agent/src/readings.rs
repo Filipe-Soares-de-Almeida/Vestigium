@@ -92,6 +92,37 @@ impl Readings for WindowsReadings {
     }
 }
 
+/// Longest wait, in ticks, between two attempts to open a source again.
+const REOPEN_CAP: u32 = 60;
+
+/// Spaces the attempts to open a source again, in ticks: 1, 2, 4 and so on up to a cap.
+#[derive(Debug)]
+pub struct Backoff {
+    wait: u32,
+    left: u32,
+}
+
+impl Backoff {
+    pub fn new() -> Backoff {
+        Backoff { wait: 1, left: 0 }
+    }
+
+    /// True when an attempt is due this tick.
+    pub fn due(&mut self) -> bool {
+        if self.left == 0 {
+            return true;
+        }
+        self.left -= 1;
+        false
+    }
+
+    /// Notes a failed attempt: the next one comes after a longer wait.
+    pub fn failed(&mut self) {
+        self.left = self.wait - 1;
+        self.wait = (self.wait * 2).min(REOPEN_CAP);
+    }
+}
+
 /// The sources whose health is tracked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -173,6 +204,23 @@ mod tests {
             call: "PdhCollectQueryData",
             status: 0xC000_0BBD,
         }
+    }
+
+    #[test]
+    fn reopen_wait_doubles_up_to_a_cap() {
+        let mut backoff = Backoff::new();
+        let mut gaps = Vec::new();
+        let mut since = 0;
+        while gaps.len() < 9 {
+            since += 1;
+            if backoff.due() {
+                gaps.push(since);
+                since = 0;
+                backoff.failed();
+            }
+        }
+
+        assert_eq!(gaps, [1, 1, 2, 4, 8, 16, 32, 60, 60]);
     }
 
     #[test]

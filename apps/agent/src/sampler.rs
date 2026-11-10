@@ -30,7 +30,7 @@ use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
-use crate::readings::{Readings, Source, SourceHealths, SourceSet};
+use crate::readings::{Backoff, Readings, Source, SourceHealths, SourceSet, Waiter};
 use crate::sensitive::SensitiveMode;
 use crate::shutdown;
 
@@ -122,6 +122,7 @@ pub fn run_sampler(store: Store, wiring: Wiring) -> io::Result<SamplerHandle> {
             let gate = wiring.gate.clone();
             let mut sampler = Sampler::new(store, wiring);
             sampler.run(&gate);
+            sampler.take_events();
             sampler.settle_fall(wall_ms(), true);
             sampler.leave(GapReason::Stopped);
             sampler.close_ring();
@@ -194,16 +195,38 @@ struct Sampler {
     source_health: SourceHealths,
 }
 
-/// The data sources a tick reads.
+/// The data sources a tick reads, and the timer that paces it.
 struct Sources {
     readings: Box<dyn Readings>,
+    /// True once the performance counters opened; they are tried again until then.
+    pdh_open: bool,
+    pdh_backoff: Backoff,
+    /// The high-resolution timer; ticks wait with a plain sleep while it is missing.
+    timer: Option<Box<dyn Waiter>>,
+    timer_backoff: Backoff,
 }
 
 impl Sources {
+    fn new(readings: Box<dyn Readings>) -> Sources {
+        Sources {
+            readings,
+            pdh_open: false,
+            pdh_backoff: Backoff::new(),
+            timer: None,
+            timer_backoff: Backoff::new(),
+        }
+    }
+
     /// Takes the first readings, which only set the baseline for rates.
     fn prime(&mut self) {
         let _ = self.readings.cpu();
-        let _ = self.readings.pdh();
+        self.prime_pdh();
+    }
+
+    fn prime_pdh(&mut self) {
+        if self.pdh_open {
+            let _ = self.readings.pdh();
+        }
     }
 
     fn reset(&mut self) {
@@ -317,14 +340,8 @@ impl Sampler {
         let Some(source_set) = self.source_set.take() else {
             return;
         };
-        let mut sources = Sources {
-            readings: source_set(),
-        };
-        let pdh = self.read(Source::Pdh, sources.readings.open_pdh());
-        let timer = pdh.and_then(|()| self.read(Source::Timer, sources.readings.open_timer()));
-        let Ok(timer) = timer else {
-            return;
-        };
+        let mut sources = Sources::new(source_set());
+        self.open_pdh(&mut sources);
         sources.prime();
         let mut next_tick = unbiased_ms() + TICK_MS;
         let mut ticks = 0usize;
@@ -350,10 +367,7 @@ impl Sampler {
             }
 
             let due_ms = (next_tick - unbiased_ms()).max(0.0);
-            let waited = timer.wait(Duration::from_secs_f64(due_ms / 1000.0));
-            if self.read(Source::Timer, waited).is_err() {
-                return;
-            }
+            self.pace(&mut sources, Duration::from_secs_f64(due_ms / 1000.0), gate);
             let woke = unbiased_ms();
             let sampler_lag_ms = (woke - next_tick).max(0.0) as f32;
             // After a long stall, start a fresh schedule instead of catching up.
@@ -374,10 +388,46 @@ impl Sampler {
             if let Err(err) = self.tick(&mut sources, woke, sampler_lag_ms, ticks) {
                 self.report(&err);
             }
+            if !sources.pdh_open && sources.pdh_backoff.due() {
+                self.open_pdh(&mut sources);
+                sources.prime_pdh();
+            }
             if trim_at == Some(ticks) {
                 trim_at = None;
                 release_idle_pages();
             }
+        }
+    }
+
+    /// Waits `due` for the next tick on the timer, or with a plain sleep while there is none.
+    /// The timer is created again on a growing wait; a pause or a stop ends the sleep at once.
+    fn pace(&mut self, sources: &mut Sources, due: Duration, gate: &RunGate) {
+        if sources.timer.is_none() && sources.timer_backoff.due() {
+            match self.read(Source::Timer, sources.readings.open_timer()) {
+                Ok(timer) => {
+                    sources.timer = Some(timer);
+                    sources.timer_backoff = Backoff::new();
+                }
+                Err(_) => sources.timer_backoff.failed(),
+            }
+        }
+        if let Some(timer) = &sources.timer {
+            let waited = timer.wait(due);
+            if self.read(Source::Timer, waited).is_ok() {
+                return;
+            }
+            sources.timer = None;
+            sources.timer_backoff.failed();
+        }
+        gate.wait_while_running_for(due);
+    }
+
+    /// Tries to open the performance counters; a failure schedules the next attempt.
+    fn open_pdh(&mut self, sources: &mut Sources) {
+        let opened = self.read(Source::Pdh, sources.readings.open_pdh());
+        sources.pdh_open = opened.is_ok();
+        if opened.is_err() {
+            sources.pdh_backoff.failed();
         }
     }
 
@@ -412,7 +462,11 @@ impl Sampler {
             ..Strain::default()
         };
         let cpu = self.read(Source::Cpu, sources.readings.cpu())?;
-        let pdh = self.read(Source::Pdh, sources.readings.pdh())?;
+        let pdh = if sources.pdh_open {
+            self.read(Source::Pdh, sources.readings.pdh())?
+        } else {
+            None
+        };
         if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
             let sample = Sample {
                 ts_ms,
@@ -1127,6 +1181,163 @@ mod tests {
         fn open_timer(&mut self) -> Result<Box<dyn Waiter>, CollectError> {
             Ok(Box::new(Sleeper))
         }
+    }
+
+    /// What a `Scripted` set does, shared with the test that watches it.
+    #[derive(Default)]
+    struct Script {
+        /// Attempts to open the counters that still fail.
+        pdh_open_failures: u32,
+        pdh_open_attempts: u32,
+        /// Attempts to create the timer that still fail.
+        timer_open_failures: u32,
+    }
+
+    /// A quiet machine whose counters and timer open as the script says.
+    struct Scripted {
+        script: Arc<Mutex<Script>>,
+        pdh_open: bool,
+        quiet: Quiet,
+    }
+
+    fn scripted(script: &Arc<Mutex<Script>>) -> SourceSet {
+        let script = script.clone();
+        Box::new(move || {
+            Box::new(Scripted {
+                script,
+                pdh_open: false,
+                quiet: Quiet,
+            })
+        })
+    }
+
+    fn refused(call: &'static str) -> CollectError {
+        CollectError::Pdh {
+            call,
+            status: 0xC000_0BB8,
+        }
+    }
+
+    impl Readings for Scripted {
+        fn memory(&mut self) -> Result<MemoryInfo, CollectError> {
+            self.quiet.memory()
+        }
+
+        fn cpu(&mut self) -> Result<Option<CpuReading>, CollectError> {
+            self.quiet.cpu()
+        }
+
+        fn pdh(&mut self) -> Result<Option<PdhReading>, CollectError> {
+            if self.pdh_open {
+                self.quiet.pdh()
+            } else {
+                Err(refused("read before the counters opened"))
+            }
+        }
+
+        fn processes(&mut self) -> Result<Vec<ProcessCounters>, CollectError> {
+            self.quiet.processes()
+        }
+
+        fn reset(&mut self) {}
+
+        fn open_pdh(&mut self) -> Result<(), CollectError> {
+            let mut script = lock(&self.script);
+            script.pdh_open_attempts += 1;
+            if script.pdh_open_failures > 0 {
+                script.pdh_open_failures -= 1;
+                return Err(refused("PdhAddEnglishCounterW"));
+            }
+            self.pdh_open = true;
+            Ok(())
+        }
+
+        fn open_timer(&mut self) -> Result<Box<dyn Waiter>, CollectError> {
+            let mut script = lock(&self.script);
+            if script.timer_open_failures > 0 {
+                script.timer_open_failures -= 1;
+                return Err(refused("CreateWaitableTimerExW"));
+            }
+            Ok(Box::new(Sleeper))
+        }
+    }
+
+    #[test]
+    fn pdh_that_opens_late_starts_sampling_without_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            pdh_open_failures: 2,
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+
+        thread::sleep(Duration::from_millis(500));
+        assert!(
+            !sampled(&running.status),
+            "sampled before the counters opened"
+        );
+        let sampled_later = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_later, "the counters opened but nothing was sampled");
+        assert_eq!(lock(&script).pdh_open_attempts, 3);
+        assert!(lock(&running.status).last_error.is_some());
+    }
+
+    #[test]
+    fn a_failing_open_still_turns_a_kernel_power_41_into_an_occurrence() {
+        let dir = tempfile::tempdir().unwrap();
+        let last = wall_ms() - 10 * 60_000;
+        {
+            let (mut ring, _) = BlackboxRing::open(&dir.path().join("blackbox.ring")).unwrap();
+            for i in 0..30 {
+                ring.push_sample(&quiet(last - 29_000 + i * 1_000));
+            }
+            // Dropped without a clean close, as a fall leaves it.
+        }
+        let script = Arc::new(Mutex::new(Script {
+            pdh_open_failures: u32::MAX,
+            ..Script::default()
+        }));
+
+        let running = start_with(dir.path(), Duration::from_secs(1), scripted(&script));
+        let boot = wall_ms() - 60_000;
+        running
+            .events_tx
+            .send(unexpected_shutdown(boot, last + 2_000))
+            .unwrap();
+        running.events_tx.send(power_loss(boot + 1_000)).unwrap();
+        let found = wait_until(PATIENCE, || {
+            history(dir.path())
+                .occurrences(i64::MIN, i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|o| o.kind == OccurrenceKind::PostMortem)
+        });
+        stop(&running);
+
+        assert!(
+            found,
+            "the fall left no post-mortem while the counters were down"
+        );
+        assert_eq!(lock(&running.status).last_sample_ms, None);
+        assert!(lock(&script).pdh_open_attempts > 1, "no second attempt");
+    }
+
+    #[test]
+    fn a_timer_that_will_not_open_still_ticks() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            timer_open_failures: u32::MAX,
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+
+        let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_once, "no tick without the timer");
+        assert!(lock(&running.status).last_error.is_some());
     }
 
     #[test]
