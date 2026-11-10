@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- Crash dumps kept in a subfolder of the crash dumps folder no longer disappear from the list and from
+  the space count until the next dump scan. The watcher's own listing now reads one level of
+  subfolders, as the dump scan does, so it no longer marks those dumps as deleted.
 - A health alert about two antivirus products running, or about the page file, now stays open when
   Windows does not answer the check. Before, the alert closed, or never opened, whenever the Security
   Center was not up yet (often just after logon) or the page file could not be read, and a failed

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use vestigium_collect::{
-    CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps,
+    CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps_one_level,
 };
 use vestigium_core::{DumpKind, DumpRecord, listing_changes};
 use vestigium_store::{Store, StoreError};
@@ -34,10 +34,12 @@ pub fn take_inventory(
     let mut listed = Vec::new();
     let mut covered = Vec::new();
     if let Some(dir) = &places.app_dir
-        && let Some(files) = list_dumps(dir)
+        && let Some(listing) = list_dumps_one_level(dir)
     {
-        covered.push(with_separator(dir));
-        listed.extend(files.into_iter().map(|f| record(f, DumpKind::App)));
+        if listing.complete {
+            covered.push(with_separator(dir));
+        }
+        listed.extend(listing.files.into_iter().map(|f| record(f, DumpKind::App)));
     }
     if let Some(crash) = &places.crash {
         covered.push(crash.dump_file.to_string_lossy().into_owned());
@@ -120,6 +122,39 @@ mod tests {
             present
                 .iter()
                 .any(|d| d.record.kind == DumpKind::KernelMemory)
+        );
+    }
+
+    #[test]
+    fn a_dump_in_a_crashdumps_subfolder_is_not_marked_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("CrashDumps").join("Game");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("a.dmp"), [0u8; 64]).unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let stored = DumpRecord {
+            path: sub.join("a.dmp").to_string_lossy().into_owned(),
+            file_ms: 10,
+            kind: DumpKind::App,
+            crash_ms: 10,
+            size_bytes: 64,
+            analysis: None,
+        };
+        store.upsert_dumps(&[stored], 10).unwrap();
+        let places = places(dir.path());
+
+        take_inventory(&mut store, &places, 20).unwrap();
+        take_inventory(&mut store, &places, 30).unwrap();
+
+        let present = store.present_dumps().unwrap();
+        assert_eq!(present.len(), 1);
+        assert_eq!(present[0].record.path, sub.join("a.dmp").to_string_lossy());
+
+        fs::remove_file(sub.join("a.dmp")).unwrap();
+        take_inventory(&mut store, &places, 40).unwrap();
+        assert!(
+            store.present_dumps().unwrap().is_empty(),
+            "gone is still gone"
         );
     }
 

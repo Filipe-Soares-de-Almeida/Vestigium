@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use vestigium_collect::{
-    DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, subfolders, wall_ms,
+    DumpFile, app_dump_dir, crash_control, dump_file, list_dumps_one_level, wall_ms,
 };
 use vestigium_core::{
     Analysis, DUMP_SCAN_VERSION, DumpKind, DumpRecord, DumpScan, Fault, fault_address,
@@ -92,20 +92,12 @@ fn dump_files() -> Vec<(DumpFile, bool)> {
 
 /// The `.dmp` files of `dir` and of the folders right under it.
 fn listed(dir: &Path, app: bool) -> Vec<(DumpFile, bool)> {
-    let mut files: Vec<(DumpFile, bool)> = list_dumps(dir)
+    list_dumps_one_level(dir)
+        .map(|listing| listing.files)
         .unwrap_or_default()
         .into_iter()
         .map(|f| (f, app))
-        .collect();
-    for sub in subfolders(dir) {
-        files.extend(
-            list_dumps(&sub)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|f| (f, app)),
-        );
-    }
-    files
+        .collect()
 }
 
 fn read_dump(file: DumpFile, app: bool) -> DumpRecord {

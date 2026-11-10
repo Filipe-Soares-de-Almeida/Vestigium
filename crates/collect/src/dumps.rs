@@ -74,6 +74,27 @@ pub fn list_dumps(dir: &Path) -> Option<Vec<DumpFile>> {
     )
 }
 
+/// The dumps of a folder and of the folders right under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DumpListing {
+    pub files: Vec<DumpFile>,
+    /// Every folder was listed, so a dump absent from `files` is really gone.
+    pub complete: bool,
+}
+
+/// The `.dmp` files in `dir` and in its real subfolders; `None` when `dir` cannot be listed.
+pub fn list_dumps_one_level(dir: &Path) -> Option<DumpListing> {
+    let mut files = list_dumps(dir)?;
+    let mut complete = true;
+    for sub in subfolders(dir) {
+        match list_dumps(&sub) {
+            Some(found) => files.extend(found),
+            None => complete = false,
+        }
+    }
+    Some(DumpListing { files, complete })
+}
+
 /// The real folders directly under `dir`: a junction or link is never one.
 pub fn subfolders(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -182,6 +203,29 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].size_bytes, 1);
         assert_eq!(subfolders(dir.path()), [dir.path().join("Sub")]);
+    }
+
+    #[test]
+    fn the_one_level_listing_reads_the_folder_and_its_subfolders() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("Game");
+        std::fs::create_dir_all(sub.join("Deeper")).unwrap();
+        std::fs::write(dir.path().join("a.dmp"), b"x").unwrap();
+        std::fs::write(sub.join("b.dmp"), b"xy").unwrap();
+        std::fs::write(sub.join("Deeper").join("c.dmp"), b"xyz").unwrap();
+        std::fs::write(sub.join("notes.txt"), b"x").unwrap();
+
+        let listing = list_dumps_one_level(dir.path()).unwrap();
+
+        let mut names: Vec<_> = listing
+            .files
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["a.dmp", "b.dmp"], "one level down, no deeper");
+        assert!(listing.complete);
+        assert!(list_dumps_one_level(&dir.path().join("missing")).is_none());
     }
 
     #[test]

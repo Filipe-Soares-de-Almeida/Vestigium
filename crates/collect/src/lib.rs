@@ -26,7 +26,8 @@ pub use boot::{BOOT_LOG, boot_report};
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
 pub use dumps::{
-    CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, subfolders,
+    CrashControl, DumpFile, DumpListing, app_dump_dir, crash_control, dump_file, list_dumps,
+    list_dumps_one_level, subfolders,
 };
 pub use etw::{
     Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, EventSink, IMAGE,
