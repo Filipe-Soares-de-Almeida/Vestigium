@@ -316,6 +316,9 @@ impl Sampler {
         let history_last = sampler.store.last_sample_end_ms().ok().flatten();
         match opened {
             Some(Ok((ring, held))) => {
+                if let Some(warning) = &held.warning {
+                    sampler.report(warning);
+                }
                 sampler.ring = Some(ring);
                 sampler.fall = Fall::after(held, history_last, now);
             }
@@ -1665,6 +1668,26 @@ mod tests {
         let (_, count, _) = samples(dir.path());
         assert!(count >= 1);
         assert_eq!(lock(&running.status).last_error, None);
+    }
+
+    #[test]
+    fn a_ring_of_another_version_is_reported_at_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ring = vec![0u8; 32 * 1024];
+        ring[..4].copy_from_slice(b"VBXR");
+        ring[4] = 9;
+        std::fs::write(dir.path().join("blackbox.ring"), ring).unwrap();
+
+        let running = start(dir.path(), NEVER_DUE);
+        let reported = wait_until(PATIENCE, || {
+            lock(&running.status)
+                .last_error
+                .as_deref()
+                .is_some_and(|e| e.contains("black box"))
+        });
+        stop(&running);
+
+        assert!(reported, "the foreign ring was not reported");
     }
 
     #[test]

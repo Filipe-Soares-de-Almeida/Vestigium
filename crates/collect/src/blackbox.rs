@@ -13,6 +13,7 @@ use windows::Win32::System::Memory::{
 use windows::core::HSTRING;
 
 use crate::CollectError;
+use crate::timer::wall_ms;
 
 /// Records the ring holds: five minutes of seconds plus three processes every five seconds, the
 /// longest the history can go unwritten.
@@ -28,6 +29,10 @@ const CLOSED: u8 = 1;
 const KIND_SAMPLE: u8 = 1;
 const KIND_PROCESS: u8 = 2;
 const MIB: u64 = 1024 * 1024;
+/// The earliest time a record may carry: 2020-01-01 UTC, in Unix milliseconds.
+const EARLIEST_MS: i64 = 1_577_836_800_000;
+/// How far past the clock a record's time may be.
+const LATEST_AHEAD_MS: i64 = 24 * 60 * 60_000;
 /// Processes kept from each ranking: the busiest by CPU, by memory and by disk.
 const TOP_KEPT: usize = 3;
 
@@ -38,6 +43,8 @@ pub struct RingContents {
     pub clean: bool,
     pub samples: Vec<Sample>,
     pub tops: Vec<ProcessTop>,
+    /// Set when the file could not be read as a ring of this version.
+    pub warning: Option<String>,
 }
 
 /// The last five minutes in compact records, in a mapped file that outlives the process.
@@ -83,7 +90,7 @@ impl BlackboxRing {
         if view.Value.is_null() {
             return Err(windows::core::Error::from_thread().into());
         }
-        let held = read(ring.bytes());
+        let held = read(ring.bytes(), wall_ms());
         let bytes = ring.bytes_mut();
         bytes.fill(0);
         bytes[..4].copy_from_slice(&MAGIC);
@@ -147,14 +154,26 @@ impl Drop for BlackboxRing {
     }
 }
 
-/// The samples and rankings in a ring's bytes, oldest first; an unknown layout counts as clean.
-fn read(bytes: &[u8]) -> RingContents {
-    if bytes[..4] != MAGIC || bytes[4] != VERSION {
+/// The samples and rankings in a ring's bytes, oldest first, leaving out records whose time is
+/// not plausible at `now_ms`. A ring of another version is an unclean stop with a warning; a file
+/// with no ring header counts as clean.
+fn read(bytes: &[u8], now_ms: i64) -> RingContents {
+    if bytes[..4] != MAGIC {
         return RingContents {
             clean: true,
             ..RingContents::default()
         };
     }
+    if bytes[4] != VERSION {
+        return RingContents {
+            warning: Some(format!(
+                "the black box ring has layout version {}, this build reads version {VERSION}",
+                bytes[4]
+            )),
+            ..RingContents::default()
+        };
+    }
+    let plausible = EARLIEST_MS..=now_ms.saturating_add(LATEST_AHEAD_MS);
     let mut samples = Vec::new();
     let mut processes: Vec<(i64, ProcessSample)> = Vec::new();
     for record in bytes[HEADER..HEADER + RING_RECORDS * RECORD]
@@ -163,7 +182,7 @@ fn read(bytes: &[u8]) -> RingContents {
     {
         let ts_ms = i64::from_le_bytes(record[..8].try_into().unwrap_or_default());
         match record[8] {
-            _ if ts_ms == 0 => {}
+            _ if !plausible.contains(&ts_ms) => {}
             KIND_SAMPLE => samples.push(decode_sample(ts_ms, record)),
             KIND_PROCESS => processes.push((ts_ms, decode_process(record))),
             _ => {}
@@ -185,6 +204,7 @@ fn read(bytes: &[u8]) -> RingContents {
         clean: bytes[5] == CLOSED,
         samples,
         tops,
+        warning: None,
     }
 }
 
@@ -439,25 +459,32 @@ mod tests {
         assert!(back.name.len() <= 32);
     }
 
-    #[test]
-    fn reading_orders_seconds_and_groups_rankings() {
+    /// A clock reading after the earliest plausible time, for rings written in tests.
+    const NOW: i64 = 1_800_000_000_000;
+
+    fn ring_with(records: &[[u8; RECORD]]) -> Vec<u8> {
         let mut bytes = vec![0u8; RING_BYTES];
         bytes[..4].copy_from_slice(&MAGIC);
         bytes[4] = VERSION;
-        let records = [
-            encode_sample(&sample(3_000)),
-            encode_process(2_000, &process(1, "A.exe", 1.0, 1, 0.0)),
-            encode_sample(&sample(1_000)),
-            encode_process(2_000, &process(2, "B.exe", 1.0, 1, 0.0)),
-        ];
         for (i, record) in records.iter().enumerate() {
             bytes[HEADER + i * RECORD..HEADER + (i + 1) * RECORD].copy_from_slice(record);
         }
-        let held = read(&bytes);
+        bytes
+    }
+
+    #[test]
+    fn reading_orders_seconds_and_groups_rankings() {
+        let bytes = ring_with(&[
+            encode_sample(&sample(NOW - 2_000)),
+            encode_process(NOW - 3_000, &process(1, "A.exe", 1.0, 1, 0.0)),
+            encode_sample(&sample(NOW - 4_000)),
+            encode_process(NOW - 3_000, &process(2, "B.exe", 1.0, 1, 0.0)),
+        ]);
+        let held = read(&bytes, NOW);
         assert!(!held.clean);
         assert_eq!(
             held.samples.iter().map(|s| s.ts_ms).collect::<Vec<_>>(),
-            [1_000, 3_000]
+            [NOW - 4_000, NOW - 2_000]
         );
         assert_eq!(held.tops.len(), 1);
         assert_eq!(held.tops[0].entries.len(), 2);
@@ -465,6 +492,42 @@ mod tests {
 
     #[test]
     fn an_unknown_layout_counts_as_clean() {
-        assert!(read(&vec![0u8; RING_BYTES]).clean);
+        assert!(read(&vec![0u8; RING_BYTES], NOW).clean);
+    }
+
+    #[test]
+    fn a_record_with_an_implausible_time_is_dropped() {
+        let bytes = ring_with(&[
+            encode_sample(&sample(i64::MAX)),
+            encode_sample(&sample(1)),
+            encode_sample(&sample(-NOW)),
+            encode_sample(&sample(NOW + 2 * LATEST_AHEAD_MS)),
+            encode_process(1, &process(1, "A.exe", 1.0, 1, 0.0)),
+            encode_sample(&sample(NOW - 1_000)),
+            encode_process(NOW - 1_000, &process(2, "B.exe", 1.0, 1, 0.0)),
+        ]);
+        let held = read(&bytes, NOW);
+        assert_eq!(
+            held.samples.iter().map(|s| s.ts_ms).collect::<Vec<_>>(),
+            [NOW - 1_000]
+        );
+        assert_eq!(held.tops.len(), 1);
+        assert_eq!(held.tops[0].entries[0].name, "B.exe");
+    }
+
+    #[test]
+    fn a_ring_of_another_version_is_a_pending_fall() {
+        let mut bytes = ring_with(&[encode_sample(&sample(NOW - 1_000))]);
+        bytes[4] = VERSION + 1;
+        let held = read(&bytes, NOW);
+        assert!(!held.clean);
+        assert!(held.samples.is_empty());
+        assert!(held.warning.is_some_and(|w| w.contains("version")));
+    }
+
+    #[test]
+    fn a_readable_ring_has_no_warning() {
+        let held = read(&ring_with(&[encode_sample(&sample(NOW - 1_000))]), NOW);
+        assert_eq!(held.warning, None);
     }
 }

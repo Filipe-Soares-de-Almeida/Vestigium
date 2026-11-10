@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A damaged black box file can no longer move the window of the post-mortem after a fall. Records
+  with a time before 2020 or more than a day ahead of the clock are ignored, and a file written by
+  another version of the monitor is reported as a stop that was not clean instead of as a clean one.
 - After a start, the health check now runs again once the first batch of Windows events is saved.
   The check a minute after start could not see the boot and crash events still waiting to be
   saved, so an unexpected restart appeared in the health findings up to an hour late.

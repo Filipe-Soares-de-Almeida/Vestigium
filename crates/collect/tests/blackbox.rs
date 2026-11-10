@@ -6,6 +6,8 @@ use vestigium_core::{ProcessSample, ProcessTop, Sample};
 
 /// Set in the child process that writes a ring and dies without closing it.
 const CHILD: &str = "VESTIGIUM_RING_CHILD";
+/// A time in 2023, after the earliest a ring record may carry and before any clock now.
+const BASE: i64 = 1_700_000_000_000;
 
 fn sample(ts_ms: i64) -> Sample {
     Sample {
@@ -57,7 +59,7 @@ fn ring_writer_child() {
         return;
     };
     let (mut ring, _) = BlackboxRing::open(Path::new(&path)).unwrap();
-    write_seconds(&mut ring, 1_000_000, 30);
+    write_seconds(&mut ring, BASE, 30);
     // Ends the process with the ring still mapped and unflushed, as a kill would.
     std::process::exit(3);
 }
@@ -80,7 +82,7 @@ fn ring_survives_a_killed_process() {
     let (_ring, held) = BlackboxRing::open(&path).unwrap();
     assert!(!held.clean);
     assert_eq!(held.samples.len(), 30);
-    assert_eq!(held.samples.last().map(|s| s.ts_ms), Some(1_029_000));
+    assert_eq!(held.samples.last().map(|s| s.ts_ms), Some(BASE + 29_000));
     assert_eq!(held.tops.len(), 1);
     assert_eq!(held.tops[0].entries[0].name, "Browser.exe");
 }
@@ -92,7 +94,7 @@ fn a_clean_close_is_read_as_clean_and_the_ring_starts_over() {
     {
         let (mut ring, held) = BlackboxRing::open(&path).unwrap();
         assert!(held.samples.is_empty());
-        write_seconds(&mut ring, 5_000, 10);
+        write_seconds(&mut ring, BASE, 10);
         ring.close_cleanly().unwrap();
     }
     let (ring, held) = BlackboxRing::open(&path).unwrap();
@@ -114,14 +116,14 @@ fn the_ring_keeps_only_the_newest_records() {
     {
         let (mut ring, _) = BlackboxRing::open(&path).unwrap();
         for i in 0..RING_RECORDS as i64 + 60 {
-            ring.push_sample(&sample(i * 1000));
+            ring.push_sample(&sample(BASE + i * 1000));
         }
     }
     let (_ring, held) = BlackboxRing::open(&path).unwrap();
     assert_eq!(held.samples.len(), RING_RECORDS);
-    assert_eq!(held.samples.first().map(|s| s.ts_ms), Some(60_000));
+    assert_eq!(held.samples.first().map(|s| s.ts_ms), Some(BASE + 60_000));
     assert_eq!(
         held.samples.last().map(|s| s.ts_ms),
-        Some((RING_RECORDS as i64 + 59) * 1000)
+        Some(BASE + (RING_RECORDS as i64 + 59) * 1000)
     );
 }
