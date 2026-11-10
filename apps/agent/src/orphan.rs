@@ -1,4 +1,9 @@
-use vestigium_collect::{DEEP_CAPTURE_SESSION, ProcessSnapshotter, session_exists, stop_session};
+use vestigium_collect::{
+    DEEP_CAPTURE_SESSION, PRESENTMON_SESSION, ProcessSnapshotter, session_exists, stop_session,
+};
+
+/// The trace sessions a deep capture leaves behind when its helper is killed.
+const CAPTURE_SESSIONS: [&str; 2] = [DEEP_CAPTURE_SESSION, PRESENTMON_SESSION];
 
 /// Image names of the helper, installed and development.
 const HELPER_IMAGES: [&str; 2] = ["Vestigium.Helper.exe", "vestigium-helper.exe"];
@@ -14,17 +19,23 @@ fn is_helper(image: &str) -> bool {
         .any(|name| image.eq_ignore_ascii_case(name))
 }
 
-/// Stops the deep capture's kernel session when no helper is running to own it; a stop that
-/// is refused or fails is ignored.
+/// Stops the deep capture's kernel session and PresentMon's session when no helper is running
+/// to own them; a stop that is refused or fails is ignored.
 pub fn release_orphaned_capture() {
-    if !session_exists(DEEP_CAPTURE_SESSION) {
+    let left: Vec<&str> = CAPTURE_SESSIONS
+        .into_iter()
+        .filter(|name| session_exists(name))
+        .collect();
+    if left.is_empty() {
         return;
     }
     let helper_running = ProcessSnapshotter::with_capacity(1 << 20)
         .snapshot()
         .map_or(true, |all| all.iter().any(|p| is_helper(&p.name)));
     if should_stop_orphan(true, helper_running) {
-        let _ = stop_session(DEEP_CAPTURE_SESSION);
+        for name in left {
+            let _ = stop_session(name);
+        }
     }
 }
 

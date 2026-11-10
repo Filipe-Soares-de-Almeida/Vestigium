@@ -45,6 +45,11 @@ How to use this file:
 
 ### Fixed
 
+- A deep capture no longer waits forever for the frame recorder. If PresentMon is still running 15
+  seconds after the capture should have ended, it is ended and the capture finishes with the frames
+  read so far, or marked as not measured when there were none. PresentMon is also tied to the
+  administrator helper, so ending the helper ends it too, and the monitor stops a leftover PresentMon
+  trace session at start, as it already did for the kernel one.
 - Startup entries of common antivirus products, such as Avast, AVG, ESET, Kaspersky, Norton, McAfee
   and Bitdefender, are now shown as protected on the Optimizations screen and can no longer be
   disabled from it. Before, only names with words such as Defender or Security were protected. A slow

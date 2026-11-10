@@ -1,15 +1,26 @@
 use std::io::{BufRead, BufReader, Read};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject,
+};
 
 use crate::CollectError;
 
 /// PresentMon's ETW session for the deep capture.
 pub const PRESENTMON_SESSION: &str = "Vestigium PresentMon";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// How long past its own timer a PresentMon run may last before it is killed.
+const DEADLINE_MARGIN_SECS: u64 = 15;
 
 /// One presented frame: the app's own cadence, start time in raw QPC.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +41,8 @@ pub struct PresentMonOutcome {
     pub requested_secs: u64,
     /// Whole seconds the process ran.
     pub ran_secs: u64,
+    /// The process outlived its deadline and was killed.
+    pub timed_out: bool,
 }
 
 /// A run ends about a second after its timer; this much shorter than asked is an early end.
@@ -49,6 +62,12 @@ impl PresentMonOutcome {
         if self.stderr.contains("overflowed present events") {
             return Some("PresentMon saw presents but finished none".into());
         }
+        if self.timed_out {
+            return Some(format!(
+                "PresentMon did not stop in time and was ended after {} s",
+                self.ran_secs
+            ));
+        }
         if self.exit_code != Some(0) {
             return Some(format!(
                 "PresentMon exited with {:?}: {}",
@@ -67,7 +86,7 @@ impl PresentMonOutcome {
     /// The seconds the frames cover and why that is less than asked, when frames were read but the
     /// run failed or stopped before its timer.
     pub fn partial(&self) -> Option<(u64, String)> {
-        if self.rows == 0 || (self.exit_code == Some(0) && !self.ended_early()) {
+        if self.rows == 0 || (self.exit_code == Some(0) && !self.ended_early() && !self.timed_out) {
             return None;
         }
         let covered = if self.requested_secs > 0 {
@@ -76,6 +95,7 @@ impl PresentMonOutcome {
             self.ran_secs
         };
         let how = match self.exit_code {
+            _ if self.timed_out => "did not stop in time and was ended".to_string(),
             Some(0) => "stopped".to_string(),
             Some(code) => format!("exited with {code}"),
             None => "ended without an exit code".to_string(),
@@ -145,19 +165,69 @@ impl CsvColumns {
     }
 }
 
-/// Runs PresentMon at `exe` for `seconds` with no window, handing each frame to `on_frame`.
+/// Runs PresentMon at `exe` for `seconds` with no window, handing each frame to `on_frame`; a run
+/// that outlives its timer by more than a margin is killed.
 pub fn run_presentmon(
     exe: &Path,
     seconds: u64,
     on_frame: impl FnMut(FrameRow),
 ) -> Result<PresentMonOutcome, CollectError> {
-    run_with_args(exe, &presentmon_args(seconds), seconds, on_frame)
+    let deadline = Duration::from_secs(seconds + DEADLINE_MARGIN_SECS);
+    run_with_args(exe, &presentmon_args(seconds), seconds, deadline, on_frame)
+}
+
+/// A job object that ends every process in it when its handle closes.
+struct KillOnClose(HANDLE);
+
+impl KillOnClose {
+    /// A job holding `child`; `None` when Windows refuses one (the child then runs unguarded).
+    fn holding(child: &Child) -> Option<KillOnClose> {
+        // SAFETY: the job handle is owned by the returned value and closed once; the limit
+        // structure outlives the call; the child's raw handle is valid while `child` lives.
+        unsafe {
+            let job = CreateJobObjectW(None, None).ok()?;
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ready = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .is_ok()
+                && AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())).is_ok();
+            if ready {
+                Some(KillOnClose(job))
+            } else {
+                let _ = CloseHandle(job);
+                None
+            }
+        }
+    }
+
+    /// Ends every process in the job at once, children included.
+    fn kill(&self) {
+        // SAFETY: the handle is a live job object owned by `self`.
+        unsafe {
+            let _ = TerminateJobObject(self.0, 1);
+        }
+    }
+}
+
+impl Drop for KillOnClose {
+    fn drop(&mut self) {
+        // SAFETY: the handle is owned by `self` and closed once.
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
 }
 
 fn run_with_args(
     exe: &Path,
     args: &[String],
     requested_secs: u64,
+    deadline: Duration,
     mut on_frame: impl FnMut(FrameRow),
 ) -> Result<PresentMonOutcome, CollectError> {
     let started = Instant::now();
@@ -168,6 +238,7 @@ fn run_with_args(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    let job = KillOnClose::holding(&child);
     let mut stderr = child.stderr.take();
     let errors = thread::spawn(move || {
         let mut text = String::new();
@@ -176,15 +247,27 @@ fn run_with_args(
         }
         text
     });
+    let (lines, incoming) = mpsc::channel();
+    if let Some(stdout) = child.stdout.take() {
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let failed = line.is_err();
+                if lines.send(line).is_err() || failed {
+                    break;
+                }
+            }
+        });
+    }
     let mut outcome = PresentMonOutcome {
         requested_secs,
         ..Default::default()
     };
-    if let Some(stdout) = child.stdout.take() {
-        let mut columns = None;
-        for line in BufReader::new(stdout).lines() {
-            let line = line?;
-            match &columns {
+    let mut columns = None;
+    let mut read_error = None;
+    loop {
+        let left = deadline.saturating_sub(started.elapsed());
+        match incoming.recv_timeout(left) {
+            Ok(Ok(line)) => match &columns {
                 None => columns = CsvColumns::new(&line),
                 Some(cols) => {
                     if let Some(frame) = cols.row(&line) {
@@ -192,12 +275,33 @@ fn run_with_args(
                         on_frame(frame);
                     }
                 }
+            },
+            Ok(Err(e)) => {
+                read_error = Some(e);
+                break;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                outcome.timed_out = true;
+                break;
             }
         }
     }
-    outcome.exit_code = child.wait()?.code();
+    if outcome.timed_out || read_error.is_some() {
+        match &job {
+            Some(job) => job.kill(),
+            None => {
+                let _ = child.kill();
+            }
+        }
+    }
+    let status = child.wait();
     outcome.ran_secs = started.elapsed().as_secs();
     outcome.stderr = errors.join().unwrap_or_default();
+    if let Some(e) = read_error {
+        return Err(e.into());
+    }
+    outcome.exit_code = status?.code();
     Ok(outcome)
 }
 
@@ -339,12 +443,73 @@ mod tests {
             .to_vec();
 
         let mut seen = 0;
-        let outcome = run_with_args(Path::new("cmd.exe"), &args, 300, |_| seen += 1).unwrap();
+        let outcome = run_with_args(
+            Path::new("cmd.exe"),
+            &args,
+            300,
+            Duration::from_secs(60),
+            |_| seen += 1,
+        )
+        .unwrap();
 
         assert_eq!((seen, outcome.rows, outcome.exit_code), (2, 2, Some(1)));
         assert_eq!(outcome.unavailable(), None);
         let (covered, why) = outcome.partial().expect("a run that died is partial");
         assert!(covered < 300);
         assert!(why.contains("exited with 1"), "{why}");
+    }
+
+    fn ping_for(secs: u32) -> Vec<String> {
+        ["-n", &secs.to_string(), "127.0.0.1"]
+            .map(String::from)
+            .to_vec()
+    }
+
+    #[test]
+    fn presentmon_that_never_exits_is_killed_after_the_deadline() {
+        let started = Instant::now();
+        let outcome = run_with_args(
+            Path::new("ping.exe"),
+            &ping_for(40),
+            300,
+            Duration::from_secs(2),
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(outcome.timed_out);
+        assert!(outcome.unavailable().unwrap().contains("did not stop"));
+    }
+
+    #[test]
+    fn a_run_that_was_ended_keeps_its_rows_as_partial() {
+        let outcome = PresentMonOutcome {
+            rows: 40,
+            exit_code: Some(1),
+            requested_secs: 300,
+            ran_secs: 315,
+            timed_out: true,
+            ..Default::default()
+        };
+        assert_eq!(outcome.unavailable(), None);
+        let (covered, why) = outcome.partial().expect("partial");
+        assert_eq!(covered, 300);
+        assert!(why.contains("did not stop in time"), "{why}");
+    }
+
+    #[test]
+    fn closing_the_job_ends_the_process_in_it() {
+        let mut child = Command::new("ping.exe")
+            .args(ping_for(40))
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let job = KillOnClose::holding(&child).expect("a job object");
+        drop(job);
+        let started = Instant::now();
+        child.wait().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }
