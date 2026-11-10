@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use vestigium_core::{Guid, Hive, Setting, SettingStore, StartupEntry, StartupList, Value};
+use vestigium_core::{
+    ERROR_MAY_HAVE_CHANGED, Guid, Hive, Setting, SettingStore, StartupEntry, StartupList, Value,
+};
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_DIR_NOT_EMPTY, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL, LUID,
     LocalFree, STATUS_SUCCESS, WIN32_ERROR,
@@ -224,6 +226,20 @@ fn read_service(name: &str) -> Option<Value> {
         start,
         delayed,
         running: status.dwCurrentState == SERVICE_RUNNING,
+    })
+}
+
+/// Writes one plugged-in value of one power scheme.
+fn write_ac_index(scheme: Guid, subgroup: Guid, setting: Guid, index: u32) -> Result<(), u32> {
+    // SAFETY: writes one AC value of one existing scheme.
+    ok(unsafe {
+        PowerWriteACValueIndex(
+            None,
+            &GUID::from_u128(scheme.0),
+            Some(&GUID::from_u128(subgroup.0)),
+            Some(&GUID::from_u128(setting.0)),
+            index,
+        )
     })
 }
 
@@ -613,20 +629,22 @@ pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
             Value::Index(index),
         ) => {
             let chosen = scheme_of(*scheme).ok_or(ERROR_FILE_NOT_FOUND.0)?;
-            let scheme = GUID::from_u128(chosen.0);
-            // SAFETY: writes one AC value of one existing scheme.
-            ok(unsafe {
-                PowerWriteACValueIndex(
-                    None,
-                    &scheme,
-                    Some(&GUID::from_u128(subgroup.0)),
-                    Some(&GUID::from_u128(setting.0)),
-                    *index,
-                )
-            })?;
+            let Some(Value::Index(before)) = read_setting(&Setting::PowerAc {
+                subgroup: *subgroup,
+                setting: *setting,
+                scheme: Some(chosen),
+            }) else {
+                return Err(ERROR_FILE_NOT_FOUND.0);
+            };
+            write_ac_index(chosen, *subgroup, *setting, *index)?;
             if active_scheme() == Some(chosen) {
                 // SAFETY: applies the active scheme again so the new value takes effect.
-                ok(unsafe { PowerSetActiveScheme(None, Some(&scheme)) })?;
+                let applied =
+                    ok(unsafe { PowerSetActiveScheme(None, Some(&GUID::from_u128(chosen.0))) });
+                if let Err(first) = applied {
+                    let back = write_ac_index(chosen, *subgroup, *setting, before);
+                    return Err(after_rollback(first, back));
+                }
             }
             Ok(())
         }
@@ -705,7 +723,121 @@ fn delete_empty_key(hive: HKEY, key: &str) -> Result<(), u32> {
     ok(unsafe { RegDeleteKeyW(hive, &HSTRING::from(key)) })
 }
 
+/// The calls `write_service` makes on one open service.
+trait ServiceCalls {
+    fn set_start(&mut self, start: u32) -> Result<(), u32>;
+    fn set_delayed(&mut self, delayed: bool) -> Result<(), u32>;
+    fn is_running(&mut self) -> Result<bool, u32>;
+    fn stop(&mut self) -> Result<(), u32>;
+    fn start_it(&mut self) -> Result<(), u32>;
+}
+
+/// Moves a service to `wanted` (start type, delayed start, running) from `before` (start type,
+/// delayed start). When a step after the start type fails, the old start type is written back and
+/// the first error returned; if that fails too, the error says the value may have changed.
+fn switch_service(
+    calls: &mut impl ServiceCalls,
+    before: (u32, bool),
+    wanted: (u32, bool, bool),
+) -> Result<(), u32> {
+    let (start, delayed, running) = wanted;
+    calls.set_start(start)?;
+    let later = (|| {
+        calls.set_delayed(start == 2 && delayed)?;
+        let is_running = calls.is_running()?;
+        if is_running && !running {
+            calls.stop()
+        } else if !is_running && running {
+            calls.start_it()
+        } else {
+            Ok(())
+        }
+    })();
+    later.map_err(|first| {
+        let back = calls
+            .set_start(before.0)
+            .and_then(|()| calls.set_delayed(before.0 == 2 && before.1));
+        after_rollback(first, back)
+    })
+}
+
+/// The error to report once a rollback ran: the first one, unless the rollback failed as well.
+fn after_rollback(first: u32, rollback: Result<(), u32>) -> u32 {
+    if rollback.is_ok() {
+        first
+    } else {
+        ERROR_MAY_HAVE_CHANGED
+    }
+}
+
+/// One service opened to change and control it, closed when dropped.
+struct OpenService(Service);
+
+impl ServiceCalls for OpenService {
+    fn set_start(&mut self, start: u32) -> Result<(), u32> {
+        // SAFETY: changes only the start type; every other field is left as it is.
+        unsafe {
+            ChangeServiceConfigW(
+                (self.0).0,
+                ENUM_SERVICE_TYPE(SERVICE_NO_CHANGE),
+                SERVICE_START_TYPE(start),
+                SERVICE_ERROR(SERVICE_NO_CHANGE),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .map_err(|e| code(&e))
+    }
+
+    fn set_delayed(&mut self, delayed: bool) -> Result<(), u32> {
+        let mut info = SERVICE_DELAYED_AUTO_START_INFO {
+            fDelayedAutostart: delayed.into(),
+        };
+        // SAFETY: the struct is the one the information level reads.
+        unsafe {
+            ChangeServiceConfig2W(
+                (self.0).0,
+                SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+                Some((&raw mut info).cast()),
+            )
+        }
+        .map_err(|e| code(&e))
+    }
+
+    fn is_running(&mut self) -> Result<bool, u32> {
+        let mut status = SERVICE_STATUS::default();
+        // SAFETY: the handle has SERVICE_QUERY_STATUS.
+        unsafe { QueryServiceStatus((self.0).0, &mut status) }.map_err(|e| code(&e))?;
+        Ok(status.dwCurrentState == SERVICE_RUNNING)
+    }
+
+    fn stop(&mut self) -> Result<(), u32> {
+        let mut status = SERVICE_STATUS::default();
+        // SAFETY: the handle has SERVICE_STOP; the status buffer is the one the call fills.
+        unsafe { ControlService((self.0).0, SERVICE_CONTROL_STOP, &mut status) }
+            .map_err(|e| code(&e))
+    }
+
+    fn start_it(&mut self) -> Result<(), u32> {
+        // SAFETY: the handle has SERVICE_START; no arguments are passed.
+        unsafe { StartServiceW((self.0).0, None) }.map_err(|e| code(&e))
+    }
+}
+
 fn write_service(name: &str, start: u32, delayed: bool, running: bool) -> Result<(), u32> {
+    let Some(Value::Service {
+        start: old_start,
+        delayed: old_delayed,
+        ..
+    }) = read_service(name)
+    else {
+        return Err(ERROR_FILE_NOT_FOUND.0);
+    };
     // SAFETY: a connection to the local service manager; closed by `Service`.
     let manager =
         Service(unsafe { OpenSCManagerW(None, None, SC_MANAGER_CONNECT) }.map_err(|e| code(&e))?);
@@ -714,48 +846,11 @@ fn write_service(name: &str, start: u32, delayed: bool, running: bool) -> Result
     let service = Service(
         unsafe { OpenServiceW(manager.0, &HSTRING::from(name), access) }.map_err(|e| code(&e))?,
     );
-    // SAFETY: changes only the start type; every other field is left as it is.
-    unsafe {
-        ChangeServiceConfigW(
-            service.0,
-            ENUM_SERVICE_TYPE(SERVICE_NO_CHANGE),
-            SERVICE_START_TYPE(start),
-            SERVICE_ERROR(SERVICE_NO_CHANGE),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-    }
-    .map_err(|e| code(&e))?;
-    let mut info = SERVICE_DELAYED_AUTO_START_INFO {
-        fDelayedAutostart: (start == 2 && delayed).into(),
-    };
-    // SAFETY: the struct is the one the information level reads.
-    unsafe {
-        ChangeServiceConfig2W(
-            service.0,
-            SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-            Some((&raw mut info).cast()),
-        )
-    }
-    .map_err(|e| code(&e))?;
-    let mut status = SERVICE_STATUS::default();
-    // SAFETY: the handle has SERVICE_QUERY_STATUS.
-    unsafe { QueryServiceStatus(service.0, &mut status) }.map_err(|e| code(&e))?;
-    let is_running = status.dwCurrentState == SERVICE_RUNNING;
-    if is_running && !running {
-        // SAFETY: the handle has SERVICE_STOP; the status buffer is the one the call fills.
-        unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) }
-            .map_err(|e| code(&e))?;
-    } else if !is_running && running {
-        // SAFETY: the handle has SERVICE_START; no arguments are passed.
-        unsafe { StartServiceW(service.0, None) }.map_err(|e| code(&e))?;
-    }
-    Ok(())
+    switch_service(
+        &mut OpenService(service),
+        (old_start, old_delayed),
+        (start, delayed, running),
+    )
 }
 
 /// Turns on one privilege the process token holds but keeps off by default.
@@ -799,5 +894,106 @@ impl SettingStore for WindowsSettings {
 
     fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32> {
         write_setting(setting, value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A service in memory that records its start type and can refuse a call.
+    struct FakeService {
+        start: u32,
+        delayed: bool,
+        running: bool,
+        refuses_stop: bool,
+        refuses_rollback: bool,
+        calls: usize,
+    }
+
+    impl ServiceCalls for FakeService {
+        fn set_start(&mut self, start: u32) -> Result<(), u32> {
+            self.calls += 1;
+            if self.refuses_rollback && self.calls > 1 {
+                return Err(1053);
+            }
+            self.start = start;
+            Ok(())
+        }
+
+        fn set_delayed(&mut self, delayed: bool) -> Result<(), u32> {
+            self.delayed = delayed;
+            Ok(())
+        }
+
+        fn is_running(&mut self) -> Result<bool, u32> {
+            Ok(self.running)
+        }
+
+        fn stop(&mut self) -> Result<(), u32> {
+            if self.refuses_stop {
+                return Err(1052);
+            }
+            self.running = false;
+            Ok(())
+        }
+
+        fn start_it(&mut self) -> Result<(), u32> {
+            self.running = true;
+            Ok(())
+        }
+    }
+
+    fn running_automatic() -> FakeService {
+        FakeService {
+            start: 2,
+            delayed: true,
+            running: true,
+            refuses_stop: false,
+            refuses_rollback: false,
+            calls: 0,
+        }
+    }
+
+    #[test]
+    fn a_service_that_refuses_stop_keeps_its_start_type() {
+        let mut service = FakeService {
+            refuses_stop: true,
+            ..running_automatic()
+        };
+        let result = switch_service(&mut service, (2, true), (4, false, false));
+        assert_eq!(result, Err(1052));
+        assert_eq!((service.start, service.delayed), (2, true));
+        assert!(service.running);
+    }
+
+    #[test]
+    fn a_service_that_stops_is_left_disabled() {
+        let mut service = running_automatic();
+        assert_eq!(
+            switch_service(&mut service, (2, true), (4, false, false)),
+            Ok(())
+        );
+        assert_eq!(
+            (service.start, service.delayed, service.running),
+            (4, false, false)
+        );
+    }
+
+    #[test]
+    fn a_failed_rollback_says_the_value_may_have_changed() {
+        let mut service = FakeService {
+            refuses_stop: true,
+            refuses_rollback: true,
+            ..running_automatic()
+        };
+        let result = switch_service(&mut service, (2, true), (4, false, false));
+        assert_eq!(result, Err(ERROR_MAY_HAVE_CHANGED));
+    }
+
+    #[test]
+    fn a_rollback_never_hides_the_first_error() {
+        assert_eq!(after_rollback(1052, Ok(())), 1052);
+        assert_eq!(after_rollback(1052, Err(5)), ERROR_MAY_HAVE_CHANGED);
     }
 }

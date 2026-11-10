@@ -666,6 +666,46 @@ fn a_power_change_without_a_scheme_is_still_in_the_catalog() {
 }
 
 #[test]
+fn a_write_that_may_have_landed_stays_in_the_undo() {
+    let service = Setting::Service {
+        name: "WSearch".into(),
+    };
+    let on = Value::Service {
+        start: 2,
+        delayed: true,
+        running: true,
+    };
+    let off = Value::Service {
+        start: 4,
+        delayed: false,
+        running: false,
+    };
+    let result = |error| vestigium_core::SettingResult {
+        change: SettingChange {
+            setting: service.clone(),
+            from: on.clone(),
+            to: off.clone(),
+        },
+        error,
+    };
+    let change = |error| vestigium_core::TweakChange {
+        tweak: TweakId::WindowsSearch,
+        subject: None,
+        undo_of: None,
+        results: vec![result(error)],
+        restore_point: None,
+    };
+    assert_eq!(change(None).written().len(), 1);
+    assert_eq!(
+        change(Some(vestigium_core::ERROR_MAY_HAVE_CHANGED))
+            .written()
+            .len(),
+        1
+    );
+    assert!(change(Some(5)).written().is_empty());
+}
+
+#[test]
 fn guid_reads_and_writes_its_usual_text() {
     let balanced: vestigium_core::Guid = "381b4222-f694-41f0-9685-ff5bb260df2e".parse().unwrap();
     assert_eq!(balanced, SCHEME_BALANCED);

@@ -181,13 +181,7 @@ pub fn undo_change(
     if row.undone_ms.is_some() || row.change.undo_of.is_some() {
         return Err(UiError::Failed(format!("change {id} cannot be undone")));
     }
-    let written: Vec<_> = row
-        .change
-        .results
-        .iter()
-        .filter(|r| r.error.is_none() && r.change.from != r.change.to)
-        .map(|r| r.change.clone())
-        .collect();
+    let written = row.change.written();
     if written.is_empty() {
         return Ok(TweaksApplied {
             ids: Vec::new(),

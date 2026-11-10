@@ -1080,6 +1080,17 @@ impl TweakChange {
     pub fn succeeded(&self) -> bool {
         self.results.iter().all(|r| r.error.is_none())
     }
+
+    /// The changes Windows holds or may hold, which an undo puts back: the writes that succeeded
+    /// and those that failed with `ERROR_MAY_HAVE_CHANGED`, leaving out what did not move.
+    pub fn written(&self) -> Vec<SettingChange> {
+        self.results
+            .iter()
+            .filter(|r| r.error.is_none() || r.error == Some(ERROR_MAY_HAVE_CHANGED))
+            .filter(|r| r.change.from != r.change.to)
+            .map(|r| r.change.clone())
+            .collect()
+    }
 }
 
 /// Layout of the `TweakPlan` the window writes and the `TweakResults` the helper writes today.
@@ -1089,6 +1100,8 @@ const MOST_CHANGES: usize = 8;
 /// Win32 errors a change records when it is not written.
 pub const ERROR_UNREADABLE: u32 = 1168;
 pub const ERROR_CHANGED_SINCE: u32 = 13;
+/// A write failed and putting the old value back failed too, so the setting may hold either.
+pub const ERROR_MAY_HAVE_CHANGED: u32 = 0x2000_0001;
 
 /// One tweak to apply or undo, as the window asks for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

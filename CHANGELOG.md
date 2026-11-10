@@ -38,6 +38,10 @@ How to use this file:
 
 ### Fixed
 
+- A tweak that changes a Windows service, or a power setting, and then fails on a later step no longer
+  leaves the first change behind with no way back. The old start type or power value is now written
+  back, and the history shows the real error. If even that cannot be written back, the change is kept
+  as partly written, with Undo offered, instead of being listed as refused.
 - Undoing a power tweak, such as the PCIe power saving or USB suspend setting, now puts the old value
   back in the power plan that was changed, not in whichever plan is active when you click Undo, and
   refuses with an error if that plan no longer exists. Before, switching plans between applying and

@@ -83,10 +83,10 @@ pub use shutdown::{
 pub use stutter::{BURST_COUNT, BURST_WINDOW_MS, HICCUP_MS, StutterDetector};
 pub use trigger::{HangOutcome, Severity, Trigger, severity};
 pub use tweak::{
-    Advice, Applier, BIG_HIBERFILE, CaptureCauses, ERROR_CHANGED_SINCE, ERROR_UNREADABLE, Guid,
-    Helped, Hive, PCIE_ASPM, PlanItem, RestorePoint, SCHEME_BALANCED, SCHEME_HIGH_PERFORMANCE,
-    SCHEME_POWER_SAVER, SUB_PCIEXPRESS, SUB_USB, Setting, SettingChange, SettingResult,
-    SettingStore, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
+    Advice, Applier, BIG_HIBERFILE, CaptureCauses, ERROR_CHANGED_SINCE, ERROR_MAY_HAVE_CHANGED,
+    ERROR_UNREADABLE, Guid, Helped, Hive, PCIE_ASPM, PlanItem, RestorePoint, SCHEME_BALANCED,
+    SCHEME_HIGH_PERFORMANCE, SCHEME_POWER_SAVER, SUB_PCIEXPRESS, SUB_USB, Setting, SettingChange,
+    SettingResult, SettingStore, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
     TWEAK_PLAN_VERSION, TWEAKS, Takes, TweakChange, TweakId, TweakInputs, TweakPlan, TweakResults,
     USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, check_item, disabled_approval,
     helped, undo,

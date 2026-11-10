@@ -58,6 +58,10 @@ export const TONE: Record<Group, string> = {
 /** What the page calls one tweak's state. */
 export type Shown = "signal" | "quiet" | "applied" | "set" | "unavailable" | "protected";
 
+/** Windows reported no error, or reported that a write failed and the old value may not be back. */
+const ERROR_MAY_HAVE_CHANGED = 0x2000_0001;
+const wrote = (x: { error: number | null }) => x.error === null || x.error === ERROR_MAY_HAVE_CHANGED;
+
 /** The change still in place for this tweak, if Vestigium made one and Windows still holds it. */
 export function inPlace(a: Advice, history: TweakRow[]): TweakRow | null {
   return (
@@ -68,7 +72,7 @@ export function inPlace(a: Advice, history: TweakRow[]): TweakRow | null {
         r.undone_ms === null &&
         r.change.undo_of === null &&
         !r.outside &&
-        r.change.results.some((x) => x.error === null),
+        r.change.results.some(wrote),
     ) ?? null
   );
 }
@@ -246,7 +250,7 @@ export function helpedVerdict(before: number, after: number): string {
 /** Where a history row stands, in words. */
 export function rowState(r: TweakRow): { mark: "Ok" | "Attention" | "Closed"; text: string } {
   const failed = r.change.results.some((x) => x.error !== null);
-  const written = r.change.results.some((x) => x.error === null);
+  const written = r.change.results.some(wrote);
   if (r.change.undo_of !== null) return { mark: "Closed", text: k("row.undo") };
   if (r.undone_ms !== null) return { mark: "Closed", text: k("row.undone", { when: at(r.undone_ms) }) };
   if (!written) return { mark: "Attention", text: k("row.refused") };
