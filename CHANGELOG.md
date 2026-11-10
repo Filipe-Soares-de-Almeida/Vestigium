@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- The crash dump scan no longer hangs on a dump the Windows debugger engine cannot load. Each dump
+  gets at most one minute, the whole scan at most ten minutes, and a dump left out of the analysis is
+  still listed with its size and date.
 - A deep capture no longer waits forever for the frame recorder. If PresentMon is still running 15
   seconds after the capture should have ended, it is ended and the capture finishes with the frames
   read so far, or marked as not measured when there were none. PresentMon is also tied to the

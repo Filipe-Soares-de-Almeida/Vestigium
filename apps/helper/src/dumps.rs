@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use vestigium_collect::{
     DumpFile, app_dump_dir, crash_control, dump_file, list_dumps_one_level, wall_ms,
@@ -28,6 +29,10 @@ const FRAMES: usize = 64;
 /// Size of the header of a kernel dump.
 const KERNEL_HEADER: usize = 0x2000;
 const FILETIME_UNIX_DIFF_MS: i64 = 11_644_473_600_000;
+/// Longest the debugger engine may take to load one dump, in milliseconds.
+const WAIT_FOR_DUMP_MS: u32 = 60_000;
+/// Longest the whole scan may spend in the engine; later dumps keep their size and date only.
+const SCAN_CEILING: Duration = Duration::from_secs(600);
 
 /// What the first bytes of a kernel dump say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,11 +58,12 @@ pub fn run(out: &Path) -> ExitCode {
     let mut found = dump_files();
     found.sort_by_key(|(f, _)| std::cmp::Reverse(f.file_ms));
     found.truncate(MOST_DUMPS);
+    let started = Instant::now();
     let scan = DumpScan {
         ts_ms: wall_ms(),
         dumps: found
             .into_iter()
-            .map(|(f, app)| read_dump(f, app))
+            .map(|(f, app)| read_dump(f, app, started.elapsed() < SCAN_CEILING))
             .collect(),
     };
     let mut bytes = vec![DUMP_SCAN_VERSION];
@@ -100,7 +106,7 @@ fn listed(dir: &Path, app: bool) -> Vec<(DumpFile, bool)> {
         .collect()
 }
 
-fn read_dump(file: DumpFile, app: bool) -> DumpRecord {
+fn read_dump(file: DumpFile, app: bool, analyse: bool) -> DumpRecord {
     let path = file.path.to_string_lossy().into_owned();
     let mut head = vec![0u8; KERNEL_HEADER];
     let read = File::open(&file.path)
@@ -123,12 +129,15 @@ fn read_dump(file: DumpFile, app: bool) -> DumpRecord {
         kind,
         crash_ms,
         size_bytes: file.size_bytes,
-        analysis: analyze(&file.path, process),
+        analysis: analyse
+            .then(|| analyze(&file.path, process, WAIT_FOR_DUMP_MS))
+            .flatten(),
     }
 }
 
-/// Opens the dump with the debugger engine that ships with Windows, no symbols, no network.
-fn analyze(path: &Path, process: Option<String>) -> Option<Analysis> {
+/// Opens the dump with the debugger engine that ships with Windows, no symbols, no network;
+/// gives up after `wait_ms` waiting for the engine to load it.
+fn analyze(path: &Path, process: Option<String>, wait_ms: u32) -> Option<Analysis> {
     // SAFETY: plain engine calls on interfaces created here, one engine per dump; every buffer
     // outlives the call that fills it.
     unsafe {
@@ -143,7 +152,7 @@ fn analyze(path: &Path, process: Option<String>) -> Option<Analysis> {
             .OpenDumpFileWide(&HSTRING::from(path.as_os_str()), 0)
             .ok()?;
         let analysis = (|| {
-            control.WaitForEvent(DEBUG_WAIT_DEFAULT, u32::MAX).ok()?;
+            control.WaitForEvent(DEBUG_WAIT_DEFAULT, wait_ms).ok()?;
             let fault = fault_of(&control)?;
             let modules = modules_of(&symbols);
             let mut stack = Vec::new();
@@ -429,6 +438,39 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["1.dmp", "Top.exe.1.dmp"]);
+    }
+
+    fn invented_dump(dir: &Path) -> DumpFile {
+        let path = dir.join("Invented.exe.1.dmp");
+        let mut bytes = b"MDMP".to_vec();
+        bytes.extend((0..4096u32).map(|i| (i % 251) as u8));
+        std::fs::write(&path, &bytes).unwrap();
+        DumpFile {
+            path,
+            file_ms: 1_000,
+            size_bytes: bytes.len() as u64,
+        }
+    }
+
+    #[test]
+    fn a_dump_past_the_scan_ceiling_keeps_its_size_and_date_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = read_dump(invented_dump(dir.path()), true, false);
+        assert!(record.analysis.is_none());
+        assert_eq!((record.size_bytes, record.file_ms), (4100, 1_000));
+        assert_eq!(record.kind, DumpKind::App);
+    }
+
+    // Loads the System32 debugger engine; run by hand with
+    // `cargo test -p vestigium-helper -- --ignored a_truncated_dump`.
+    #[test]
+    #[ignore = "loads the debugger engine"]
+    fn a_truncated_dump_is_kept_without_analysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let dump = invented_dump(dir.path());
+        let started = Instant::now();
+        assert!(analyze(&dump.path, None, 5_000).is_none());
+        assert!(started.elapsed() < Duration::from_secs(30));
     }
 
     #[test]
