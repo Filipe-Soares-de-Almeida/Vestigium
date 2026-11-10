@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- The timeline of an occurrence now names the disk, or the processor core, that reached the peak
+  value it quotes. When two disks went past a limit in the same window, it used to name the disk
+  that crossed first next to the peak of the other.
 - A not-responding app that bridged two nearby incidents now joins them into one occurrence. The two
   used to be saved as separate occurrences with overlapping windows, which counted the same moment
   twice in the tray.

@@ -78,3 +78,57 @@ fn facts_name_the_busiest_process() {
         },
     }));
 }
+
+#[test]
+fn the_crossing_names_the_disk_of_the_peak() {
+    let mut window = quiet_window();
+    tweak(&mut window, -20, -20, |s| s.disks[0].latency_ms = 250.0);
+    tweak(&mut window, -5, -5, |s| s.disks[1].latency_ms = 800.0);
+    let found = facts(&[], &window);
+    let crossing = found
+        .iter()
+        .find(|f| {
+            matches!(
+                f.kind,
+                FactKind::Crossed {
+                    metric: Metric::DiskLatencyMs,
+                    ..
+                }
+            )
+        })
+        .expect("a latency crossing");
+
+    assert_eq!(crossing.at_ms, T - 20_000);
+    let FactKind::Crossed { value, subject, .. } = &crossing.kind else {
+        unreachable!();
+    };
+    assert_eq!(*value, 800.0);
+    assert_eq!(subject.as_deref(), Some("1 D:"));
+}
+
+#[test]
+fn the_queue_crossing_names_the_disk_of_the_peak() {
+    let mut window = quiet_window();
+    tweak(&mut window, -20, -20, |s| s.disks[0].queue_len = 8.5);
+    tweak(&mut window, -5, -5, |s| s.disks[1].queue_len = 12.0);
+    let found = facts(&[], &window);
+    let crossing = found
+        .iter()
+        .find(|f| {
+            matches!(
+                f.kind,
+                FactKind::Crossed {
+                    metric: Metric::DiskQueue,
+                    ..
+                }
+            )
+        })
+        .expect("a queue crossing");
+
+    assert_eq!(crossing.at_ms, T - 20_000);
+    let FactKind::Crossed { value, subject, .. } = &crossing.kind else {
+        unreachable!();
+    };
+    assert_eq!(*value, 12.0);
+    assert_eq!(subject.as_deref(), Some("1 D:"));
+}
