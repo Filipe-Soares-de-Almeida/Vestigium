@@ -35,6 +35,12 @@ pub struct FrameRow {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PresentMonOutcome {
     pub rows: u64,
+    /// Data lines read after the header, whether or not they gave a frame.
+    pub lines: u64,
+    /// Data lines that gave no frame.
+    pub skipped: u64,
+    /// Lines read before any header with the needed columns; all of them when none was found.
+    pub stray_lines: u64,
     pub exit_code: Option<i32>,
     pub stderr: String,
     /// Seconds the run was asked for; 0 when it is not known.
@@ -74,6 +80,15 @@ impl PresentMonOutcome {
                 self.exit_code,
                 self.stderr.trim()
             ));
+        }
+        if self.lines > 0 {
+            return Some(format!(
+                "PresentMon wrote {} lines but none gave a frame",
+                self.lines
+            ));
+        }
+        if self.stray_lines > 0 {
+            return Some("PresentMon's output had no header with the columns needed".into());
         }
         self.ended_early().then(|| {
             format!(
@@ -162,6 +177,42 @@ impl CsvColumns {
             cpu_start_qpc: fields.get(self.cpu_start)?.trim().parse().ok()?,
             between_presents_ms: fields.get(self.between)?.trim().parse().ok(),
         })
+    }
+}
+
+/// What a CSV reader has taken from PresentMon's output so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct FrameCount {
+    frames: u64,
+    lines: u64,
+    stray_lines: u64,
+}
+
+/// Reads PresentMon's CSV line by line: the first line with the needed columns is the header, and
+/// every later non-empty line is data that either gives a frame or is counted as skipped.
+#[derive(Debug, Default)]
+struct FrameReader {
+    columns: Option<CsvColumns>,
+    count: FrameCount,
+}
+
+impl FrameReader {
+    fn line(&mut self, line: &str, on_frame: &mut impl FnMut(FrameRow)) {
+        let Some(columns) = &self.columns else {
+            self.columns = CsvColumns::new(line);
+            if self.columns.is_none() && !line.trim().is_empty() {
+                self.count.stray_lines += 1;
+            }
+            return;
+        };
+        if line.trim().is_empty() {
+            return;
+        }
+        self.count.lines += 1;
+        if let Some(frame) = columns.row(line) {
+            self.count.frames += 1;
+            on_frame(frame);
+        }
     }
 }
 
@@ -262,20 +313,12 @@ fn run_with_args(
         requested_secs,
         ..Default::default()
     };
-    let mut columns = None;
+    let mut reader = FrameReader::default();
     let mut read_error = None;
     loop {
         let left = deadline.saturating_sub(started.elapsed());
         match incoming.recv_timeout(left) {
-            Ok(Ok(line)) => match &columns {
-                None => columns = CsvColumns::new(&line),
-                Some(cols) => {
-                    if let Some(frame) = cols.row(&line) {
-                        outcome.rows += 1;
-                        on_frame(frame);
-                    }
-                }
-            },
+            Ok(Ok(line)) => reader.line(&line, &mut on_frame),
             Ok(Err(e)) => {
                 read_error = Some(e);
                 break;
@@ -296,6 +339,10 @@ fn run_with_args(
         }
     }
     let status = child.wait();
+    outcome.rows = reader.count.frames;
+    outcome.lines = reader.count.lines;
+    outcome.skipped = reader.count.lines - reader.count.frames;
+    outcome.stray_lines = reader.count.stray_lines;
     outcome.ran_secs = started.elapsed().as_secs();
     outcome.stderr = errors.join().unwrap_or_default();
     if let Some(e) = read_error {
@@ -457,6 +504,110 @@ mod tests {
         let (covered, why) = outcome.partial().expect("a run that died is partial");
         assert!(covered < 300);
         assert!(why.contains("exited with 1"), "{why}");
+    }
+
+    fn read_all(text: &str) -> (FrameCount, usize) {
+        let mut reader = FrameReader::default();
+        let mut frames = 0;
+        for line in text.lines() {
+            reader.line(line, &mut |_| frames += 1);
+        }
+        (reader.count, frames)
+    }
+
+    #[test]
+    fn a_run_whose_lines_give_no_frame_is_unavailable() {
+        let (count, frames) = read_all(&format!(
+            "{HEADER}
+bad,x,,,,,,,,,,y
+bad,z,,,,,,,,,,w
+"
+        ));
+        assert_eq!((frames, count.lines, count.frames), (0, 2, 0));
+        let outcome = PresentMonOutcome {
+            lines: count.lines,
+            skipped: count.lines - count.frames,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert!(outcome.unavailable().unwrap().contains("2 lines"));
+    }
+
+    #[test]
+    fn a_header_matching_no_column_is_unavailable() {
+        let (count, _) = read_all(
+            "Program,Pid,Start
+game.exe,7,100
+game.exe,7,200
+",
+        );
+        assert_eq!((count.lines, count.stray_lines), (0, 3));
+        let outcome = PresentMonOutcome {
+            stray_lines: count.stray_lines,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert!(outcome.unavailable().unwrap().contains("no header"));
+    }
+
+    #[test]
+    fn some_frames_with_some_lost_lines_stay_available() {
+        let good = "game.exe,4242,0x1,DXGI,1,0,100,NA,16.7,0.2,1.0,123456789,16.6,3.0,13.6";
+        let (count, frames) = read_all(&format!(
+            "{HEADER}
+{good}
+broken
+
+"
+        ));
+        assert_eq!((frames, count.lines, count.frames), (1, 2, 1));
+        let outcome = PresentMonOutcome {
+            rows: count.frames,
+            lines: count.lines,
+            skipped: 1,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(outcome.unavailable(), None);
+    }
+
+    #[test]
+    fn a_line_before_the_header_is_not_a_data_line() {
+        let (count, _) = read_all(&format!(
+            "starting trace
+{HEADER}
+"
+        ));
+        assert_eq!((count.lines, count.stray_lines), (0, 1));
+    }
+
+    #[test]
+    fn a_run_of_unreadable_lines_is_counted_from_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("rows.csv");
+        std::fs::write(
+            &csv,
+            "Application,ProcessID,CPUStartQPC,MsBetweenPresents
+game.exe,x,y,1
+game.exe,x,y,2
+",
+        )
+        .unwrap();
+        let args: Vec<String> = ["/D", "/C", "type", csv.to_str().unwrap()]
+            .map(String::from)
+            .to_vec();
+
+        let outcome = run_with_args(
+            Path::new("cmd.exe"),
+            &args,
+            0,
+            Duration::from_secs(60),
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!((outcome.rows, outcome.lines, outcome.skipped), (0, 2, 2));
+        assert!(outcome.unavailable().is_some());
     }
 
     fn ping_for(secs: u32) -> Vec<String> {
