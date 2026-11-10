@@ -215,6 +215,15 @@ impl Blackbox {
         }
     }
 
+    /// Cuts every gap that ends after `now_ms` down to it and removes the ones that start after it,
+    /// so a gap stamped while the wall clock was ahead stops covering the time after it stepped back.
+    pub fn cut_gaps_to(&mut self, now_ms: i64) {
+        self.gaps.retain_mut(|gap| {
+            gap.end_ms = gap.end_ms.min(now_ms);
+            gap.start_ms <= now_ms
+        });
+    }
+
     /// Records a hole in watching; triggers inside it, or just after it, are dropped.
     pub fn push_gap(&mut self, gap: Gap) {
         self.gaps.push(gap);

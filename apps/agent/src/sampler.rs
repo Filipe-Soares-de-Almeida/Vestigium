@@ -439,6 +439,7 @@ impl Sampler {
         if self.cleared.swap(false, Ordering::AcqRel) {
             self.forget(ts_ms);
         }
+        self.blackbox.cut_gaps_to(ts_ms);
         let sensitive = self.sensitive.is_on();
         self.blackbox.set_sensitive(sensitive);
         let mut probe_max_lag_ms: f32 = 0.0;

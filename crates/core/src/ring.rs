@@ -32,6 +32,11 @@ impl<T> Ring<T> {
         }
     }
 
+    /// Keeps the items for which `keep` returns true, which may change them in place.
+    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
+        self.items.retain_mut(keep);
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

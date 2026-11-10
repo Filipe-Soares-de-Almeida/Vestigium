@@ -125,6 +125,73 @@ fn sleep_gap_is_not_a_freeze() {
 }
 
 #[test]
+fn gap_ahead_of_the_clock_stops_blocking_after_it_steps_back() {
+    let gap = Gap {
+        start_ms: T,
+        end_ms: T + 10_800_000,
+        reason: GapReason::Suspended,
+    };
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(gap);
+    bb.cut_gaps_to(T + 5_000);
+    late(&mut bb, T + 60_000, 600.0);
+
+    let found = occurrences(bb.poll(T + 100_000));
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, OccurrenceKind::Freeze);
+}
+
+#[test]
+fn gap_ahead_of_the_clock_blocks_without_the_cut() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(Gap {
+        start_ms: T,
+        end_ms: T + 10_800_000,
+        reason: GapReason::Suspended,
+    });
+    late(&mut bb, T + 60_000, 600.0);
+
+    assert!(occurrences(bb.poll(T + 100_000)).is_empty());
+}
+
+#[test]
+fn cutting_gaps_leaves_a_past_gap_alone() {
+    let gap = Gap {
+        start_ms: T,
+        end_ms: T + 40_000,
+        reason: GapReason::Suspended,
+    };
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(gap);
+    bb.cut_gaps_to(T + 200_000);
+    late(&mut bb, T + 40_500, 40_000.0);
+
+    let outputs = bb.poll(T + 200_000);
+
+    assert!(outputs.contains(&Output::Gap(gap)));
+    assert!(occurrences(outputs).is_empty());
+}
+
+#[test]
+fn cutting_gaps_removes_one_that_starts_after_now() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(Gap {
+        start_ms: T + 3_600_000,
+        end_ms: T + 3_700_000,
+        reason: GapReason::Paused,
+    });
+    bb.cut_gaps_to(T + 5_000);
+    late(&mut bb, T + 60_000, 600.0);
+
+    assert_eq!(occurrences(bb.poll(T + 100_000)).len(), 1);
+}
+
+#[test]
 fn hang_right_after_a_freeze_is_dropped() {
     let mut bb = blackbox();
     let running: HashSet<u32> = [5, 6].into();

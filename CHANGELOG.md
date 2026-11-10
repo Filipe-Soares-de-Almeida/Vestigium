@@ -38,6 +38,10 @@ How to use this file:
 
 ### Fixed
 
+- A wall clock that steps back, as a time correction does after a PC with two operating systems
+  starts, no longer hides freezes, app hangs and stutters for as long as it stepped back. Before, a
+  stretch of lost watching recorded while the clock was ahead kept covering the time that followed
+  and silently discarded everything new that touched it.
 - A wall clock set far ahead, by a time correction, a manual change or a second operating system on the
   same PC, no longer makes the monitor delete real history: the hourly cleanup now skips a run when
   the clock is more than an hour past the newest stored data.
