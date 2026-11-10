@@ -161,6 +161,9 @@ struct Sampler {
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
     gaps: Vec<Gap>,
+    /// How often a batch is written, and when the last one was.
+    flush_ms: i64,
+    last_write_ms: i64,
     /// When watching stopped and why, while paused or suspended.
     away_since: Option<(i64, GapReason)>,
     pruned_hour: Option<i64>,
@@ -264,6 +267,8 @@ impl Sampler {
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
+            flush_ms: i64::try_from(wiring.flush.as_millis()).unwrap_or(i64::MAX),
+            last_write_ms: now,
             away_since: None,
             pruned_hour: None,
             snapshots: VecDeque::with_capacity(TOP_EVERY + 1),
@@ -385,9 +390,7 @@ impl Sampler {
             }
 
             ticks += 1;
-            if let Err(err) = self.tick(&mut sources, woke, sampler_lag_ms, ticks) {
-                self.report(&err);
-            }
+            self.tick(&mut sources, woke, sampler_lag_ms, ticks);
             if !sources.pdh_open && sources.pdh_backoff.due() {
                 self.open_pdh(&mut sources);
                 sources.prime_pdh();
@@ -431,13 +434,7 @@ impl Sampler {
         }
     }
 
-    fn tick(
-        &mut self,
-        sources: &mut Sources,
-        woke: f64,
-        sampler_lag_ms: f32,
-        ticks: usize,
-    ) -> Result<(), CollectError> {
+    fn tick(&mut self, sources: &mut Sources, woke: f64, sampler_lag_ms: f32, ticks: usize) {
         let ts_ms = wall_ms();
         if self.cleared.swap(false, Ordering::AcqRel) {
             self.forget(ts_ms);
@@ -454,20 +451,26 @@ impl Sampler {
         if sensitive {
             keep_hiccups(&mut lock(&self.hiccups), &ticks_seen, ts_ms);
         }
-        let memory = self.read(Source::Memory, sources.readings.memory())?;
+        // Each source fails alone: the rest of the tick runs whatever the others returned.
+        let memory = self.read(Source::Memory, sources.readings.memory()).ok();
         let mut strain = Strain {
-            mem_used_pct: used_pct(memory.total_bytes, memory.avail_bytes),
+            mem_used_pct: memory.map_or(0.0, |m| used_pct(m.total_bytes, m.avail_bytes)),
             worst_lag_ms: probe_max_lag_ms.max(sampler_lag_ms),
             hardware_error: self.hardware_error,
             ..Strain::default()
         };
-        let cpu = self.read(Source::Cpu, sources.readings.cpu())?;
+        let cpu = self
+            .read(Source::Cpu, sources.readings.cpu())
+            .ok()
+            .flatten();
         let pdh = if sources.pdh_open {
-            self.read(Source::Pdh, sources.readings.pdh())?
+            self.read(Source::Pdh, sources.readings.pdh())
+                .ok()
+                .flatten()
         } else {
             None
         };
-        if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
+        if let (Some(memory), Some(cpu), Some(pdh)) = (memory, cpu, pdh) {
             let sample = Sample {
                 ts_ms,
                 cpu_pct: cpu.cpu_pct,
@@ -517,15 +520,21 @@ impl Sampler {
             lock(&self.status).last_sample_ms = Some(ts_ms);
         }
 
-        if self.snapshots.len() > TOP_EVERY {
-            self.snapshots.pop_front();
+        let snapshot = self
+            .read(Source::Processes, sources.readings.processes())
+            .ok();
+        let snapshotted = snapshot.is_some();
+        if let Some(snapshot) = snapshot {
+            if self.snapshots.len() > TOP_EVERY {
+                self.snapshots.pop_front();
+            }
+            self.snapshots.push_back((woke, snapshot));
         }
-        let snapshot = self.read(Source::Processes, sources.readings.processes())?;
-        self.snapshots.push_back((woke, snapshot));
         if ticks.is_multiple_of(HANG_EVERY) {
             self.check_hangs(ts_ms);
         }
-        if ticks.is_multiple_of(TOP_EVERY)
+        if snapshotted
+            && ticks.is_multiple_of(TOP_EVERY)
             && self.snapshots.len() > TOP_EVERY
             && let (Some((then, old)), Some((now, _))) =
                 (self.snapshots.front(), self.snapshots.back())
@@ -584,7 +593,7 @@ impl Sampler {
         self.keep(outputs, ts_ms);
         self.publish_suggestion();
         self.sync_ring(ts_ms, strain);
-        if self.batcher.due(ts_ms) {
+        if self.batcher.due(ts_ms) || self.events_due(ts_ms) {
             self.flush();
         }
         if prune_due(self.pruned_hour, ts_ms) {
@@ -602,7 +611,6 @@ impl Sampler {
             self.first_health_ms = None;
             self.check_health(ts_ms);
         }
-        Ok(())
     }
 
     /// Lists the dumps Windows kept, without opening any.
@@ -803,6 +811,9 @@ impl Sampler {
 
     /// Stores the machine facts once the disk counters name the disks.
     fn learn_machine(&mut self, sample: &Sample) {
+        if sample.disks.is_empty() {
+            return;
+        }
         let known = &self.blackbox.machine().disks;
         if known.len() == sample.disks.len()
             && known
@@ -921,6 +932,12 @@ impl Sampler {
         }
     }
 
+    /// True when events or gaps have waited a whole interval for samples that did not come.
+    fn events_due(&self, now_ms: i64) -> bool {
+        (!self.events.is_empty() || !self.gaps.is_empty())
+            && now_ms.saturating_sub(self.last_write_ms) >= self.flush_ms
+    }
+
     /// Writes whatever is buffered except the minute still open.
     fn flush(&mut self) {
         let segments = self.batcher.take();
@@ -935,6 +952,7 @@ impl Sampler {
 
     /// Writes segments, events with their bookmark, and gaps in one transaction.
     fn write(&mut self, segments: Vec<Segment>) {
+        self.last_write_ms = wall_ms();
         let batch = Batch {
             segments,
             events: mem::take(&mut self.events),
@@ -1016,6 +1034,7 @@ mod tests {
     use super::*;
     use crate::readings::{Waiter, windows_source_set};
     use vestigium_collect::{CpuReading, MemoryInfo, PdhReading};
+    use vestigium_core::DiskLoad;
 
     struct Running {
         gate: Arc<RunGate>,
@@ -1191,6 +1210,16 @@ mod tests {
         pdh_open_attempts: u32,
         /// Attempts to create the timer that still fail.
         timer_open_failures: u32,
+        /// Sources whose every read fails.
+        failing: Vec<Source>,
+        /// The counters name one disk while this is false, and none once it is true.
+        disks_gone: bool,
+    }
+
+    impl Script {
+        fn fails(&self, source: Source) -> bool {
+            self.failing.contains(&source)
+        }
     }
 
     /// A quiet machine whose counters and timer open as the script says.
@@ -1220,22 +1249,46 @@ mod tests {
 
     impl Readings for Scripted {
         fn memory(&mut self) -> Result<MemoryInfo, CollectError> {
+            if lock(&self.script).fails(Source::Memory) {
+                return Err(refused("GlobalMemoryStatusEx"));
+            }
             self.quiet.memory()
         }
 
         fn cpu(&mut self) -> Result<Option<CpuReading>, CollectError> {
+            if lock(&self.script).fails(Source::Cpu) {
+                return Err(refused("NtQuerySystemInformation"));
+            }
             self.quiet.cpu()
         }
 
         fn pdh(&mut self) -> Result<Option<PdhReading>, CollectError> {
-            if self.pdh_open {
-                self.quiet.pdh()
-            } else {
-                Err(refused("read before the counters opened"))
+            let script = lock(&self.script);
+            if !self.pdh_open {
+                return Err(refused("read before the counters opened"));
             }
+            if script.fails(Source::Pdh) {
+                return Err(refused("PdhCollectQueryData"));
+            }
+            let mut reading = self.quiet.pdh()?;
+            if let Some(reading) = reading.as_mut()
+                && !script.disks_gone
+            {
+                reading.disks.push(DiskLoad {
+                    name: "9 Z:".to_string(),
+                    active_pct: 1.0,
+                    latency_ms: 1.0,
+                    queue_len: 0.0,
+                    bytes_per_s: 0.0,
+                });
+            }
+            Ok(reading)
         }
 
         fn processes(&mut self) -> Result<Vec<ProcessCounters>, CollectError> {
+            if lock(&self.script).fails(Source::Processes) {
+                return Err(refused("NtQuerySystemInformation"));
+            }
             self.quiet.processes()
         }
 
@@ -1322,6 +1375,95 @@ mod tests {
         );
         assert_eq!(lock(&running.status).last_sample_ms, None);
         assert!(lock(&script).pdh_open_attempts > 1, "no second attempt");
+    }
+
+    #[test]
+    fn a_source_that_always_fails_still_stores_a_freeze() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            failing: vec![Source::Memory, Source::Cpu, Source::Pdh, Source::Processes],
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), Duration::from_secs(1), scripted(&script));
+
+        let tick = ProbeTick {
+            wall_ms: wall_ms(),
+            lag_ms: 1_500.0,
+        };
+        running.probe_tx.send(tick).unwrap();
+        let event = WinEvent {
+            ts_ms: wall_ms(),
+            channel: Channel::System,
+            provider: "disk".to_string(),
+            id: 153,
+            record_id: 78,
+            level: 3,
+            meaning: EventMeaning::DiskRetry,
+            data_xml: String::new(),
+        };
+        running
+            .events_tx
+            .send(Delivered {
+                event: event.clone(),
+                bookmark_xml: "<BookmarkList/>".to_string(),
+            })
+            .unwrap();
+        let stored = wait_until(PATIENCE, || {
+            history(dir.path())
+                .occurrences(i64::MIN, i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|o| o.kind == OccurrenceKind::Freeze && o.start_ms == tick.wall_ms - 1_500)
+                && history(dir.path()).events(i64::MIN, i64::MAX).unwrap() == vec![event.clone()]
+        });
+        stop(&running);
+
+        assert!(stored, "the freeze or the event was not stored");
+        assert_eq!(lock(&running.status).last_sample_ms, None);
+        let (_, count, _) = samples(dir.path());
+        assert!(count <= 300);
+    }
+
+    #[test]
+    fn a_failing_process_list_does_not_stop_the_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            failing: vec![Source::Processes],
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+
+        let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_once, "no sample while the process list failed");
+        assert!(lock(&running.now).top.is_none());
+        assert!(lock(&running.status).last_error.is_some());
+    }
+
+    #[test]
+    fn a_failing_source_does_not_erase_the_machine_disks() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script::default()));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+        let learned = wait_until(PATIENCE, || {
+            history(dir.path())
+                .machine()
+                .unwrap()
+                .is_some_and(|m| m.disks.len() == 1)
+        });
+        let before = lock(&running.status).last_sample_ms;
+
+        lock(&script).disks_gone = true;
+        let sampled_after = wait_until(PATIENCE, || {
+            lock(&running.status).last_sample_ms > before.map(|ms| ms + 2_000)
+        });
+        stop(&running);
+
+        assert!(learned, "the disk was never learned");
+        assert!(sampled_after, "no sample after the disks vanished");
+        let machine = history(dir.path()).machine().unwrap().unwrap();
+        assert_eq!(machine.disks.len(), 1);
     }
 
     #[test]

@@ -81,6 +81,11 @@ How to use this file:
   freezes, crashes and events, tries to open the counters again with a growing wait of up to a
   minute, and resumes the per-second readings as soon as they open. Before, nothing was recorded
   until the watcher was restarted, and the fall of the previous session was lost.
+- A reading that fails in the watcher (memory, processor times, the performance counters or the
+  process list) no longer cancels the rest of that second. The other readings, the detection of
+  freezes and crashes, the pending events and the periodic writes carry on, and the saved list of
+  the machine's disks is no longer emptied when the disk counters return nothing. Before, a reading
+  that kept failing left freezes it had already seen unfinished and events unsaved.
 
 ## [0.1.0] - 2026-11-09
 
