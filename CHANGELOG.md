@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- When two or more apps hang together in one occurrence, each is now a medium-confidence suspect, so
+  a measured system cause such as memory pressure is listed ahead of them. An app that hung twice in
+  one occurrence is named once, with the better of its two confidences.
 - The report after an unexpected shutdown, and the health checks that read the stored events, now
   judge each stored event again with the rules of the installed version. An event saved by another
   version that today's rules no longer recognise is no longer shown as a fact.

@@ -591,7 +591,8 @@ fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     })
 }
 
-/// A hung app is High when its own CPU or I/O shows inside the hang or no system rule matched.
+/// A hung app is High when its own CPU or I/O shows inside the hang or no system rule matched,
+/// unless two or more apps hung together, which makes each Medium.
 fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect> {
     if triggers.iter().any(|t| matches!(t, Trigger::Freeze { .. })) {
         return Vec::new();
@@ -608,12 +609,6 @@ fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect
         else {
             continue;
         };
-        if named
-            .iter()
-            .any(|s| matches!(&s.cause, Cause::App { name: n } if n == name))
-        {
-            continue;
-        }
         let mut evidence = vec![Evidence::Hang {
             name: name.clone(),
             duration_ms: end_ms - start_ms,
@@ -638,7 +633,7 @@ fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect
                 });
             }
         }
-        named.push(Suspect {
+        let suspect = Suspect {
             cause: Cause::App { name: name.clone() },
             confidence: if own_load || !system_cause {
                 Confidence::High
@@ -647,7 +642,18 @@ fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect
             },
             evidence,
             next_steps: vec![NextStep::ReportToAppVendor],
-        });
+        };
+        match named.iter_mut().find(|s| s.cause == suspect.cause) {
+            Some(kept) if kept.confidence < suspect.confidence => *kept = suspect,
+            Some(_) => {}
+            None => named.push(suspect),
+        }
+    }
+    // Several windows hung together say little about which one is to blame.
+    if named.len() >= 2 {
+        for suspect in &mut named {
+            suspect.confidence = Confidence::Medium;
+        }
     }
     named
 }

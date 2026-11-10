@@ -433,6 +433,60 @@ fn a_hung_app_with_its_own_load_stays_high() {
     assert_eq!(app_confidence(&found), Confidence::High);
 }
 
+fn hang(pid: u32, name: &str) -> Trigger {
+    Trigger::AppHang {
+        pid,
+        name: name.to_string(),
+        start_ms: T,
+        end_ms: T + 9_000,
+        outcome: HangOutcome::Recovered,
+    }
+}
+
+#[test]
+fn two_hung_apps_in_one_group_are_both_medium() {
+    let (_, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![
+            process(98, "first.exe", 40.0, 1, 0.0),
+            process(99, "second.exe", 35.0, 1, 0.0),
+        ],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let triggers = vec![hang(98, "first.exe"), hang(99, "second.exe")];
+    let found = suspects(&triggers, &window);
+
+    assert!(matches!(found[0].cause, Cause::Memory { .. }));
+    let apps: Vec<&Suspect> = found
+        .iter()
+        .filter(|s| matches!(s.cause, Cause::App { .. }))
+        .collect();
+    assert_eq!(apps.len(), 2);
+    assert!(apps.iter().all(|s| s.confidence == Confidence::Medium));
+}
+
+#[test]
+fn one_app_hung_twice_keeps_its_best_confidence() {
+    let (_, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![process(100, "stuck.exe", 40.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let triggers = vec![hang(99, "stuck.exe"), hang(100, "stuck.exe")];
+    let found = suspects(&triggers, &window);
+
+    assert_eq!(
+        found
+            .iter()
+            .filter(|s| matches!(s.cause, Cause::App { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(app_confidence(&found), Confidence::High);
+}
+
 #[test]
 fn load_outside_the_hang_does_not_make_a_hung_app_high() {
     let (triggers, mut window) = hung_pid_99(memory_case());
