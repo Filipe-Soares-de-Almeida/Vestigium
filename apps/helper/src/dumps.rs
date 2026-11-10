@@ -4,7 +4,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use vestigium_collect::{DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, wall_ms};
+use vestigium_collect::{
+    DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, subfolders, wall_ms,
+};
 use vestigium_core::{
     Analysis, DUMP_SCAN_VERSION, DumpKind, DumpRecord, DumpScan, Fault, fault_address,
     kernel_dump_kind,
@@ -99,15 +101,13 @@ fn listed(dir: &Path, app: bool) -> Vec<(DumpFile, bool)> {
         .into_iter()
         .map(|f| (f, app))
         .collect();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for sub in entries.filter_map(Result::ok).filter(|e| e.path().is_dir()) {
-            files.extend(
-                list_dumps(&sub.path())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|f| (f, app)),
-            );
-        }
+    for sub in subfolders(dir) {
+        files.extend(
+            list_dumps(&sub)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| (f, app)),
+        );
     }
     files
 }
@@ -401,6 +401,46 @@ mod tests {
             file_name(r"\SystemRoot\system32\ntoskrnl.exe"),
             "ntoskrnl.exe"
         );
+    }
+
+    fn dump_folders() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let crash = dir.path().join("CrashDumps");
+        std::fs::create_dir_all(crash.join("Real")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Other")).unwrap();
+        std::fs::write(crash.join("Real").join("1.dmp"), b"x").unwrap();
+        std::fs::write(crash.join("Top.exe.1.dmp"), b"x").unwrap();
+        std::fs::write(dir.path().join("Other").join("2.dmp"), b"x").unwrap();
+        (dir, crash)
+    }
+
+    #[test]
+    fn listed_skips_a_junction_to_another_dump() {
+        let (dir, crash) = dump_folders();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(crash.join("Linked"))
+            .arg(dir.path().join("Other"))
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "could not make a junction");
+        let names: Vec<String> = listed(&crash, true)
+            .into_iter()
+            .map(|(f, _)| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.contains(&"2.dmp".to_string()), "{names:?}");
+        assert!(names.contains(&"1.dmp".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn listed_keeps_the_dumps_of_plain_folders() {
+        let (_dir, crash) = dump_folders();
+        let mut names: Vec<String> = listed(&crash, true)
+            .into_iter()
+            .map(|(f, _)| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["1.dmp", "Top.exe.1.dmp"]);
     }
 
     #[test]

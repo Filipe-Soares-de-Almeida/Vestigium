@@ -27,6 +27,8 @@ How to use this file:
 - The administrator helper now loads the Windows libraries it needs from the Windows system folder
   only, so a file with the name of one of them left beside the helper is never run with administrator
   rights.
+- The crash dump scan no longer follows a junction or link inside a dump folder, so a link planted
+  there cannot make the administrator helper or the monitor list or read another dump.
 
 ### Fixed
 

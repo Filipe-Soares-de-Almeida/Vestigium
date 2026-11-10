@@ -1,7 +1,10 @@
+use std::fs::Metadata;
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
     RegGetValueW,
@@ -71,9 +74,30 @@ pub fn list_dumps(dir: &Path) -> Option<Vec<DumpFile>> {
     )
 }
 
-/// Size and last write of one dump, from its metadata; the file is never opened.
+/// The real folders directly under `dir`: a junction or link is never one.
+pub fn subfolders(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            std::fs::symlink_metadata(entry.path()).is_ok_and(|m| m.is_dir() && !is_link(&m))
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Whether the entry is a junction, symbolic link or other reparse point.
+fn is_link(meta: &Metadata) -> bool {
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+}
+
+/// Size and last write of one dump, from its metadata; the file is never opened, and a link is not one.
 pub fn dump_file(path: &Path) -> Option<DumpFile> {
-    let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+    let meta = std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|m| m.is_file() && !is_link(m))?;
     let file_ms = meta
         .modified()
         .ok()?
@@ -142,4 +166,38 @@ fn text(key: PCWSTR, value: PCWSTR) -> Option<String> {
     }
     let end = data.iter().position(|&u| u == 0).unwrap_or(data.len());
     Some(String::from_utf16_lossy(&data[..end])).filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_folder_lists_its_dumps_and_subfolders() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("Sub")).unwrap();
+        std::fs::write(dir.path().join("a.dmp"), b"x").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+        let listed = list_dumps(dir.path()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].size_bytes, 1);
+        assert_eq!(subfolders(dir.path()), [dir.path().join("Sub")]);
+    }
+
+    #[test]
+    fn a_junction_is_not_a_subfolder() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("Real")).unwrap();
+        std::fs::create_dir(dir.path().join("Target")).unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(dir.path().join("Linked"))
+            .arg(dir.path().join("Target"))
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "could not make a junction");
+        let mut found = subfolders(dir.path());
+        found.sort();
+        assert_eq!(found, [dir.path().join("Real"), dir.path().join("Target")]);
+    }
 }
