@@ -286,17 +286,38 @@ impl Setting {
     /// Whether a value has the shape this setting holds, so that restoring it stays in its domain.
     pub fn fits(&self, value: &Value) -> bool {
         match (self, value) {
-            (Setting::Dword { .. }, Value::Dword(_) | Value::Absent)
+            (Setting::Dword { .. }, Value::Absent)
             | (Setting::Key { .. }, Value::Present | Value::Absent)
             | (Setting::PowerAc { .. }, Value::Index(_))
             | (Setting::ActiveScheme, Value::Scheme(_))
             | (Setting::Hibernation, Value::On(_))
             | (Setting::StartupApproval { .. }, Value::Absent) => true,
+            (Setting::Dword { name, .. }, Value::Dword(v)) => {
+                dword_range(name).is_some_and(|range| range.contains(v))
+            }
             (Setting::Service { .. }, Value::Service { start, .. }) => (2..=4).contains(start),
             (Setting::StartupApproval { .. }, Value::Bytes(b)) => b.len() == 12 && b[0] < 8,
             _ => false,
         }
     }
+}
+
+/// The values a DWORD of the catalog takes, wide enough for anything a person may have set by hand.
+/// HiberbootEnabled, the Game DVR flags: 0 or 1. DumpType: 0 custom, 1 mini, 2 full. CrashDumpEnabled:
+/// 0 to 7 (none, complete, kernel, small, automatic). HwSchMode: 1 off, 2 on. DumpCount has no
+/// documented maximum and OverlayTestMode is undocumented, so each gets a generous cap.
+fn dword_range(name: &str) -> Option<std::ops::RangeInclusive<u32>> {
+    Some(match name {
+        "HiberbootEnabled"
+        | "AppCaptureEnabled"
+        | "HistoricalCaptureEnabled"
+        | "GameDVR_Enabled" => 0..=1,
+        "DumpType" | "HwSchMode" => 0..=2,
+        "CrashDumpEnabled" => 0..=7,
+        "OverlayTestMode" => 0..=255,
+        "DumpCount" => 0..=10_000,
+        _ => return None,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1173,6 +1194,32 @@ pub trait SettingStore {
     fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32>;
 }
 
+/// Whether any setting an undo would put back now holds something other than what was written
+/// or what it held before; a setting that cannot be read is left to the undo itself to refuse.
+pub fn changed_outside(written: &[SettingChange], store: &mut impl SettingStore) -> bool {
+    written.iter().any(|change| {
+        store
+            .read(&change.setting)
+            .is_some_and(|now| !same_state(&now, &change.to) && !same_state(&now, &change.from))
+    })
+}
+
+/// Whether two readings of a setting are the same state; a service's running flag is left out,
+/// since it is still moving right after a start or a stop.
+fn same_state(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (
+            Value::Service { start, delayed, .. },
+            Value::Service {
+                start: other_start,
+                delayed: other_delayed,
+                ..
+            },
+        ) => start == other_start && delayed == other_delayed,
+        _ => a == b,
+    }
+}
+
 /// The setting a change acts on: a plugged-in power value being applied is pinned to the scheme
 /// active now, so its undo goes back to that scheme; every other setting is as the change names it.
 fn target_of(
@@ -1209,18 +1256,27 @@ pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange 
             });
             break;
         };
-        let leads_there = item.undo_of.is_some()
-            || current == change.to
-            || match (item.tweak, &change.to) {
-                (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
-                _ => apply_value(item.tweak, &target, &current).as_ref() == Some(&change.to),
-            };
+        let leads_there = if item.undo_of.is_some() {
+            same_state(&current, &change.from) || same_state(&current, &change.to)
+        } else {
+            current == change.to
+                || match (item.tweak, &change.to) {
+                    (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
+                    _ => apply_value(item.tweak, &target, &current).as_ref() == Some(&change.to),
+                }
+        };
         let error = if !leads_there {
             Some(ERROR_CHANGED_SINCE)
         } else if current == change.to {
             None
         } else {
-            store.write(&target, &change.to).err()
+            match store.write(&target, &change.to) {
+                Err(code) => Some(code),
+                Ok(()) => store
+                    .read(&target)
+                    .is_none_or(|now| !same_state(&now, &change.to))
+                    .then_some(ERROR_MAY_HAVE_CHANGED),
+            }
         };
         results.push(SettingResult {
             change: SettingChange {

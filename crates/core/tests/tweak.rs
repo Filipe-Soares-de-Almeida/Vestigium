@@ -705,6 +705,162 @@ fn a_write_that_may_have_landed_stays_in_the_undo() {
     assert!(change(Some(5)).written().is_empty());
 }
 
+fn undo_item(setting: Setting, from: Value, to: Value) -> vestigium_core::PlanItem {
+    vestigium_core::PlanItem {
+        tweak: TweakId::CrashDump,
+        subject: None,
+        undo_of: Some(1),
+        changes: vec![SettingChange { setting, from, to }],
+    }
+}
+
+#[test]
+fn a_forged_undo_cannot_write_an_absurd_value() {
+    let count = TweakId::AppDumps.settings()[2].clone();
+    let forged = vestigium_core::PlanItem {
+        tweak: TweakId::AppDumps,
+        subject: None,
+        undo_of: Some(1),
+        changes: vec![SettingChange {
+            setting: count.clone(),
+            from: Value::Dword(10),
+            to: Value::Dword(u32::MAX),
+        }],
+    };
+    assert!(vestigium_core::check_item(&forged, vestigium_core::Applier::Elevated).is_err());
+    let honest = vestigium_core::PlanItem {
+        changes: vec![SettingChange {
+            setting: count,
+            from: Value::Dword(10),
+            to: Value::Dword(25),
+        }],
+        ..forged
+    };
+    assert!(vestigium_core::check_item(&honest, vestigium_core::Applier::Elevated).is_ok());
+}
+
+#[test]
+fn dword_values_stay_inside_what_the_setting_takes() {
+    let dword = |tweak: TweakId, at: usize| tweak.settings()[at].clone();
+    let accepts = |setting: &Setting, value: u32| setting.fits(&Value::Dword(value));
+    assert!(accepts(&dword(TweakId::CrashDump, 0), 7));
+    assert!(!accepts(&dword(TweakId::CrashDump, 0), 8));
+    assert!(accepts(&dword(TweakId::AppDumps, 1), 2));
+    assert!(!accepts(&dword(TweakId::AppDumps, 1), 3));
+    assert!(accepts(&dword(TweakId::GpuScheduling, 0), 2));
+    assert!(!accepts(&dword(TweakId::GpuScheduling, 0), 3));
+    assert!(accepts(&dword(TweakId::FastStartup, 0), 1));
+    assert!(!accepts(&dword(TweakId::FastStartup, 0), 2));
+    assert!(accepts(&dword(TweakId::GameDvr, 0), 1));
+    assert!(!accepts(&dword(TweakId::GameDvr, 2), 2));
+    assert!(!accepts(&dword(TweakId::Mpo, 0), u32::MAX));
+    assert!(dword(TweakId::AppDumps, 2).fits(&Value::Absent));
+}
+
+#[test]
+fn an_undo_runs_only_over_what_vestigium_wrote() {
+    let crash = TweakId::CrashDump.settings()[0].clone();
+    let mut store = FakeStore {
+        values: vec![(crash.clone(), Value::Dword(1))],
+        fails: None,
+        writes: 0,
+    };
+    let back = undo_item(crash.clone(), Value::Dword(7), Value::Dword(0));
+
+    let refused = vestigium_core::carry_out(&back, &mut store);
+
+    assert_eq!(
+        refused.results[0].error,
+        Some(vestigium_core::ERROR_CHANGED_SINCE)
+    );
+    assert_eq!(store.writes, 0);
+    assert_eq!(store.read(&crash), Some(Value::Dword(1)));
+
+    set(&mut store, crash.clone(), Value::Dword(7));
+    let done = vestigium_core::carry_out(&back, &mut store);
+    assert_eq!(done.results[0].error, None);
+    assert_eq!(store.read(&crash), Some(Value::Dword(0)));
+
+    let again = vestigium_core::carry_out(&back, &mut store);
+    assert_eq!(again.results[0].error, None, "already undone counts");
+    assert_eq!(store.writes, 1);
+}
+
+#[test]
+fn a_setting_changed_outside_stops_the_undo_before_it_is_planned() {
+    let crash = TweakId::CrashDump.settings()[0].clone();
+    let written = vec![SettingChange {
+        setting: crash.clone(),
+        from: Value::Dword(0),
+        to: Value::Dword(7),
+    }];
+    let mut store = FakeStore {
+        values: vec![(crash.clone(), Value::Dword(7))],
+        fails: None,
+        writes: 0,
+    };
+    assert!(!vestigium_core::changed_outside(&written, &mut store));
+    set(&mut store, crash.clone(), Value::Dword(2));
+    assert!(vestigium_core::changed_outside(&written, &mut store));
+    set(&mut store, crash, Value::Dword(0));
+    assert!(
+        !vestigium_core::changed_outside(&written, &mut store),
+        "already back"
+    );
+    assert_eq!(store.writes, 0);
+}
+
+struct Ignoring(Value);
+
+impl vestigium_core::SettingStore for Ignoring {
+    fn read(&mut self, _: &Setting) -> Option<Value> {
+        Some(self.0.clone())
+    }
+
+    fn write(&mut self, _: &Setting, _: &Value) -> Result<(), u32> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_write_that_does_not_read_back_may_have_changed() {
+    let crash = TweakId::CrashDump.settings()[0].clone();
+    let plan = item(TweakId::CrashDump, vec![(crash, Value::Dword(7))], None);
+    let done = vestigium_core::carry_out(&plan, &mut Ignoring(Value::Dword(0)));
+    assert_eq!(
+        done.results[0].error,
+        Some(vestigium_core::ERROR_MAY_HAVE_CHANGED)
+    );
+    assert_eq!(done.results[0].change.from, Value::Dword(0));
+    assert_eq!(done.results[0].change.to, Value::Dword(7));
+}
+
+#[test]
+fn a_service_still_starting_reads_back_as_written() {
+    let service = Setting::Service {
+        name: "SysMain".into(),
+    };
+    let wanted = Value::Service {
+        start: 2,
+        delayed: true,
+        running: true,
+    };
+    let pending = Value::Service {
+        start: 2,
+        delayed: true,
+        running: false,
+    };
+    let mut store = Ignoring(pending);
+    let mut plan = item(TweakId::SysMain, vec![(service, wanted)], Some(3));
+    plan.changes[0].from = Value::Service {
+        start: 2,
+        delayed: true,
+        running: false,
+    };
+    let done = vestigium_core::carry_out(&plan, &mut store);
+    assert_eq!(done.results[0].error, None);
+}
+
 #[test]
 fn guid_reads_and_writes_its_usual_text() {
     let balanced: vestigium_core::Guid = "381b4222-f694-41f0-9685-ff5bb260df2e".parse().unwrap();

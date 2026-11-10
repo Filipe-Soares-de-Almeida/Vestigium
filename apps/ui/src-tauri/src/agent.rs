@@ -36,6 +36,8 @@ pub enum UiError {
     Failed(String),
     #[error("the permission prompt was declined")]
     Declined,
+    #[error("a setting now holds a value that Vestigium did not write")]
+    ChangedSince,
 }
 
 impl From<IpcError> for UiError {
@@ -65,6 +67,7 @@ impl Serialize for UiError {
             UiError::Ipc(_) => "ipc",
             UiError::Failed(_) => "failed",
             UiError::Declined => "declined",
+            UiError::ChangedSince => "changed_since",
         };
         Wire {
             kind,

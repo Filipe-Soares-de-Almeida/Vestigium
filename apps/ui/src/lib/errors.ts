@@ -10,6 +10,7 @@ const KINDS: readonly UiErrorKind[] = [
   "ipc",
   "failed",
   "declined",
+  "changed_since",
 ];
 
 /** The kind of a rejected command; anything that is not a `UiError` counts as `failed`. */

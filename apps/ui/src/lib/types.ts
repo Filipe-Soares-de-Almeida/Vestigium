@@ -466,7 +466,8 @@ export type UiErrorKind =
   | "store"
   | "ipc"
   | "failed"
-  | "declined";
+  | "declined"
+  | "changed_since";
 
 /** What a failed command rejects with; the window words it from `kind`. */
 export interface UiError {

@@ -10,6 +10,7 @@
   import RowList from "../components/RowList.svelte";
   import StatusMark from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
+  import { errorKind, errorText } from "../lib/errors";
   import { t, tn } from "../lib/i18n.svelte";
   import { tweakGroupOf } from "../lib/groups";
   import { relatedLinks } from "../lib/related.svelte";
@@ -103,7 +104,8 @@
 
   function report(outcome: Outcome, done: string): void {
     if (outcome.kind === "declined") toast.show(t("ui.tweaks.toast.declined"));
-    else if (outcome.kind === "failed") toast.show(t("ui.tweaks.toast.failed"));
+    else if (outcome.kind === "failed")
+      toast.show(errorKind(outcome.error) === "changed_since" ? errorText(outcome.error) : t("ui.tweaks.toast.failed"));
     else if (outcome.rows.some((r) => r.change.results.some((x) => x.error !== null))) toast.show(t("ui.tweaks.toast.partial"));
     else toast.show(done);
   }

@@ -2,12 +2,12 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use vestigium_collect::{
-    RESTORE_CREATED, has_battery, hiberfile_bytes, monitor_count, physical_drive, read_setting,
-    restore_events, startup_entries, system_drive,
+    RESTORE_CREATED, WindowsSettings, has_battery, hiberfile_bytes, monitor_count, physical_drive,
+    read_setting, restore_events, startup_entries, system_drive,
 };
 use vestigium_core::{
     Advice, Applier, Helped, PlanItem, Status, TWEAK_PLAN_VERSION, TWEAKS, TweakChange, TweakId,
-    TweakInputs, TweakPlan, advise, helped, undo,
+    TweakInputs, TweakPlan, advise, changed_outside, helped, undo,
 };
 use vestigium_ipc::{Request, Response};
 use vestigium_store::TweakChangeRow;
@@ -182,6 +182,9 @@ pub fn undo_change(
         return Err(UiError::Failed(format!("change {id} cannot be undone")));
     }
     let written = row.change.written();
+    if changed_outside(&written, &mut WindowsSettings) {
+        return Err(UiError::ChangedSince);
+    }
     if written.is_empty() {
         return Ok(TweaksApplied {
             ids: Vec::new(),

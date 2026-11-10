@@ -100,6 +100,27 @@ fn undo_keeps_the_original_change() {
 }
 
 #[test]
+fn a_refused_undo_leaves_the_change_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let forward = mpo_change(Value::Absent, Value::Dword(5));
+    let applied = change(TweakId::Mpo, forward.clone(), None);
+    let id = store
+        .record_tweak_change(&applied, DAY, Applier::Elevated)
+        .unwrap();
+
+    let mut refused = change(TweakId::Mpo, undo(&forward), Some(id));
+    refused.results[0].error = Some(vestigium_core::ERROR_CHANGED_SINCE);
+    store
+        .record_tweak_change(&refused, 3 * DAY, Applier::Elevated)
+        .unwrap();
+
+    assert_eq!(store.tweaks_in_place().unwrap().len(), 1);
+    let original = store.tweak_change(id).unwrap().unwrap();
+    assert_eq!(original.undone_ms, None);
+}
+
+#[test]
 fn an_absent_value_survives_the_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = store(&dir);

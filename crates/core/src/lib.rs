@@ -88,8 +88,8 @@ pub use tweak::{
     SCHEME_HIGH_PERFORMANCE, SCHEME_POWER_SAVER, SUB_PCIEXPRESS, SUB_USB, Setting, SettingChange,
     SettingResult, SettingStore, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
     TWEAK_PLAN_VERSION, TWEAKS, Takes, TweakChange, TweakId, TweakInputs, TweakPlan, TweakResults,
-    USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, check_item, disabled_approval,
-    helped, undo,
+    USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, changed_outside, check_item,
+    disabled_approval, helped, undo,
 };
 pub use tweak_v1::{SettingChangeV1, SettingResultV1, SettingV1, TweakChangeV1};
 pub use window::{Gap, GapReason, HangSpan, Window};

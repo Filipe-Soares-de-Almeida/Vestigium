@@ -50,6 +50,7 @@
   "ui.common.severity.Medium": "média",
   "ui.common.severity.Severe": "grave",
   "ui.common.error.declined": "Permissão de administrador negada. Nada foi executado.",
+  "ui.common.error.changed_since": "O Windows agora tem um valor diferente do que o Vestigium definiu, então o desfazer não foi executado.",
 
   "ui.shell.title": "Vestigium",
   "ui.shell.nav.label": "Navegação",

@@ -46,7 +46,7 @@ impl Store {
             ],
         )?;
         let id = tx.last_insert_rowid();
-        if let Some(undone) = change.undo_of {
+        if let Some(undone) = change.undo_of.filter(|_| change.succeeded()) {
             tx.execute(
                 "UPDATE tweak_change SET undone_ms = ?2 WHERE id = ?1 AND undone_ms IS NULL",
                 params![undone, applied_ms],

@@ -352,8 +352,10 @@ mod tests {
                 .map(|(_, v)| v.clone())
         }
 
-        fn write(&mut self, _: &Setting, _: &Value) -> Result<(), u32> {
+        fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32> {
             self.writes += 1;
+            self.values.retain(|(s, _)| s != setting);
+            self.values.push((setting.clone(), value.clone()));
             Ok(())
         }
     }
@@ -497,13 +499,14 @@ mod tests {
             items: vec![item],
             without_restore_point: false,
         };
-        let mut store = Fake {
-            values: vec![(setting, Value::Absent)],
-            writes: 0,
-        };
-        apply(&plan, &mut store, || RestorePoint::Created);
-        apply(&plan, &mut store, || RestorePoint::Reused { at_ms: None });
-        assert_eq!(store.writes, 2);
+        for point in [RestorePoint::Created, RestorePoint::Reused { at_ms: None }] {
+            let mut store = Fake {
+                values: vec![(setting.clone(), Value::Absent)],
+                writes: 0,
+            };
+            apply(&plan, &mut store, || point);
+            assert_eq!(store.writes, 1, "{point:?}");
+        }
     }
 
     #[test]

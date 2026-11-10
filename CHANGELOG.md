@@ -38,6 +38,11 @@ How to use this file:
 
 ### Fixed
 
+- Undo no longer overwrites a setting you changed yourself after applying a tweak. If Windows now holds
+  another value than the one Vestigium set, the undo is refused with a message and nothing is written,
+  and a refused undo no longer marks the original change as undone. The administrator helper also
+  refuses a plan that asks for a value outside what the setting takes, and each written value is read
+  back to check it.
 - A tweak that changes a Windows service, or a power setting, and then fails on a later step no longer
   leaves the first change behind with no way back. The old start type or power value is now written
   back, and the history shows the real error. If even that cannot be written back, the change is kept
