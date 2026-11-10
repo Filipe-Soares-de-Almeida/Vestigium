@@ -511,6 +511,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(20, 50_000), boot(2, 95_000)],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     let found = evaluate(&inputs);
     let slow = find(&found, FindingKind::SlowBoot).unwrap();
@@ -520,6 +521,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(2, 50_000)],
         delays: vec![delay(DelayKind::App, true)],
+        ..BootReport::default()
     });
     let found = evaluate(&inputs);
     assert!(
@@ -545,6 +547,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(40, 120_000)],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
 }
@@ -647,6 +650,7 @@ fn every_finding_carries_evidence_and_critical_comes_first() {
             post_boot_ms: 40_000,
         }],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     inputs.events = vec![
         power_loss(1, 0, 6),

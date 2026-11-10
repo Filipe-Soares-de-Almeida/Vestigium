@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
+use vestigium_core::health::{SCAN_VERSION, SCAN_VERSION_V1, ScanResult, ScanResultV1, Subject};
 use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, TestRunV2, disk_subject};
 use vestigium_core::{
     Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
@@ -38,7 +38,7 @@ pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -
 pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "scan") {
-        let Some(scan) = read_versioned::<ScanResult>(&path, SCAN_VERSION) else {
+        let Some(scan) = read_scan(&path) else {
             continue;
         };
         let Ok(id) = store.insert_scan(&scan) else {
@@ -267,6 +267,12 @@ fn read_test_run(path: &Path) -> Option<TestRun> {
         .or_else(|| read_versioned::<TestRunV1>(path, 1).map(TestRun::from))
 }
 
+/// A health scan file of the current layout or the one before it.
+fn read_scan(path: &Path) -> Option<ScanResult> {
+    read_versioned::<ScanResult>(path, SCAN_VERSION)
+        .or_else(|| read_versioned::<ScanResultV1>(path, SCAN_VERSION_V1).map(ScanResult::from))
+}
+
 /// A file written as one version byte and a postcard body; `None` for another version.
 fn read_versioned<T: serde::de::DeserializeOwned>(path: &Path, expected: u8) -> Option<T> {
     let bytes = fs::read(path).ok()?;
@@ -455,6 +461,22 @@ mod tests {
         let mut bytes = vec![version];
         bytes.extend(postcard::to_allocvec(value).unwrap());
         fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn a_scan_file_of_the_first_layout_is_still_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let scans = dir.path().join("scans");
+        fs::create_dir(&scans).unwrap();
+        let old = ScanResultV1 {
+            ts_ms: 40,
+            boot: None,
+        };
+        write_versioned(&scans.join("1.scan"), SCAN_VERSION_V1, &old);
+
+        assert_eq!(import_scans(&scans, &mut store), vec![1]);
+        assert_eq!(store.last_scan().unwrap(), Some(ScanResult::from(old)));
     }
 
     #[test]

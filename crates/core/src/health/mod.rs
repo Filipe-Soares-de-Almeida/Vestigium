@@ -144,10 +144,31 @@ pub struct BootDelay {
 pub struct BootReport {
     pub boots: Vec<BootTime>,
     pub delays: Vec<BootDelay>,
+    /// Boot log events that could not be read or rendered, and so are missing from the report.
+    pub skipped: u32,
+}
+
+/// The first stored layout of `BootReport`, kept to read older scans.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BootReportV1 {
+    pub boots: Vec<BootTime>,
+    pub delays: Vec<BootDelay>,
+}
+
+impl From<BootReportV1> for BootReport {
+    fn from(old: BootReportV1) -> BootReport {
+        BootReport {
+            boots: old.boots,
+            delays: old.delays,
+            skipped: 0,
+        }
+    }
 }
 
 /// Layout of the `ScanResult` the elevated helper writes and the store keeps.
-pub const SCAN_VERSION: u8 = 1;
+pub const SCAN_VERSION: u8 = 2;
+/// The layout before the boot report counted its skipped events.
+pub const SCAN_VERSION_V1: u8 = 1;
 
 /// What one full scan read with elevation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -155,6 +176,22 @@ pub struct ScanResult {
     pub ts_ms: i64,
     /// `None` when the boot log could not be read.
     pub boot: Option<BootReport>,
+}
+
+/// The first stored layout of `ScanResult`, kept to read older scans.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScanResultV1 {
+    pub ts_ms: i64,
+    pub boot: Option<BootReportV1>,
+}
+
+impl From<ScanResultV1> for ScanResult {
+    fn from(old: ScanResultV1) -> ScanResult {
+        ScanResult {
+            ts_ms: old.ts_ms,
+            boot: old.boot.map(BootReport::from),
+        }
+    }
 }
 
 /// One physical disk's health, read without elevation.

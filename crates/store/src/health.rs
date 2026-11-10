@@ -1,6 +1,7 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::health::{
-    FINDING_VERSION, Finding, FindingChange, SCAN_VERSION, ScanResult, StoredFinding,
+    FINDING_VERSION, Finding, FindingChange, SCAN_VERSION, SCAN_VERSION_V1, ScanResult,
+    ScanResultV1, StoredFinding,
 };
 
 use crate::{Store, StoreError, decode, encode};
@@ -115,8 +116,14 @@ impl Store {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        row.map(|(version, data)| one(version, SCAN_VERSION, "scan version", &data))
-            .transpose()
+        row.map(|(version, data)| {
+            if version == i64::from(SCAN_VERSION_V1) {
+                return one::<ScanResultV1>(version, SCAN_VERSION_V1, "scan version", &data)
+                    .map(ScanResult::from);
+            }
+            one(version, SCAN_VERSION, "scan version", &data)
+        })
+        .transpose()
     }
 
     fn finding_rows(
