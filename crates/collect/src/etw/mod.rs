@@ -4,7 +4,7 @@ mod consumer;
 mod kernel;
 mod session;
 
-pub use consumer::{EventSink, spawn_consumer};
+pub use consumer::{Consumed, EventSink, spawn_consumer};
 pub use kernel::{IMAGE, KernelRecord, PERF_INFO, kernel_record};
 pub use session::{DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, KernelSession, SessionStats};
 

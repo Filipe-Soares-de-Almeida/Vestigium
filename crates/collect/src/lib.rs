@@ -26,8 +26,8 @@ pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
 pub use dumps::{CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps};
 pub use etw::{
-    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, IMAGE, KernelRecord, KernelSession,
-    PERF_INFO, RawEvent, SessionStats, kernel_record, spawn_consumer,
+    Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, IMAGE, KernelRecord,
+    KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, spawn_consumer,
 };
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};

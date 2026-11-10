@@ -142,7 +142,13 @@ fn capture(length: Duration, etl: Option<&Path>) -> DeepCapture {
             }
             match consumer {
                 Some(Ok(handle)) => match handle.join() {
-                    Ok(sink) => (drivers, longest) = sink.routines.finish(&sink.modules),
+                    Ok(read) => {
+                        if let Some(why) = unread(read.events, &read.status) {
+                            kernel = CaptureSource::Unavailable(why);
+                        }
+                        let sink = read.sink;
+                        (drivers, longest) = sink.routines.finish(&sink.modules);
+                    }
                     Err(_) => kernel = CaptureSource::Unavailable("the trace reader failed".into()),
                 },
                 Some(Err(e)) => kernel = CaptureSource::Unavailable(e.to_string()),
@@ -195,6 +201,15 @@ fn frames(length: Duration, clock: Clock) -> (CaptureSource, Vec<AppFrames>, Vec
     (source, apps, hitches)
 }
 
+/// Why a trace reader's work cannot be trusted: its session failed, or it received no event at all.
+fn unread(events: u64, status: &Result<(), String>) -> Option<String> {
+    match status {
+        Err(why) => Some(why.clone()),
+        Ok(()) if events == 0 => Some("the trace reader received no events".into()),
+        Ok(()) => None,
+    }
+}
+
 /// What a finished PresentMon run says about the frames: whole, partial or not measured.
 fn frames_source(outcome: &PresentMonOutcome) -> CaptureSource {
     if let Some(why) = outcome.unavailable() {
@@ -212,6 +227,14 @@ fn frames_source(outcome: &PresentMonOutcome) -> CaptureSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reader_that_failed_or_saw_nothing_is_not_trusted() {
+        assert_eq!(unread(10, &Ok(())), None);
+        assert!(unread(0, &Ok(())).is_some());
+        assert_eq!(unread(10, &Err("closed".into())).as_deref(), Some("closed"));
+        assert!(unread(0, &Err("not opened".into())).is_some());
+    }
 
     #[test]
     fn a_run_that_died_is_a_partial_source() {
