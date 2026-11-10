@@ -6,7 +6,7 @@ The project aims to keep the monitor as light as possible. It takes one reading 
 
 ## Does it send anything?
 
-No. There is no account and no telemetry; what Vestigium keeps stays in one folder in your user profile. The only request that leaves the PC is the update check, and only if you allow it: it asks GitHub for the newest version and sends no PC data. Reports leave the PC only when you copy and paste them yourself. See [Privacy and data](./Privacy-and-data.md).
+No. There is no account and no telemetry; what Vestigium keeps stays in one folder in your user profile. Besides the update check, which runs only if you allow it and asks GitHub for the newest version with no PC data, the app makes no request. The installer downloads the WebView2 runtime when it is missing, and an update downloads its installer after you confirm. Reports leave the PC only when you copy and paste them yourself. See [Privacy and data](./Privacy-and-data.md).
 
 ## Why does it ask for administrator rights?
 

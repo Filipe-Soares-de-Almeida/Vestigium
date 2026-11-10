@@ -42,6 +42,9 @@ How to use this file:
   shutdown report can have, since a shutdown that did not finish gets no report, and the window's
   text for that kind is gone. The privacy page now says that a result file the monitor cannot read
   stays in the data folder.
+- The README, the privacy page and the questions page no longer say the update check is the only
+  request the app makes: they now also say that the installer downloads the WebView2 runtime when it
+  is missing and that an update downloads its installer after you confirm.
 
 ### Security
 

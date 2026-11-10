@@ -55,8 +55,9 @@ on.
   full system drive, tests memory and disks without changing them, and suggests Windows settings to
   change, each undone in one click. Security features stay as they are.
 - **Light, local, no account.** The agent runs as your user and the window exits when it closes.
-  Tasks that need administrator rights ask one at a time. No telemetry: the only request that leaves
-  the PC is the update check, which the window asks about first.
+  Tasks that need administrator rights ask one at a time. No telemetry: besides the update check,
+  which the window asks about first, the app makes no request. The installer downloads the WebView2
+  runtime when it is missing, and an update downloads its installer after you confirm.
 
 ---
 

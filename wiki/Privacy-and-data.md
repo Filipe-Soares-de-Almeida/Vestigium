@@ -2,9 +2,10 @@ What Vestigium keeps, where it keeps it, what leaves the PC, and how to delete i
 
 ## What leaves the PC
 
-Nothing, unless you allow the update check. There is no account and no telemetry.
+Only the requests listed below. There is no account and no telemetry.
 
 - **The update check**, when on, asks GitHub for the newest version when the window opens, at most once a day. It sends no PC data; like any request on the internet, it reaches GitHub from your connection's address.
+- **The downloads of the installer and of an update.** The installer downloads the WebView2 runtime when the PC lacks it, and an update downloads its installer after you select **Update and restart**. Vestigium sends no PC data with either.
 - **Reading crash dumps** happens on the PC, with no internet connection.
 - **Copy report** and **Copy result** put text on your clipboard. Where it goes next is up to you; see [Reporting a problem](./Reporting-a-problem.md).
 
