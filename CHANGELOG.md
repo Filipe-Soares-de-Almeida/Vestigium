@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- An update check that the release feed answers with an error, such as a server problem or a rate
+  limit, now shows as failed instead of "up to date", and the automatic check tries again the next
+  time the window opens instead of waiting a day.
 - Moving quickly between screens that show the live view can no longer stop the new screen's
   live stream, which left it frozen on its first second.
 - A program page whose read of today's events fails now shows the error with a Retry button, instead

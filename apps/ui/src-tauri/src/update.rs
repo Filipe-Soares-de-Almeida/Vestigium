@@ -258,7 +258,16 @@ pub fn release_notes(lang: String, after: Option<String>) -> Vec<Release> {
     )
 }
 
-/// Asks the release feed for a newer version; a feed with no release yet counts as up to date.
+/// Reads the updater's answer: no update is `None` only when the feed answered. The feed always
+/// holds a release, so a missing one means the check failed, whatever the HTTP status was.
+fn checked<T>(
+    answer: Result<Option<T>, tauri_plugin_updater::Error>,
+) -> Result<Option<T>, UiError> {
+    answer.map_err(|err| UiError::Failed(err.to_string()))
+}
+
+/// Asks the release feed for a newer version; a failed answer is an error and leaves the daily
+/// check due.
 #[tauri::command]
 pub async fn update_check(
     app: AppHandle,
@@ -268,11 +277,7 @@ pub async fn update_check(
     let updater = app
         .updater()
         .map_err(|err| UiError::Failed(err.to_string()))?;
-    let found = match updater.check().await {
-        Ok(found) => found,
-        Err(tauri_plugin_updater::Error::ReleaseNotFound) => None,
-        Err(err) => return Err(UiError::Failed(err.to_string())),
-    };
+    let found = checked(updater.check().await)?;
     let mut prefs = read_prefs(&app)?;
     prefs.last_check_ms = Some(now_ms());
     write_prefs(&app, &prefs)?;
@@ -353,6 +358,14 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = "# Changelog\n\n<!--\n- Every change adds its entries.\n-->\n\n## [Unreleased]\n\n### Added\n\n- Not out yet.\n\n## [0.2.0] - 2026-11-18\n\n### Added\n\n- Holding Ctrl pauses the `Now` screen,\n  like Task Manager.\n- See all programs.\n\n### Fixed\n\n- Health opens with its data.\n\n## [0.1.0] - 2026-11-01\n\n### Added\n\n- First version.\n\n[Unreleased]: https://example.invalid/compare/v0.2.0...HEAD\n[0.2.0]: https://example.invalid/v0.2.0\n";
+
+    #[test]
+    fn release_not_found_is_a_failed_check() {
+        let missing = checked::<()>(Err(tauri_plugin_updater::Error::ReleaseNotFound));
+        assert!(matches!(missing, Err(UiError::Failed(_))));
+        assert!(matches!(checked::<u8>(Ok(None)), Ok(None)));
+        assert!(matches!(checked(Ok(Some(1_u8))), Ok(Some(1))));
+    }
 
     #[test]
     fn released_sections_are_read_and_unreleased_is_left_out() {
