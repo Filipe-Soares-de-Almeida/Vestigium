@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- A program that is still not responding 15 seconds or more after the PC wakes from sleep or the
+  watcher resumes from a pause now gets a report. Before, a hang first seen right after a resume was
+  always discarded as the settling time of waking, so a program that stayed frozen for minutes never
+  appeared.
 - A report with a very large number of entries, such as one made by thousands of repeated Windows
   events, is no longer written to the history in a form that could not be opened again: the history now
   reads reports up to four times larger than before, so one that was stored but showed an error opens.

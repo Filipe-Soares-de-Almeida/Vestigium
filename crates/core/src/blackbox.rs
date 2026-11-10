@@ -11,6 +11,8 @@ use crate::{
 pub const RING_MS: i64 = 10 * 60_000;
 /// After a resume, the probe and the counters settle for this long.
 pub const GAP_MARGIN_MS: i64 = 2_000;
+/// A hang that lasts this long past a gap is real, not the settling after waking.
+const HANG_AFTER_GAP_MS: i64 = 15_000;
 /// A hung app first seen this soon after a freeze is the freeze's echo.
 pub const HANG_ECHO_MS: i64 = 10_000;
 /// Freezes shorter than this leave apps responsive.
@@ -250,9 +252,31 @@ impl Blackbox {
                 .iter()
                 .any(|&(start, end)| (start..=end + HANG_ECHO_MS).contains(&first_seen));
             if !echo {
+                let trigger = self.after_gaps(trigger);
                 self.add(trigger);
             }
         }
+    }
+
+    /// A hang that touches a gap but lasts long past it starts after the gap's settling time.
+    fn after_gaps(&self, mut trigger: Trigger) -> Trigger {
+        let settled_ms = self
+            .gaps
+            .iter()
+            .filter(|gap| touches(&trigger, gap))
+            .map(|gap| gap.end_ms)
+            .max();
+        if let (
+            Trigger::AppHang {
+                start_ms, end_ms, ..
+            },
+            Some(gap_end),
+        ) = (&mut trigger, settled_ms)
+            && *end_ms - gap_end >= HANG_AFTER_GAP_MS
+        {
+            *start_ms = (*start_ms).max(gap_end + GAP_MARGIN_MS + 1);
+        }
+        trigger
     }
 
     /// Cuts every gap that ends after `now_ms` down to it and removes the ones that start after it,

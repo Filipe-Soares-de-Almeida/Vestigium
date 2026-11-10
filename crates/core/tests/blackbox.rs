@@ -4,9 +4,9 @@ use std::collections::HashSet;
 
 use common::{GIB, T, calm, event, machine, process};
 use vestigium_core::{
-    Blackbox, Cause, EpisodeKind, EventMeaning, Gap, GapReason, HungWindow, Occurrence,
-    OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, REPORTED_EXEMPLARS, RING_MS,
-    Severity, Timing, Trigger,
+    Blackbox, Cause, EpisodeKind, EventMeaning, GAP_MARGIN_MS, Gap, GapReason, HungWindow,
+    Occurrence, OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, REPORTED_EXEMPLARS,
+    RING_MS, Severity, Timing, Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -220,6 +220,48 @@ fn hang_right_after_a_freeze_is_dropped() {
         1,
         "the hang stays in the story"
     );
+}
+
+#[test]
+fn a_hang_still_going_after_a_resume_is_an_occurrence() {
+    let gap = Gap {
+        start_ms: T,
+        end_ms: T + 40_000,
+        reason: GapReason::Suspended,
+    };
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(gap);
+    for s in (41..=75).step_by(2) {
+        bb.push_hangs(T + s * 1_000, &[hung(11, "player.exe")], &running);
+    }
+    bb.push_hangs(T + 77_000, &[], &running);
+
+    let found = occurrences(bb.poll(T + 200_000));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, OccurrenceKind::AppHang);
+    assert!(found[0].start_ms > gap.end_ms + GAP_MARGIN_MS);
+    assert_eq!(found[0].end_ms, T + 77_000);
+}
+
+#[test]
+fn a_short_hang_right_after_a_resume_is_still_dropped() {
+    let gap = Gap {
+        start_ms: T,
+        end_ms: T + 40_000,
+        reason: GapReason::Suspended,
+    };
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 0);
+    bb.push_gap(gap);
+    for s in (41..=45).step_by(2) {
+        bb.push_hangs(T + s * 1_000, &[hung(11, "player.exe")], &running);
+    }
+    bb.push_hangs(T + 47_000, &[], &running);
+
+    assert!(occurrences(bb.poll(T + 200_000)).is_empty());
 }
 
 #[test]
