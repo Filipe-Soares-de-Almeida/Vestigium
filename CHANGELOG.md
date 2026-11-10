@@ -45,6 +45,7 @@ How to use this file:
 
 ### Fixed
 
+- The English title of a disk whose SMART predicts failure no longer puts a colon after the drive name, which showed a doubled colon for a drive letter. It now reads "SMART of disk C: predicts failure".
 - Today, Events and a program's page no longer fail to open when two overload periods start in the
   same moment, such as two disks at full activity together or the processor and the memory filling at
   once. Before, the Moments list and the Events table showed an error for the rest of the day.

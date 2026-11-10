@@ -1220,7 +1220,7 @@
   "ui.health.ev.surface.partial": "The scan did not cover the whole disk",
   "ui.health.ev.surface.tech": "Unreadable blocks {unreadable}, blocks of 500 ms or more {slow}",
   "ui.health.ev.volume": "The file system check found problems ({date})",
-  "ui.health.kind.DiskSmart.title.Critical": "Disk {subject}: SMART predicts failure",
+  "ui.health.kind.DiskSmart.title.Critical": "SMART of disk {subject} predicts failure",
   "ui.health.kind.DiskSmart.title.Attention": "Disk {subject} shows signs of wear",
   "ui.health.kind.DiskSmart.tech": "{subject} · SMART and NVMe health",
   "ui.health.kind.DiskSmart.why.Critical": "The disk's SMART predicts failure. Files still open, but that can change at any time. Back up now.",
