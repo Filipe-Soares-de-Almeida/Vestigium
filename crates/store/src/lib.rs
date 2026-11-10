@@ -39,6 +39,8 @@ pub enum StoreError {
     Corrupt,
     #[error("database schema {found} is newer than this version supports ({supported})")]
     NewerSchema { found: u32, supported: u32 },
+    #[error("the history database is in {found} journal mode, but WAL mode is required")]
+    JournalMode { found: String },
     #[error("cannot create the data folder: {0}")]
     Io(#[from] std::io::Error),
     #[error("no history database yet")]

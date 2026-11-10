@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::fs;
+use std::mem;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -315,6 +316,65 @@ enum PipeFailure {
     Serve(String),
 }
 
+/// The pipe's own connection to the history, opened again when a request finds it closed.
+struct SecondConnection {
+    db: PathBuf,
+    store: Option<Store>,
+    /// The results waiting from before the start are imported once, on the first open.
+    imported: bool,
+}
+
+impl SecondConnection {
+    fn new(db: PathBuf) -> SecondConnection {
+        SecondConnection {
+            db,
+            store: None,
+            imported: false,
+        }
+    }
+
+    /// The open connection; a closed one is opened now, once per call, and the first open also
+    /// imports the results that were waiting.
+    fn store(&mut self, shared: &Shared) -> Option<&mut Store> {
+        if self.store.is_none() {
+            match Store::open(&self.db) {
+                Ok(store) => self.store = Some(store),
+                Err(err) => lock(&shared.status).last_error = Some(err.to_string()),
+            }
+        }
+        let store = self.store.as_mut()?;
+        if !mem::replace(&mut self.imported, true) {
+            import_captures(&shared.captures_dir, &[], store);
+            import_scans(&shared.scans_dir, store);
+            import_dumps(&shared.dumps_dir, store);
+            import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
+            import_tests(&shared.tests_dir, store);
+        }
+        Some(store)
+    }
+}
+
+/// True for the requests that write to the history through the pipe's own connection.
+fn needs_store(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::SetSettings(_)
+            | Request::ClearHistory
+            | Request::ImportResults
+            | Request::ApplyUserTweak { .. }
+    )
+}
+
+/// Answers a request, opening the pipe's connection first when the request needs it.
+fn serve(request: Request, shared: &Shared, second: &mut SecondConnection) -> Response {
+    let store = if needs_store(&request) {
+        second.store(shared)
+    } else {
+        None
+    };
+    handle(request, shared, store)
+}
+
 /// Runs the pipe until `run_once` returns `Ok`; a run that fails or panics is recorded and started
 /// again, and after five binds in a row that fail the agent is told to exit.
 fn keep_pipe_serving(
@@ -472,28 +532,18 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         let shared = shared.clone();
         let pipe = pipe.clone();
         // Settings are written through a connection of the pipe's own.
-        let mut settings_store = Store::open(&db).ok();
-        if let Some(store) = settings_store.as_mut() {
-            import_captures(&shared.captures_dir, &[], store);
-            import_scans(&shared.scans_dir, store);
-            import_dumps(&shared.dumps_dir, store);
-            import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
-            import_tests(&shared.tests_dir, store);
-        }
-        let mut first = Some((server, settings_store));
+        let mut second = SecondConnection::new(db.clone());
+        second.store(&shared);
+        let mut first = Some(server);
         thread::Builder::new()
             .name("pipe".to_string())
             .spawn(move || {
                 keep_pipe_serving(&shared, PIPE_RETRY_WAIT, || {
-                    let (server, mut settings_store) = match first.take() {
+                    let server = match first.take() {
                         Some(ready) => ready,
-                        None => (
-                            PipeServer::bind(&pipe).map_err(PipeFailure::Bind)?,
-                            Store::open(&db).ok(),
-                        ),
+                        None => PipeServer::bind(&pipe).map_err(PipeFailure::Bind)?,
                     };
-                    let ended =
-                        server.serve(|request| handle(request, &shared, settings_store.as_mut()));
+                    let ended = server.serve(|request| serve(request, &shared, &mut second));
                     Err(PipeFailure::Serve(ended.err().map_or_else(
                         || "the pipe closed".to_string(),
                         |err| err.to_string(),
@@ -969,6 +1019,49 @@ pub(crate) mod tests {
         assert_eq!(accepted, Response::Done);
         assert_eq!(*lock(&shared.settings), right);
         assert_eq!(store.settings().unwrap(), right);
+    }
+
+    #[test]
+    fn a_history_that_opens_late_serves_the_requests_that_follow() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("data");
+        fs::write(&blocker, b"a file where the data folder should be").unwrap();
+        let shared = shared();
+        let mut second = SecondConnection::new(blocker.join("vestigium.db"));
+        let settings = Settings {
+            language: LanguagePref::PtBr,
+            ..Settings::default()
+        };
+
+        let closed = serve(Request::SetSettings(settings), &shared, &mut second);
+        assert!(matches!(
+            closed,
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert!(lock(&shared.status).last_error.is_some());
+
+        fs::remove_file(&blocker).unwrap();
+        let opened = serve(Request::SetSettings(settings), &shared, &mut second);
+
+        assert_eq!(opened, Response::Done);
+        let stored = Store::open(&blocker.join("vestigium.db")).unwrap();
+        assert_eq!(stored.settings().unwrap(), settings);
+    }
+
+    #[test]
+    fn a_request_that_needs_no_history_does_not_open_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        let shared = shared();
+        let mut second = SecondConnection::new(db.clone());
+
+        let answer = serve(Request::Now, &shared, &mut second);
+
+        assert!(matches!(answer, Response::Now(_)));
+        assert!(!db.exists());
     }
 
     #[test]

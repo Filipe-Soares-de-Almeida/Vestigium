@@ -41,6 +41,11 @@ How to use this file:
 
 ### Fixed
 
+- Settings, clearing the history, importing results and applying a tweak no longer stay unavailable
+  for the rest of a run after the history could not be opened once at start: the watcher tries again
+  at the next request that needs it and imports the results that were waiting. A history location
+  that cannot use WAL mode, such as a network folder, is now refused with an error naming the mode
+  it found instead of being used unsafely.
 - A history file with a damaged header no longer keeps the watcher from starting at every logon: the
   watcher moves the file, with its -wal and -shm files, to a name ending in .corrupt and the time, never
   deletes it, and starts a new empty history. A file that is only locked, or that a newer version

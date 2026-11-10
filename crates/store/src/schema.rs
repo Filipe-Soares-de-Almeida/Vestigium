@@ -223,7 +223,9 @@ impl Store {
                 supported: SCHEMA_VERSION,
             });
         }
-        conn.pragma_update_and_check(None, "journal_mode", "WAL", |_| Ok(()))?;
+        let mode: String =
+            conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
+        require_wal(&mode)?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "cache_size", -CACHE_KIB)?;
         migrate(&mut conn, found)?;
@@ -374,6 +376,18 @@ impl Store {
     }
 }
 
+/// Refuses a journal mode other than WAL, which SQLite reports instead of failing when a
+/// location cannot switch to it.
+fn require_wal(mode: &str) -> Result<(), StoreError> {
+    if mode.eq_ignore_ascii_case("wal") {
+        Ok(())
+    } else {
+        Err(StoreError::JournalMode {
+            found: mode.to_string(),
+        })
+    }
+}
+
 /// True when the file exists, holds bytes and does not begin with the SQLite header.
 fn has_foreign_header(path: &Path) -> bool {
     use std::io::Read;
@@ -453,4 +467,21 @@ fn migrate(conn: &mut Connection, from: u32) -> Result<(), StoreError> {
     }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_wal_is_accepted_as_the_journal_mode() {
+        assert!(require_wal("wal").is_ok());
+        assert!(require_wal("WAL").is_ok());
+        for mode in ["delete", "memory", "truncate", ""] {
+            assert!(matches!(
+                require_wal(mode),
+                Err(StoreError::JournalMode { found }) if found == mode
+            ));
+        }
+    }
 }
