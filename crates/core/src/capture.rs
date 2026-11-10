@@ -31,6 +31,9 @@ const MIN_FRAMES: usize = 60;
 const UNKNOWN_MODULE: &str = "<unknown>";
 /// A routine this long, in microseconds, is felt on its own.
 const LONG_US: u32 = 1_000;
+/// Routines of at least `LONG_US` that, repeated in one capture, make a driver's blame certain.
+/// Not measured on a healthy PC yet: three is the starting point.
+const REPEAT_TO_BLAME: u64 = 3;
 /// A routine this long, in microseconds, counts toward the rate of long ones.
 const SLOW_US: u32 = 100;
 /// Routines of at least `SLOW_US` per minute that make a driver a suspect.
@@ -495,7 +498,7 @@ pub fn capture_findings(capture: &DeepCapture) -> Vec<Suspect> {
         .drivers
         .iter()
         .filter(|d| nameable(&d.module))
-        .filter_map(|d| driver_finding(d, duration_ms))
+        .filter_map(|d| driver_finding(d, duration_ms, capture))
         .collect();
     found.extend(
         capture
@@ -507,17 +510,23 @@ pub fn capture_findings(capture: &DeepCapture) -> Vec<Suspect> {
     ranked(found, capture.lost_events)
 }
 
-fn driver_finding(driver: &DriverLatency, duration_ms: i64) -> Option<(Suspect, f64)> {
+fn driver_finding(
+    driver: &DriverLatency,
+    duration_ms: i64,
+    capture: &DeepCapture,
+) -> Option<(Suspect, f64)> {
     let intermediary = is_intermediary(&driver.module);
     let minutes = duration_ms as f64 / 60_000.0;
     let core_pct = (driver.total_us() as f64 / (duration_ms as f64 * 1_000.0) * 100.0) as f32;
     let slow = driver.dpc.at_least(SLOW_US) + driver.isr.at_least(SLOW_US);
     let max_us = driver.max_us();
+    let long = driver.dpc.at_least(LONG_US) + driver.isr.at_least(LONG_US);
     let confidence = if max_us >= LONG_US {
-        if intermediary {
-            Confidence::Medium
-        } else {
-            Confidence::High
+        let sure = long >= REPEAT_TO_BLAME || backed_on_page(&driver.module, capture);
+        match (sure, intermediary) {
+            (true, false) => Confidence::High,
+            (true, true) | (false, false) => Confidence::Medium,
+            (false, true) => Confidence::Low,
         }
     } else if slow as f64 / minutes >= SLOW_PER_MIN || core_pct >= CORE_PCT {
         if intermediary {
@@ -545,12 +554,25 @@ fn driver_finding(driver: &DriverLatency, duration_ms: i64) -> Option<(Suspect, 
             count: driver.dpc.count + driver.isr.count,
             max_us,
             at_least_100us: slow,
-            at_least_1ms: driver.dpc.at_least(LONG_US) + driver.isr.at_least(LONG_US),
+            at_least_1ms: long,
             core_pct,
         }],
         next_steps: update_driver(intermediary),
     };
     Some((suspect, f64::from(max_us)))
+}
+
+/// Whether a hiccup or a hitch lies next to one of the module's long routines kept in the capture.
+fn backed_on_page(module: &str, capture: &DeepCapture) -> bool {
+    capture
+        .longest
+        .iter()
+        .filter(|l| l.module == module && l.us >= LONG_US)
+        .any(|l| {
+            let near = |ts_ms: i64| (l.ts_ms - ts_ms).abs() <= NEAR_MS;
+            capture.hiccups.iter().any(|h| near(h.ts_ms))
+                || capture.hitches.iter().any(|h| near(h.ts_ms))
+        })
 }
 
 fn app_finding(app: &AppFrames, capture: &DeepCapture) -> (Suspect, f64) {
@@ -651,10 +673,10 @@ fn window_driver(
             module: module.to_string(),
             intermediary,
         },
-        confidence: if intermediary && !backed {
-            Confidence::Medium
-        } else {
+        confidence: if backed {
             Confidence::High
+        } else {
+            Confidence::Medium
         },
         evidence,
         next_steps: update_driver(intermediary),
@@ -957,29 +979,96 @@ mod tests {
     }
 
     #[test]
-    fn driver_over_1ms_is_high() {
+    fn one_routine_of_1ms_is_not_high() {
         let mut c = capture();
-        c.drivers = vec![driver("nvlddmkm.sys", &[20, 1_500], &[])];
+        c.drivers = vec![driver("usbxhci.sys", &[1_100], &[])];
         let found = capture_findings(&c);
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].confidence, Confidence::High);
+        assert_eq!(found[0].confidence, Confidence::Medium);
         assert_eq!(
             found[0].cause,
             Cause::DriverModule {
-                module: "nvlddmkm.sys".to_string(),
+                module: "usbxhci.sys".to_string(),
                 intermediary: false
             }
         );
         assert_eq!(found[0].next_steps, [NextStep::UpdateDriver]);
+    }
+
+    #[test]
+    fn repeated_routines_of_1ms_are_high() {
+        let mut c = capture();
+        c.drivers = vec![
+            driver("nvlddmkm.sys", &[20, 1_500, 1_200, 3_000], &[]),
+            driver("usbxhci.sys", &[1_100], &[1_100, 1_300]),
+            driver("twice.sys", &[1_100, 1_100], &[]),
+        ];
+        let found = capture_findings(&c);
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].confidence, Confidence::High);
         assert!(matches!(
             found[0].evidence[0],
             Evidence::Routine {
-                max_us: 1_500,
-                count: 2,
-                at_least_1ms: 1,
+                max_us: 3_000,
+                count: 4,
+                at_least_1ms: 3,
                 ..
             }
         ));
+        assert_eq!(
+            named(&found, "usbxhci.sys").map(|s| s.confidence),
+            Some(Confidence::High),
+            "a routine of each kind counts toward the repetition"
+        );
+        assert_eq!(
+            named(&found, "twice.sys").map(|s| s.confidence),
+            Some(Confidence::Medium)
+        );
+    }
+
+    #[test]
+    fn a_hiccup_next_to_a_long_routine_makes_a_driver_high_on_the_page() {
+        let at = START + 20_000;
+        let mut c = capture();
+        c.drivers = vec![driver("usbxhci.sys", &[1_100], &[])];
+        c.longest = vec![long(at, "usbxhci.sys", 1_100)];
+        c.hiccups = vec![ProbeHiccup {
+            ts_ms: at + NEAR_MS + 1,
+            lag_ms: 30.0,
+        }];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+        c.hiccups[0].ts_ms = at + NEAR_MS;
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
+        c.hiccups.clear();
+        c.apps = vec![app("game.exe", 3)];
+        c.hitches = vec![hitch(at - 40, "game.exe")];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
+        c.longest = vec![long(at + 5_000, "other.sys", 1_100)];
+        assert_eq!(
+            capture_findings(&c)[0].confidence,
+            Confidence::Medium,
+            "only the module's own routines are backed"
+        );
+    }
+
+    #[test]
+    fn a_lone_routine_of_an_intermediary_is_low() {
+        let mut c = capture();
+        c.drivers = vec![driver("storport.sys", &[5_000], &[])];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Low);
+        c.drivers = vec![driver("storport.sys", &[5_000; 3], &[])];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn a_lone_routine_in_a_window_is_medium() {
+        let at = START + 20_000;
+        let mut c = capture();
+        c.longest = vec![long(at, "usbxhci.sys", 1_100)];
+        let found = capture_suspects(START, START + 60_000, &c);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].confidence, Confidence::Medium);
+        assert_eq!(found[0].next_steps, [NextStep::UpdateDriver]);
     }
 
     #[test]
@@ -1004,7 +1093,7 @@ mod tests {
         assert!(!is_intermediary("storahci.sys"));
         let mut c = capture();
         c.drivers = vec![
-            driver("storport.sys", &[5_000], &[]),
+            driver("storport.sys", &[5_000; 3], &[]),
             driver("ndis.sys", &[150; 60], &[]),
         ];
         let found = capture_findings(&c);
@@ -1256,8 +1345,8 @@ mod tests {
         let mut c = capture();
         c.drivers = vec![
             driver("mid.sys", &[150; 60], &[]),
-            driver("small.sys", &[1_200], &[]),
-            driver("big.sys", &[8_000], &[]),
+            driver("small.sys", &[1_200; 3], &[]),
+            driver("big.sys", &[8_000; 3], &[]),
         ];
         c.apps = vec![app("game.exe", 3)];
         let order: Vec<Cause> = capture_findings(&c).into_iter().map(|s| s.cause).collect();
@@ -1287,7 +1376,7 @@ mod tests {
         assert_eq!(capture_findings(&c).len(), 1);
         let window = capture_suspects(START, START + 60_000, &c);
         assert_eq!(window.len(), 1);
-        assert_eq!(window[0].confidence, Confidence::High);
+        assert_eq!(window[0].confidence, Confidence::Medium);
     }
 
     #[test]

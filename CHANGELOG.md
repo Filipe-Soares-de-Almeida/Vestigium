@@ -30,6 +30,10 @@ How to use this file:
 
 ### Fixed
 
+- A deep capture no longer gives a driver high confidence, nor tells you to update it, because of one
+  long routine. A driver now needs three routines of 1 ms or more, or one next to a stall or a
+  dropped frame; a single one is reported with medium confidence, in the capture and in the
+  occurrence it covers.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the
