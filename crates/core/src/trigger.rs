@@ -10,6 +10,11 @@ pub enum Severity {
     Severe,
 }
 
+impl Severity {
+    /// Every variant, in declaration order.
+    pub const ALL: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
+}
+
 /// Under 1 s is light, up to 5 s medium, longer severe.
 pub fn severity(duration_ms: f32) -> Severity {
     if duration_ms < 1_000.0 {

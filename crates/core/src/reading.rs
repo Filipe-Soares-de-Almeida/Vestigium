@@ -37,6 +37,16 @@ pub enum PcState {
     Suspended,
 }
 
+impl PcState {
+    /// Every variant, in declaration order.
+    pub const ALL: [PcState; 4] = [
+        PcState::Calm,
+        PcState::Busy,
+        PcState::Pressure,
+        PcState::Suspended,
+    ];
+}
+
 impl Reading {
     pub fn of_sample(sample: &Sample) -> Reading {
         let disks = sample.disks.iter();

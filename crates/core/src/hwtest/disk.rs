@@ -239,6 +239,11 @@ pub enum Bus {
     Other,
 }
 
+impl Bus {
+    /// Every variant, in declaration order.
+    pub const ALL: [Bus; 4] = [Bus::Sata, Bus::Nvme, Bus::Usb, Bus::Other];
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BenchMode {
     /// 1 MiB blocks, 8 in flight.
@@ -374,6 +379,15 @@ pub enum VolumeResult {
     NoProblems,
     ProblemsFound,
     CouldNotCheck,
+}
+
+impl VolumeResult {
+    /// Every variant, in declaration order.
+    pub const ALL: [VolumeResult; 3] = [
+        VolumeResult::NoProblems,
+        VolumeResult::ProblemsFound,
+        VolumeResult::CouldNotCheck,
+    ];
 }
 
 /// What an online file system check of one volume found.

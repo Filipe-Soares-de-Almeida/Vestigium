@@ -14,6 +14,17 @@ pub enum OccurrenceKind {
 }
 
 impl OccurrenceKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [OccurrenceKind; 5] = [
+        OccurrenceKind::Freeze,
+        OccurrenceKind::Stutter,
+        OccurrenceKind::AppHang,
+        OccurrenceKind::Reported,
+        OccurrenceKind::PostMortem,
+    ];
+}
+
+impl OccurrenceKind {
     pub fn of(trigger: &Trigger) -> OccurrenceKind {
         match trigger {
             Trigger::Freeze { .. } => OccurrenceKind::Freeze,

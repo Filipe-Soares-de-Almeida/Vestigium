@@ -37,6 +37,16 @@ pub enum TestKind {
     DiskBenchmark,
 }
 
+impl TestKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [TestKind; 4] = [
+        TestKind::MemoryQuick,
+        TestKind::DiskSurface,
+        TestKind::VolumeCheck,
+        TestKind::DiskBenchmark,
+    ];
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Outcome {
     /// Ran to the end and found nothing.
@@ -47,6 +57,16 @@ pub enum Outcome {
     Interrupted,
     /// Could not run; the reason is in the data.
     Failed,
+}
+
+impl Outcome {
+    /// Every variant, in declaration order.
+    pub const ALL: [Outcome; 4] = [
+        Outcome::Clean,
+        Outcome::Problems,
+        Outcome::Interrupted,
+        Outcome::Failed,
+    ];
 }
 
 /// What a test covered and found, in the shape of its kind.

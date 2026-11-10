@@ -26,6 +26,16 @@ pub enum DumpKind {
     App,
 }
 
+impl DumpKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [DumpKind; 4] = [
+        DumpKind::KernelMini,
+        DumpKind::KernelMemory,
+        DumpKind::LiveKernel,
+        DumpKind::App,
+    ];
+}
+
 /// What went wrong, as the dump records it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fault {

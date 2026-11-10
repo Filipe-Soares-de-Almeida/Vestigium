@@ -31,12 +31,22 @@ pub enum LanguagePref {
     PtBr,
 }
 
+impl LanguagePref {
+    /// Every variant, in declaration order.
+    pub const ALL: [LanguagePref; 3] = [LanguagePref::System, LanguagePref::En, LanguagePref::PtBr];
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemePref {
     #[default]
     System,
     Light,
     Dark,
+}
+
+impl ThemePref {
+    /// Every variant, in declaration order.
+    pub const ALL: [ThemePref; 3] = [ThemePref::System, ThemePref::Light, ThemePref::Dark];
 }
 
 /// Palette of the window; light or dark is `ThemePref`.
@@ -49,6 +59,16 @@ pub enum ColorTheme {
     Indigo,
 }
 
+impl ColorTheme {
+    /// Every variant, in declaration order.
+    pub const ALL: [ColorTheme; 4] = [
+        ColorTheme::Red,
+        ColorTheme::Graphite,
+        ColorTheme::Slate,
+        ColorTheme::Indigo,
+    ];
+}
+
 /// How much a report says: plain language first, raw values last.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DetailLevel {
@@ -56,6 +76,15 @@ pub enum DetailLevel {
     Simple,
     Detailed,
     Technical,
+}
+
+impl DetailLevel {
+    /// Every variant, in declaration order.
+    pub const ALL: [DetailLevel; 3] = [
+        DetailLevel::Simple,
+        DetailLevel::Detailed,
+        DetailLevel::Technical,
+    ];
 }
 
 /// What a person can change; starting with Windows lives in the registry, not here.

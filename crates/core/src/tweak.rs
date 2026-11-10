@@ -326,6 +326,11 @@ pub enum Applier {
     Elevated,
 }
 
+impl Applier {
+    /// Every variant, in declaration order.
+    pub const ALL: [Applier; 2] = [Applier::User, Applier::Elevated];
+}
+
 /// When a change starts to count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Takes {
@@ -333,6 +338,16 @@ pub enum Takes {
     NextShutdown,
     NextSignIn,
     Restart,
+}
+
+impl Takes {
+    /// Every variant, in declaration order.
+    pub const ALL: [Takes; 4] = [
+        Takes::Now,
+        Takes::NextShutdown,
+        Takes::NextSignIn,
+        Takes::Restart,
+    ];
 }
 
 impl TweakId {

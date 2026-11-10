@@ -17,6 +17,11 @@ pub enum Confidence {
     High,
 }
 
+impl Confidence {
+    /// Every variant, in declaration order.
+    pub const ALL: [Confidence; 3] = [Confidence::Low, Confidence::Medium, Confidence::High];
+}
+
 /// A value the rules read; percentages run 0 to 100.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Metric {
@@ -31,6 +36,23 @@ pub enum Metric {
     PerfLimitPct,
     PrivateBytes,
     IoBytesPerS,
+}
+
+impl Metric {
+    /// Every variant, in declaration order.
+    pub const ALL: [Metric; 11] = [
+        Metric::DiskLatencyMs,
+        Metric::DiskQueue,
+        Metric::DiskActivePct,
+        Metric::MemAvailPct,
+        Metric::HardFaultsPerS,
+        Metric::CpuPct,
+        Metric::CoreDpcIsrPct,
+        Metric::GpuPct,
+        Metric::PerfLimitPct,
+        Metric::PrivateBytes,
+        Metric::IoBytesPerS,
+    ];
 }
 
 /// Where a rule crosses for each metric; see `crosses_down` for the direction.

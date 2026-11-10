@@ -14,6 +14,17 @@ pub enum GapReason {
     ClockChanged,
 }
 
+impl GapReason {
+    /// Every variant, in declaration order.
+    pub const ALL: [GapReason; 5] = [
+        GapReason::Paused,
+        GapReason::Suspended,
+        GapReason::Stopped,
+        GapReason::Crashed,
+        GapReason::ClockChanged,
+    ];
+}
+
 /// A span with nothing watched; nothing inside it counts as a stall.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gap {
