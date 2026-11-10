@@ -9,9 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    BlackboxRing, CollectError, CpuSampler, Delivered, EventSubscription, HighResTimer, PdhSampler,
-    ProcessSnapshotter, WindowsHealth, disk_media, hung_pids, logical_cpus, memory_info,
-    physical_drive, unbiased_ms, wall_ms,
+    BlackboxRing, CollectError, Delivered, EventSubscription, WindowsHealth, disk_media, hung_pids,
+    logical_cpus, memory_info, physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
@@ -31,6 +30,7 @@ use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerEvent;
+use crate::readings::{Readings, Source, SourceHealths, SourceSet};
 use crate::sensitive::SensitiveMode;
 use crate::shutdown;
 
@@ -46,7 +46,6 @@ const PAUSE_CHECK_MS: i64 = 60_000;
 const OWN_CPU_SPAN_MS: f64 = 60_000.0;
 /// Programs the live screen can list in full, busiest first.
 const PROGRAMS_LISTED: usize = 300;
-const SNAPSHOT_BUFFER: usize = 512 * 1024;
 /// Ticks after a start or a resume before idle pages are handed back to Windows.
 const TRIM_AFTER_TICKS: usize = 10;
 /// A stop shorter than this is a restart, not a gap.
@@ -110,6 +109,8 @@ pub struct Wiring {
     pub health_due: Arc<AtomicBool>,
     /// The black box file that outlives a fall; `None` keeps none.
     pub ring_path: Option<PathBuf>,
+    /// What each tick reads from Windows, and how the counters and the timer are opened.
+    pub source_set: SourceSet,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -187,25 +188,26 @@ struct Sampler {
     hardware_error: bool,
     /// A crash was reported, so the dumps are listed again on the next tick.
     dumps_due: bool,
+    /// What the sampler reads; taken by `run`.
+    source_set: Option<SourceSet>,
+    /// How each source has been reading.
+    source_health: SourceHealths,
 }
 
-/// The data sources a tick reads, opened once on the sampler thread.
+/// The data sources a tick reads.
 struct Sources {
-    cpu: CpuSampler,
-    pdh: PdhSampler,
-    processes: ProcessSnapshotter,
+    readings: Box<dyn Readings>,
 }
 
 impl Sources {
     /// Takes the first readings, which only set the baseline for rates.
     fn prime(&mut self) {
-        let _ = self.cpu.sample();
-        let _ = self.pdh.sample();
+        let _ = self.readings.cpu();
+        let _ = self.readings.pdh();
     }
 
     fn reset(&mut self) {
-        self.cpu.reset();
-        self.pdh.reset();
+        self.readings.reset();
     }
 }
 
@@ -257,6 +259,8 @@ impl Sampler {
             started_ms: now,
             hardware_error: false,
             dumps_due: false,
+            source_set: Some(wiring.source_set),
+            source_health: SourceHealths::default(),
             store,
         };
         sampler.recall_last_day(now);
@@ -310,15 +314,16 @@ impl Sampler {
     /// Ticks once a second until the gate says stop; pausing writes everything and blocks.
     /// Time runs on the unbiased clock, so a sleep of the whole system is not a late tick.
     fn run(&mut self, gate: &RunGate) {
-        let opened = PdhSampler::open().and_then(|pdh| HighResTimer::new().map(|t| (pdh, t)));
-        let (pdh, timer) = match opened {
-            Ok(parts) => parts,
-            Err(err) => return self.report(&err),
+        let Some(source_set) = self.source_set.take() else {
+            return;
         };
         let mut sources = Sources {
-            cpu: CpuSampler::new(),
-            pdh,
-            processes: ProcessSnapshotter::with_capacity(SNAPSHOT_BUFFER),
+            readings: source_set(),
+        };
+        let pdh = self.read(Source::Pdh, sources.readings.open_pdh());
+        let timer = pdh.and_then(|()| self.read(Source::Timer, sources.readings.open_timer()));
+        let Ok(timer) = timer else {
+            return;
         };
         sources.prime();
         let mut next_tick = unbiased_ms() + TICK_MS;
@@ -345,8 +350,9 @@ impl Sampler {
             }
 
             let due_ms = (next_tick - unbiased_ms()).max(0.0);
-            if let Err(err) = timer.wait(Duration::from_secs_f64(due_ms / 1000.0)) {
-                return self.report(&err);
+            let waited = timer.wait(Duration::from_secs_f64(due_ms / 1000.0));
+            if self.read(Source::Timer, waited).is_err() {
+                return;
             }
             let woke = unbiased_ms();
             let sampler_lag_ms = (woke - next_tick).max(0.0) as f32;
@@ -398,14 +404,15 @@ impl Sampler {
         if sensitive {
             keep_hiccups(&mut lock(&self.hiccups), &ticks_seen, ts_ms);
         }
-        let memory = memory_info()?;
+        let memory = self.read(Source::Memory, sources.readings.memory())?;
         let mut strain = Strain {
             mem_used_pct: used_pct(memory.total_bytes, memory.avail_bytes),
             worst_lag_ms: probe_max_lag_ms.max(sampler_lag_ms),
             hardware_error: self.hardware_error,
             ..Strain::default()
         };
-        let (cpu, pdh) = (sources.cpu.sample()?, sources.pdh.sample()?);
+        let cpu = self.read(Source::Cpu, sources.readings.cpu())?;
+        let pdh = self.read(Source::Pdh, sources.readings.pdh())?;
         if let (Some(cpu), Some(pdh)) = (cpu, pdh) {
             let sample = Sample {
                 ts_ms,
@@ -459,8 +466,8 @@ impl Sampler {
         if self.snapshots.len() > TOP_EVERY {
             self.snapshots.pop_front();
         }
-        self.snapshots
-            .push_back((woke, sources.processes.snapshot()?));
+        let snapshot = self.read(Source::Processes, sources.readings.processes())?;
+        self.snapshots.push_back((woke, snapshot));
         if ticks.is_multiple_of(HANG_EVERY) {
             self.check_hangs(ts_ms);
         }
@@ -888,6 +895,18 @@ impl Sampler {
         }
     }
 
+    /// Notes how a source read, tells the status about a new error, and hands the result back.
+    fn read<T>(
+        &mut self,
+        source: Source,
+        result: Result<T, CollectError>,
+    ) -> Result<T, CollectError> {
+        if let Some(text) = self.source_health.record(source, wall_ms(), &result) {
+            self.report(&text);
+        }
+        result
+    }
+
     fn report(&self, err: &dyn std::fmt::Display) {
         lock(&self.status).last_error = Some(err.to_string());
     }
@@ -941,6 +960,8 @@ mod tests {
     use vestigium_store::{Series, decode, encode};
 
     use super::*;
+    use crate::readings::{Waiter, windows_source_set};
+    use vestigium_collect::{CpuReading, MemoryInfo, PdhReading};
 
     struct Running {
         gate: Arc<RunGate>,
@@ -961,6 +982,10 @@ mod tests {
     };
 
     fn start(dir: &std::path::Path, flush: Duration) -> Running {
+        start_with(dir, flush, windows_source_set())
+    }
+
+    fn start_with(dir: &std::path::Path, flush: Duration, source_set: SourceSet) -> Running {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let gate = RunGate::new();
         let (probe_tx, probe_rx) = mpsc::channel();
@@ -991,6 +1016,7 @@ mod tests {
                 cleared: Arc::new(AtomicBool::new(false)),
                 health_due: Arc::new(AtomicBool::new(false)),
                 ring_path: Some(dir.join("blackbox.ring")),
+                source_set,
             },
         )
         .unwrap();
@@ -1044,6 +1070,77 @@ mod tests {
 
     fn sampled(status: &Mutex<AgentStatus>) -> bool {
         lock(status).last_sample_ms.is_some()
+    }
+
+    /// Sleeps for the wait, as the high-resolution timer would.
+    struct Sleeper;
+
+    impl Waiter for Sleeper {
+        fn wait(&self, due: Duration) -> Result<(), CollectError> {
+            thread::sleep(due);
+            Ok(())
+        }
+    }
+
+    /// Readings of a quiet machine, every source working.
+    struct Quiet;
+
+    impl Readings for Quiet {
+        fn memory(&mut self) -> Result<MemoryInfo, CollectError> {
+            Ok(MemoryInfo {
+                total_bytes: 16 << 30,
+                avail_bytes: 8 << 30,
+                commit_bytes: 10 << 30,
+                commit_limit_bytes: 24 << 30,
+            })
+        }
+
+        fn cpu(&mut self) -> Result<Option<CpuReading>, CollectError> {
+            Ok(Some(CpuReading {
+                cpu_pct: 10.0,
+                dpc_pct: 0.0,
+                isr_pct: 0.0,
+                cores: Vec::new(),
+            }))
+        }
+
+        fn pdh(&mut self) -> Result<Option<PdhReading>, CollectError> {
+            Ok(Some(PdhReading {
+                perf_limit_pct: 100.0,
+                proc_perf_pct: 100.0,
+                hard_faults_per_s: 0.0,
+                disks: Vec::new(),
+                gpu: None,
+            }))
+        }
+
+        fn processes(&mut self) -> Result<Vec<ProcessCounters>, CollectError> {
+            Ok(Vec::new())
+        }
+
+        fn reset(&mut self) {}
+
+        fn open_pdh(&mut self) -> Result<(), CollectError> {
+            Ok(())
+        }
+
+        fn open_timer(&mut self) -> Result<Box<dyn Waiter>, CollectError> {
+            Ok(Box::new(Sleeper))
+        }
+    }
+
+    #[test]
+    fn a_sampler_runs_on_a_replaced_source_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start_with(dir.path(), NEVER_DUE, Box::new(|| Box::new(Quiet)));
+
+        let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_once, "no sample from the replaced sources");
+        let (_, count, _) = samples(dir.path());
+        assert!(count >= 1);
+        assert_eq!(lock(&running.status).last_error, None);
     }
 
     #[test]

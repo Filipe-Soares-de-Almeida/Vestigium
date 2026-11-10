@@ -24,6 +24,7 @@ use windows::core::HSTRING;
 
 use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
 use crate::orphan::release_orphaned_capture;
+use crate::readings::windows_source_set;
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -380,6 +381,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 cleared: shared.cleared.clone(),
                 health_due: shared.health_due.clone(),
                 ring_path: Some(data_dir.join("blackbox.ring")),
+                source_set: windows_source_set(),
             },
         )
         .map_err(failed)?,

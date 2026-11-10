@@ -10,6 +10,7 @@ mod import;
 mod orphan;
 mod paths;
 mod power;
+mod readings;
 mod sampler;
 mod sensitive;
 mod shutdown;
