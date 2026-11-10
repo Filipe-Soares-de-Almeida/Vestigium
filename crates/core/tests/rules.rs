@@ -192,6 +192,34 @@ fn memory_culprit_is_the_biggest_before_the_trigger() {
 }
 
 #[test]
+fn two_processes_that_reuse_a_pid_are_ranked_apart() {
+    let (triggers, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T - 25_000,
+        entries: vec![process(4242, "first.exe", 5.0, 6, 0.0)],
+    });
+    window.tops.push(ProcessTop {
+        ts_ms: T - 10_000,
+        entries: vec![process(4242, "second.exe", 5.0, 9, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
+
+    assert_eq!(
+        memory.cause,
+        Cause::Memory {
+            process: Some("second.exe".to_string())
+        }
+    );
+    assert!(memory.evidence.iter().any(|e| matches!(
+        e,
+        Evidence::Process { pid: 4242, name, value, .. }
+            if name == "second.exe" && *value == (9 * common::GIB) as f64
+    )));
+}
+
+#[test]
 fn memory_stays_quiet() {
     let (triggers, mut window) = quiet_case();
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = 2 * common::GIB);

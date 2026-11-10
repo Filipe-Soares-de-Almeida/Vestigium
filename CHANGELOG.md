@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- Two different programs that were given the same process number within one occurrence are no longer
+  added together when the heaviest process is picked, so the suspect names the right program.
 - The timeline of an occurrence now names the disk, or the processor core, that reached the peak
   value it quotes. When two disks went past a limit in the same window, it used to name the disk
   that crossed first next to the peak of the other.

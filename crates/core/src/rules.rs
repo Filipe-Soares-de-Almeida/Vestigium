@@ -861,30 +861,30 @@ enum Summary {
 
 /// Processes by the mean or the peak of `metric` across the rankings, heaviest first.
 fn ranked(tops: &[&ProcessTop], metric: Metric, summary: Summary) -> Vec<Evidence> {
-    let mut load: HashMap<u32, (String, f64)> = HashMap::new();
+    let mut load: HashMap<(u32, &str), f64> = HashMap::new();
     for p in tops.iter().flat_map(|t| &t.entries) {
         let value = process_value(p, metric);
-        let entry = load.entry(p.pid).or_insert((p.name.clone(), 0.0));
-        entry.1 = match summary {
-            Summary::Mean => entry.1 + value,
-            Summary::Max => entry.1.max(value),
+        let entry = load.entry((p.pid, p.name.as_str())).or_insert(0.0);
+        *entry = match summary {
+            Summary::Mean => *entry + value,
+            Summary::Max => entry.max(value),
         };
     }
     let count = tops.len().max(1) as f64;
-    let mut ranked: Vec<(u32, String, f64)> = load
+    let mut ranked: Vec<(u32, &str, f64)> = load
         .into_iter()
-        .map(|(pid, (name, value))| match summary {
+        .map(|((pid, name), value)| match summary {
             Summary::Mean => (pid, name, value / count),
             Summary::Max => (pid, name, value),
         })
         .filter(|(_, _, value)| *value > 0.0)
         .collect();
-    ranked.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)));
+    ranked.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(b.1)));
     ranked
         .into_iter()
         .map(|(pid, name, value)| Evidence::Process {
             pid,
-            name,
+            name: name.to_string(),
             metric,
             value,
         })
