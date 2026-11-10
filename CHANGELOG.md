@@ -22,6 +22,12 @@ How to use this file:
 
 ## [Unreleased]
 
+### Security
+
+- The administrator helper now loads the Windows libraries it needs from the Windows system folder
+  only, so a file with the name of one of them left beside the helper is never run with administrator
+  rights.
+
 ### Fixed
 
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and

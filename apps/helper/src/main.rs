@@ -3,9 +3,16 @@
 
 use std::process::ExitCode;
 
+use windows::Win32::System::LibraryLoader::{
+    LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+};
+
 use vestigium_helper::{capture, chkdsk, delete, dumps, job, scan, surface, tweak};
 
 fn main() -> ExitCode {
+    // Libraries loaded from here on come from System32 only; a failure leaves the build-time limit.
+    // SAFETY: called once at startup, before any thread or library load of the helper's own.
+    let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Ok(job) = job::parse(&args) else {
         return ExitCode::from(job::REFUSED);

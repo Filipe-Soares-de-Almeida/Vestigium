@@ -15,6 +15,11 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={ICON}");
+    // Static imports resolve from System32 only, never from the helper's own folder.
+    println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+    // The debugger engine loads after main restricts the search path, so its own imports follow it.
+    println!("cargo:rustc-link-arg-bins=/DELAYLOAD:dbgeng.dll");
+    println!("cargo:rustc-link-arg-bins=delayimp.lib");
     // The UAC prompt and Task Manager show these fields, not the file name.
     let mut resource = winresource::WindowsResource::new();
     resource
