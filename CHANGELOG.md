@@ -38,6 +38,9 @@ How to use this file:
 
 ### Fixed
 
+- A Seagate hard disk that logged a single command timeout no longer shows an impossible count of
+  4294967295 damaged sectors. The command timeout attribute is now read as the 16-bit counter it holds,
+  and the number on a disk-health alert is the highest of the watched counters instead of their sum.
 - A hard disk that was idle when the monitor restarted no longer has its open disk-health alert
   closed and reopened as a new one, which could hide a critical alert and reset its date. The alert now
   stays open until the disk is read again, and the idle disk is still never woken up to be read.

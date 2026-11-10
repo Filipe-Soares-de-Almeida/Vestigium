@@ -8,7 +8,7 @@ use crate::{EventMeaning, Media, NextStep, WinEvent};
 use super::{
     Concern, DAY_MS, DelayKind, DiskHealth, Finding, FindingKind, HealthFact, HealthInputs,
     Measure, NVME_WORN_PCT, Reference, SmartAttribute, Subject, WATCHED_ATTRIBUTES,
-    failures_between,
+    failures_between, watched_count,
 };
 
 const GB: u64 = 1 << 30;
@@ -110,8 +110,12 @@ fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
     let watched: Vec<SmartAttribute> = disk
         .attributes
         .iter()
-        .filter(|a| WATCHED_ATTRIBUTES.contains(&a.id) && a.raw > 0)
-        .copied()
+        .filter(|a| WATCHED_ATTRIBUTES.contains(&a.id))
+        .map(|a| SmartAttribute {
+            raw: u64::from(watched_count(a)),
+            ..*a
+        })
+        .filter(|a| a.raw > 0)
         .collect();
     let nvme_critical = disk
         .nvme
@@ -137,9 +141,9 @@ fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
             )
         }
         None => {
-            let raw: u64 = watched.iter().map(|a| a.raw).sum();
+            let highest = watched.iter().map(|a| a.raw).max().unwrap_or(0);
             (
-                Measure::Count(u32::try_from(raw).unwrap_or(u32::MAX)),
+                Measure::Count(u32::try_from(highest).unwrap_or(u32::MAX)),
                 Reference::AtMost(Measure::Count(0)),
             )
         }

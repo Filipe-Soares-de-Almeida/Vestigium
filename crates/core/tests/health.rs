@@ -163,6 +163,42 @@ fn smart_raw_counters_raise_attention() {
 }
 
 #[test]
+fn seagate_command_timeouts_read_as_a_16_bit_count() {
+    let mut inputs = healthy();
+    inputs.disks = vec![disk(vec![attr(188, 0x0001_0001_0001)])];
+
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.concern, Concern::Attention);
+    assert_eq!(smart.value, Measure::Count(1));
+    assert_eq!(smart.evidence, vec![HealthFact::Attribute(attr(188, 1))]);
+}
+
+#[test]
+fn the_finding_value_is_the_highest_counter_not_their_sum() {
+    let mut inputs = healthy();
+    inputs.disks = vec![disk(vec![
+        attr(5, 7),
+        attr(197, 2),
+        attr(188, 0x0003_0000_0001),
+    ])];
+
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.value, Measure::Count(7));
+}
+
+#[test]
+fn a_seagate_counter_with_no_timeouts_raises_nothing() {
+    let mut inputs = healthy();
+    inputs.disks = vec![disk(vec![attr(188, 0x0001_0001_0000)])];
+
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
+}
+
+#[test]
 fn predict_failure_is_critical() {
     let mut inputs = healthy();
     inputs.disks[0].predict_failure = true;

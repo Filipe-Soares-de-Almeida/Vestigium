@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// ATA attributes whose raw count above zero is a reason to look at the disk.
 pub const WATCHED_ATTRIBUTES: [u8; 5] = [5, 187, 188, 197, 198];
+/// Seagate packs three 16-bit counters in attribute 188; its first is the command timeouts.
+const COMMAND_TIMEOUT_ID: u8 = 188;
 /// NVMe "percentage used" from which the disk counts as worn.
 pub const NVME_WORN_PCT: u8 = 90;
 const ENTRIES: usize = 30;
@@ -61,6 +63,15 @@ pub fn nvme_detail(log: &[u8]) -> Option<NvmeDetail> {
         unsafe_shutdowns: counter(log, 144)?,
         error_log_entries: counter(log, 176)?,
     })
+}
+
+/// The count a watched attribute stands for: the low 16 bits of 188 (assumed Seagate layout), else the raw value.
+pub fn watched_count(attribute: &SmartAttribute) -> u32 {
+    if attribute.id == COMMAND_TIMEOUT_ID {
+        (attribute.raw & 0xFFFF) as u32
+    } else {
+        u32::try_from(attribute.raw).unwrap_or(u32::MAX)
+    }
 }
 
 /// The attributes of a 512-byte SMART READ DATA block: 30 entries of 12 bytes from byte 2.

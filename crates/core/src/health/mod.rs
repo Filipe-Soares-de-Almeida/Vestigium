@@ -13,7 +13,7 @@ pub use reliability::{failures_between, is_failure};
 pub use rules::evaluate;
 pub use smart::{
     NVME_WORN_PCT, NvmeDetail, NvmeHealth, SmartAttribute, WATCHED_ATTRIBUTES, nvme_detail,
-    nvme_health, smart_attributes,
+    nvme_health, smart_attributes, watched_count,
 };
 
 /// Layout of the `Finding` BLOB written today.
