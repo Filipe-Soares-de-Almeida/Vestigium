@@ -182,7 +182,7 @@ pub fn check(letter: char) -> (Outcome, VolumeCheck) {
 
 /// Checks the file system of volume `letter` into a new `.chkdsk` file.
 pub fn run(letter: char, out: &Path) -> ExitCode {
-    let Ok(mut file) = output::create(out, "tests", "chkdsk") else {
+    let Ok(file) = output::create(out, "tests", "chkdsk") else {
         return ExitCode::from(job::REFUSED);
     };
     let started_ms = wall_ms();
@@ -194,7 +194,7 @@ pub fn run(letter: char, out: &Path) -> ExitCode {
         outcome,
         data: TestData::VolumeCheck(found),
     };
-    if write_run(&mut file, &run) {
+    if write_run(file, &run) {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(job::WRITE_FAILED)

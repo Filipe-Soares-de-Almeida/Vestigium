@@ -342,15 +342,13 @@ pub fn failed_run(number: u32, media: Media, reason: String, started_ms: i64) ->
 }
 
 /// Writes a run as the agent reads it: the version byte, then the run.
-pub(crate) fn write_run(file: &mut File, run: &TestRun) -> bool {
+pub(crate) fn write_run(mut file: output::Pending, run: &TestRun) -> bool {
     let mut bytes = vec![TEST_RUN_VERSION];
     match postcard::to_allocvec(run) {
         Ok(body) => bytes.extend(body),
         Err(_) => return false,
     }
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .is_ok()
+    file.write_all(&bytes).is_ok() && file.commit().is_ok()
 }
 
 fn rewrite(file: &mut File, progress: &SurfaceProgress) {
@@ -367,11 +365,11 @@ fn rewrite(file: &mut File, progress: &SurfaceProgress) {
 /// Scans physical drive `number` from `from_mib` into a new `.surface` file, rewriting a
 /// `.progress` file beside it and stopping when a `.stop` file appears there.
 pub fn run(number: u32, from_mib: u64, out: &Path) -> ExitCode {
-    let Ok(mut file) = output::create(out, "tests", "surface") else {
+    let Ok(file) = output::create(out, "tests", "surface") else {
         return ExitCode::from(job::REFUSED);
     };
     let Ok(mut progress_file) =
-        output::create(&out.with_extension("progress"), "tests", "progress")
+        output::create_in_place(&out.with_extension("progress"), "tests", "progress")
     else {
         return ExitCode::from(job::REFUSED);
     };
@@ -398,7 +396,7 @@ pub fn run(number: u32, from_mib: u64, out: &Path) -> ExitCode {
     };
     let _ = output::delete_through(&progress_file);
     drop(progress_file);
-    if write_run(&mut file, &run) {
+    if write_run(file, &run) {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(job::WRITE_FAILED)

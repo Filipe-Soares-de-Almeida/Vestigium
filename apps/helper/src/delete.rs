@@ -75,11 +75,7 @@ pub fn run(list: &Path) -> ExitCode {
         Ok(body) => bytes.extend(body),
         Err(_) => return ExitCode::from(job::WRITE_FAILED),
     }
-    if file
-        .write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .is_err()
-    {
+    if file.write_all(&bytes).is_err() || file.commit().is_err() {
         return ExitCode::from(job::WRITE_FAILED);
     }
     ExitCode::SUCCESS

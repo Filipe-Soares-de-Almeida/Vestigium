@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
 use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, disk_subject};
@@ -152,19 +153,51 @@ pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
     ids
 }
 
-/// The files named `<digits>.<extension>`, in name order.
+/// How long an empty result, or the temporary file of one, may sit unchanged before it counts as
+/// what a helper that died left behind; longer than any job, the deep capture's 24 hours included.
+const LEFTOVER_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// The files named `<digits>.<extension>`, in name order. An empty one, or a `<digits>.<extension>.tmp`,
+/// untouched for `LEFTOVER_AFTER` is deleted instead of listed.
 fn numbered_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
-        .map(|entry| entry.path())
-        .filter(|path| is_numbered(path, extension))
-        .collect();
+    let now = SystemTime::now();
+    let temporary = format!("{extension}.tmp");
+    let mut files = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        if is_numbered(&path, &temporary) {
+            if is_left_over(&entry, now, false) {
+                let _ = fs::remove_file(&path);
+            }
+        } else if is_numbered(&path, extension) {
+            if is_left_over(&entry, now, true) {
+                let _ = fs::remove_file(&path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
     files.sort();
     files
+}
+
+/// Whether the file has not changed for `LEFTOVER_AFTER` and, when `only_empty`, holds nothing.
+fn is_left_over(entry: &fs::DirEntry, now: SystemTime, only_empty: bool) -> bool {
+    let Ok(meta) = entry.metadata() else {
+        return false;
+    };
+    (!only_empty || meta.len() == 0)
+        && meta
+            .modified()
+            .ok()
+            .and_then(|at| now.duration_since(at).ok())
+            .is_some_and(|age| age >= LEFTOVER_AFTER)
 }
 
 fn is_numbered(path: &Path, extension: &str) -> bool {
@@ -449,6 +482,61 @@ mod tests {
         let rows = store.tweaks_in_place().unwrap();
         assert_eq!(rows[0].change, change);
         assert_eq!(rows[0].applier, Applier::Elevated);
+    }
+
+    fn age(path: &Path, by: Duration) {
+        let file = fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(SystemTime::now() - by).unwrap();
+    }
+
+    #[test]
+    fn an_old_empty_result_is_a_leftover_and_a_fresh_one_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        fs::write(tweaks.join("30.tweaked"), b"").unwrap();
+        fs::write(tweaks.join("31.tweaked"), b"").unwrap();
+        fs::write(tweaks.join("32.tweaked"), [TWEAK_PLAN_VERSION, 0xff, 0xff]).unwrap();
+        age(
+            &tweaks.join("30.tweaked"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+        age(
+            &tweaks.join("32.tweaked"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+
+        assert!(import_tweaks(&tweaks, &mut store).is_empty());
+
+        assert!(!tweaks.join("30.tweaked").exists(), "old and empty goes");
+        assert!(
+            tweaks.join("31.tweaked").exists(),
+            "a helper may be running"
+        );
+        assert!(
+            tweaks.join("32.tweaked").exists(),
+            "an unreadable file stays"
+        );
+    }
+
+    #[test]
+    fn an_old_temporary_result_is_deleted_and_never_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        fs::write(tweaks.join("40.tweaked.tmp"), [TWEAK_PLAN_VERSION, 1]).unwrap();
+        fs::write(tweaks.join("41.tweaked.tmp"), [TWEAK_PLAN_VERSION, 1]).unwrap();
+        age(
+            &tweaks.join("40.tweaked.tmp"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+
+        assert!(import_tweaks(&tweaks, &mut store).is_empty());
+
+        assert!(!tweaks.join("40.tweaked.tmp").exists());
+        assert!(tweaks.join("41.tweaked.tmp").exists());
     }
 
     #[test]

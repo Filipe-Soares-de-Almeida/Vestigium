@@ -38,6 +38,10 @@ How to use this file:
 
 ### Fixed
 
+- A helper that stops halfway, because of a full disk, a power cut or the process being ended, no
+  longer leaves an empty result file that the monitor reads again at every import. The helper now writes
+  its result under a temporary name and gives it the final one only when it is complete, and the
+  monitor deletes an empty result or a temporary file that has not changed for a week.
 - A tweak is no longer written to Windows when the restore point it asked for was not confirmed,
   unless you agreed to go on without one. Before, a point that Windows logged and then dropped, or
   one that Windows never confirmed, let the change through while the history said a point was made.

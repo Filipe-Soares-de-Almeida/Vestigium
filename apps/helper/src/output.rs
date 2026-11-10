@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
+use std::ops::{Deref, DerefMut};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::AsRawHandle;
 use std::path::{Component, Path, PathBuf, Prefix};
@@ -8,7 +9,8 @@ use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_GENERIC_WRITE,
     FILE_NAME_NORMALIZED, FILE_SHARE_READ, FileDispositionInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
-    GetFinalPathNameByHandleW, GetLongPathNameW, SetFileInformationByHandle, VOLUME_NAME_DOS,
+    GetFinalPathNameByHandleW, GetLongPathNameW, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    SetFileInformationByHandle, VOLUME_NAME_DOS,
 };
 use windows::core::HSTRING;
 
@@ -77,9 +79,83 @@ pub fn open_existing(path: &Path, folder: &str, extension: &str) -> Result<File,
     Ok(file)
 }
 
-/// Creates the result file: right shape, every folder on the way real (no junction or link), and new.
-pub fn create(path: &Path, folder: &str, extension: &str) -> Result<File, String> {
+/// Creates a file for a progress marker: right shape, every folder on the way real (no junction
+/// or link), and new, under its own name.
+pub fn create_in_place(path: &Path, folder: &str, extension: &str) -> Result<File, String> {
     check_shape(path, folder, extension)?;
+    open_new(path)
+}
+
+/// A result file written under `<name>.tmp` beside its final name, which it takes in `commit`.
+/// Dropped without a commit, the temporary file is deleted through its handle.
+pub struct Pending {
+    file: File,
+    target: PathBuf,
+    temp: PathBuf,
+    committed: bool,
+}
+
+impl Pending {
+    /// Writes the file to disk, then gives it its final name; it never replaces an existing file.
+    pub fn commit(mut self) -> Result<(), String> {
+        self.file.sync_all().map_err(|e| e.to_string())?;
+        let from = HSTRING::from(self.temp.as_os_str());
+        let to = HSTRING::from(self.target.as_os_str());
+        // SAFETY: two NUL-terminated strings that outlive the call; no replace flag, so an existing target fails.
+        unsafe { MoveFileExW(&from, &to, MOVEFILE_WRITE_THROUGH) }.map_err(|e| e.to_string())?;
+        self.committed = true;
+        if let Err(reason) = same_final_path(&self.file, &self.target) {
+            let _ = delete_through(&self.file);
+            return Err(reason);
+        }
+        Ok(())
+    }
+}
+
+impl Deref for Pending {
+    type Target = File;
+
+    fn deref(&self) -> &File {
+        &self.file
+    }
+}
+
+impl DerefMut for Pending {
+    fn deref_mut(&mut self) -> &mut File {
+        &mut self.file
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = delete_through(&self.file);
+        }
+    }
+}
+
+/// Creates the temporary file of a result: the final name has the right shape and is free, every
+/// folder on the way is real (no junction or link), and the temporary name is new.
+pub fn create(path: &Path, folder: &str, extension: &str) -> Result<Pending, String> {
+    check_shape(path, folder, extension)?;
+    if std::fs::symlink_metadata(path).is_ok() {
+        return Err(format!("{} already exists", path.display()));
+    }
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".tmp");
+    let temp = PathBuf::from(name);
+    let file = open_new(&temp)?;
+    Ok(Pending {
+        file,
+        target: path.to_path_buf(),
+        temp,
+        committed: false,
+    })
+}
+
+/// Opens `path` as a new file with `DELETE` access after checking that no folder on the way is a
+/// junction or link, and that its handle leads to `path`.
+fn open_new(path: &Path) -> Result<File, String> {
     for folder in path.ancestors().skip(1) {
         if folder.parent().is_none() {
             break;
@@ -160,6 +236,8 @@ pub fn delete_through(file: &File) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     const GOOD: &str =
@@ -218,8 +296,59 @@ mod tests {
         let folder = dir.path().join("Vestigium").join("data").join("captures");
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("42.capture");
-        assert!(create(&path, "captures", "capture").is_ok());
-        assert!(create(&path, "captures", "capture").is_err());
+        let made = create(&path, "captures", "capture").unwrap();
+        assert!(
+            create(&path, "captures", "capture").is_err(),
+            "temp is taken"
+        );
+        made.commit().unwrap();
+        assert!(
+            create(&path, "captures", "capture").is_err(),
+            "final exists"
+        );
+    }
+
+    fn result_folder(dir: &tempfile::TempDir, name: &str) -> PathBuf {
+        let folder = dir.path().join("Vestigium").join("data").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    #[test]
+    fn a_result_is_written_under_a_temporary_name_and_renamed_at_the_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = result_folder(&dir, "tweaks");
+        let path = folder.join("30.tweaked");
+        let mut pending = create(&path, "tweaks", "tweaked").unwrap();
+        pending.write_all(b"result").unwrap();
+        assert!(!path.exists(), "nothing under the final name yet");
+        assert!(folder.join("30.tweaked.tmp").exists());
+        pending.commit().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"result");
+        assert!(!folder.join("30.tweaked.tmp").exists());
+    }
+
+    #[test]
+    fn a_commit_never_replaces_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = result_folder(&dir, "tweaks");
+        let path = folder.join("31.tweaked");
+        let mut pending = create(&path, "tweaks", "tweaked").unwrap();
+        pending.write_all(b"new").unwrap();
+        std::fs::write(&path, b"other").unwrap();
+        assert!(pending.commit().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"other");
+        assert!(!folder.join("31.tweaked.tmp").exists());
+    }
+
+    #[test]
+    fn a_result_dropped_before_the_end_leaves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = result_folder(&dir, "scans");
+        let path = folder.join("32.scan");
+        drop(create(&path, "scans", "scan").unwrap());
+        assert!(!path.exists());
+        assert!(!folder.join("32.scan.tmp").exists());
     }
 
     #[test]
@@ -288,7 +417,7 @@ mod tests {
         let folder = dir.path().join("Vestigium").join("data").join("tests");
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("5.progress");
-        let file = create(&path, "tests", "progress").unwrap();
+        let file = create_in_place(&path, "tests", "progress").unwrap();
         let moved = folder.join("moved.txt");
         std::fs::rename(&path, &moved).unwrap();
         std::fs::write(&path, b"another file").unwrap();
@@ -303,8 +432,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("Vestigium").join("data").join("captures");
         std::fs::create_dir_all(&folder).unwrap();
-        let path = folder.join("7.capture");
-        let file = create(&path, "captures", "capture").unwrap();
+        let path = folder.join("7.progress");
+        let file = create_in_place(&path, "captures", "progress").unwrap();
         assert!(delete_through(&file).is_ok());
         drop(file);
         assert!(!path.exists());
