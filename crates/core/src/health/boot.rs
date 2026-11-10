@@ -3,10 +3,12 @@ use crate::xml::data_named;
 use super::{BootDelay, BootReport, BootTime, DelayKind};
 
 /// Words that mark a slow boot step as a security product, which is never offered for removal.
-const SECURITY_WORDS: [&str; 5] = [
+const SECURITY_WORDS: [&str; 7] = [
     "defender",
     "antimalware",
+    "anti-malware",
     "antivirus",
+    "anti-virus",
     "security",
     "msmpeng",
 ];

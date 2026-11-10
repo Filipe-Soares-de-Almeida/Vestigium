@@ -471,6 +471,63 @@ fn startup_app_is_never_a_security_product() {
     assert!(security.changes.is_empty() && security.signals.is_empty());
 }
 
+fn startup_status(name: &str, exe: &str) -> Status {
+    let mut pc = inputs();
+    pc.startup = vec![StartupEntry {
+        hive: Hive::CurrentUser,
+        list: StartupList::Run,
+        name: name.into(),
+        exe: exe.into(),
+    }];
+    advise(&pc)
+        .into_iter()
+        .find(|a| a.subject.as_deref() == Some(name))
+        .expect("the entry")
+        .status
+}
+
+#[test]
+fn security_products_are_protected_by_vendor_name() {
+    for (name, exe) in [
+        ("Malwarebytes Tray", "mbamtray.exe"),
+        (
+            "MBAMTray",
+            r"C:\Program Files\Malwarebytes\Anti-Malware\mbamtray.exe",
+        ),
+        ("Acme Anti-Malware Helper", "acme.exe"),
+        ("Acme Anti-Virus Helper", "acme.exe"),
+        ("Kaspersky Tray", "avp.exe"),
+        ("McAfee Agent", r"C:\Program Files\McAfee\Agent\masvc.exe"),
+        (
+            "Avast Tray",
+            r"C:\Program Files\Avast Software\Avast\AvastUI.exe",
+        ),
+        ("Norton Tray", "nortontray.exe"),
+        ("Sophos UI", "sophosui.exe"),
+        ("ESET Tray", "egui.exe"),
+    ] {
+        assert_eq!(startup_status(name, exe), Status::Protected, "{name}");
+    }
+}
+
+#[test]
+fn ordinary_startup_entries_stay_ready() {
+    for (name, exe) in [
+        (
+            "Spotify",
+            r"C:\Users\Someone\AppData\Roaming\Spotify\Spotify.exe",
+        ),
+        (
+            "OneDrive",
+            r"C:\Program Files\Microsoft OneDrive\OneDrive.exe",
+        ),
+        ("Steam Client", "steam.exe"),
+        ("Reset Helper", "reset.exe"),
+    ] {
+        assert_eq!(startup_status(name, exe), Status::Ready, "{name}");
+    }
+}
+
 #[test]
 fn a_third_party_antivirus_startup_entry_is_protected() {
     for exe in ["AvastUI.exe", "avgui.exe", "egui.exe", "avpui.exe"] {
