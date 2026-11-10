@@ -38,7 +38,11 @@ const DELAYS_SHOWN: usize = 5;
 
 /// Every finding of one health pass, the most worrying first and in table order otherwise.
 pub fn evaluate(inputs: &HealthInputs) -> Vec<Finding> {
-    let mut found: Vec<Finding> = inputs.disks.iter().filter_map(disk_smart).collect();
+    let mut found: Vec<Finding> = inputs
+        .disks
+        .iter()
+        .filter_map(|d| disk_smart(d, is_hdd(inputs, &d.name)))
+        .collect();
     found.extend(low_space(inputs));
     found.extend(page_file(inputs));
     found.extend(memory_often(inputs));
@@ -106,11 +110,21 @@ fn matching<'a>(
         .filter(move |e| e.meaning == meaning && (ids.is_empty() || ids.contains(&e.id)))
 }
 
-fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
+/// Whether the named disk is a hard drive; a disk the machine facts do not list is not.
+fn is_hdd(inputs: &HealthInputs, name: &str) -> bool {
+    inputs
+        .machine
+        .disks
+        .iter()
+        .any(|d| d.name == name && d.media == Media::Hdd)
+}
+
+/// The watched attributes count only on a hard drive, where their raw value is a plain counter.
+fn disk_smart(disk: &DiskHealth, hdd: bool) -> Option<Finding> {
     let watched: Vec<SmartAttribute> = disk
         .attributes
         .iter()
-        .filter(|a| WATCHED_ATTRIBUTES.contains(&a.id))
+        .filter(|a| hdd && WATCHED_ATTRIBUTES.contains(&a.id))
         .map(|a| SmartAttribute {
             raw: u64::from(watched_count(a)),
             ..*a

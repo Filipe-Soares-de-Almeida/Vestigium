@@ -8,6 +8,7 @@ const COMMAND_TIMEOUT_ID: u8 = 188;
 pub const NVME_WORN_PCT: u8 = 90;
 const ENTRIES: usize = 30;
 const ENTRY_LEN: usize = 12;
+const BLOCK_LEN: usize = 512;
 
 /// One attribute of an ATA SMART READ DATA block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,7 +76,15 @@ pub fn watched_count(attribute: &SmartAttribute) -> u32 {
 }
 
 /// The attributes of a 512-byte SMART READ DATA block: 30 entries of 12 bytes from byte 2.
+/// A block whose bytes do not sum to zero modulo 256 yields none.
 pub fn smart_attributes(data: &[u8]) -> Vec<SmartAttribute> {
+    let sum = data
+        .iter()
+        .take(BLOCK_LEN)
+        .fold(0u8, |a, b| a.wrapping_add(*b));
+    if data.len() < BLOCK_LEN || sum != 0 {
+        return Vec::new();
+    }
     (0..ENTRIES)
         .filter_map(|i| data.get(2 + i * ENTRY_LEN..2 + (i + 1) * ENTRY_LEN))
         .filter(|entry| entry[0] != 0)

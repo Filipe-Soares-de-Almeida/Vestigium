@@ -68,6 +68,22 @@ fn disk(attributes: Vec<SmartAttribute>) -> DiskHealth {
     }
 }
 
+/// A disk of the machine's hard drive, the one the SMART attribute list applies to.
+fn hdd(attributes: Vec<SmartAttribute>) -> DiskHealth {
+    DiskHealth {
+        name: "1 D:".into(),
+        ..disk(attributes)
+    }
+}
+
+/// Sets byte 511 so that the 512 bytes of a SMART block sum to zero modulo 256.
+fn sealed(mut block: Vec<u8>) -> Vec<u8> {
+    block[511] = 0;
+    let sum = block.iter().fold(0u8, |a, b| a.wrapping_add(*b));
+    block[511] = sum.wrapping_neg();
+    block
+}
+
 fn nvme(critical_warning: u8, percentage_used: u8, media_errors: u64) -> NvmeHealth {
     NvmeHealth {
         critical_warning,
@@ -147,13 +163,13 @@ fn healthy_pc_has_no_findings() {
 #[test]
 fn smart_raw_counters_raise_attention() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(187, 1), attr(9, 4000)])];
+    inputs.disks = vec![hdd(vec![attr(187, 1), attr(9, 4000)])];
 
     let found = evaluate(&inputs);
     let smart = find(&found, FindingKind::DiskSmart).unwrap();
 
     assert_eq!(smart.concern, Concern::Attention);
-    assert_eq!(smart.subject, Subject::Disk("0 C:".into()));
+    assert_eq!(smart.subject, Subject::Disk("1 D:".into()));
     assert_eq!(smart.value, Measure::Count(1));
     assert_eq!(smart.evidence, vec![HealthFact::Attribute(attr(187, 1))]);
     assert_eq!(
@@ -163,9 +179,27 @@ fn smart_raw_counters_raise_attention() {
 }
 
 #[test]
+fn solid_state_watched_attributes_are_not_flagged() {
+    let mut inputs = healthy();
+    inputs.disks = vec![disk(vec![attr(5, 3), attr(187, 1)])];
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
+
+    inputs.disks = vec![hdd(vec![attr(5, 3)])];
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::DiskSmart)
+            .unwrap()
+            .concern,
+        Concern::Attention
+    );
+
+    inputs.disks[0].name = "9 Z:".into();
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
+}
+
+#[test]
 fn seagate_command_timeouts_read_as_a_16_bit_count() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(188, 0x0001_0001_0001)])];
+    inputs.disks = vec![hdd(vec![attr(188, 0x0001_0001_0001)])];
 
     let found = evaluate(&inputs);
     let smart = find(&found, FindingKind::DiskSmart).unwrap();
@@ -178,7 +212,7 @@ fn seagate_command_timeouts_read_as_a_16_bit_count() {
 #[test]
 fn the_finding_value_is_the_highest_counter_not_their_sum() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![
+    inputs.disks = vec![hdd(vec![
         attr(5, 7),
         attr(197, 2),
         attr(188, 0x0003_0000_0001),
@@ -193,7 +227,7 @@ fn the_finding_value_is_the_highest_counter_not_their_sum() {
 #[test]
 fn a_seagate_counter_with_no_timeouts_raises_nothing() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(188, 0x0001_0001_0000)])];
+    inputs.disks = vec![hdd(vec![attr(188, 0x0001_0001_0000)])];
 
     assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
 }
@@ -233,12 +267,23 @@ fn nvme_critical_warning_is_critical_and_wear_is_attention() {
 }
 
 #[test]
+fn smart_block_with_a_bad_checksum_is_ignored() {
+    let mut block = vec![0u8; 512];
+    block[2..14].copy_from_slice(&[5, 0x33, 0, 100, 99, 5, 0, 0, 0, 0, 0, 0]);
+    let mut block = sealed(block);
+    assert_eq!(smart_attributes(&block).len(), 1);
+
+    block[511] = block[511].wrapping_add(1);
+    assert_eq!(smart_attributes(&block), Vec::new());
+}
+
+#[test]
 fn smart_parsers_read_the_blocks_and_survive_garbage() {
     let mut block = vec![0u8; 512];
     block[2..14].copy_from_slice(&[5, 0x33, 0, 100, 99, 7, 0, 0, 0, 0, 0, 0]);
     block[14..26].copy_from_slice(&[194, 0x22, 0, 36, 60, 40, 0, 20, 0, 60, 0, 0]);
 
-    let attributes = smart_attributes(&block);
+    let attributes = smart_attributes(&sealed(block));
 
     assert_eq!(attributes.len(), 2);
     assert_eq!(
@@ -636,7 +681,7 @@ fn no_crash_dump_warning() {
 #[test]
 fn every_finding_carries_evidence_and_critical_comes_first() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(197, 2)])];
+    inputs.disks = vec![hdd(vec![attr(197, 2)])];
     inputs.volumes = vec![volume(30, 900)];
     inputs.page_files = Some(Vec::new());
     inputs.memory_high_days_7d = 4;

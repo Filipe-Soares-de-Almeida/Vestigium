@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A solid-state disk no longer gets an attention finding from the SMART counters that only mean a
+  failing sector on a hard disk, and a SMART block whose checksum is wrong, as some USB bridges
+  return, is ignored instead of being read as attributes.
 - A busy disk during a surface scan, volume check or speed test of that same disk is now recognised
   as the load of the test, whatever program Windows names as the cause, such as the chkdsk process
   the volume check starts. The history marks it as caused by a test instead of suggesting ordinary
