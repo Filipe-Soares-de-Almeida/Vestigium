@@ -53,6 +53,9 @@ How to use this file:
 
 ### Fixed
 
+- While the watcher is stuck or busy, the timing measurements and Windows events waiting for it are
+  now capped instead of growing in memory without limit. A Windows event that did not fit is
+  reported and read again at the next start.
 - Restarting the watcher within five minutes of a crash no longer loses that crash: what the black
   box held is kept until Windows has confirmed the fall or the wait is over.
 - Pausing watching just as an earlier timed pause ends no longer lets the old pause end the new

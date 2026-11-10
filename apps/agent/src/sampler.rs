@@ -1246,10 +1246,10 @@ mod tests {
         handle: SamplerHandle,
         status: Arc<Mutex<AgentStatus>>,
         now: Arc<Mutex<NowFrame>>,
-        probe_tx: mpsc::Sender<ProbeTick>,
+        probe_tx: mpsc::SyncSender<ProbeTick>,
         power_tx: mpsc::Sender<PowerNotice>,
         wake: Arc<Wake>,
-        events_tx: mpsc::Sender<Delivered>,
+        events_tx: mpsc::SyncSender<Delivered>,
     }
 
     /// What a test keeps of a sampler's wiring: the gate, the shared state and the senders.
@@ -1257,10 +1257,10 @@ mod tests {
         gate: Arc<RunGate>,
         status: Arc<Mutex<AgentStatus>>,
         now: Arc<Mutex<NowFrame>>,
-        probe_tx: mpsc::Sender<ProbeTick>,
+        probe_tx: mpsc::SyncSender<ProbeTick>,
         power_tx: mpsc::Sender<PowerNotice>,
         wake: Arc<Wake>,
-        events_tx: mpsc::Sender<Delivered>,
+        events_tx: mpsc::SyncSender<Delivered>,
     }
 
     /// Occurrences close one second after their trigger, so tests do not wait half a minute.
@@ -1293,10 +1293,10 @@ mod tests {
     /// The wiring of a sampler and the handles a test uses to drive it.
     fn wire(dir: &std::path::Path, flush: Duration, source_set: SourceSet) -> (Wiring, Ties) {
         let gate = RunGate::new();
-        let (probe_tx, probe_rx) = mpsc::channel();
+        let (probe_tx, probe_rx) = mpsc::sync_channel(64);
         let (power_tx, power_rx) = mpsc::channel();
         let wake = Arc::new(Wake::new().unwrap());
-        let (events_tx, events_rx) = mpsc::channel();
+        let (events_tx, events_rx) = mpsc::sync_channel(64);
         let status = Arc::new(Mutex::new(AgentStatus::default()));
         let sensitive = SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR);
         let now = Arc::new(Mutex::new(NowFrame::default()));
@@ -2546,7 +2546,9 @@ mod tests {
     }
 
     /// A subscription to an event no log holds, so it starts and stays silent.
-    fn quiet_subscription(tx: mpsc::Sender<Delivered>) -> Result<EventSubscription, CollectError> {
+    fn quiet_subscription(
+        tx: mpsc::SyncSender<Delivered>,
+    ) -> Result<EventSubscription, CollectError> {
         let query = "<QueryList><Query Id=\"0\"><Select Path=\"Application\">                     *[System[Provider[@Name='VestigiumNoSuchProvider']]]</Select></Query></QueryList>";
         EventSubscription::start_with_query(query, None, vestigium_core::classify, tx)
     }
@@ -2555,7 +2557,7 @@ mod tests {
     fn a_failed_subscription_is_tried_again_every_minute_until_it_starts() {
         let dir = tempfile::tempdir().unwrap();
         let mut sampler = manual_sampler(dir.path());
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = mpsc::sync_channel(64);
         let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = attempts.clone();
         sampler.resubscribe = Some(Box::new(move |_| {
@@ -2834,9 +2836,9 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let shared = Arc::new(crate::app::tests::shared());
-        let (probe_tx, probe_rx) = mpsc::channel();
+        let (probe_tx, probe_rx) = mpsc::sync_channel(64);
         let (_power_tx, power_rx) = mpsc::channel();
-        let (_events_tx, events_rx) = mpsc::channel();
+        let (_events_tx, events_rx) = mpsc::sync_channel(64);
         let wiring = Wiring {
             flush: Duration::from_secs(1),
             timing: QUICK,

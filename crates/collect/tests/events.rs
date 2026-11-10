@@ -71,7 +71,7 @@ fn receive(rx: &Receiver<Delivered>, count: usize) -> Vec<Delivered> {
 #[ignore]
 fn subscription_delivers_a_reported_event() {
     let id = fresh_id();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let _subscription = EventSubscription::start_with_query(&query(id), None, test_meaning, tx)
         .expect("subscribing needs no elevation");
 
@@ -99,7 +99,7 @@ fn bookmark_resumes_after_the_last_event() {
     let id = fresh_id().wrapping_add(1);
     report(id, "older");
     report(id, "newer");
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let subscription =
         EventSubscription::start_with_query(&query(id), None, test_meaning, tx).unwrap();
     let both = receive(&rx, 2);
@@ -110,7 +110,7 @@ fn bookmark_resumes_after_the_last_event() {
         "the two reported events were not both delivered"
     );
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let _resumed = EventSubscription::start_with_query(
         &query(id),
         both[0].bookmark_xml.as_deref(),
@@ -127,7 +127,7 @@ fn bookmark_resumes_after_the_last_event() {
 #[test]
 #[ignore]
 fn a_refused_bookmark_starts_the_backfill_instead() {
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(64);
 
     let subscription =
         EventSubscription::start(Some("not a bookmark"), Duration::from_secs(60), tx);

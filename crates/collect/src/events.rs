@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
@@ -36,7 +36,7 @@ pub struct Delivered {
 
 /// What the callback needs; owned by the subscription and freed after it closes.
 struct Context {
-    tx: Sender<Delivered>,
+    tx: SyncSender<Delivered>,
     meaning_of: Classifier,
     render: EVT_HANDLE,
     bookmark: Mutex<EVT_HANDLE>,
@@ -48,7 +48,7 @@ struct Context {
 
 impl Context {
     fn new(
-        tx: Sender<Delivered>,
+        tx: SyncSender<Delivered>,
         meaning_of: Classifier,
         render: EVT_HANDLE,
         bookmark: EVT_HANDLE,
@@ -98,7 +98,7 @@ impl EventSubscription {
     pub fn start(
         bookmark_xml: Option<&str>,
         backfill: Duration,
-        tx: Sender<Delivered>,
+        tx: SyncSender<Delivered>,
     ) -> Result<EventSubscription, CollectError> {
         if let Some(xml) = bookmark_xml
             && let Ok(resumed) = EventSubscription::start_with_query(
@@ -129,7 +129,7 @@ impl EventSubscription {
         query: &str,
         bookmark_xml: Option<&str>,
         meaning_of: Classifier,
-        tx: Sender<Delivered>,
+        tx: SyncSender<Delivered>,
     ) -> Result<EventSubscription, CollectError> {
         // SAFETY: a context for the system properties, closed with `Context`.
         let render = unsafe { EvtCreateRenderContext(None, EvtRenderContextSystem.0)? };
@@ -203,9 +203,11 @@ unsafe extern "system" fn on_event(
     // SAFETY: the subscription hands back the context it was created with, alive until it closes.
     let context = unsafe { &*context.cast::<Context>() };
     match deliver(context, event) {
-        Ok(Some(delivered)) => {
-            let _ = context.tx.send(delivered);
-        }
+        Ok(Some(delivered)) => match context.tx.try_send(delivered) {
+            // A full queue never blocks the Event Log; the bookmark stays before what was lost.
+            Err(TrySendError::Full(_)) => context.fail("the Event Log queue was full"),
+            Ok(()) | Err(TrySendError::Disconnected(_)) => {}
+        },
         Ok(None) => {}
         Err(reason) => context.fail(reason),
     }
@@ -392,7 +394,7 @@ mod tests {
     }
 
     fn context() -> Context {
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
         Context::new(tx, classify, EVT_HANDLE(0), EVT_HANDLE(0))
     }
 

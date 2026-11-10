@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(7);
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let subscription = EventSubscription::start(None, Duration::from_secs(days * 86_400), tx)?;
     let events: Vec<Delivered> = std::iter::from_fn(|| rx.recv_timeout(QUIET).ok()).collect();
     drop(subscription);
@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Some(last) = events.last() else {
         return Ok(());
     };
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let _resumed = EventSubscription::start(last.bookmark_xml.as_deref(), Duration::ZERO, tx)?;
     let replayed = std::iter::from_fn(|| rx.recv_timeout(QUIET).ok()).count();
     println!("resumed after the last one: {replayed} events read again");

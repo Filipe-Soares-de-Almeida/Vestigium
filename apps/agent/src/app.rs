@@ -40,6 +40,10 @@ use crate::{autostart, paths, power, shutdown};
 const DEFAULT_FLUSH: Duration = Duration::from_secs(300);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+/// Probe ticks that wait for the sampler: about three minutes at the usual ten a second.
+const PROBE_QUEUE: usize = 2_048;
+/// Event Log events that wait for the sampler; the curated ones are far rarer than this.
+const EVENT_QUEUE: usize = 4_096;
 /// How far back the first run reads the curated Windows events.
 const EVENT_BACKFILL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Ten minutes of readings at 1 Hz, with room for late ticks.
@@ -485,10 +489,11 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
 
     release_orphaned_capture();
 
-    let (probe_tx, probe_rx) = mpsc::channel();
+    let (probe_tx, probe_rx) = mpsc::sync_channel(PROBE_QUEUE);
+    // A few power notices come per sleep and none may be lost, so this queue has no limit.
     let (power_tx, power_rx) = mpsc::channel();
     let wake = Arc::new(Wake::new().map_err(failed)?);
-    let (events_tx, events_rx) = mpsc::channel();
+    let (events_tx, events_rx) = mpsc::sync_channel(EVENT_QUEUE);
     // Without a readable bookmark the backfill runs again; stored events are not duplicated.
     let bookmark = store.bookmark_xml().ok().flatten();
     let subscription =

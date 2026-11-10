@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds = arg("--seconds").unwrap_or(60);
 
     let gate = RunGate::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(4096);
     let cpu_before = process_cpu_ms();
     let probe = spawn_probe(
         ProbeConfig::new(Duration::from_millis(period_ms)),
