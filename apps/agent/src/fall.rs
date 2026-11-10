@@ -39,6 +39,8 @@ pub struct Fall {
     loss: Option<(i64, CrashKind)>,
     down_ms: Option<i64>,
     next_boot: Vec<WinEvent>,
+    /// Events logged shortly before the last second watched, delivered again by the old bookmark.
+    before: Vec<WinEvent>,
 }
 
 impl Fall {
@@ -56,6 +58,7 @@ impl Fall {
             loss: None,
             down_ms: None,
             next_boot: Vec::new(),
+            before: Vec::new(),
         })
     }
 
@@ -64,9 +67,18 @@ impl Fall {
         self.last_ms
     }
 
-    /// Takes in a delivered event; only what was logged after the last second watched counts.
+    /// Takes in a delivered event: what the next boot logged after the last second watched dates
+    /// and classifies the fall, and what was logged just before it joins the evidence window.
     pub fn offer(&mut self, event: &WinEvent, now_ms: i64) {
-        if event.ts_ms <= self.last_ms || !NEXT_BOOT.contains(&event.meaning) {
+        if event.ts_ms <= self.last_ms {
+            if event.ts_ms >= self.last_ms - POSTMORTEM_BEFORE_MS
+                && !self.before.iter().any(|kept| same_record(kept, event))
+            {
+                self.before.push(event.clone());
+            }
+            return;
+        }
+        if !NEXT_BOOT.contains(&event.meaning) {
             return;
         }
         match event.meaning {
@@ -117,12 +129,19 @@ impl Fall {
             mem_total_bytes: 0,
             disks: Vec::new(),
         });
+        let mut events = store.events(from, to)?;
+        for kept in self.before {
+            if !events.iter().any(|stored| same_record(stored, &kept)) {
+                events.push(kept);
+            }
+        }
+        events.sort_by_key(|e| e.ts_ms);
         let window = Window {
             from_ms: from,
             to_ms: to,
             samples: samples.into_values().collect(),
             tops: tops.into_values().collect(),
-            events: store.events(from, to)?,
+            events,
             hangs: Vec::new(),
             gaps: store.gaps(from, to)?,
             machine,
@@ -136,6 +155,11 @@ impl Fall {
             self.next_boot,
         ))
     }
+}
+
+/// An event is unique per channel and record id.
+fn same_record(a: &WinEvent, b: &WinEvent) -> bool {
+    a.channel == b.channel && a.record_id == b.record_id
 }
 
 /// What makes the black box sync sooner, read once a second.
@@ -184,6 +208,7 @@ impl RingSync {
 #[cfg(test)]
 mod tests {
     use vestigium_core::Channel;
+    use vestigium_store::Batch;
 
     use super::*;
 
@@ -262,6 +287,85 @@ mod tests {
             fall.settled(231_000),
             "the 6008 never came; the 41 alone settles it"
         );
+    }
+
+    fn disk_event(ts_ms: i64, record_id: u64) -> WinEvent {
+        WinEvent {
+            record_id,
+            provider: "disk".into(),
+            id: 153,
+            ..event(ts_ms, EventMeaning::DiskRetry, "")
+        }
+    }
+
+    fn settled_occurrence(mut fall: Fall, store: &Store) -> Occurrence {
+        let after = fall.last_ms() + 1_000;
+        fall.offer(&event(after, EventMeaning::PowerLoss, BLUE_SCREEN), 1);
+        fall.occurrence(store).unwrap().unwrap()
+    }
+
+    #[test]
+    fn events_before_the_last_second_are_kept_for_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        fall.offer(&disk_event(last - 90_000, 1), 2_000_000);
+        fall.offer(&disk_event(last, 2), 2_000_000);
+
+        let occurrence = settled_occurrence(fall, &store);
+        let kept: Vec<i64> = occurrence
+            .window
+            .events
+            .iter()
+            .filter(|e| e.meaning == EventMeaning::DiskRetry)
+            .map(|e| e.ts_ms)
+            .collect();
+        assert_eq!(kept, [last - 90_000, last]);
+    }
+
+    #[test]
+    fn events_older_than_the_window_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        fall.offer(&disk_event(last - POSTMORTEM_BEFORE_MS - 1, 1), 2_000_000);
+
+        let occurrence = settled_occurrence(fall, &store);
+        assert!(
+            occurrence
+                .window
+                .events
+                .iter()
+                .all(|e| e.meaning != EventMeaning::DiskRetry)
+        );
+    }
+
+    #[test]
+    fn a_stored_event_and_a_kept_one_with_the_same_record_are_counted_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let stored = disk_event(last - 30_000, 7);
+        store
+            .append_batch(&Batch {
+                events: vec![stored.clone()],
+                ..Batch::default()
+            })
+            .unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        fall.offer(&stored, 2_000_000);
+        fall.offer(&stored, 2_000_000);
+
+        let occurrence = settled_occurrence(fall, &store);
+        let disk = occurrence
+            .window
+            .events
+            .iter()
+            .filter(|e| e.meaning == EventMeaning::DiskRetry)
+            .count();
+        assert_eq!(disk, 1);
     }
 
     #[test]

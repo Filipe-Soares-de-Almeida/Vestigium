@@ -41,6 +41,10 @@ How to use this file:
 
 ### Fixed
 
+- The report of a PC that fell now includes the disk and display events Windows logged in the two
+  minutes before the last second the watcher saw. Before, they arrived after the report was written, so
+  a freeze caused by the disk or the graphics driver was reported as a power cut of low confidence;
+  now it names the storage or the graphics driver.
 - Settings, clearing the history, importing results and applying a tweak no longer stay unavailable
   for the rest of a run after the history could not be opened once at start: the watcher tries again
   at the next request that needs it and imports the results that were waiting. A history location

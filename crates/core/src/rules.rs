@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::episode::MEMORY_HIGH_PCT;
+use crate::postmortem::POSTMORTEM_BEFORE_MS;
 use crate::process::per_program;
 use crate::{
     CrashKind, DiskLoad, EventMeaning, Media, OccurrenceKind, ProcessSample, ProcessTop,
@@ -205,6 +206,8 @@ pub struct Suspect {
 struct Focus {
     start: i64,
     end: i64,
+    /// How far before `start` Windows events still count as the cause.
+    event_lead_ms: i64,
 }
 
 /// How long before the focus starts and after it ends a cause is still looked for.
@@ -220,16 +223,28 @@ impl Focus {
         self.end + SCAN_AFTER_MS
     }
 
+    fn event_scan_from(self) -> i64 {
+        self.start - self.event_lead_ms
+    }
+
     fn of(triggers: &[Trigger], window: &Window) -> Focus {
         let rank = |t: &Trigger| OccurrenceKind::of(t).rank();
         let Some(gravest) = triggers.iter().map(rank).max() else {
             return Focus {
                 start: window.from_ms,
                 end: window.from_ms,
+                event_lead_ms: SCAN_BEFORE_MS,
             };
         };
         let group = triggers.iter().filter(|t| rank(t) == gravest);
+        // A fall stops the evidence at the last second, so what Windows logged minutes before it counts.
+        let fall = group.clone().any(|t| matches!(t, Trigger::Crash { .. }));
         Focus {
+            event_lead_ms: if fall {
+                POSTMORTEM_BEFORE_MS
+            } else {
+                SCAN_BEFORE_MS
+            },
             start: group
                 .clone()
                 .map(Trigger::start_ms)
@@ -275,7 +290,7 @@ const STORAGE_EVENTS: &[EventMeaning] = &[
 ];
 
 fn storage_reset(focus: Focus, window: &Window) -> Option<Suspect> {
-    let (from, to) = (focus.scan_from(), focus.scan_to());
+    let (from, to) = (focus.event_scan_from(), focus.scan_to());
     let mut evidence = events_between(window, STORAGE_EVENTS, from, to);
     if evidence.is_empty() {
         return None;
@@ -507,7 +522,7 @@ fn dpc_isr(focus: Focus, window: &Window) -> Option<Suspect> {
 }
 
 fn gpu_driver(focus: Focus, window: &Window) -> Option<Suspect> {
-    let (from, to) = (focus.scan_from(), focus.scan_to());
+    let (from, to) = (focus.event_scan_from(), focus.scan_to());
     let mut evidence = events_between(window, &[EventMeaning::DisplayReset], from, to);
     if evidence.is_empty() {
         return None;

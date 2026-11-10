@@ -1112,8 +1112,8 @@ mod tests {
 
     use vestigium_collect::ProbeConfig;
     use vestigium_core::{
-        Channel, CrashKind, DEFAULT_PROBE_PERIOD, EventMeaning, OccurrenceKind, SENSITIVE_FOR,
-        Sample, Trigger,
+        Cause, Channel, CrashKind, DEFAULT_PROBE_PERIOD, EventMeaning, OccurrenceKind,
+        SENSITIVE_FOR, Sample, Trigger,
     };
     use vestigium_store::{Series, decode, encode};
 
@@ -1971,6 +1971,83 @@ mod tests {
             gaps.iter()
                 .any(|g| g.reason == GapReason::Crashed && g.start_ms == last),
             "the time away was not recorded as a fall: {gaps:?}"
+        );
+    }
+
+    #[test]
+    fn a_disk_event_before_the_last_second_reaches_the_postmortem() {
+        let dir = tempfile::tempdir().unwrap();
+        let last = wall_ms() - 10 * 60_000;
+        {
+            let (mut ring, _) = BlackboxRing::open(&dir.path().join("blackbox.ring")).unwrap();
+            for i in 0..30 {
+                ring.push_sample(&quiet(last - 29_000 + i * 1_000));
+            }
+            // Dropped without a clean close, as a fall leaves it.
+        }
+
+        let running = start(dir.path(), Duration::from_secs(1));
+        let boot = wall_ms() - 60_000;
+        // The old bookmark delivers what was logged before the stop first, then the next boot's events.
+        running
+            .events_tx
+            .send(delivered(
+                last - 30_000,
+                "disk",
+                153,
+                EventMeaning::DiskRetry,
+                String::new(),
+            ))
+            .unwrap();
+        running
+            .events_tx
+            .send(unexpected_shutdown(boot, last + 2_000))
+            .unwrap();
+        let frozen = "<EventData><Data Name='BugcheckCode'>0</Data>            <Data Name='SleepInProgress'>0</Data><Data Name='PowerButtonTimestamp'>0</Data></EventData>";
+        running
+            .events_tx
+            .send(delivered(
+                boot + 1_000,
+                "Microsoft-Windows-Kernel-Power",
+                41,
+                EventMeaning::PowerLoss,
+                frozen.to_string(),
+            ))
+            .unwrap();
+        let found = wait_until(PATIENCE, || {
+            history(dir.path())
+                .occurrences(i64::MIN, i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|o| o.kind == OccurrenceKind::PostMortem)
+        });
+        stop(&running);
+
+        assert!(found, "the fall left no post-mortem");
+        let store = history(dir.path());
+        let summary = store
+            .occurrences(i64::MIN, i64::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|o| o.kind == OccurrenceKind::PostMortem)
+            .unwrap();
+        let occurrence = store.occurrence(summary.id).unwrap().unwrap();
+        assert!(
+            occurrence
+                .window
+                .events
+                .iter()
+                .any(|e| e.meaning == EventMeaning::DiskRetry && e.ts_ms == last - 30_000),
+            "the disk event is missing from the window: {:?}",
+            occurrence.window.events
+        );
+        assert!(
+            occurrence
+                .suspects
+                .iter()
+                .any(|s| matches!(s.cause, Cause::Storage { .. })),
+            "no storage suspect: {:?}",
+            occurrence.suspects
         );
     }
 
