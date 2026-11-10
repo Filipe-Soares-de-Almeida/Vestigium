@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- A busy disk during a surface scan, volume check or speed test of that same disk is now recognised
+  as the load of the test, whatever program Windows names as the cause, such as the chkdsk process
+  the volume check starts. The history marks it as caused by a test instead of suggesting ordinary
+  disk steps.
 - When two or more apps hang together in one occurrence, each is now a medium-confidence suspect, so
   a measured system cause such as memory pressure is listed ahead of them. An app that hung twice in
   one occurrence is named once, with the better of its two confidences.

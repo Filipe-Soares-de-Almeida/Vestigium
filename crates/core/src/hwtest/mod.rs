@@ -4,8 +4,8 @@ mod memory;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Episode;
 use crate::health::Subject;
+use crate::{Episode, EpisodeKind};
 
 pub use disk::{
     BAND_BOUNDS_MS, BANDS, BENCH_FILE_BYTES, BENCH_FREE_MARGIN_BYTES, BENCH_SECONDS, BenchMode,
@@ -108,14 +108,44 @@ pub fn disk_subject(number: u32, disks: &[crate::DiskInfo]) -> Subject {
     Subject::Disk(name)
 }
 
-/// Whether an episode most likely came from a Vestigium test running at the time.
+/// Whether an episode most likely came from a Vestigium test running at the time: the process
+/// is one of ours, or a busy disk is the one a disk test was reading or writing.
 pub fn caused_by_test(episode: &Episode, runs: &[TestRun]) -> bool {
     let ours = episode.culprit.as_ref().is_some_and(|c| {
         TEST_PROCESSES
             .iter()
             .any(|p| p.eq_ignore_ascii_case(&c.name))
     });
-    ours && runs
-        .iter()
-        .any(|r| r.started_ms <= episode.end_ms && episode.start_ms <= r.ended_ms)
+    let overlapping = || {
+        runs.iter()
+            .filter(|r| r.started_ms <= episode.end_ms && episode.start_ms <= r.ended_ms)
+    };
+    if ours && overlapping().next().is_some() {
+        return true;
+    }
+    let EpisodeKind::DiskBusy { disk } = &episode.kind else {
+        return false;
+    };
+    overlapping().any(|r| {
+        matches!(
+            r.kind(),
+            TestKind::DiskSurface | TestKind::VolumeCheck | TestKind::DiskBenchmark
+        ) && tested_disk(&r.subject, disk)
+    })
+}
+
+/// Whether a test of `subject` works on the disk the counters call `disk`, such as "1 D:": a disk
+/// by its name or number, a volume by its drive letter.
+fn tested_disk(subject: &Subject, disk: &str) -> bool {
+    let mut parts = disk.split_whitespace();
+    let number = parts.next();
+    match subject {
+        Subject::Disk(name) => {
+            name.eq_ignore_ascii_case(disk) || name.split_whitespace().next() == number
+        }
+        Subject::Volume(root) => root
+            .get(..2)
+            .is_some_and(|letter| parts.any(|v| v.eq_ignore_ascii_case(letter))),
+        Subject::Pc => false,
+    }
 }

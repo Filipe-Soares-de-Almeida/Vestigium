@@ -1,9 +1,9 @@
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
     BANDS, BenchMode, BenchResult, Bus, DiagnosticResult, Expected, MemoryQuick, Outcome,
-    QUICK_CHUNK, Region, SURFACE_REGIONS, SurfaceAggregator, TestData, TestRun, VolumeResult,
-    bench_has_room, bench_reference, bench_verdict, caused_by_test, combined_surface, disk_subject,
-    latency_band, memory_diagnostics, quick_test_size, volume_result,
+    QUICK_CHUNK, Region, SURFACE_REGIONS, SurfaceAggregator, TestData, TestRun, VolumeCheck,
+    VolumeResult, bench_has_room, bench_reference, bench_verdict, caused_by_test, combined_surface,
+    disk_subject, latency_band, memory_diagnostics, quick_test_size, volume_result,
 };
 use vestigium_core::{
     Channel, Culprit, DiskInfo, Episode, EpisodeKind, EventMeaning, Media, WinEvent,
@@ -234,6 +234,73 @@ fn episode(start_ms: i64, end_ms: i64, culprit: &str) -> Episode {
         }),
         truncated: false,
     }
+}
+
+fn disk_busy(start_ms: i64, end_ms: i64, disk: &str, culprit: &str) -> Episode {
+    Episode {
+        kind: EpisodeKind::DiskBusy { disk: disk.into() },
+        ..episode(start_ms, end_ms, culprit)
+    }
+}
+
+fn volume_run(subject: Subject, started_ms: i64, ended_ms: i64) -> TestRun {
+    TestRun {
+        subject,
+        started_ms,
+        ended_ms,
+        outcome: Outcome::Clean,
+        data: TestData::VolumeCheck(VolumeCheck {
+            volume: r"D:\".into(),
+            exit_code: Some(0),
+            result: VolumeResult::NoProblems,
+            output: String::new(),
+            dirty_before: Some(false),
+            dirty_after: Some(false),
+        }),
+    }
+}
+
+#[test]
+fn a_disk_busy_during_a_surface_scan_of_that_disk_is_the_tests() {
+    let runs = [volume_run(Subject::Disk("1 D:".into()), 1_000, 60_000)];
+    assert!(caused_by_test(
+        &disk_busy(30_000, 90_000, "1 D:", "chkdsk.exe"),
+        &runs
+    ));
+    assert!(!caused_by_test(
+        &disk_busy(70_000, 90_000, "1 D:", "chkdsk.exe"),
+        &runs
+    ));
+}
+
+#[test]
+fn a_disk_busy_on_another_disk_is_not_the_tests() {
+    let runs = [volume_run(Subject::Disk("0 C:".into()), 1_000, 60_000)];
+    assert!(!caused_by_test(
+        &disk_busy(30_000, 90_000, "1 D:", "chkdsk.exe"),
+        &runs
+    ));
+}
+
+#[test]
+fn a_test_names_its_disk_by_number_or_by_drive_letter() {
+    let busy = disk_busy(30_000, 90_000, "1 D: E:", "System");
+    let by_number = [volume_run(Subject::Disk("1".into()), 1_000, 60_000)];
+    let by_letter = [volume_run(Subject::Volume(r"E:\".into()), 1_000, 60_000)];
+    let other_letter = [volume_run(Subject::Volume(r"C:\".into()), 1_000, 60_000)];
+
+    assert!(caused_by_test(&busy, &by_number));
+    assert!(caused_by_test(&busy, &by_letter));
+    assert!(!caused_by_test(&busy, &other_letter));
+}
+
+#[test]
+fn a_memory_test_does_not_claim_a_busy_disk() {
+    let runs = [quick_run(1_000, 60_000)];
+    assert!(!caused_by_test(
+        &disk_busy(30_000, 90_000, "1 D:", "System"),
+        &runs
+    ));
 }
 
 #[test]
