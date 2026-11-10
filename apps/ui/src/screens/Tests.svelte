@@ -114,6 +114,14 @@
     void hwtests.load();
   }
 
+  async function stop(): Promise<void> {
+    try {
+      await hwtests.stop();
+    } catch (error) {
+      toast.show(errorText(error));
+    }
+  }
+
   function started(outcome: Started): void {
     if (outcome.kind === "declined") toast.show(t("ui.tests.toast.declined"));
     else if (outcome.kind === "failed") toast.show(outcome.error ? errorText(outcome.error) : t("ui.tests.toast.busy"));
@@ -299,7 +307,7 @@
           <i style:width={live.frac === null ? undefined : `${live.frac * 100}%`}></i>
         </span>
         {#if live.stoppable}
-          <button type="button" class="btn" onclick={() => void hwtests.stop()}>{t("ui.tests.cancel")}</button>
+          <button type="button" class="btn" onclick={() => void stop()}>{t("ui.tests.cancel")}</button>
         {/if}
       </div>
       {#if live.facts.length}

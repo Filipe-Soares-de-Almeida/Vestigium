@@ -50,6 +50,8 @@ How to use this file:
 
 ### Fixed
 
+- Pressing Cancel on a running test or disk scan now shows the reason in a message when the stop
+  request fails, instead of doing nothing.
 - A test or Windows Memory Diagnostic detail page whose read of the tests fails now shows the error
   with a Retry button, instead of an empty page.
 - The time a window has been not responding on the Now screen now starts again when the same program
