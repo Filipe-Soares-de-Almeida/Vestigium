@@ -87,6 +87,55 @@ fn close_triggers_merge_into_one_occurrence() {
 }
 
 #[test]
+fn a_trigger_that_bridges_two_pending_occurrences_merges_them() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 0);
+    late(&mut bb, T + 500, 500.0);
+    late(&mut bb, T + 50_500, 500.0);
+    bb.push_hangs(T + 25_000, &[hung(11, "player.exe")], &running);
+    bb.push_hangs(T + 52_000, &[], &running);
+
+    let found = occurrences(bb.poll(T + 200_000));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].triggers.len(), 3);
+    assert_eq!((found[0].start_ms, found[0].end_ms), (T, T + 52_000));
+}
+
+#[test]
+fn an_unrelated_trigger_does_not_merge_distant_pending_occurrences() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 0);
+    late(&mut bb, T + 500, 500.0);
+    late(&mut bb, T + 150_500, 500.0);
+    bb.push_hangs(T + 25_000, &[hung(11, "player.exe")], &running);
+    bb.push_hangs(T + 52_000, &[], &running);
+
+    let found = occurrences(bb.poll(T + 300_000));
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].triggers.len(), 2);
+    assert_eq!(found[1].triggers.len(), 1);
+}
+
+#[test]
+fn a_bridge_does_not_merge_past_five_minutes() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 0);
+    late(&mut bb, T + 500, 500.0);
+    late(&mut bb, T + 305_500, 500.0);
+    bb.push_hangs(T + 25_000, &[hung(11, "player.exe")], &running);
+    bb.push_hangs(T + 280_000, &[], &running);
+
+    let found = occurrences(bb.poll(T + 600_000));
+    assert_eq!(found.len(), 2);
+    for occurrence in &found {
+        assert!(occurrence.end_ms - occurrence.start_ms <= 300_000);
+    }
+}
+
+#[test]
 fn merging_stops_at_five_minutes() {
     let mut bb = blackbox();
     for k in 0..21 {

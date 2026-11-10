@@ -114,6 +114,33 @@ impl Pending {
             .filter(|t| matches!(t, Trigger::Reported { event: kept } if kept.provider == event.provider && kept.id == event.id))
             .count()
     }
+
+    /// Whether a trigger spanning `start` to `end` is close enough to join this, within `max_ms`.
+    fn accepts(&self, trigger: &Trigger, start: i64, end: i64, timing: Timing) -> bool {
+        let merge_ms = if self.reported_by_same_provider(trigger) {
+            timing.merge_ms.max(REPORTED_MERGE_MS)
+        } else {
+            timing.merge_ms
+        };
+        start <= self.end_ms + merge_ms
+            && end >= self.start_ms - merge_ms
+            && end.max(self.end_ms) - start.min(self.start_ms) <= timing.max_ms
+    }
+
+    /// Whether `other` is close enough to this to join it, by the rule a trigger joins by.
+    fn reaches(&self, other: &Pending, timing: Timing) -> bool {
+        other
+            .triggers
+            .iter()
+            .any(|t| self.accepts(t, other.start_ms, other.end_ms, timing))
+    }
+
+    /// Adds the trigger unless this already holds enough reported events like it.
+    fn keep(&mut self, trigger: Trigger) {
+        if self.repeats(&trigger) < REPORTED_EXEMPLARS {
+            self.triggers.push(trigger);
+        }
+    }
 }
 
 /// Everything the agent sees goes in; everything worth storing comes out.
@@ -456,31 +483,47 @@ impl Blackbox {
         }
         let (start, end) = (trigger.start_ms(), trigger.end_ms());
         let timing = self.timing;
-        let joins = self.pending.iter_mut().find(|p| {
-            let merge_ms = if p.reported_by_same_provider(&trigger) {
-                timing.merge_ms.max(REPORTED_MERGE_MS)
-            } else {
-                timing.merge_ms
-            };
-            start <= p.end_ms + merge_ms
-                && end >= p.start_ms - merge_ms
-                && end.max(p.end_ms) - start.min(p.start_ms) <= timing.max_ms
-        });
-        match joins {
-            Some(pending) => {
-                pending.start_ms = pending.start_ms.min(start);
-                pending.end_ms = pending.end_ms.max(end);
-                pending.sensitive |= self.sensitive;
-                if pending.repeats(&trigger) < REPORTED_EXEMPLARS {
-                    pending.triggers.push(trigger);
-                }
-            }
-            None => self.pending.push(Pending {
+        let joins = self
+            .pending
+            .iter()
+            .position(|p| p.accepts(&trigger, start, end, timing));
+        let Some(at) = joins else {
+            self.pending.push(Pending {
                 start_ms: start,
                 end_ms: end,
                 triggers: vec![trigger],
                 sensitive: self.sensitive,
-            }),
+            });
+            return;
+        };
+        let pending = &mut self.pending[at];
+        pending.start_ms = pending.start_ms.min(start);
+        pending.end_ms = pending.end_ms.max(end);
+        pending.sensitive |= self.sensitive;
+        pending.keep(trigger);
+        self.merge_bridged(at);
+    }
+
+    /// Folds into the pending occurrence at `at` every other one that its growth now reaches.
+    fn merge_bridged(&mut self, mut at: usize) {
+        let timing = self.timing;
+        while let Some(other) = self
+            .pending
+            .iter()
+            .enumerate()
+            .position(|(i, p)| i != at && self.pending[at].reaches(p, timing))
+        {
+            let absorbed = self.pending.remove(other);
+            if other < at {
+                at -= 1;
+            }
+            let merged = &mut self.pending[at];
+            merged.start_ms = merged.start_ms.min(absorbed.start_ms);
+            merged.end_ms = merged.end_ms.max(absorbed.end_ms);
+            merged.sensitive |= absorbed.sensitive;
+            for trigger in absorbed.triggers {
+                merged.keep(trigger);
+            }
         }
     }
 

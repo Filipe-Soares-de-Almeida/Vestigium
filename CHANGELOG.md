@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A not-responding app that bridged two nearby incidents now joins them into one occurrence. The two
+  used to be saved as separate occurrences with overlapping windows, which counted the same moment
+  twice in the tray.
 - An occurrence of a long freeze or a long not-responding app, whose first seconds had already left
   the ten minutes the monitor keeps in memory, is now marked as cut short instead of looking
   complete.
