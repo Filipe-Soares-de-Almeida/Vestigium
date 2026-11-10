@@ -44,6 +44,9 @@ How to use this file:
 - A watcher that stops answering no longer leaves the window waiting forever: a request to it now
   gives up after three seconds. A program that connects to the watcher's channel and says nothing, or
   sends half a request, is dropped after a few seconds instead of blocking the window.
+- If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
+  it again after a second, and exits only when that keeps failing, instead of carrying on with no
+  channel while the window says it is not running.
 - A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
   result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
   attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now

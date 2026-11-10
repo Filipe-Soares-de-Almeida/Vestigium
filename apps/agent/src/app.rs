@@ -1,5 +1,7 @@
+use std::any::Any;
 use std::collections::VecDeque;
 use std::fs;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -117,6 +119,8 @@ pub struct Shared {
     pub tests_dir: PathBuf,
     /// Set after a scan was stored; the sampler runs a health pass on its next tick.
     pub health_due: Arc<AtomicBool>,
+    /// Set when the pipe could not be bound again; the agent then exits.
+    pub pipe_lost: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
 }
@@ -296,6 +300,60 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
     }
 }
 
+/// Binds that failed in a row before the agent gives up on its pipe.
+const PIPE_BIND_TRIES: u32 = 5;
+/// Pause before the pipe is bound again.
+const PIPE_RETRY_WAIT: Duration = Duration::from_secs(1);
+
+/// Why one run of the pipe ended.
+#[derive(Debug)]
+enum PipeFailure {
+    Bind(IpcError),
+    Serve(String),
+}
+
+/// Runs the pipe until `run_once` returns `Ok`; a run that fails or panics is recorded and started
+/// again, and after five binds in a row that fail the agent is told to exit.
+fn keep_pipe_serving(
+    shared: &Shared,
+    wait: Duration,
+    mut run_once: impl FnMut() -> Result<(), PipeFailure>,
+) {
+    let mut failed_binds = 0;
+    loop {
+        let failure = match panic::catch_unwind(AssertUnwindSafe(&mut run_once)) {
+            Ok(Ok(())) => return,
+            Ok(Err(failure)) => failure,
+            Err(payload) => PipeFailure::Serve(panic_text(payload.as_ref())),
+        };
+        let reason = match failure {
+            PipeFailure::Bind(err) => {
+                failed_binds += 1;
+                err.to_string()
+            }
+            PipeFailure::Serve(reason) => {
+                failed_binds = 0;
+                reason
+            }
+        };
+        lock(&shared.status).last_error = Some(format!("the pipe stopped: {reason}"));
+        if failed_binds >= PIPE_BIND_TRIES {
+            shared.pipe_lost.store(true, Ordering::Relaxed);
+            shutdown::wake();
+            return;
+        }
+        thread::sleep(wait);
+    }
+}
+
+fn panic_text(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| text.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the pipe thread panicked".to_string())
+}
+
 /// Starts the agent and runs it until Exit or the end of the session.
 pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     let server = match PipeServer::bind(&pipe_name(&current_user_sid().map_err(failed)?)) {
@@ -332,6 +390,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         tweaks_dir: data_dir.join("tweaks"),
         tests_dir: data_dir.join("tests"),
         health_due: Arc::new(AtomicBool::new(false)),
+        pipe_lost: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
 
@@ -396,6 +455,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
 
     {
         let shared = shared.clone();
+        let pipe = pipe_name(&current_user_sid().map_err(failed)?);
         // Settings are written through a connection of the pipe's own.
         let mut settings_store = Store::open(&db).ok();
         if let Some(store) = settings_store.as_mut() {
@@ -405,10 +465,25 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             import_tweaks(&shared.tweaks_dir, store);
             import_tests(&shared.tests_dir, store);
         }
+        let mut first = Some((server, settings_store));
         thread::Builder::new()
             .name("pipe".to_string())
             .spawn(move || {
-                server.serve(|request| handle(request, &shared, settings_store.as_mut()))
+                keep_pipe_serving(&shared, PIPE_RETRY_WAIT, || {
+                    let (server, mut settings_store) = match first.take() {
+                        Some(ready) => ready,
+                        None => (
+                            PipeServer::bind(&pipe).map_err(PipeFailure::Bind)?,
+                            Store::open(&db).ok(),
+                        ),
+                    };
+                    let ended =
+                        server.serve(|request| handle(request, &shared, settings_store.as_mut()));
+                    Err(PipeFailure::Serve(ended.err().map_or_else(
+                        || "the pipe closed".to_string(),
+                        |err| err.to_string(),
+                    )))
+                })
             })
             .map_err(failed)?;
     }
@@ -430,6 +505,9 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             if tray.on_menu(&event.id, &shared) == Action::Exit {
                 shutdown::quit();
             }
+        }
+        if shared.pipe_lost.load(Ordering::Relaxed) {
+            shutdown::quit();
         }
         let lang = lang_for(lock(&shared.settings).language, system);
         if lang != tray.lang() {
@@ -586,8 +664,44 @@ pub(crate) mod tests {
             tweaks_dir: PathBuf::from("tweaks"),
             tests_dir: PathBuf::from("tests"),
             health_due: Arc::new(AtomicBool::new(false)),
+            pipe_lost: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
+    }
+
+    #[test]
+    fn pipe_thread_serves_again_after_a_failed_run() {
+        let shared = shared();
+        let mut runs = 0;
+
+        keep_pipe_serving(&shared, Duration::ZERO, || {
+            runs += 1;
+            match runs {
+                1 => Err(PipeFailure::Serve("the pipe broke".to_string())),
+                2 => panic!("a handler failed"),
+                _ => Ok(()),
+            }
+        });
+
+        assert_eq!(runs, 3);
+        let last_error = lock(&shared.status).last_error.clone().unwrap();
+        assert!(last_error.contains("a handler failed"), "{last_error}");
+        assert!(!shared.pipe_lost.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn pipe_thread_gives_up_after_repeated_bind_failures() {
+        let shared = shared();
+        let mut runs = 0;
+
+        keep_pipe_serving(&shared, Duration::ZERO, || {
+            runs += 1;
+            Err(PipeFailure::Bind(IpcError::AlreadyRunning))
+        });
+
+        assert_eq!(runs, PIPE_BIND_TRIES);
+        assert!(shared.pipe_lost.load(Ordering::Relaxed));
+        assert!(lock(&shared.status).last_error.is_some());
     }
 
     #[test]
