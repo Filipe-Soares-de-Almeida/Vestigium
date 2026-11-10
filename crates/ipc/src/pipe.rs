@@ -151,10 +151,27 @@ impl PipeClient {
 
     /// Sends one request and reads its answer; either step fails with `TimedOut` after 3 s.
     pub fn call(&mut self, request: &Request) -> Result<Response, IpcError> {
+        self.send(request)?;
+        self.receive()
+    }
+
+    /// Writes one request; when this fails the caller can tell the request was not read.
+    pub fn send(&mut self, request: &Request) -> Result<(), IpcError> {
+        write_frame(&mut self.timed()?, request)
+    }
+
+    /// Reads the answer to the request last sent.
+    pub fn receive(&mut self) -> Result<Response, IpcError> {
+        read_frame(&mut self.timed()?)
+    }
+
+    fn timed(&self) -> Result<TimedPipe, IpcError> {
         let handle = HANDLE(self.pipe.as_raw_handle());
-        let mut pipe = TimedPipe::new(handle, CLIENT_IO_TIMEOUT, CLIENT_IO_TIMEOUT)?;
-        write_frame(&mut pipe, request)?;
-        read_frame(&mut pipe)
+        Ok(TimedPipe::new(
+            handle,
+            CLIENT_IO_TIMEOUT,
+            CLIENT_IO_TIMEOUT,
+        )?)
     }
 }
 

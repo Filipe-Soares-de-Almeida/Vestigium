@@ -51,6 +51,9 @@ How to use this file:
   its connection channel to the window, so two watchers never record into the same history.
 - When another program is already using Vestigium's connection channel, Vestigium now says so in a
   message, naming the program when Windows allows it, instead of closing without a word.
+- After the watcher restarts, the window now reconnects on its own instead of showing the warning
+  about another program or version for a few seconds, and then the Start button. A request that may
+  already have been carried out, such as clearing the history, is never sent a second time.
 - A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
   result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
   attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now

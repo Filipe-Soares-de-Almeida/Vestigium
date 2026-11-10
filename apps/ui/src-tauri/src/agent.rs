@@ -16,6 +16,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(3);
 const START_POLL: Duration = Duration::from_millis(100);
 /// `ERROR_FILE_NOT_FOUND`: nobody has created the pipe.
 const NO_PIPE: i32 = 2;
+/// `ERROR_BROKEN_PIPE`, `ERROR_NO_DATA` and `ERROR_PIPE_NOT_CONNECTED`: the other end is gone.
+const GONE: [i32; 3] = [109, 232, 233];
 
 /// Why a command from the window failed.
 #[derive(Debug, thiserror::Error)]
@@ -43,10 +45,43 @@ pub enum UiError {
 impl From<IpcError> for UiError {
     fn from(err: IpcError) -> UiError {
         match err {
-            IpcError::Io(io) if io.raw_os_error() == Some(NO_PIPE) => UiError::AgentStopped,
+            IpcError::Io(io) if io.raw_os_error() == Some(NO_PIPE) || is_gone(&io) => {
+                UiError::AgentStopped
+            }
             IpcError::ServerMismatch { .. } => UiError::Mismatch,
             other => UiError::Ipc(other),
         }
+    }
+}
+
+/// Whether the other end of the pipe has closed.
+fn is_gone(err: &std::io::Error) -> bool {
+    err.raw_os_error().is_some_and(|code| GONE.contains(&code))
+        || err.kind() == std::io::ErrorKind::UnexpectedEof
+}
+
+/// Whether a connection error means the pipe was closed from the other end, as opposed to slow.
+fn dead(err: &IpcError) -> bool {
+    matches!(err, IpcError::Io(io) if is_gone(io))
+}
+
+/// Whether a request can be sent again after its answer was lost: it changes nothing, or sets a
+/// value that sending twice leaves as it is.
+fn may_replay(request: &Request) -> bool {
+    match request {
+        Request::Hello { .. }
+        | Request::Status
+        | Request::Now
+        | Request::Recent
+        | Request::ProgramRecent { .. }
+        | Request::SetPaused { .. }
+        | Request::SetSensitive { .. }
+        | Request::Settings
+        | Request::SetAutostart { .. } => true,
+        Request::SetSettings(_)
+        | Request::ClearHistory
+        | Request::ImportResults
+        | Request::ApplyUserTweak { .. } => false,
     }
 }
 
@@ -100,6 +135,8 @@ pub struct SettingsDto {
 /// The one pipe connection to the watcher, shared by every command and the live stream.
 pub struct Link {
     agent_exe: Option<PathBuf>,
+    /// The pipe to connect to; the user's own unless a test names one.
+    pipe: Option<String>,
     client: Mutex<Option<PipeClient>>,
 }
 
@@ -107,7 +144,17 @@ impl Link {
     pub fn new(agent_exe: Option<PathBuf>) -> Link {
         Link {
             agent_exe,
+            pipe: None,
             client: Mutex::new(None),
+        }
+    }
+
+    /// A link to the pipe called `pipe`, for tests that run a watcher of their own.
+    #[cfg(test)]
+    fn on_pipe(agent_exe: Option<PathBuf>, pipe: &str) -> Link {
+        Link {
+            pipe: Some(pipe.to_string()),
+            ..Link::new(agent_exe)
         }
     }
 
@@ -117,19 +164,34 @@ impl Link {
         Some(exe.with_file_name("Vestigium.exe"))
     }
 
-    /// Sends one request, connecting first if needed; a failed call drops the connection.
+    /// Sends one request, connecting first if needed. A kept connection that turns out to be dead
+    /// is replaced once; a request that may already have run is not sent again after its answer
+    /// was lost. A failed call drops the connection.
     pub fn call(&self, request: &Request) -> Result<Response, UiError> {
         let mut client = lock(&self.client);
-        let connected = match client.take() {
-            Some(open) => open,
-            None => self.connect()?,
-        };
-        let open = client.insert(connected);
-        match open.call(request) {
-            Ok(response) => Ok(response),
-            Err(err) => {
-                *client = None;
-                Err(err.into())
+        let mut fresh = client.is_none();
+        loop {
+            let mut open = match client.take() {
+                Some(open) => open,
+                None => {
+                    fresh = true;
+                    self.connect()?
+                }
+            };
+            if let Err(err) = open.send(request) {
+                if !fresh && dead(&err) {
+                    fresh = true;
+                    continue;
+                }
+                return Err(err.into());
+            }
+            match open.receive() {
+                Ok(response) => {
+                    *client = Some(open);
+                    return Ok(response);
+                }
+                Err(err) if !fresh && dead(&err) && may_replay(request) => fresh = true,
+                Err(err) => return Err(err.into()),
             }
         }
     }
@@ -176,8 +238,11 @@ impl Link {
     /// Opens the pipe and checks both ends speak the same protocol.
     fn connect(&self) -> Result<PipeClient, UiError> {
         let exe = self.agent_exe.as_deref().ok_or(UiError::AgentStopped)?;
-        let sid = current_user_sid()?;
-        let mut client = PipeClient::connect(&pipe_name(&sid), exe)?;
+        let pipe = match &self.pipe {
+            Some(pipe) => pipe.clone(),
+            None => pipe_name(&current_user_sid()?),
+        };
+        let mut client = PipeClient::connect(&pipe, exe)?;
         same_protocol(client.call(&Request::Hello {
             protocol: PROTOCOL_VERSION,
         })?)?;
@@ -207,7 +272,11 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use vestigium_ipc::ErrorCode;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+    use std::sync::mpsc;
+
+    use vestigium_ipc::{ErrorCode, PipeServer};
 
     use super::*;
 
@@ -223,6 +292,153 @@ mod tests {
             UiError::from(IpcError::ServerMismatch { found }),
             UiError::Mismatch
         ));
+    }
+
+    fn unique_pipe() -> String {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        pipe_name(&format!("link-test-{}-{n}", std::process::id()))
+    }
+
+    fn link_to(pipe: &str) -> Link {
+        Link::on_pipe(Some(std::env::current_exe().unwrap()), pipe)
+    }
+
+    fn answer(request: Request) -> Response {
+        match request {
+            Request::Hello { .. } => Response::Hello {
+                protocol: PROTOCOL_VERSION,
+                agent_version: "test".into(),
+            },
+            Request::Status => Response::Status(AgentStatus::default()),
+            _ => Response::Done,
+        }
+    }
+
+    /// A watcher whose first pipe ends when a `doomed` request arrives and that opens a second one
+    /// at once; `seen` counts the doomed requests either pipe received, and the channel says when
+    /// the second pipe is ready.
+    fn watcher_that_restarts(
+        name: &str,
+        doomed: fn(&Request) -> bool,
+        seen: Arc<AtomicUsize>,
+    ) -> mpsc::Receiver<()> {
+        let (ready, restarted) = mpsc::channel();
+        let name = name.to_string();
+        let first = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || {
+            let counted = seen.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                first.serve(|request| {
+                    if doomed(&request) {
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        panic!("the first watcher ends");
+                    }
+                    answer(request)
+                })
+            }));
+            drop(first);
+            let second = PipeServer::bind(&name).unwrap();
+            ready.send(()).unwrap();
+            let _ = second.serve(|request| {
+                if doomed(&request) {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                }
+                answer(request)
+            });
+        });
+        restarted
+    }
+
+    #[test]
+    fn a_connection_the_agent_dropped_is_retried_once() {
+        let name = unique_pipe();
+        let restarted = watcher_that_restarts(
+            &name,
+            |request| matches!(request, Request::SetSensitive { .. }),
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let link = link_to(&name);
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+        let mut dead = lock(&link.client).take().unwrap();
+        dead.call(&Request::SetSensitive { on: true }).unwrap_err();
+        restarted.recv().unwrap();
+        *lock(&link.client) = Some(dead);
+
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+    }
+
+    #[test]
+    fn a_request_that_may_have_run_is_not_replayed_after_a_read_failure() {
+        let name = unique_pipe();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let restarted = watcher_that_restarts(
+            &name,
+            |request| matches!(request, Request::ClearHistory),
+            seen.clone(),
+        );
+        let link = link_to(&name);
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+
+        let result = link.call(&Request::ClearHistory);
+
+        assert!(result.is_err());
+        restarted.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn only_requests_that_change_nothing_twice_are_replayed() {
+        assert!(may_replay(&Request::Status));
+        assert!(may_replay(&Request::Recent));
+        assert!(may_replay(&Request::SetPaused {
+            paused: true,
+            until_ms: None
+        }));
+        assert!(!may_replay(&Request::ClearHistory));
+        assert!(!may_replay(&Request::ImportResults));
+        assert!(!may_replay(&Request::SetSettings(Settings::default())));
+    }
+
+    #[test]
+    fn a_mute_agent_times_out_instead_of_blocking() {
+        let name = unique_pipe();
+        let (release, hold) = mpsc::channel::<()>();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || {
+            server.serve(move |request| match request {
+                Request::Hello { .. } => answer(request),
+                _ => {
+                    let _ = hold.recv();
+                    Response::Done
+                }
+            })
+        });
+        let link = link_to(&name);
+        let started = Instant::now();
+
+        let result = link.call(&Request::Status);
+
+        assert!(matches!(
+            &result,
+            Err(UiError::Ipc(IpcError::Io(err))) if err.kind() == std::io::ErrorKind::TimedOut
+        ));
+        assert!(started.elapsed() < Duration::from_secs(7));
+        drop(release);
+    }
+
+    #[test]
+    fn a_broken_connection_means_the_watcher_stopped() {
+        for code in GONE {
+            let gone = std::io::Error::from_raw_os_error(code);
+            assert!(matches!(
+                UiError::from(IpcError::Io(gone)),
+                UiError::AgentStopped
+            ));
+        }
+        let slow = std::io::Error::from(std::io::ErrorKind::TimedOut);
+        assert!(matches!(UiError::from(IpcError::Io(slow)), UiError::Ipc(_)));
     }
 
     #[test]
