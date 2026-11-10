@@ -198,6 +198,8 @@ fn migration_from_v3_adds_findings_and_scans() {
             "CREATE TABLE gap (id INTEGER PRIMARY KEY, start_ms INTEGER NOT NULL,
                  end_ms INTEGER NOT NULL, reason INTEGER NOT NULL);
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
+             CREATE TABLE event (id INTEGER PRIMARY KEY, provider TEXT NOT NULL,
+                 meaning INTEGER NOT NULL);
              PRAGMA user_version = 3;",
         )
         .unwrap();

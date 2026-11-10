@@ -114,6 +114,42 @@ fn event(ts_ms: i64, record_id: u64) -> WinEvent {
     }
 }
 
+/// Every event meaning, walked through a match that stops compiling when a meaning is added.
+fn every_meaning() -> Vec<EventMeaning> {
+    use EventMeaning::*;
+    let next = |meaning: EventMeaning| match meaning {
+        StorageReset => Some(DiskRetry),
+        DiskRetry => Some(DiskBadBlock),
+        DiskBadBlock => Some(PagingError),
+        PagingError => Some(DisplayReset),
+        DisplayReset => Some(HardwareError),
+        HardwareError => Some(PowerLoss),
+        PowerLoss => Some(UnexpectedShutdown),
+        UnexpectedShutdown => Some(BugCheck),
+        BugCheck => Some(CpuFirmwareLimit),
+        CpuFirmwareLimit => Some(LowVirtualMemory),
+        LowVirtualMemory => Some(AppHang),
+        AppHang => Some(AppCrash),
+        AppCrash => Some(ServiceCrash),
+        ServiceCrash => Some(NoCrashDump),
+        NoCrashDump => Some(MemoryDiagnostic),
+        MemoryDiagnostic => None,
+    };
+    std::iter::successors(Some(StorageReset), |&meaning| next(meaning)).collect()
+}
+
+const MEMORY_DIAGNOSTICS: &str = "Microsoft-Windows-MemoryDiagnostics-Results";
+
+fn memory_diagnostic(ts_ms: i64, record_id: u64) -> WinEvent {
+    WinEvent {
+        provider: MEMORY_DIAGNOSTICS.to_string(),
+        id: 1201,
+        level: 4,
+        meaning: EventMeaning::MemoryDiagnostic,
+        ..event(ts_ms, record_id)
+    }
+}
+
 fn gap(start_ms: i64, end_ms: i64) -> Gap {
     Gap {
         start_ms,
@@ -152,6 +188,32 @@ fn migration_from_v1_keeps_segments() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.samples(0, 10_000).unwrap(), vec![sample(1_000)]);
     assert!(store.occurrences(i64::MIN, i64::MAX).unwrap().is_empty());
+}
+
+#[test]
+fn migration_repairs_memory_diagnostics_stored_without_a_meaning() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute_batch(
+            "PRAGMA user_version = 9;
+             INSERT INTO event (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
+             VALUES (1000, 1, 'stornvme', 129, 1, 3, 1, '<EventData/>'),
+                    (2000, 1, 'Microsoft-Windows-MemoryDiagnostics-Results', 1201, 2, 4, 0,
+                     '<EventData/>');",
+        )
+        .unwrap();
+    }
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(
+        store.events(i64::MIN, i64::MAX).unwrap(),
+        vec![event(1_000, 1), memory_diagnostic(2_000, 2)]
+    );
 }
 
 #[test]
@@ -197,6 +259,45 @@ fn events_are_unique_per_channel_and_record() {
     store.append_batch(&batch).unwrap();
 
     assert_eq!(store.events(0, 10_000).unwrap(), vec![event(1_000, 42)]);
+}
+
+#[test]
+fn every_event_meaning_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let stored: Vec<WinEvent> = every_meaning()
+        .into_iter()
+        .zip(1..)
+        .map(|(meaning, n)| WinEvent {
+            meaning,
+            ..event(n * 1_000, n as u64)
+        })
+        .collect();
+
+    store
+        .append_batch(&Batch {
+            events: stored.clone(),
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.events(i64::MIN, i64::MAX).unwrap(), stored);
+}
+
+#[test]
+fn a_memory_diagnostic_event_does_not_break_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let stored = vec![event(1_000, 1), memory_diagnostic(2_000, 2)];
+
+    store
+        .append_batch(&Batch {
+            events: stored.clone(),
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.events(0, 10_000).unwrap(), stored);
 }
 
 #[test]

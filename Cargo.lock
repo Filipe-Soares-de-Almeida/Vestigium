@@ -4518,6 +4518,7 @@ name = "vestigium-agent"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "rusqlite",
  "serde",
  "tempfile",
  "tray-icon 0.26.1",
@@ -4579,6 +4580,7 @@ name = "vestigium-i18n"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "vestigium-core",
 ]
 
 [[package]]

@@ -47,6 +47,8 @@ pub enum StoreError {
     SchemaMismatch { found: u32, supported: u32 },
     #[error("unknown {what} code {code}")]
     UnknownCode { what: &'static str, code: i64 },
+    #[error("{what} {value} has no stored code")]
+    UnwritableValue { what: &'static str, value: String },
     #[error("invalid setting: {0}")]
     Setting(#[from] vestigium_core::SettingError),
     #[error("JSON error: {0}")]

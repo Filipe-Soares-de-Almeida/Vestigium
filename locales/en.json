@@ -416,6 +416,7 @@
   "ui.occurrence.event.AppCrash": "A program closed with an error",
   "ui.occurrence.event.ServiceCrash": "A Windows service stopped unexpectedly",
   "ui.occurrence.event.NoCrashDump": "Windows could not prepare a crash dump; a blue screen would leave no record",
+  "ui.occurrence.event.MemoryDiagnostic": "Windows Memory Diagnostic finished a run",
   "ui.occurrence.todo.title": "What to do",
   "ui.occurrence.todo.none": "No action suggested for this cause. If it repeats, check resource usage in Now.",
   "ui.occurrence.dump.title": "Dump of this shutdown",

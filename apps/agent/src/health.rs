@@ -153,7 +153,8 @@ mod tests {
     use std::rc::Rc;
 
     use vestigium_core::health::{FindingKind, PageFile, VolumeSpace};
-    use vestigium_core::{DiskInfo, Episode};
+    use vestigium_core::{Channel, DiskInfo, Episode, EventMeaning, WinEvent};
+    use vestigium_store::Batch;
 
     use super::*;
     use vestigium_core::health::SmartAttribute;
@@ -382,5 +383,86 @@ mod tests {
             .unwrap();
 
         assert_eq!(memory_high_days(&store, NOW - 7 * DAY_MS, NOW).unwrap(), 3);
+    }
+
+    #[test]
+    fn a_memory_diagnostic_with_errors_opens_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        store
+            .append_batch(&Batch {
+                events: vec![WinEvent {
+                    ts_ms: NOW - 3 * DAY_MS,
+                    channel: Channel::System,
+                    provider: "Microsoft-Windows-MemoryDiagnostics-Results".into(),
+                    id: 1102,
+                    record_id: 7,
+                    level: 2,
+                    meaning: EventMeaning::MemoryDiagnostic,
+                    data_xml: "<UserData><Results><NumPagesTested>1000</NumPagesTested>\
+                               <NumPagesUnTested>0</NumPagesUnTested><NumBadPages>3</NumBadPages>\
+                               </Results></UserData>"
+                        .into(),
+                }],
+                ..Batch::default()
+            })
+            .unwrap();
+        let mut pass = HealthPass::new(FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        });
+
+        let outcome = run(&mut pass, &mut store, NOW, &[]);
+
+        assert_eq!(outcome.critical, 1);
+        let kinds: Vec<FindingKind> = store
+            .open_findings()
+            .unwrap()
+            .iter()
+            .map(|f| f.finding.kind)
+            .collect();
+        assert_eq!(kinds, [FindingKind::MemoryTestErrors]);
+    }
+
+    #[test]
+    fn a_pass_that_cannot_read_events_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let mut pass = HealthPass::new(FakeHealth {
+            free_gb: 4,
+            ..FakeHealth::default()
+        });
+        run(&mut pass, &mut store, NOW, &[]);
+        let raw = rusqlite::Connection::open(dir.path().join("vestigium.db")).unwrap();
+        raw.execute(
+            "INSERT INTO event (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
+             VALUES (?1, 1, 'provider', 1, 1, 2, 99, '<EventData/>')",
+            [NOW - DAY_MS],
+        )
+        .unwrap();
+        pass.source.free_gb = 50;
+        let machine = machine();
+        let busy = HashSet::new();
+        let now = PassNow {
+            ts_ms: NOW + DAY_MS / 24,
+            machine: &machine,
+            busy_disks: &busy,
+            commit_limit_bytes: 40 * GB,
+        };
+
+        assert!(matches!(
+            pass.run(&mut store, &now),
+            Err(StoreError::UnknownCode {
+                what: "event meaning",
+                code: 99
+            })
+        ));
+        let kinds: Vec<FindingKind> = store
+            .open_findings()
+            .unwrap()
+            .iter()
+            .map(|f| f.finding.kind)
+            .collect();
+        assert_eq!(kinds, [FindingKind::LowSpace]);
     }
 }

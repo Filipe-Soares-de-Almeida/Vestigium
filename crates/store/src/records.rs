@@ -26,7 +26,7 @@ const REASONS: [GapReason; 4] = [
     GapReason::Crashed,
 ];
 /// Stored meaning codes are positions in this list plus one; new meanings go at the end.
-const MEANINGS: [EventMeaning; 15] = [
+const MEANINGS: [EventMeaning; 16] = [
     EventMeaning::StorageReset,
     EventMeaning::DiskRetry,
     EventMeaning::DiskBadBlock,
@@ -42,12 +42,22 @@ const MEANINGS: [EventMeaning; 15] = [
     EventMeaning::AppCrash,
     EventMeaning::ServiceCrash,
     EventMeaning::NoCrashDump,
+    EventMeaning::MemoryDiagnostic,
 ];
 
-fn code<T: PartialEq>(list: &[T], value: &T) -> i64 {
+/// The stored code of `value`: its position in `list` plus one; a value missing from it is refused.
+fn code<T: PartialEq + std::fmt::Debug>(
+    list: &[T],
+    value: &T,
+    what: &'static str,
+) -> Result<i64, StoreError> {
     list.iter()
         .position(|v| v == value)
-        .map_or(0, |i| i as i64 + 1)
+        .map(|i| i as i64 + 1)
+        .ok_or_else(|| StoreError::UnwritableValue {
+            what,
+            value: format!("{value:?}"),
+        })
 }
 
 fn from_code<T: Copy>(list: &[T], code: i64, what: &'static str) -> Result<T, StoreError> {
@@ -57,16 +67,16 @@ fn from_code<T: Copy>(list: &[T], code: i64, what: &'static str) -> Result<T, St
         .ok_or(StoreError::UnknownCode { what, code })
 }
 
-pub(crate) fn channel_code(channel: Channel) -> i64 {
-    code(&CHANNELS, &channel)
+pub(crate) fn channel_code(channel: Channel) -> Result<i64, StoreError> {
+    code(&CHANNELS, &channel, "channel")
 }
 
-pub(crate) fn meaning_code(meaning: EventMeaning) -> i64 {
-    code(&MEANINGS, &meaning)
+pub(crate) fn meaning_code(meaning: EventMeaning) -> Result<i64, StoreError> {
+    code(&MEANINGS, &meaning, "event meaning")
 }
 
-pub(crate) fn gap_code(reason: GapReason) -> i64 {
-    code(&REASONS, &reason)
+pub(crate) fn gap_code(reason: GapReason) -> Result<i64, StoreError> {
+    code(&REASONS, &reason, "gap reason")
 }
 
 fn episode_code(kind: &EpisodeKind) -> i64 {
@@ -88,15 +98,17 @@ const SETTING_DETAIL_LEVEL: &str = "detail_level";
 impl Store {
     /// Stores a finished occurrence on its own, right away; returns its id.
     pub fn insert_occurrence(&mut self, occurrence: &Occurrence) -> Result<i64, StoreError> {
+        let kind = code(&KINDS, &occurrence.kind, "occurrence kind")?;
+        let severity = code(&SEVERITIES, &occurrence.severity, "severity")?;
         self.conn.execute(
             "INSERT INTO occurrence (version, kind, start_ms, end_ms, severity, cause, data)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 RECORD_VERSION,
-                code(&KINDS, &occurrence.kind),
+                kind,
                 occurrence.start_ms,
                 occurrence.end_ms,
-                code(&SEVERITIES, &occurrence.severity),
+                severity,
                 postcard::to_stdvec(&occurrence.cause())?,
                 encode(std::slice::from_ref(occurrence)),
             ],
@@ -356,4 +368,20 @@ fn one<T: serde::de::DeserializeOwned>(version: i64, data: &[u8]) -> Result<T, S
         });
     }
     decode::<T>(data)?.pop().ok_or(StoreError::EmptySegment)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_missing_from_its_table_is_refused() {
+        const PARTIAL: [Severity; 2] = [Severity::Light, Severity::Medium];
+
+        assert_eq!(code(&PARTIAL, &Severity::Medium, "severity").unwrap(), 2);
+        assert!(matches!(
+            code(&PARTIAL, &Severity::Severe, "severity"),
+            Err(StoreError::UnwritableValue { what: "severity", value }) if value == "Severe"
+        ));
+    }
 }

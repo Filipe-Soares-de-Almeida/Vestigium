@@ -22,6 +22,13 @@ How to use this file:
 
 ## [Unreleased]
 
+### Fixed
+
+- A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
+  Settings with an error page, and memory errors it finds now open an alert in Health. History
+  already recorded this way is repaired when the monitor starts. The history format changes, so the
+  window and the monitor must be updated together.
+
 ## [0.1.0] - 2026-11-09
 
 The first release.

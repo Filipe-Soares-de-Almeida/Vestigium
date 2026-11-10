@@ -6,7 +6,7 @@ use vestigium_core::{Gap, WinEvent};
 use crate::records::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -149,6 +149,9 @@ const MIGRATIONS: &[&str] = &[
         raw     INTEGER NOT NULL,
         PRIMARY KEY (disk, attr, day)
     ) WITHOUT ROWID;",
+    // Memory Diagnostic events once stored with meaning 0 get their code, 16.
+    "UPDATE event SET meaning = 16
+     WHERE meaning = 0 AND provider = 'Microsoft-Windows-MemoryDiagnostics-Results';",
 ];
 
 /// What the agent writes in one transaction, every batch.
@@ -267,14 +270,16 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for event in &batch.events {
+                let channel = channel_code(event.channel)?;
+                let meaning = meaning_code(event.meaning)?;
                 insert.execute(params![
                     event.ts_ms,
-                    channel_code(event.channel),
+                    channel,
                     event.provider,
                     event.id,
                     i64::try_from(event.record_id).unwrap_or(i64::MAX),
                     event.level,
-                    meaning_code(event.meaning),
+                    meaning,
                     event.data_xml
                 ])?;
             }
@@ -288,7 +293,8 @@ impl Store {
             let mut insert = tx
                 .prepare_cached("INSERT INTO gap (start_ms, end_ms, reason) VALUES (?1, ?2, ?3)")?;
             for gap in &batch.gaps {
-                insert.execute(params![gap.start_ms, gap.end_ms, gap_code(gap.reason)])?;
+                let reason = gap_code(gap.reason)?;
+                insert.execute(params![gap.start_ms, gap.end_ms, reason])?;
             }
         }
         tx.commit()?;

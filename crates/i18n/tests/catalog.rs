@@ -1,9 +1,45 @@
 use std::collections::{BTreeSet, HashMap};
 
+use vestigium_core::EventMeaning;
 use vestigium_i18n::{Catalog, Lang};
 
 fn keys(lang: Lang) -> BTreeSet<String> {
     Catalog::load(lang).keys().map(str::to_string).collect()
+}
+
+/// Every event meaning, walked through a match that stops compiling when a meaning is added.
+fn every_meaning() -> Vec<EventMeaning> {
+    use EventMeaning::*;
+    let next = |meaning: EventMeaning| match meaning {
+        StorageReset => Some(DiskRetry),
+        DiskRetry => Some(DiskBadBlock),
+        DiskBadBlock => Some(PagingError),
+        PagingError => Some(DisplayReset),
+        DisplayReset => Some(HardwareError),
+        HardwareError => Some(PowerLoss),
+        PowerLoss => Some(UnexpectedShutdown),
+        UnexpectedShutdown => Some(BugCheck),
+        BugCheck => Some(CpuFirmwareLimit),
+        CpuFirmwareLimit => Some(LowVirtualMemory),
+        LowVirtualMemory => Some(AppHang),
+        AppHang => Some(AppCrash),
+        AppCrash => Some(ServiceCrash),
+        ServiceCrash => Some(NoCrashDump),
+        NoCrashDump => Some(MemoryDiagnostic),
+        MemoryDiagnostic => None,
+    };
+    std::iter::successors(Some(StorageReset), |&meaning| next(meaning)).collect()
+}
+
+#[test]
+fn every_event_meaning_has_text_in_both_languages() {
+    for lang in [Lang::En, Lang::PtBr] {
+        let keys = keys(lang);
+        for meaning in every_meaning() {
+            let key = format!("ui.occurrence.event.{meaning:?}");
+            assert!(keys.contains(&key), "{lang:?}: {key} is missing");
+        }
+    }
 }
 
 #[test]

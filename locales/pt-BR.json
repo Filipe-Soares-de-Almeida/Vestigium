@@ -416,6 +416,7 @@
   "ui.occurrence.event.AppCrash": "Um programa fechou com erro",
   "ui.occurrence.event.ServiceCrash": "Um serviço do Windows parou inesperadamente",
   "ui.occurrence.event.NoCrashDump": "O Windows não conseguiu preparar o dump; uma tela azul não deixaria registro",
+  "ui.occurrence.event.MemoryDiagnostic": "O Diagnóstico de Memória do Windows terminou uma execução",
   "ui.occurrence.todo.title": "O que fazer",
   "ui.occurrence.todo.none": "Nenhuma ação sugerida para esta causa. Se repetir, veja o uso de recursos em Agora.",
   "ui.occurrence.dump.title": "Dump deste desligamento",
