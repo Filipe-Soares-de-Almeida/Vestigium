@@ -4,6 +4,10 @@ use vestigium_core::{MinuteRollup, MinuteSample, ProcessTop, Sample, minute_of};
 
 use crate::{Segment, Series, encode};
 
+/// Most items in one segment: a 16-core sample with six disks is 385 bytes, so a chunk stays
+/// under a few MiB, far below what a segment may inflate to.
+const SEGMENT_ITEMS: usize = 2_048;
+
 /// Buffers items until a batch is due, then turns them into one segment per series.
 #[derive(Debug)]
 pub struct Batcher {
@@ -42,7 +46,7 @@ impl Batcher {
         self.processes.push(top);
     }
 
-    /// True once the oldest buffered item is at least one interval old.
+    /// True once the oldest buffered item is at least one interval old, or the clock is behind it.
     pub fn due(&self, now_ms: i64) -> bool {
         let oldest = [
             self.samples.first().map(|s| s.ts_ms),
@@ -52,7 +56,7 @@ impl Batcher {
         .into_iter()
         .flatten()
         .min();
-        oldest.is_some_and(|ts| now_ms.saturating_sub(ts) >= self.interval_ms)
+        oldest.is_some_and(|ts| now_ms < ts || now_ms.saturating_sub(ts) >= self.interval_ms)
     }
 
     /// Empties the buffer into one segment per non-empty series; the open minute stays.
@@ -82,12 +86,16 @@ fn push_segment<T: serde::Serialize>(
     items: &[T],
     ts_ms: impl Fn(&T) -> i64,
 ) {
-    if let (Some(first), Some(last)) = (items.first(), items.last()) {
+    for chunk in items.chunks(SEGMENT_ITEMS) {
+        let stamps = chunk.iter().map(&ts_ms);
+        let (Some(start_ms), Some(end_ms)) = (stamps.clone().min(), stamps.max()) else {
+            continue;
+        };
         segments.push(Segment {
             series,
-            start_ms: ts_ms(first),
-            end_ms: ts_ms(last),
-            data: encode(items),
+            start_ms,
+            end_ms,
+            data: encode(chunk),
         });
     }
 }

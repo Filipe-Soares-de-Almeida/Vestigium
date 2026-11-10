@@ -558,3 +558,63 @@ fn duplicate_minutes_are_merged() {
     assert_eq!(minutes.len(), 1);
     assert_eq!((minutes[0].ts_ms, minutes[0].samples), (60_000, 50));
 }
+
+#[test]
+fn batch_is_due_when_the_clock_steps_back() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    batcher.push_sample(sample(10_000_000));
+
+    assert!(batcher.due(0));
+    assert!(batcher.due(299_999));
+}
+
+/// A sample of a 16-core machine with several disks, as large as a real one gets.
+fn wide_sample(ts_ms: i64) -> Sample {
+    let mut wide = sample(ts_ms);
+    wide.cores = vec![wide.cores[0].clone(); 16];
+    wide.disks = (0..6)
+        .map(|n| DiskLoad {
+            name: format!("{n} D:"),
+            ..wide.disks[0].clone()
+        })
+        .collect();
+    wide
+}
+
+#[test]
+fn a_huge_buffer_is_split_into_decodable_segments() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    for n in 0..60_000 {
+        batcher.push_sample(wide_sample(n * 1_000));
+    }
+
+    let segments = batcher.take();
+
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 60_000);
+    assert!(
+        segments
+            .iter()
+            .filter(|s| s.series == Series::Samples)
+            .count()
+            > 1
+    );
+}
+
+#[test]
+fn segments_of_stamps_out_of_order_cover_their_range() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    batcher.push_sample(sample(9_000));
+    batcher.push_sample(sample(2_000));
+
+    let segments = batcher.take();
+
+    let samples = segments
+        .iter()
+        .find(|s| s.series == Series::Samples)
+        .unwrap();
+    assert_eq!((samples.start_ms, samples.end_ms), (2_000, 9_000));
+}
