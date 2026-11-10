@@ -304,8 +304,25 @@ pub enum FindingChange {
     Close { id: i64 },
 }
 
+/// The finding kinds whose source was not read, so a pass cannot tell whether they still hold.
+pub fn unread_kinds(inputs: &HealthInputs) -> Vec<FindingKind> {
+    let mut kinds = Vec::new();
+    if inputs.antivirus.is_none() {
+        kinds.push(FindingKind::TwoAntivirus);
+    }
+    if inputs.page_files.is_none() {
+        kinds.push(FindingKind::PageFile);
+    }
+    kinds
+}
+
 /// Turns a pass's findings into changes: new ones open, changed ones update, missing ones close.
-pub fn reconcile(open: &[StoredFinding], fresh: &[Finding]) -> Vec<FindingChange> {
+/// An open finding of a kind in `unread` stays open, since its source gave no answer.
+pub fn reconcile(
+    open: &[StoredFinding],
+    fresh: &[Finding],
+    unread: &[FindingKind],
+) -> Vec<FindingChange> {
     let mut changes = Vec::new();
     for finding in fresh {
         match open
@@ -324,7 +341,7 @@ pub fn reconcile(open: &[StoredFinding], fresh: &[Finding]) -> Vec<FindingChange
         let still = fresh
             .iter()
             .any(|f| f.kind == stored.finding.kind && f.subject == stored.finding.subject);
-        if !still {
+        if !still && !unread.contains(&stored.finding.kind) {
             changes.push(FindingChange::Close { id: stored.id });
         }
     }

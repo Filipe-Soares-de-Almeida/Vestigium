@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use vestigium_collect::{HealthSource, physical_drive};
 use vestigium_core::health::{
     Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, SecurityProduct, Subject,
-    evaluate, reconcile,
+    evaluate, reconcile, unread_kinds,
 };
 use vestigium_core::hwtest::TEST_REACH_DAYS;
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
@@ -58,12 +58,14 @@ impl<S: HealthSource> HealthPass<S> {
     }
 
     pub fn run(&mut self, store: &mut Store, now: &PassNow) -> Result<PassOutcome, StoreError> {
-        let asked_security_center = self
-            .antivirus_read_ms
-            .is_none_or(|at| now.ts_ms - at >= ANTIVIRUS_EVERY_MS);
+        // A failed read is asked again on the next pass; only an answer is kept for a day.
+        let asked_security_center = self.antivirus.is_none()
+            || self
+                .antivirus_read_ms
+                .is_none_or(|at| now.ts_ms - at >= ANTIVIRUS_EVERY_MS);
         if asked_security_center {
             self.antivirus = self.source.antivirus();
-            self.antivirus_read_ms = Some(now.ts_ms);
+            self.antivirus_read_ms = self.antivirus.is_some().then_some(now.ts_ms);
         }
         let mut unread: HashSet<&str> = HashSet::new();
         for disk in &now.machine.disks {
@@ -124,7 +126,7 @@ impl<S: HealthSource> HealthPass<S> {
                 .collect(),
         };
         let fresh = evaluate(&inputs);
-        let mut changes = reconcile(&open, &fresh);
+        let mut changes = reconcile(&open, &fresh, &unread_kinds(&inputs));
         // A disk this pass did not read keeps its open SMART finding.
         changes.retain(|change| match change {
             FindingChange::Close { id } => !open.iter().any(|s| {
@@ -163,7 +165,7 @@ fn memory_high_days(store: &Store, from_ms: i64, to_ms: i64) -> Result<u32, Stor
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use vestigium_core::health::{PageFile, VolumeSpace};
@@ -183,6 +185,9 @@ mod tests {
         asked_disks: Rc<RefCell<Vec<String>>>,
         asked_antivirus: Rc<RefCell<u32>>,
         failing_disk: bool,
+        two_antivirus: bool,
+        antivirus_down: Rc<Cell<bool>>,
+        page_files_down: Rc<Cell<bool>>,
     }
 
     impl HealthSource for FakeHealth {
@@ -216,6 +221,9 @@ mod tests {
         }
 
         fn page_files(&mut self) -> Option<Vec<PageFile>> {
+            if self.page_files_down.get() {
+                return None;
+            }
             Some(vec![PageFile {
                 path: r"C:\pagefile.sys".into(),
                 size_bytes: 8 * GB,
@@ -225,10 +233,20 @@ mod tests {
 
         fn antivirus(&mut self) -> Option<Vec<SecurityProduct>> {
             *self.asked_antivirus.borrow_mut() += 1;
-            Some(vec![SecurityProduct {
+            if self.antivirus_down.get() {
+                return None;
+            }
+            let mut products = vec![SecurityProduct {
                 name: "Built-in antivirus".into(),
                 on: true,
-            }])
+            }];
+            if self.two_antivirus {
+                products.push(SecurityProduct {
+                    name: "Other antivirus".into(),
+                    on: true,
+                });
+            }
+            Some(products)
         }
     }
 
@@ -394,6 +412,117 @@ mod tests {
         assert!(!run(&mut pass, &mut store, NOW + 3_600_000, &[]).asked_security_center);
         assert!(run(&mut pass, &mut store, NOW + DAY_MS, &[]).asked_security_center);
         assert_eq!(*asked.borrow(), 2);
+    }
+
+    fn open_kinds(store: &Store) -> Vec<FindingKind> {
+        store
+            .open_findings()
+            .unwrap()
+            .iter()
+            .map(|f| f.finding.kind)
+            .collect()
+    }
+
+    #[test]
+    fn a_failed_antivirus_read_keeps_the_open_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            two_antivirus: true,
+            ..FakeHealth::default()
+        };
+        let down = fake.antivirus_down.clone();
+        let asked = fake.asked_antivirus.clone();
+        let mut pass = HealthPass::new(fake);
+        run(&mut pass, &mut store, NOW, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+
+        down.set(true);
+        run(&mut pass, &mut store, NOW + DAY_MS, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+
+        run(&mut pass, &mut store, NOW + DAY_MS + 3_600_000, &[]);
+        assert_eq!(*asked.borrow(), 3, "a failed read is asked again next pass");
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+
+        down.set(false);
+        run(&mut pass, &mut store, NOW + DAY_MS + 7_200_000, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+    }
+
+    #[test]
+    fn a_fresh_pass_without_the_security_center_keeps_two_antivirus() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            two_antivirus: true,
+            ..FakeHealth::default()
+        };
+        let mut first = HealthPass::new(fake.clone());
+        run(&mut first, &mut store, NOW, &[]);
+
+        let down = fake.clone();
+        down.antivirus_down.set(true);
+        let mut restarted = HealthPass::new(down);
+        run(&mut restarted, &mut store, NOW + 60_000, &[]);
+
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+    }
+
+    #[test]
+    fn an_antivirus_that_comes_up_later_opens_the_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            two_antivirus: true,
+            ..FakeHealth::default()
+        };
+        fake.antivirus_down.set(true);
+        let down = fake.antivirus_down.clone();
+        let mut pass = HealthPass::new(fake);
+        run(&mut pass, &mut store, NOW, &[]);
+        assert!(open_kinds(&store).is_empty());
+
+        down.set(false);
+        run(&mut pass, &mut store, NOW + 3_600_000, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::TwoAntivirus]);
+    }
+
+    #[test]
+    fn a_page_file_read_that_fails_keeps_the_open_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        };
+        let down = fake.page_files_down.clone();
+        let mut pass = HealthPass::new(fake);
+        let event = WinEvent {
+            ts_ms: NOW - DAY_MS,
+            channel: Channel::System,
+            provider: "Microsoft-Windows-Resource-Exhaustion-Detector".into(),
+            id: 2004,
+            record_id: 1,
+            level: 2,
+            meaning: EventMeaning::LowVirtualMemory,
+            data_xml: String::new(),
+        };
+        store
+            .append_batch(&Batch {
+                events: vec![event],
+                ..Batch::default()
+            })
+            .unwrap();
+        run(&mut pass, &mut store, NOW, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::PageFile]);
+
+        down.set(true);
+        run(&mut pass, &mut store, NOW + 3_600_000, &[]);
+        assert_eq!(open_kinds(&store), [FindingKind::PageFile]);
     }
 
     #[test]

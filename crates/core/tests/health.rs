@@ -2,7 +2,7 @@ use vestigium_core::health::{
     BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingChange,
     FindingKind, HealthFact, HealthInputs, Measure, NvmeHealth, PageFile, Reference,
     SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_detail,
-    nvme_health, reconcile, smart_attributes,
+    nvme_health, reconcile, smart_attributes, unread_kinds,
 };
 use vestigium_core::hwtest::{
     MemoryQuick, Outcome, SurfaceAggregator, TestData, TestRun, VolumeCheck, VolumeResult,
@@ -721,7 +721,7 @@ fn reconcile_opens_updates_and_closes() {
         },
     ];
 
-    let changes = reconcile(&open, &fresh);
+    let changes = reconcile(&open, &fresh, &[]);
 
     assert_eq!(
         changes,
@@ -740,9 +740,41 @@ fn reconcile_opens_updates_and_closes() {
         finding: memory.clone(),
     }];
     assert_eq!(
-        reconcile(&settled, std::slice::from_ref(&memory)),
+        reconcile(&settled, std::slice::from_ref(&memory), &[]),
         Vec::new()
     );
+}
+
+#[test]
+fn reconcile_keeps_an_open_finding_whose_source_was_not_read() {
+    let mut inputs = healthy();
+    inputs.antivirus = Some(vec![product("One", true), product("Two", true)]);
+    let two = find(&evaluate(&inputs), FindingKind::TwoAntivirus)
+        .unwrap()
+        .clone();
+    let open = vec![StoredFinding {
+        id: 7,
+        opened_ms: NOW - DAY,
+        finding: two,
+    }];
+
+    inputs.antivirus = None;
+    inputs.page_files = None;
+    let fresh = evaluate(&inputs);
+    let unread = unread_kinds(&inputs);
+
+    assert_eq!(unread, [FindingKind::TwoAntivirus, FindingKind::PageFile]);
+    assert_eq!(
+        reconcile(&open, &fresh, &unread),
+        Vec::new(),
+        "an unread source closes nothing"
+    );
+    assert_eq!(
+        reconcile(&open, &fresh, &[]),
+        vec![FindingChange::Close { id: 7 }],
+        "a source read as empty still closes it"
+    );
+    assert!(unread_kinds(&healthy()).is_empty());
 }
 
 #[test]

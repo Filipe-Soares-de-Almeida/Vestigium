@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- A health alert about two antivirus products running, or about the page file, now stays open when
+  Windows does not answer the check. Before, the alert closed, or never opened, whenever the Security
+  Center was not up yet (often just after logon) or the page file could not be read, and a failed
+  antivirus check was not asked again for a day. The check is now repeated at the next health pass.
 - A program that is still not responding 15 seconds or more after the PC wakes from sleep or the
   watcher resumes from a pause now gets a report. Before, a hang first seen right after a resume was
   always discarded as the settling time of waking, so a program that stayed frozen for minutes never
