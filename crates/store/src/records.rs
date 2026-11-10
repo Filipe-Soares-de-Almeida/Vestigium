@@ -222,8 +222,19 @@ impl Store {
             .optional()?)
     }
 
-    /// Stored settings; a key that is missing or unreadable takes its default.
+    /// Stored settings; a key that is missing or unreadable takes its default, and a retention
+    /// field that is unreadable or out of range takes its own default while the others stay.
     pub fn settings(&self) -> Result<Settings, StoreError> {
+        Ok(self.read_settings()?.0)
+    }
+
+    /// What `settings` had to replace by a default, one sentence each; empty when nothing was.
+    pub fn settings_notes(&self) -> Result<Vec<String>, StoreError> {
+        Ok(self.read_settings()?.1)
+    }
+
+    fn read_settings(&self) -> Result<(Settings, Vec<String>), StoreError> {
+        let mut notes = Vec::new();
         let mut query = self.conn.prepare_cached("SELECT key, value FROM setting")?;
         let rows = query.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -233,9 +244,7 @@ impl Store {
             let (key, value) = row?;
             match key.as_str() {
                 SETTING_RETENTION => {
-                    if let Ok(retention) = serde_json::from_str::<Retention>(&value) {
-                        settings.retention = retention;
-                    }
+                    settings.retention = retention_from(&value, &mut notes);
                 }
                 SETTING_LANGUAGE => {
                     if let Ok(language) = serde_json::from_str::<LanguagePref>(&value) {
@@ -260,10 +269,7 @@ impl Store {
                 _ => {}
             }
         }
-        if settings.validate().is_err() {
-            settings.retention = Retention::default();
-        }
-        Ok(settings)
+        Ok((settings, notes))
     }
 
     pub fn machine(&self) -> Result<Option<MachineInfo>, StoreError> {
@@ -274,6 +280,46 @@ impl Store {
             })
             .optional()?;
         Ok(data.map(|d| serde_json::from_str(&d)).transpose()?)
+    }
+}
+
+/// The stored retention: each field that is a number the settings accept is kept, the others
+/// take their default and add a note.
+fn retention_from(value: &str, notes: &mut Vec<String>) -> Retention {
+    let default = Retention::default();
+    let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(value) else {
+        notes.push("the stored retention could not be read; the defaults are used".into());
+        return default;
+    };
+    let mut field = |name: &str, set: fn(&mut Retention, u32)| {
+        let accepted = |v: &u32| {
+            let mut retention = default;
+            set(&mut retention, *v);
+            let settings = Settings {
+                retention,
+                ..Settings::default()
+            };
+            settings.validate().is_ok()
+        };
+        let found = fields
+            .get(name)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(accepted);
+        if found.is_none() {
+            notes.push(format!(
+                "the stored retention {name} is missing or out of range; its default is used"
+            ));
+        }
+        found
+    };
+    let samples_hours = field("samples_hours", |r, v| r.samples_hours = v);
+    let minutes_days = field("minutes_days", |r, v| r.minutes_days = v);
+    let records_days = field("records_days", |r, v| r.records_days = v);
+    Retention {
+        samples_hours: samples_hours.unwrap_or(default.samples_hours),
+        minutes_days: minutes_days.unwrap_or(default.minutes_days),
+        records_days: records_days.unwrap_or(default.records_days),
     }
 }
 

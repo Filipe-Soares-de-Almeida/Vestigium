@@ -470,6 +470,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             name.to_string_lossy()
         ));
     }
+    report_setting_notes(&store, &shared.status);
 
     for dir in [
         &shared.captures_dir,
@@ -640,6 +641,16 @@ fn message_box(catalog: &Catalog, body: &str) {
 
 pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Tells the status what the stored settings had to replace by a default, when anything.
+fn report_setting_notes(store: &Store, status: &Mutex<AgentStatus>) {
+    let Ok(notes) = store.settings_notes() else {
+        return;
+    };
+    if !notes.is_empty() {
+        lock(status).last_error = Some(notes.join("; "));
+    }
 }
 
 #[cfg(test)]
@@ -1028,6 +1039,28 @@ pub(crate) mod tests {
         assert_eq!(accepted, Response::Done);
         assert_eq!(*lock(&shared.settings), right);
         assert_eq!(store.settings().unwrap(), right);
+    }
+
+    #[test]
+    fn a_stored_setting_replaced_by_its_default_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        drop(Store::open(&db).unwrap());
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute(
+                "INSERT INTO setting (key, value) VALUES ('retention', ?1)",
+                [r#"{"samples_hours":10,"minutes_days":60,"records_days":400}"#],
+            )
+            .unwrap();
+        let store = Store::open(&db).unwrap();
+        let shared = shared();
+
+        report_setting_notes(&store, &shared.status);
+
+        let last_error = lock(&shared.status).last_error.clone().unwrap();
+        assert!(last_error.contains("samples_hours"), "{last_error}");
+        assert_eq!(store.settings().unwrap().retention.minutes_days, 60);
     }
 
     #[test]

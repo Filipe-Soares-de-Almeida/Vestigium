@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- A retention setting that is out of range or unreadable no longer resets the other two. Only the
+  bad value goes back to its default, and the monitor records which one it replaced.
 - A deep capture whose frame tool wrote lines but no usable frame now shows the frames as not
   measured, with the reason, instead of as a run with no frames. The same goes for output with no
   header the monitor can read, such as a program name with a comma in it.

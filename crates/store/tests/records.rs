@@ -745,6 +745,80 @@ fn settings_outside_bounds_are_refused() {
     assert_eq!(store.settings().unwrap(), Settings::default());
 }
 
+/// Writes a retention value straight into the setting row, as a manual edit would.
+fn write_retention(dir: &Path, json: &str) {
+    rusqlite::Connection::open(dir.join("vestigium.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO setting (key, value) VALUES ('retention', ?1)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [json],
+        )
+        .unwrap();
+}
+
+#[test]
+fn one_bad_retention_field_keeps_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(open(dir.path()));
+    write_retention(
+        dir.path(),
+        r#"{"samples_hours":10,"minutes_days":60,"records_days":400}"#,
+    );
+
+    let store = open(dir.path());
+    let settings = store.settings().unwrap();
+
+    assert_eq!(settings.retention.minutes_days, 60);
+    assert_eq!(settings.retention.records_days, 400);
+    assert_eq!(settings.retention.samples_hours, 48);
+    assert!(settings.validate().is_ok());
+    let notes = store.settings_notes().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("samples_hours"), "{notes:?}");
+}
+
+#[test]
+fn unreadable_retention_json_keeps_its_valid_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(open(dir.path()));
+    write_retention(
+        dir.path(),
+        r#"{"samples_hours":"many","minutes_days":120,"records_days":500}"#,
+    );
+
+    let store = open(dir.path());
+    let settings = store.settings().unwrap();
+
+    assert_eq!(settings.retention.samples_hours, 48);
+    assert_eq!(settings.retention.minutes_days, 120);
+    assert_eq!(settings.retention.records_days, 500);
+    assert_eq!(store.settings_notes().unwrap().len(), 1);
+}
+
+#[test]
+fn a_retention_that_is_no_object_takes_the_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(open(dir.path()));
+    write_retention(dir.path(), "not json");
+
+    let store = open(dir.path());
+
+    assert_eq!(store.settings().unwrap(), Settings::default());
+    assert_eq!(store.settings_notes().unwrap().len(), 1);
+}
+
+#[test]
+fn valid_settings_leave_no_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let mut changed = Settings::default();
+    changed.retention.minutes_days = 200;
+    store.set_settings(&changed).unwrap();
+
+    assert!(store.settings_notes().unwrap().is_empty());
+}
+
 #[test]
 fn migration_keeps_one_row_of_each_duplicated_result() {
     let dir = tempfile::tempdir().unwrap();
