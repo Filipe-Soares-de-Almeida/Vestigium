@@ -417,3 +417,76 @@ fn an_earlier_reported_event_does_not_move_the_focus() {
         first.cause
     );
 }
+
+fn storage_of(found: &[Suspect]) -> Option<&Suspect> {
+    find(found, |c| matches!(c, Cause::Storage { .. }))
+}
+
+#[test]
+fn a_disk_event_far_from_the_freeze_is_not_a_cause() {
+    let (triggers, mut window) = cpu_case();
+    window
+        .events
+        .push(event(T - 40_000, "disk", 153, EventMeaning::DiskRetry));
+    let found = suspects(&triggers, &window);
+    assert!(storage_of(&found).is_none());
+    assert!(matches!(found[0].cause, Cause::Cpu { .. }));
+}
+
+#[test]
+fn a_disk_event_in_the_span_with_normal_reads_is_medium() {
+    let (triggers, mut window) = quiet_case();
+    window.events.push(event(
+        T - 2_000,
+        "stornvme",
+        129,
+        EventMeaning::StorageReset,
+    ));
+    let found = suspects(&triggers, &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.cause, Cause::Storage { disk: None });
+    assert_eq!(storage.confidence, Confidence::Medium);
+}
+
+#[test]
+fn slow_reads_outside_the_span_do_not_raise_a_disk_event() {
+    let (triggers, mut window) = quiet_case();
+    window.events.push(event(
+        T - 2_000,
+        "stornvme",
+        129,
+        EventMeaning::StorageReset,
+    ));
+    tweak(&mut window, -40, -40, |s| s.disks[0].latency_ms = 400.0);
+    let found = suspects(&triggers, &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.confidence, Confidence::Medium);
+}
+
+#[test]
+fn a_reported_event_alone_keeps_its_cause() {
+    let reset = event(T, "stornvme", 129, EventMeaning::StorageReset);
+    let reported = Trigger::Reported {
+        event: reset.clone(),
+    };
+    let mut window = quiet_window();
+    window.events.push(reset);
+    tweak(&mut window, -2, 2, |s| s.disks[0].latency_ms = 400.0);
+    let found = suspects(&[reported], &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.confidence, Confidence::High);
+}
+
+#[test]
+fn a_display_reset_far_from_the_freeze_is_not_a_cause() {
+    let (triggers, mut window) = cpu_case();
+    window.events.push(event(
+        T + 28_000,
+        "Display",
+        4101,
+        EventMeaning::DisplayReset,
+    ));
+    let found = suspects(&triggers, &window);
+    assert!(find(&found, |c| *c == Cause::GpuDriver).is_none());
+    assert!(matches!(found[0].cause, Cause::Cpu { .. }));
+}

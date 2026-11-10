@@ -89,6 +89,11 @@ How to use this file:
 - An event logged just before a freeze no longer moves the report's attention off the freeze: when an
   occurrence holds a freeze and an earlier event, the causes are judged around the freeze, so a busy
   processor or a slow disk next to the freeze is found instead of reading as unclear.
+- A disk event or a graphics driver restart in the log no longer becomes the first suspect just
+  because it fell within a minute and a half of a stall. Only events from 10 seconds before the stall
+  to 5 seconds after it count; one further away no longer hides a busy processor or another measured
+  cause. A disk event near the stall is reported with high confidence only when the disk was also
+  answering slowly (over 200 ms) in that span, and with medium confidence otherwise.
 
 ## [0.1.0] - 2026-11-09
 

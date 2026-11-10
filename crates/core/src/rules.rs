@@ -207,7 +207,19 @@ struct Focus {
     end: i64,
 }
 
+/// How long before the focus starts and after it ends a cause is still looked for.
+const SCAN_BEFORE_MS: i64 = 10_000;
+const SCAN_AFTER_MS: i64 = 5_000;
+
 impl Focus {
+    fn scan_from(self) -> i64 {
+        self.start - SCAN_BEFORE_MS
+    }
+
+    fn scan_to(self) -> i64 {
+        self.end + SCAN_AFTER_MS
+    }
+
     fn of(triggers: &[Trigger], window: &Window) -> Focus {
         let rank = |t: &Trigger| OccurrenceKind::of(t).rank();
         let Some(gravest) = triggers.iter().map(rank).max() else {
@@ -262,22 +274,26 @@ const STORAGE_EVENTS: &[EventMeaning] = &[
     EventMeaning::PagingError,
 ];
 
-fn storage_reset(_: Focus, window: &Window) -> Option<Suspect> {
-    let mut evidence = events_meaning(window, STORAGE_EVENTS);
+fn storage_reset(focus: Focus, window: &Window) -> Option<Suspect> {
+    let (from, to) = (focus.scan_from(), focus.scan_to());
+    let mut evidence = events_between(window, STORAGE_EVENTS, from, to);
     if evidence.is_empty() {
         return None;
     }
-    let worst = worst_disk(&window.samples, |d| d.latency_ms);
+    let worst = worst_disk(between(&window.samples, from, to), |d| d.latency_ms);
     if let Some((ts_ms, disk, value)) = &worst {
         evidence.push(metric(*ts_ms, Metric::DiskLatencyMs, *value, Some(disk)));
     }
+    let slow = worst
+        .filter(|(_, _, value)| *value > threshold(Metric::DiskLatencyMs))
+        .map(|(_, disk, _)| disk);
     Some(Suspect {
-        cause: Cause::Storage {
-            disk: worst
-                .filter(|(_, _, value)| *value > threshold(Metric::DiskLatencyMs))
-                .map(|(_, disk, _)| disk),
+        confidence: if slow.is_some() {
+            Confidence::High
+        } else {
+            Confidence::Medium
         },
-        confidence: Confidence::High,
+        cause: Cause::Storage { disk: slow },
         evidence,
         next_steps: vec![
             NextStep::UpdateStorageDriver,
@@ -288,7 +304,7 @@ fn storage_reset(_: Focus, window: &Window) -> Option<Suspect> {
 }
 
 fn disk_latency(focus: Focus, window: &Window) -> Option<Suspect> {
-    let samples = between(&window.samples, focus.start - 10_000, focus.end + 5_000);
+    let samples = between(&window.samples, focus.scan_from(), focus.scan_to());
     let latency = worst_disk(samples.iter().copied(), |d| d.latency_ms)
         .filter(|(_, _, v)| *v > threshold(Metric::DiskLatencyMs));
     let queue = worst_disk(samples.iter().copied(), |d| d.queue_len)
@@ -319,7 +335,7 @@ fn disk_latency(focus: Focus, window: &Window) -> Option<Suspect> {
     if let Some((ts_ms, value)) = active {
         evidence.push(metric(ts_ms, Metric::DiskActivePct, value, Some(&disk)));
     }
-    let tops = tops_or_all(window, focus.start - 10_000, focus.end + 5_000);
+    let tops = tops_or_all(window, focus.scan_from(), focus.scan_to());
     let busiest = ranked(&tops, Metric::IoBytesPerS, Summary::Mean)
         .into_iter()
         .next();
@@ -390,8 +406,7 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
 }
 
 fn cpu(focus: Focus, window: &Window) -> Option<Suspect> {
-    let from = focus.start - 10_000;
-    let to = focus.end + 5_000;
+    let (from, to) = (focus.scan_from(), focus.scan_to());
     let mut saturated_ms = 0;
     let mut peak: Option<(i64, f32)> = None;
     for (i, s) in window.samples.iter().enumerate() {
@@ -491,14 +506,14 @@ fn dpc_isr(focus: Focus, window: &Window) -> Option<Suspect> {
     })
 }
 
-fn gpu_driver(_: Focus, window: &Window) -> Option<Suspect> {
-    let mut evidence = events_meaning(window, &[EventMeaning::DisplayReset]);
+fn gpu_driver(focus: Focus, window: &Window) -> Option<Suspect> {
+    let (from, to) = (focus.scan_from(), focus.scan_to());
+    let mut evidence = events_between(window, &[EventMeaning::DisplayReset], from, to);
     if evidence.is_empty() {
         return None;
     }
-    let gpu = window
-        .samples
-        .iter()
+    let gpu = between(&window.samples, from, to)
+        .into_iter()
         .filter_map(|s| s.gpu_pct.map(|v| (s.ts_ms, v)))
         .max_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((ts_ms, value)) = gpu {
@@ -701,9 +716,20 @@ fn metric(ts_ms: i64, metric: Metric, value: f32, subject: Option<&str>) -> Evid
 
 /// Curated events of these kinds, judged again by provider and id rather than by the stored meaning.
 fn events_meaning(window: &Window, meanings: &[EventMeaning]) -> Vec<Evidence> {
+    events_between(window, meanings, i64::MIN, i64::MAX)
+}
+
+/// The same, limited to events from `from_ms` to `to_ms`.
+fn events_between(
+    window: &Window,
+    meanings: &[EventMeaning],
+    from_ms: i64,
+    to_ms: i64,
+) -> Vec<Evidence> {
     window
         .events
         .iter()
+        .filter(|e| (from_ms..=to_ms).contains(&e.ts_ms))
         .filter_map(|e| {
             curated_meaning(e)
                 .filter(|m| meanings.contains(m))
