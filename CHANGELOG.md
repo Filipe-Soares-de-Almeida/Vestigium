@@ -50,6 +50,8 @@ How to use this file:
 
 ### Fixed
 
+- The time a window has been not responding on the Now screen now starts again when the same program
+  hangs a second time while the live view was stopped, instead of counting from the first hang.
 - An update check that the release feed answers with an error, such as a server problem or a rate
   limit, now shows as failed instead of "up to date", and the automatic check tries again the next
   time the window opens instead of waiting a day.

@@ -1,18 +1,9 @@
 import type { LiveMessage, LivePoint, NowFrame } from "../../lib/types";
+import { type Hung, HungTracker } from "./hung";
 
 /** How much the chart shows. */
 export const SPAN_MS = 600_000;
-/** How long a window goes without input before Windows lists it as not responding. */
-const HUNG_AFTER_MS = 5_000;
-
-/** A window not responding, and since when as far as this screen can tell. */
-export interface Hung {
-  pid: number;
-  name: string;
-  sinceMs: number;
-  /** `false` when it was already listed as the stream began, so `sinceMs` is only a bound. */
-  exact: boolean;
-}
+export type { Hung };
 
 /** What the live stream has brought so far: the last ten minutes, the latest second, the hung windows. */
 export class Live {
@@ -28,6 +19,7 @@ export class Live {
   ended = $state(false);
 
   #fresh = true;
+  #hungTracker = new HungTracker();
 
   /** Forgets everything, before a stream starts again. */
   reset(): void {
@@ -65,17 +57,7 @@ export class Live {
         ];
       }
     }
-    this.hung = message.frame.hung.map((window) => {
-      const known = this.hung.find((h) => h.pid === window.pid);
-      return (
-        known ?? {
-          pid: window.pid,
-          name: window.name,
-          sinceMs: now - HUNG_AFTER_MS,
-          exact: !this.#fresh,
-        }
-      );
-    });
+    this.hung = this.#hungTracker.update(message.frame.hung, now, Date.now(), this.#fresh);
     this.#fresh = false;
   }
 }
