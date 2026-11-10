@@ -89,6 +89,7 @@ fn inputs(found: &TweakHistory, now_ms: i64) -> TweakInputs {
     });
     TweakInputs {
         now_ms,
+        evidence_from_ms: now_ms - EVIDENCE_MS,
         values,
         startup,
         hiberfile_bytes: hiberfile_bytes(),

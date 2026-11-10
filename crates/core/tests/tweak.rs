@@ -15,6 +15,7 @@ const NOW: i64 = 1_800_000_000_000;
 fn inputs() -> TweakInputs {
     TweakInputs {
         now_ms: NOW,
+        evidence_from_ms: NOW - 30 * DAY,
         values: Vec::new(),
         startup: Vec::new(),
         hiberfile_bytes: None,
@@ -392,6 +393,25 @@ fn helped_counts_equal_windows() {
     assert_eq!((h.days, h.before, h.after), (3, 1, 1));
     assert!(helped(TweakId::GameDvr, NOW - DAY / 2, &after).is_none());
     assert!(helped(TweakId::CrashDump, applied, &after).is_none());
+}
+
+#[test]
+fn helped_is_withheld_when_the_before_window_leaves_the_evidence() {
+    let mut after = with(inputs(), TweakId::GameDvr, &[]);
+    let stutter = |at| occurrence(at, OccurrenceKind::Stutter, Cause::Unclear);
+    after.occurrences = vec![stutter(NOW - 29 * DAY), stutter(NOW - 26 * DAY)];
+
+    let inside = NOW - 20 * DAY;
+    assert!(helped(TweakId::GameDvr, inside, &after).is_some());
+    let edge = NOW - 23 * DAY;
+    assert!(
+        helped(TweakId::GameDvr, edge, &after).is_some(),
+        "a before window that starts exactly at the evidence is complete"
+    );
+    let truncated = NOW - 25 * DAY;
+    assert!(helped(TweakId::GameDvr, truncated, &after).is_none());
+    let beyond = NOW - 40 * DAY;
+    assert!(helped(TweakId::GameDvr, beyond, &after).is_none());
 }
 
 struct FakeStore {

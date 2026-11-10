@@ -454,6 +454,8 @@ pub struct CaptureCauses {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TweakInputs {
     pub now_ms: i64,
+    /// Oldest time the occurrences, episodes and events below reach back to.
+    pub evidence_from_ms: i64,
     /// What each setting holds, read without elevation; a setting missing here could not be read.
     pub values: Vec<(Setting, Value)>,
     pub startup: Vec<StartupEntry>,
@@ -1046,13 +1048,16 @@ pub struct Helped {
 }
 
 /// Whether a change helped, by the signal that backs its tweak; `None` for a tweak with nothing to
-/// count or a change less than a day old.
+/// count, a change less than a day old, or a before window that starts earlier than the evidence.
 pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<Helped> {
     let days = ((inputs.now_ms - applied_ms) / DAY_MS).min(HELPED_DAYS);
     if days < 1 {
         return None;
     }
     let span = days * DAY_MS;
+    if applied_ms - span < inputs.evidence_from_ms {
+        return None;
+    }
     let count = |from: i64, to: i64| -> Option<u32> {
         Some(match tweak {
             TweakId::FastStartup => unfinished_shutdowns(inputs, from, to),

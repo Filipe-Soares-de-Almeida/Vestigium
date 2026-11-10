@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- The Did it help comparison on the Optimizations screen no longer shows a result for a change made
+  so long ago that the days before it fall outside the 30 days of history the watcher keeps. Before,
+  a change applied more than 23 days ago was compared against a before period that was cut short or
+  empty, so it could report fewer problems or no difference by mistake.
 - Crash dumps kept in a subfolder of the crash dumps folder no longer disappear from the list and from
   the space count until the next dump scan. The watcher's own listing now reads one level of
   subfolders, as the dump scan does, so it no longer marks those dumps as deleted.
