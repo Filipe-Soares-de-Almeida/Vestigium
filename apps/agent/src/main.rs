@@ -7,6 +7,7 @@ mod fall;
 mod health;
 mod icon;
 mod import;
+mod instance;
 mod orphan;
 mod paths;
 mod power;

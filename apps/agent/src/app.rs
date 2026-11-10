@@ -25,6 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
 use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
+use crate::instance::Instance;
 use crate::orphan::release_orphaned_capture;
 use crate::readings::windows_source_set;
 use crate::sampler::{Wiring, run_sampler};
@@ -356,6 +357,7 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
 
 /// Starts the agent and runs it until Exit or the end of the session.
 pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
+    let _instance = Instance::acquire()?;
     let server = match PipeServer::bind(&pipe_name(&current_user_sid().map_err(failed)?)) {
         Err(IpcError::AlreadyRunning) => return Err(StartError::AlreadyRunning),
         bound => bound.map_err(failed)?,

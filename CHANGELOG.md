@@ -47,6 +47,8 @@ How to use this file:
 - If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
   it again after a second, and exits only when that keeps failing, instead of carrying on with no
   channel while the window says it is not running.
+- Starting Vestigium a second time no longer starts a second watcher, even when the first one has lost
+  its connection channel to the window, so two watchers never record into the same history.
 - A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
   result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
   attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now
