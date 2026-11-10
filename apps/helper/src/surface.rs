@@ -5,12 +5,12 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use vestigium_collect::{disk_media, wall_ms};
+use vestigium_collect::{disk_io_bytes, disk_media, wall_ms};
 use vestigium_core::Media;
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
     Outcome, SLOW_BLOCK_MS, SURFACE_BLOCK, SurfaceAggregator, SurfaceProgress, SurfaceScan,
-    TEST_RUN_VERSION, TestData, TestRun,
+    TEST_RUN_VERSION, TestData, TestRun, outside_traffic,
 };
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE};
 use windows::Win32::Storage::FileSystem::{
@@ -55,10 +55,13 @@ pub trait Disk {
     fn read(&mut self, offset: u64, len: u32) -> Result<(), u32>;
     /// Whether the disk still reports its length; read-only, and false once it is gone.
     fn answers(&mut self) -> bool;
+    /// Bytes the disk has moved so far for every program together, when it counts them.
+    fn io_bytes(&self) -> Option<u64>;
 }
 
 /// A physical drive opened for reading only, with I/O at the lowest priority.
 pub struct PhysicalDisk {
+    number: u32,
     handle: HANDLE,
     bytes: u64,
     sector: u32,
@@ -91,6 +94,7 @@ impl PhysicalDisk {
             )
         };
         let mut disk = PhysicalDisk {
+            number,
             handle,
             bytes: 0,
             sector: 512,
@@ -191,6 +195,10 @@ impl Disk for PhysicalDisk {
         if read == len { Ok(()) } else { Err(0) }
     }
 
+    fn io_bytes(&self) -> Option<u64> {
+        disk_io_bytes(self.number)
+    }
+
     fn answers(&mut self) -> bool {
         let mut length = GET_LENGTH_INFORMATION::default();
         self.ask(
@@ -229,6 +237,7 @@ pub fn scan(
     let block = u64::from(SURFACE_BLOCK);
     let mut offset = (from_bytes.min(size) / block) * block;
     let mut scan = SurfaceAggregator::new(number, media, size, sector, offset);
+    let (counted_before, mut ours) = (disk.io_bytes(), 0u64);
     let clock = Instant::now();
     let ms = |since: Instant| since.elapsed().as_secs_f64() * 1000.0;
     let mut last_progress = 0.0;
@@ -248,8 +257,10 @@ pub fn scan(
         let started = Instant::now();
         let first = disk.read(offset, len);
         let mut took = ms(started) as f32;
+        ours += u64::from(len);
         if first.is_ok() && took >= SLOW_BLOCK_MS {
             let again = Instant::now();
+            ours += u64::from(len);
             if disk.read(offset, len).is_ok() {
                 took = took.min(ms(again) as f32);
             }
@@ -264,6 +275,7 @@ pub fn scan(
                 if vanished {
                     break;
                 }
+                ours += u64::from(sector);
                 if let Err(code) = disk.read(at, sector) {
                     vanished = DEVICE_GONE.contains(&code);
                     bad.push(at);
@@ -298,6 +310,9 @@ pub fn scan(
             last_progress = ms(clock);
             progress(scan.progress(wall_ms(), offset));
         }
+    }
+    if let (Some(before), Some(after)) = (counted_before, disk.io_bytes()) {
+        scan.set_outside_io(outside_traffic(after.saturating_sub(before), ours));
     }
     if gone {
         // A later scan resumes at the first block that was not recorded.
@@ -422,6 +437,10 @@ mod tests {
         reads: u32,
         /// Every read from this offset on fails with this Win32 error.
         fails_from: Option<(u64, u32)>,
+        /// What the disk's own byte counter reads, when it has one.
+        counter: Option<u64>,
+        /// Bytes other programs add to the counter at every read.
+        outside_per_read: u64,
         /// What the length query says once reads fail.
         answers: bool,
     }
@@ -434,6 +453,8 @@ mod tests {
                 slow_once: Vec::new(),
                 reads: 0,
                 fails_from: None,
+                counter: None,
+                outside_per_read: 0,
                 answers: true,
             }
         }
@@ -448,8 +469,15 @@ mod tests {
             512
         }
 
+        fn io_bytes(&self) -> Option<u64> {
+            self.counter
+        }
+
         fn read(&mut self, offset: u64, len: u32) -> Result<(), u32> {
             self.reads += 1;
+            if let Some(counter) = &mut self.counter {
+                *counter += u64::from(len) + self.outside_per_read;
+            }
             if let Some(at) = self.slow_once.iter().position(|&o| o == offset) {
                 self.slow_once.remove(at);
                 std::thread::sleep(Duration::from_millis(600));
@@ -468,6 +496,23 @@ mod tests {
         fn answers(&mut self) -> bool {
             self.answers
         }
+    }
+
+    #[test]
+    fn other_programs_on_the_disk_are_recorded() {
+        let mut disk = FakeDisk::new(8);
+        disk.counter = Some(1_000);
+        disk.outside_per_read = 8 * MIB;
+        assert!(scan_all(&mut disk, 0).0.outside_io);
+        let mut quiet = FakeDisk::new(8);
+        quiet.counter = Some(1_000);
+        assert!(!scan_all(&mut quiet, 0).0.outside_io);
+        let mut unknown = FakeDisk::new(8);
+        unknown.outside_per_read = 8 * MIB;
+        assert!(
+            !scan_all(&mut unknown, 0).0.outside_io,
+            "no counter, no claim"
+        );
     }
 
     fn scan_all(disk: &mut FakeDisk, from: u64) -> (SurfaceScan, bool) {

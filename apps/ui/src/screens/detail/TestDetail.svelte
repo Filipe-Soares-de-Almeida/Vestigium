@@ -73,6 +73,7 @@
         <p class="line">{t("ui.detail.surface.range", { from: formatBytes(surface.from_bytes), to: formatBytes(surface.to_bytes), total: formatBytes(surface.disk_bytes) })}</p>
         <p class="line">{surface.unreadable_blocks ? t("ui.detail.surface.unreadable", { count: formatNumber(surface.unreadable_blocks) }) : t("ui.detail.surface.clean")}</p>
         {#if surface.failure}<p class="line">{surface.failure}</p>{/if}
+        {#if surface.outside_io}<p class="line">{t("ui.detail.surface.outside")}</p>{/if}
       </Block>
       {#if surface.worst.length && level !== "Simple"}
         <Block title={t("ui.detail.surface.worst")}>

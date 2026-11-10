@@ -836,8 +836,13 @@ fn quick(errors: u64) -> TestData {
 }
 
 fn surface(media: Media, slow_ms: &[f32], unreadable: u64) -> TestData {
+    surface_with(media, slow_ms, unreadable, false)
+}
+
+fn surface_with(media: Media, slow_ms: &[f32], unreadable: u64, outside_io: bool) -> TestData {
     let disk = 1u64 << 40;
     let mut scan = SurfaceAggregator::new(1, media, disk, 512, 0);
+    scan.set_outside_io(outside_io);
     for (i, ms) in slow_ms.iter().enumerate() {
         scan.block(i as u64 * (1 << 20), *ms);
     }
@@ -914,6 +919,38 @@ fn slow_regions_count_only_on_hdd() {
     assert_eq!(flagged.len(), 1);
     assert_eq!(flagged[0].subject, Subject::Disk("1 D:".into()));
     assert_eq!(flagged[0].concern, Concern::Attention);
+}
+
+#[test]
+fn slow_blocks_with_other_programs_on_the_disk_are_not_an_alert() {
+    let slow = [700.0; 12];
+    let disk = Subject::Disk("1 D:".into());
+    let mut inputs = healthy();
+    inputs.tests.push(test_run(
+        3,
+        disk.clone(),
+        surface_with(Media::Hdd, &slow, 0, true),
+    ));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::DiskUnreadable).is_empty());
+
+    let mut idle = healthy();
+    idle.tests.push(test_run(
+        3,
+        disk.clone(),
+        surface_with(Media::Hdd, &slow, 0, false),
+    ));
+    assert_eq!(
+        of_kind(&evaluate(&idle), FindingKind::DiskUnreadable).len(),
+        1
+    );
+
+    let mut bad = healthy();
+    bad.tests
+        .push(test_run(3, disk, surface_with(Media::Hdd, &slow, 2, true)));
+    let found = evaluate(&bad);
+    let flagged = of_kind(&found, FindingKind::DiskUnreadable);
+    assert_eq!(flagged.len(), 1);
+    assert_eq!(flagged[0].concern, Concern::Critical);
 }
 
 #[test]

@@ -73,6 +73,13 @@ pub struct SurfaceScan {
     pub unreadable: Vec<u64>,
     /// Why the scan could not run or stopped short, when it did.
     pub failure: Option<String>,
+    /// Other programs used the disk during the scan, so slow reads may not be the disk's fault.
+    pub outside_io: bool,
+}
+
+/// Whether a disk moved clearly more bytes than the `ours` a test read or wrote on it, as `all`.
+pub fn outside_traffic(all: u64, ours: u64) -> bool {
+    all > ours + (ours / 10).max(16 << 20)
 }
 
 impl SurfaceScan {
@@ -126,6 +133,7 @@ impl SurfaceAggregator {
                 worst: Vec::new(),
                 unreadable: Vec::new(),
                 failure: None,
+                outside_io: false,
             },
         }
     }
@@ -158,6 +166,11 @@ impl SurfaceAggregator {
             .extend(sectors.iter().take(room).copied());
     }
 
+    /// Records whether other programs used the disk during the scan.
+    pub fn set_outside_io(&mut self, outside: bool) {
+        self.scan.outside_io = outside;
+    }
+
     pub fn progress(&self, ts_ms: i64, at_bytes: u64) -> SurfaceProgress {
         SurfaceProgress {
             disk: self.scan.disk,
@@ -186,6 +199,7 @@ pub fn combined_surface(runs: &[SurfaceScan]) -> Option<SurfaceScan> {
             break;
         }
         combined.from_bytes = earlier.from_bytes;
+        combined.outside_io |= earlier.outside_io;
         for (band, count) in combined.bands.iter_mut().zip(earlier.bands) {
             *band += count;
         }

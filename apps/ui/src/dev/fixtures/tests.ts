@@ -66,6 +66,7 @@ function surface(errors: boolean): SurfaceScan {
       : [{ offset: 120 * GIB, ms: 131 }],
     unreadable: errors ? [651 * GIB + 8192, 1720 * GIB + 4096] : [],
     failure: null,
+    outside_io: false,
   };
 }
 
@@ -77,7 +78,7 @@ function run(id: number, daysAgo: number, minutes: number, partial: Omit<TestRun
 /** An earlier read of the same disk that was stopped at 40%. */
 function stoppedSurface(): SurfaceScan {
   const scan = surface(false);
-  return { ...scan, to_bytes: scan.disk_bytes * 0.4, regions: regions([200], [], 410), worst: [] };
+  return { ...scan, to_bytes: scan.disk_bytes * 0.4, regions: regions([200], [], 410), worst: [], outside_io: true };
 }
 
 function runs(errors: boolean): TestRunDto[] {

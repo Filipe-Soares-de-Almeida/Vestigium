@@ -636,7 +636,7 @@ fn disk_unreadable(inputs: &HealthInputs) -> Vec<Finding> {
                 scan.unreadable_blocks,
                 vec![NextStep::BackUpNow, NextStep::ReplaceDisk],
             )
-        } else if scan.media == Media::Hdd && slow >= SLOW_BLOCKS {
+        } else if scan.media == Media::Hdd && slow >= SLOW_BLOCKS && !scan.outside_io {
             (
                 Concern::Attention,
                 slow,

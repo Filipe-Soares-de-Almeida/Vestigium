@@ -1039,6 +1039,8 @@ export interface SurfaceScan {
   worst: SlowBlock[];
   unreadable: number[];
   failure: string | null;
+  /** Other programs used the disk during the scan, so slow reads may not be the disk's fault. */
+  outside_io: boolean;
 }
 
 export type Bus = "Sata" | "Nvme" | "Usb" | "Other";

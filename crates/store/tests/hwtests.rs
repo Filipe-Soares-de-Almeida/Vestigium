@@ -2,8 +2,8 @@ use vestigium_core::Media;
 use vestigium_core::Retention;
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
-    MemoryQuick, Outcome, Region, SurfaceAggregator, TestData, TestDataV1, TestRun, TestRunV1,
-    VolumeCheck, VolumeCheckV1, VolumeResult,
+    BANDS, MemoryQuick, Outcome, Region, SurfaceAggregator, SurfaceScanV2, TestData, TestDataV1,
+    TestDataV2, TestRun, TestRunV1, TestRunV2, VolumeCheck, VolumeCheckV1, VolumeResult,
 };
 use vestigium_store::{SCHEMA_VERSION, Store, encode};
 
@@ -130,6 +130,55 @@ fn a_volume_check_keeps_its_dirty_state() {
     };
     store.record_test_run(&run).unwrap();
     assert_eq!(store.test_runs(0, 2 * DAY).unwrap()[0].run, run);
+}
+
+#[test]
+fn a_surface_scan_stored_with_layout_version_two_still_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let old = TestRunV2 {
+        subject: Subject::Disk("1 D:".into()),
+        started_ms: DAY,
+        ended_ms: DAY + 60_000,
+        outcome: Outcome::Clean,
+        data: TestDataV2::DiskSurface(SurfaceScanV2 {
+            disk: 1,
+            media: Media::Hdd,
+            disk_bytes: 1 << 30,
+            sector_bytes: 512,
+            from_bytes: 0,
+            to_bytes: 1 << 30,
+            bands: [10, 0, 0, 0, 0, 12],
+            unreadable_blocks: 0,
+            regions: vec![Region::Unread; 4],
+            worst: Vec::new(),
+            unreadable: Vec::new(),
+            failure: None,
+        }),
+    };
+    assert_eq!(BANDS, 6);
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute(
+            "INSERT INTO test_run (version, kind, subject, started_ms, ended_ms, outcome, data)
+             VALUES (2, 1, 'disk:1 D:', ?1, ?2, 0, ?3)",
+            rusqlite::params![
+                old.started_ms,
+                old.ended_ms,
+                encode(std::slice::from_ref(&old))
+            ],
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let runs = store.test_runs(0, 2 * DAY).unwrap();
+    assert_eq!(runs.len(), 1);
+    let TestData::DiskSurface(scan) = &runs[0].run.data else {
+        panic!("a surface scan");
+    };
+    assert_eq!(scan.slow_blocks(), 12);
+    assert!(!scan.outside_io);
 }
 
 #[test]

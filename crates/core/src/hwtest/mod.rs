@@ -12,18 +12,18 @@ pub use disk::{
     BenchResult, Benchmark, Bus, Expected, Region, SLOW_BLOCK_MS, SURFACE_BLOCK, SURFACE_REGIONS,
     SlowBlock, SurfaceAggregator, SurfaceProgress, SurfaceScan, UNREADABLE_KEPT, VolumeCheck,
     VolumeResult, WORST_KEPT, bench_has_room, bench_reference, bench_verdict, combined_surface,
-    latency_band, volume_result,
+    latency_band, outside_traffic, volume_result,
 };
-pub use legacy::{TestDataV1, TestRunV1, VolumeCheckV1};
+pub use legacy::{SurfaceScanV2, TestDataV1, TestDataV2, TestRunV1, TestRunV2, VolumeCheckV1};
 pub use memory::{
     DiagnosticDetail, DiagnosticResult, ERRORS_KEPT, MemoryDiagnostic, MemoryError, MemoryQuick,
     PATTERNS, Pattern, QUICK_CHUNK, QUICK_LEAVE_FREE, QUICK_MIN, QUICK_MINUTES, QUICK_USE_CAP,
     memory_diagnostics, quick_test_size,
 };
 
-/// Layout of the `TestRun` the window and the helper write and the store keeps; version 1 is
-/// still read through `TestRunV1`.
-pub const TEST_RUN_VERSION: u8 = 2;
+/// Layout of the `TestRun` the window and the helper write and the store keeps; versions 1 and 2
+/// are still read through `TestRunV1` and `TestRunV2`.
+pub const TEST_RUN_VERSION: u8 = 3;
 /// How far back the health pass looks at test runs.
 pub const TEST_REACH_DAYS: i64 = 90;
 /// The Vestigium processes that run tests: the window and the elevated helper.

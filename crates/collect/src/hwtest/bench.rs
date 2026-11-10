@@ -6,6 +6,7 @@ use vestigium_core::Media;
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
     BenchMode, BenchResult, Benchmark, Bus, Outcome, TestData, TestRun, bench_has_room,
+    outside_traffic,
 };
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE,
@@ -123,7 +124,7 @@ struct Measured {
 }
 
 /// Bytes the disk read and wrote since it started, for every program together.
-fn disk_bytes(disk: u32) -> Option<u64> {
+pub fn disk_io_bytes(disk: u32) -> Option<u64> {
     let path = HSTRING::from(format!(r"\\.\PhysicalDrive{disk}"));
     // SAFETY: opens the device for a query only; `Owned` closes it.
     let drive = Owned(
@@ -389,7 +390,7 @@ pub fn benchmark_with_timeout(
         outside_io: false,
         failure: None,
     };
-    let disk_before = target.disk.and_then(disk_bytes);
+    let disk_before = target.disk.and_then(disk_io_bytes);
     let mut ours = 0u64;
     remove_old_files(&target.dir);
     let path = target
@@ -466,9 +467,9 @@ pub fn benchmark_with_timeout(
         }
         result.map_err(IoError::into_message)
     })();
-    if let (Some(before), Some(after)) = (disk_before, target.disk.and_then(disk_bytes)) {
+    if let (Some(before), Some(after)) = (disk_before, target.disk.and_then(disk_io_bytes)) {
         let all = after.saturating_sub(before);
-        bench.outside_io = all > ours + (ours / 10).max(16 << 20);
+        bench.outside_io = outside_traffic(all, ours);
     }
     let outcome = match measured {
         Err(e) => {

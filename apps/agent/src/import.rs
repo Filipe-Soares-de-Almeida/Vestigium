@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
-use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, disk_subject};
+use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, TestRunV2, disk_subject};
 use vestigium_core::{
     Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
     DeepCapture, DumpDeletion, DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
@@ -218,9 +218,10 @@ fn read_capture(path: &Path) -> Option<DeepCapture> {
     postcard::from_bytes(body).ok()
 }
 
-/// A test file of the current layout or of version 1, which has no dirty state in a volume check.
+/// A test file of the current layout, or of version 2 or 1, which lack what later versions added.
 fn read_test_run(path: &Path) -> Option<TestRun> {
     read_versioned::<TestRun>(path, TEST_RUN_VERSION)
+        .or_else(|| read_versioned::<TestRunV2>(path, 2).map(TestRun::from))
         .or_else(|| read_versioned::<TestRunV1>(path, 1).map(TestRun::from))
 }
 
@@ -616,6 +617,39 @@ mod tests {
         write_versioned(&tests.join("60.chkdsk"), 1, &old);
         assert_eq!(import_tests(&tests, &mut store).len(), 1);
         assert!(!tests.join("60.chkdsk").exists());
+        assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_surface_file_of_layout_version_two_is_imported() {
+        use vestigium_core::hwtest::{Outcome, SurfaceScanV2, TestDataV2, TestRunV2};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        let old = TestRunV2 {
+            subject: Subject::Disk("1 D:".into()),
+            started_ms: 10,
+            ended_ms: 20,
+            outcome: Outcome::Clean,
+            data: TestDataV2::DiskSurface(SurfaceScanV2 {
+                disk: 1,
+                media: vestigium_core::Media::Hdd,
+                disk_bytes: 1 << 30,
+                sector_bytes: 512,
+                from_bytes: 0,
+                to_bytes: 1 << 30,
+                bands: [0; vestigium_core::hwtest::BANDS],
+                unreadable_blocks: 0,
+                regions: Vec::new(),
+                worst: Vec::new(),
+                unreadable: Vec::new(),
+                failure: None,
+            }),
+        };
+        write_versioned(&tests.join("61.surface"), 2, &old);
+        assert_eq!(import_tests(&tests, &mut store).len(), 1);
+        assert!(!tests.join("61.surface").exists());
         assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
     }
 

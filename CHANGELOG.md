@@ -41,6 +41,11 @@ How to use this file:
 
 ### Fixed
 
+- A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
+  result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
+  attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now
+  stored in a new layout, so the window, the monitor and the helper must be updated together; earlier
+  results still read.
 - A second deep capture started while one is already running, for example after the window was closed and
   reopened, is now refused by the administrator helper instead of stopping the first one's recording and
   leaving it truncated. The helper also no longer accepts a trace file path.
