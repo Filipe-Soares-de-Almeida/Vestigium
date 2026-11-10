@@ -29,6 +29,9 @@ How to use this file:
   rights.
 - The crash dump scan no longer follows a junction or link inside a dump folder, so a link planted
   there cannot make the administrator helper or the monitor list or read another dump.
+- The administrator helper now checks, from the open result file itself, that it was created in the
+  folder it was asked for, and deletes it through that same handle if a link was swapped in on the
+  way, so a result file can no longer end up in another folder.
 
 ### Fixed
 
