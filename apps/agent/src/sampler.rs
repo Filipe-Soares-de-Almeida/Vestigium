@@ -1216,7 +1216,10 @@ mod tests {
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: now.clone(),
             readings: Arc::new(Mutex::new(Ring::with_capacity(660))),
-            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
+            programs: Arc::new(Mutex::new(ProgramRing::new(
+                RING_MS,
+                vestigium_core::PROGRAM_FRAMES_MAX,
+            ))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             settings: Arc::new(Mutex::new(Settings::default())),

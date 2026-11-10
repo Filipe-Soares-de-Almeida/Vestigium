@@ -290,27 +290,40 @@ struct ProgramUse {
     io_kbps: u32,
 }
 
+/// Most rankings a `ProgramRing` keeps: one every 5 s over ten minutes, with slack.
+pub const PROGRAM_FRAMES_MAX: usize = 144;
+
 /// Every program's use at each ranking of a recent span, kept compact in memory: names are
 /// stored once and the figures in MB and KB/s.
 #[derive(Debug)]
 pub struct ProgramRing {
     span_ms: i64,
+    max_frames: usize,
+    /// How many names the table held right after its last rebuild.
+    names_after_compact: usize,
+    #[cfg(test)]
+    compactions: usize,
     names: Vec<String>,
     ids: HashMap<String, u32>,
     frames: VecDeque<(i64, Vec<ProgramUse>)>,
 }
 
 impl ProgramRing {
-    pub fn new(span_ms: i64) -> ProgramRing {
+    pub fn new(span_ms: i64, max_frames: usize) -> ProgramRing {
         ProgramRing {
             span_ms,
+            max_frames,
+            names_after_compact: 0,
+            #[cfg(test)]
+            compactions: 0,
             names: Vec::new(),
             ids: HashMap::new(),
             frames: VecDeque::new(),
         }
     }
 
-    /// Adds the programs of one ranking and drops the rankings older than the span.
+    /// Adds the programs of one ranking and drops the rankings older than the span, and those
+    /// beyond the most the ring keeps whatever their stamps say.
     pub fn push(&mut self, ts_ms: i64, programs: &[ProcessSample]) {
         while self
             .frames
@@ -319,7 +332,12 @@ impl ProgramRing {
         {
             self.frames.pop_front();
         }
-        if self.names.len() > 4 * programs.len().max(64) {
+        while self.frames.len() >= self.max_frames.max(1) {
+            self.frames.pop_front();
+        }
+        if self.names.len() > 4 * programs.len().max(64)
+            && self.names.len() >= 2 * self.names_after_compact
+        {
             self.compact();
         }
         let uses = programs
@@ -357,6 +375,7 @@ impl ProgramRing {
         self.frames.clear();
         self.names.clear();
         self.ids.clear();
+        self.names_after_compact = 0;
     }
 
     fn id(&mut self, name: &str) -> u32 {
@@ -384,6 +403,11 @@ impl ProgramRing {
         }
         self.names = names;
         self.ids = ids;
+        self.names_after_compact = self.names.len();
+        #[cfg(test)]
+        {
+            self.compactions += 1;
+        }
     }
 }
 
@@ -454,5 +478,41 @@ fn mark_heaviest(
     order.sort_by(|&a, &b| key(&samples[b]).total_cmp(&key(&samples[a])));
     for &i in order.iter().take(n) {
         chosen[i] = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named(name: String) -> ProcessSample {
+        ProcessSample {
+            pid: 1,
+            name,
+            cpu_pct: 1.0,
+            private_bytes: 0,
+            read_bps: 0.0,
+            write_bps: 0.0,
+            gpu_pct: 0.0,
+        }
+    }
+
+    #[test]
+    fn program_ring_compacts_rarely() {
+        let mut ring = ProgramRing::new(1_000_000, 5);
+        for i in 0..300 {
+            let ranking: Vec<ProcessSample> = (0..100)
+                .map(|n| named(format!("p{}.exe", i * 100 + n)))
+                .collect();
+            ring.push(i * 1_000, &ranking);
+        }
+
+        assert!(
+            ring.compactions < 100,
+            "{} rebuilds in 300 pushes",
+            ring.compactions
+        );
+        assert_eq!(ring.history("p29999.exe").len(), 1);
+        assert!(ring.history("p0.exe").is_empty());
     }
 }

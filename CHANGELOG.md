@@ -159,6 +159,10 @@ How to use this file:
   stepped back, which could lose minutes of data if the PC fell meanwhile. A batch that grew very large
   is now written in several parts, so the history can always read it back; before, a step of about a day
   back could leave a batch too large to be read.
+- The watcher's memory no longer grows by about 3.5 MB for each hour the wall clock steps back. The
+  program rankings of the last ten minutes are now limited by their number as well as by their age, and
+  their list of program names is rebuilt only when it has doubled, which also saves processor time on a
+  PC with many short-lived programs.
 - The watcher can no longer freeze for good when the window asks for its status at the very moment the
   tray icon refreshes. Before, two of its threads could each wait for the other, which stopped the
   tray menu and the icon, kept suspend notices from being handled and left the window showing a

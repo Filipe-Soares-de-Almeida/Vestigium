@@ -12,9 +12,9 @@ use std::time::Duration;
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{EventSubscription, ProbeConfig, WindowsSettings, spawn_probe, wall_ms};
 use vestigium_core::{
-    Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PlanItem, PressureSpan, ProbeHiccup,
-    ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate, SENSITIVE_FOR, SettingStore,
-    Settings, Timing, carry_out, check_item,
+    Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
+    PressureSpan, ProbeHiccup, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate,
+    SENSITIVE_FOR, SettingStore, Settings, Timing, carry_out, check_item,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
@@ -447,7 +447,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         recent: Arc::new(Mutex::new(RecentState::default())),
         now: Arc::new(Mutex::new(NowFrame::default())),
         readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
-        programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
+        programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
         cleared: Arc::new(AtomicBool::new(false)),
@@ -749,7 +749,7 @@ pub(crate) mod tests {
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: Arc::new(Mutex::new(NowFrame::default())),
             readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
-            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
+            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
             cleared: Arc::new(AtomicBool::new(false)),
