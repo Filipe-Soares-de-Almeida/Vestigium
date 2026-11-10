@@ -95,7 +95,7 @@ const base: Record<string, Handler> = {
       probe_lag: [null],
       state: ["suspended"],
     }) satisfies TimelineDto,
-  marks: () => ({ history: state.history, occurrences: [], episodes: [], by_test: [], events: [], gaps: [], tests: [] }),
+  marks: () => ({ history: state.history, occurrences: [], episodes: [], by_test: [], gaps: [], tests: [] }),
   occurrence: () => null,
   live_start: () => needsWatcher(),
   live_stop: () => null,

@@ -84,7 +84,7 @@ pub struct ProgramMarksDto {
     pub episodes: Vec<Episode>,
 }
 
-/// What the timeline marks: stalls, pressure, Windows events, holes in watching and tests.
+/// What the timeline marks: stalls, pressure, holes in watching and tests.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MarksDto {
     pub history: HistoryState,
@@ -92,7 +92,6 @@ pub struct MarksDto {
     pub episodes: Vec<Episode>,
     /// For each episode, in order: whether a Vestigium test most likely caused it.
     pub by_test: Vec<bool>,
-    pub events: Vec<WinEvent>,
     pub gaps: Vec<Gap>,
     pub tests: Vec<TestSpan>,
 }
@@ -519,7 +518,6 @@ impl History {
                 occurrences: store.occurrences(from_ms, to_ms)?,
                 by_test: episodes.iter().map(|e| caused_by_test(e, &runs)).collect(),
                 episodes,
-                events: store.events(from_ms, to_ms)?,
                 gaps: store.gaps(from_ms, to_ms)?,
                 tests,
             })
@@ -529,7 +527,6 @@ impl History {
             occurrences: Vec::new(),
             episodes: Vec::new(),
             by_test: Vec::new(),
-            events: Vec::new(),
             gaps: Vec::new(),
             tests: Vec::new(),
         }))
@@ -1121,6 +1118,41 @@ mod tests {
         assert!(marks.occurrences.is_empty());
         assert_eq!(history.occurrence(1).unwrap(), None);
         assert!(!dir.path().join("vestigium.db").exists());
+    }
+
+    #[test]
+    fn marks_leave_out_the_event_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        store
+            .append_batch(&vestigium_store::Batch {
+                events: vec![WinEvent {
+                    ts_ms: DAY_START_MS + HOUR_MS,
+                    channel: vestigium_core::Channel::System,
+                    provider: "stornvme".to_string(),
+                    id: 129,
+                    record_id: 7,
+                    level: 3,
+                    meaning: EventMeaning::StorageReset,
+                    data_xml: "<EventData>device path</EventData>".to_string(),
+                }],
+                ..vestigium_store::Batch::default()
+            })
+            .unwrap();
+        store
+            .insert_occurrence(&freeze_at(DAY_START_MS + 2 * HOUR_MS))
+            .unwrap();
+
+        let marks = history
+            .marks(DAY_START_MS, DAY_START_MS + 24 * HOUR_MS)
+            .unwrap();
+
+        assert_eq!(marks.occurrences.len(), 1);
+        let json = serde_json::to_string(&marks).unwrap();
+        assert!(
+            !json.contains("data_xml") && !json.contains("device path"),
+            "{json}"
+        );
     }
 
     #[test]

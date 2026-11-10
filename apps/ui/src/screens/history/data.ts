@@ -50,18 +50,19 @@ export function buildHistory(now: number, marks: MarksDto): HistoryData {
   const today = dayKey(now);
   const counts = new Map<string, number>();
   const byDay = new Map<string, OccurrenceSummary[]>();
+  let oldest = Infinity;
   for (const o of marks.occurrences) {
     const key = dayKey(o.start_ms);
     counts.set(key, (counts.get(key) ?? 0) + 1);
-    byDay.set(key, [...(byDay.get(key) ?? []), o]);
+    const list = byDay.get(key);
+    if (list) list.push(o);
+    else byDay.set(key, [o]);
+    if (o.start_ms < oldest) oldest = o.start_ms;
   }
   for (const list of byDay.values()) list.sort((a, b) => a.start_ms - b.start_ms);
-  const starts = [
-    ...marks.occurrences.map((o) => o.start_ms),
-    ...marks.episodes.map((e) => e.start_ms),
-    ...marks.gaps.map((g) => g.start_ms),
-  ];
-  const first = starts.length ? dayKey(Math.min(...starts)) : today;
+  for (const e of marks.episodes) if (e.start_ms < oldest) oldest = e.start_ms;
+  for (const g of marks.gaps) if (g.start_ms < oldest) oldest = g.start_ms;
+  const first = oldest === Infinity ? today : dayKey(oldest);
   return { first, today, counts, byDay };
 }
 

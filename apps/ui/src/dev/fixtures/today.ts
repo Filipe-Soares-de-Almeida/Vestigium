@@ -250,14 +250,13 @@ function marks(args: Record<string, unknown>): MarksDto {
   const from = args.fromMs as number;
   const to = args.toMs as number;
   const now = Date.now();
-  if (firstUse) return { history: "empty", occurrences: [], episodes: [], by_test: [], events: [], gaps: [], tests: [] };
+  if (firstUse) return { history: "empty", occurrences: [], episodes: [], by_test: [], gaps: [], tests: [] };
   const shown = episodes.filter((e) => e.end_ms > from && e.start_ms < to && e.start_ms < now);
   return {
     history: "ready",
     occurrences: occurrences.filter((o) => o.start_ms >= from && o.start_ms < to && o.start_ms < now),
     episodes: shown,
     by_test: shown.map(() => false),
-    events: [],
     gaps: gaps.filter((g) => g.end_ms > from && g.start_ms < to && g.start_ms < now),
     tests: [],
   };

@@ -372,7 +372,6 @@ export interface MarksDto {
   episodes: Episode[];
   /** For each episode, in order: whether a Vestigium test most likely caused it. */
   by_test: boolean[];
-  events: WinEvent[];
   gaps: Gap[];
   tests: TestSpan[];
 }

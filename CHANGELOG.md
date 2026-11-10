@@ -29,6 +29,10 @@ How to use this file:
   that never reaches the disk, such as pipe and inter-process traffic.
 - The crash dumps screen now reads only the blue screen events of the last year from the history
   instead of every kept event, so it opens faster on a PC with a long, busy history.
+- The History and Today screens no longer download the text of every Windows event kept in the
+  history each time they refresh, which was about 2 MB every five minutes for 90 days of a busy
+  PC; the event page still shows its full details. The History calendar also builds its day counts
+  in a single pass, so a history with tens of thousands of freezes no longer stalls the screen.
 
 ### Security
 

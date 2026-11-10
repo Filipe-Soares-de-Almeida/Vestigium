@@ -23,7 +23,6 @@ function marks(episodes: Episode[], occurrences: OccurrenceSummary[] = []): Mark
     occurrences,
     episodes,
     by_test: episodes.map(() => false),
-    events: [],
     gaps: [],
     tests: [],
   };
