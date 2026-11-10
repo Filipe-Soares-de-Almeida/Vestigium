@@ -2075,6 +2075,7 @@
   "ui.tests.span.min.other": "{count} min",
   "ui.tests.span.h": "{hours} h",
   "ui.tests.toast.declined": "Permission denied; nothing ran",
+  "ui.tests.toast.no_room": "Not enough free space on {volume} for the speed test: about {needed} must be free.",
   "ui.tests.toast.busy": "Another test in progress; wait for it to finish",
   "ui.tests.toast.diag_opened": "Choose in the Windows dialog when to restart",
   "ui.health.kind.MemoryTestErrors.title": "Memory test error",

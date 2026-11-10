@@ -4,14 +4,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use vestigium_core::Media;
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{BenchMode, BenchResult, Benchmark, Bus, Outcome, TestData, TestRun};
+use vestigium_core::hwtest::{
+    BenchMode, BenchResult, Benchmark, Bus, Outcome, TestData, TestRun, bench_has_room,
+};
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_NO_BUFFERING,
     FILE_FLAG_OVERLAPPED, FILE_FLAG_WRITE_THROUGH, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_MODE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW, OPEN_EXISTING, ReadFile, WriteFile,
 };
 use windows::Win32::System::IO::{
     CancelIoEx, CreateIoCompletionPort, DeviceIoControl, GetQueuedCompletionStatus, OVERLAPPED,
@@ -270,6 +272,15 @@ fn run_io(
     }
 }
 
+/// Bytes free to this user on the volume that holds `dir`, when it can be asked.
+fn free_bytes(dir: &Path) -> Option<u64> {
+    let mut free = 0u64;
+    // SAFETY: the output outlives the call and the path is NUL-terminated by `HSTRING`.
+    unsafe { GetDiskFreeSpaceExW(&HSTRING::from(dir.as_os_str()), Some(&mut free), None, None) }
+        .ok()?;
+    Some(free)
+}
+
 fn open_file(path: &Path) -> Result<Owned, String> {
     // SAFETY: a new file this run owns, deleted when its handle closes.
     let file = unsafe {
@@ -315,6 +326,12 @@ pub fn benchmark(
         .dir
         .join(format!("vestigium-bench-{}.tmp", std::process::id()));
     let measured = (|| -> Result<(), String> {
+        if free_bytes(&target.dir).is_some_and(|free| !bench_has_room(free, file_bytes)) {
+            return Err(format!(
+                "not enough free space on {} for a file of {file_bytes} bytes",
+                target.volume
+            ));
+        }
         let file = open_file(&path)?;
         // SAFETY: binds the file to a new completion port, closed by `Owned`.
         let port = Owned(

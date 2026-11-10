@@ -1187,6 +1187,8 @@ export interface TestsDto {
   running: RunningTest | null;
   scan: ScanUnderWay | null;
   bench_file_bytes: number;
+  /** Free bytes a volume needs before the speed test starts. */
+  bench_needed_bytes: number;
 }
 
 /** SMART or NVMe detail read on request: reading an idle HDD spins it up. */

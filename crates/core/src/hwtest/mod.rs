@@ -7,10 +7,11 @@ use crate::Episode;
 use crate::health::Subject;
 
 pub use disk::{
-    BAND_BOUNDS_MS, BANDS, BENCH_FILE_BYTES, BENCH_SECONDS, BenchMode, BenchResult, Benchmark, Bus,
-    Expected, Region, SLOW_BLOCK_MS, SURFACE_BLOCK, SURFACE_REGIONS, SlowBlock, SurfaceAggregator,
-    SurfaceProgress, SurfaceScan, UNREADABLE_KEPT, VolumeCheck, VolumeResult, WORST_KEPT,
-    bench_reference, bench_verdict, combined_surface, latency_band, volume_result,
+    BAND_BOUNDS_MS, BANDS, BENCH_FILE_BYTES, BENCH_FREE_MARGIN_BYTES, BENCH_SECONDS, BenchMode,
+    BenchResult, Benchmark, Bus, Expected, Region, SLOW_BLOCK_MS, SURFACE_BLOCK, SURFACE_REGIONS,
+    SlowBlock, SurfaceAggregator, SurfaceProgress, SurfaceScan, UNREADABLE_KEPT, VolumeCheck,
+    VolumeResult, WORST_KEPT, bench_has_room, bench_reference, bench_verdict, combined_surface,
+    latency_band, volume_result,
 };
 pub use memory::{
     DiagnosticDetail, DiagnosticResult, ERRORS_KEPT, MemoryDiagnostic, MemoryError, MemoryQuick,

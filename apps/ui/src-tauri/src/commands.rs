@@ -31,7 +31,9 @@ use crate::hwtests::{
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{BENCH_FILE_BYTES, QUICK_MINUTES, TestKind, TestRun};
+use vestigium_core::hwtest::{
+    BENCH_FILE_BYTES, BENCH_FREE_MARGIN_BYTES, QUICK_MINUTES, TestKind, TestRun, bench_has_room,
+};
 
 /// What every command works with: the database, the pipe and the live stream.
 pub struct AppState {
@@ -439,6 +441,7 @@ pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
             running: lock(&running).clone(),
             scan: tests_dir().and_then(|dir| scan_under_way(&dir, now)),
             bench_file_bytes: BENCH_FILE_BYTES,
+            bench_needed_bytes: BENCH_FILE_BYTES + BENCH_FREE_MARGIN_BYTES,
         })
     })
     .await
@@ -542,6 +545,11 @@ pub async fn start_benchmark(
         .into_iter()
         .find(|v| v.root.eq_ignore_ascii_case(&volume))
         .ok_or_else(|| UiError::Failed(format!("{volume} is not a fixed volume")))?;
+    if !bench_has_room(found.free_bytes, BENCH_FILE_BYTES) {
+        return Err(UiError::Failed(format!(
+            "{volume} has too little free space for the speed test"
+        )));
+    }
     start_in_window(
         app,
         &state,

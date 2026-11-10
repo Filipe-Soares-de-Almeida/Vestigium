@@ -50,6 +50,9 @@ How to use this file:
   window and the monitor must be updated together.
 - A disk surface scan that is still running now shows its progress when you close and reopen the
   window, keeps the test buttons busy, and can be stopped from the window.
+- The disk speed test no longer starts on a volume with less than 1.5 GiB free, which is its 1 GiB
+  file plus a margin; a volume that small used to fill up completely while the test ran. The
+  Tests page now says how much space is needed instead.
 
 ## [0.1.0] - 2026-11-09
 

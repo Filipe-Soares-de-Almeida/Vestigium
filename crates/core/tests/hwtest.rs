@@ -2,8 +2,8 @@ use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
     BANDS, BenchMode, BenchResult, Bus, DiagnosticResult, Expected, MemoryQuick, Outcome,
     QUICK_CHUNK, Region, SURFACE_REGIONS, SurfaceAggregator, TestData, TestRun, VolumeResult,
-    bench_reference, bench_verdict, caused_by_test, combined_surface, disk_subject, latency_band,
-    memory_diagnostics, quick_test_size, volume_result,
+    bench_has_room, bench_reference, bench_verdict, caused_by_test, combined_surface, disk_subject,
+    latency_band, memory_diagnostics, quick_test_size, volume_result,
 };
 use vestigium_core::{
     Channel, Culprit, DiskInfo, Episode, EpisodeKind, EventMeaning, Media, WinEvent,
@@ -251,4 +251,15 @@ fn episode_by_vestigium_during_a_test_is_marked() {
         &episode(70_000, 90_000, "Vestigium.Window.exe"),
         &runs
     ));
+}
+
+#[test]
+fn the_benchmark_needs_its_file_and_a_margin_free() {
+    let mib = 1u64 << 20;
+    let free = |gib: f64| (gib * GIB as f64) as u64;
+    assert!(!bench_has_room(free(1.4), GIB));
+    assert!(!bench_has_room(GIB + 512 * mib - 1, GIB));
+    assert!(bench_has_room(GIB + 512 * mib, GIB));
+    assert!(bench_has_room(free(1.6), GIB));
+    assert!(bench_has_room(16 * mib + 512 * mib, 16 * mib));
 }

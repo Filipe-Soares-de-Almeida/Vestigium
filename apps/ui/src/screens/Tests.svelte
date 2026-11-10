@@ -150,6 +150,10 @@
   }
 
   function bench(v: VolumeDto): void {
+    if (dto && v.free_bytes < dto.bench_needed_bytes) {
+      toast.show(t("ui.tests.toast.no_room", { volume: vol(v.root), needed: formatBytes(dto.bench_needed_bytes) }));
+      return;
+    }
     const d = dto?.disks.find((x) => x.number === v.disk);
     if (d?.media === "Ssd") ask({ kind: "bench", volume: v });
     else void hwtests.benchmark(v.root).then(started);

@@ -206,6 +206,13 @@ pub fn combined_surface(runs: &[SurfaceScan]) -> Option<SurfaceScan> {
 
 /// Size of the benchmark's temporary file.
 pub const BENCH_FILE_BYTES: u64 = 1 << 30;
+/// Free space the benchmark leaves on the volume beyond its file.
+pub const BENCH_FREE_MARGIN_BYTES: u64 = 512 << 20;
+
+/// Whether a volume with `free_bytes` free can hold a benchmark file of `file_bytes` and the margin.
+pub fn bench_has_room(free_bytes: u64, file_bytes: u64) -> bool {
+    free_bytes >= file_bytes.saturating_add(BENCH_FREE_MARGIN_BYTES)
+}
 /// Longest a benchmark mode runs.
 pub const BENCH_SECONDS: f64 = 5.0;
 

@@ -94,6 +94,8 @@ pub struct TestsDto {
     pub running: Option<RunningTest>,
     pub scan: Option<ScanUnderWay>,
     pub bench_file_bytes: u64,
+    /// Free space a volume needs before the speed test may start: the file and a margin.
+    pub bench_needed_bytes: u64,
 }
 
 /// SMART or NVMe detail of one disk, read when asked: reading an idle HDD spins it up.
