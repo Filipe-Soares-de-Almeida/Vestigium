@@ -425,8 +425,8 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
     if let Some((ts_ms, value)) = faults {
         evidence.push(metric(ts_ms, Metric::HardFaultsPerS, value, None));
     }
-    let all: Vec<&ProcessTop> = window.tops.iter().collect();
-    let biggest = ranked(&all, Metric::PrivateBytes, Summary::Max)
+    let before = tops_or_all(window, focus.start - 30_000, focus.start);
+    let biggest = ranked(&before, Metric::PrivateBytes, Summary::Max)
         .into_iter()
         .next();
     if let Some(p) = &biggest {

@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- A memory shortage now names the program that held the most memory in the 30 seconds before the
+  stall, not the biggest of the whole report. Before, a program that grew after the stall began, or
+  one that had left and been replaced by a bigger one, could be named, and the advice was to close
+  the wrong program.
 - The English title of a disk whose SMART predicts failure no longer puts a colon after the drive name, which showed a doubled colon for a drive letter. It now reads "SMART of disk C: predicts failure".
 - Today, Events and a program's page no longer fail to open when two overload periods start in the
   same moment, such as two disks at full activity together or the processor and the memory filling at

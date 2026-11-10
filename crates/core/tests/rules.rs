@@ -170,6 +170,28 @@ fn memory_matches() {
 }
 
 #[test]
+fn memory_culprit_is_the_biggest_before_the_trigger() {
+    let (triggers, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T - 20_000,
+        entries: vec![process(30, "editor.exe", 5.0, 6, 0.0)],
+    });
+    window.tops.push(ProcessTop {
+        ts_ms: T + 20_000,
+        entries: vec![process(31, "renderer.exe", 5.0, 9, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
+    assert_eq!(
+        memory.cause,
+        Cause::Memory {
+            process: Some("editor.exe".to_string())
+        }
+    );
+}
+
+#[test]
 fn memory_stays_quiet() {
     let (triggers, mut window) = quiet_case();
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = 2 * common::GIB);
