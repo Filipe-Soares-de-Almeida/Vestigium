@@ -14,10 +14,11 @@ use vestigium_collect::{
     physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
-    Blackbox, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState, HICCUP_MS, HungWindow,
-    MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick,
-    ProcessCounters, ProcessTop, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate, Sample,
-    Settings, Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
+    Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
+    HICCUP_MS, HungWindow, MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan,
+    ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop, ProgramRing, RING_MS, Reading,
+    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest, last_seen,
+    process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store};
@@ -56,8 +57,8 @@ const DAY_MS: i64 = 24 * HOUR_MS;
 const DISK_BUSY_MS: i64 = 60_000;
 /// The first health pass waits this long after a start, which stays light.
 const FIRST_HEALTH_AFTER_MS: i64 = 60_000;
-/// How long a late probe wake stays available to a capture that ends later.
-const HICCUPS_KEPT_MS: i64 = 15 * 60_000;
+/// How long a late probe wake stays available to a capture that ends later: the longest capture.
+const HICCUPS_KEPT_MS: i64 = CAPTURE_MINUTES_MAX as i64 * 60_000;
 const HICCUPS_KEPT: usize = 10_000;
 
 /// Lets the owner wait for the sampler to write its last batch and stop.
@@ -1515,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn hiccups_drop_what_is_older_than_fifteen_minutes() {
+    fn hiccups_drop_what_is_older_than_the_longest_capture() {
         let mut kept = VecDeque::new();
         keep_hiccups(&mut kept, &[tick(0, 20.0), tick(1_000, 20.0)], 1_000);
 
@@ -1523,6 +1524,16 @@ mod tests {
 
         let times: Vec<i64> = kept.iter().map(|h| h.ts_ms).collect();
         assert_eq!(times, [1_000]);
+    }
+
+    #[test]
+    fn hiccups_stay_for_a_capture_reopened_an_hour_later() {
+        let mut kept = VecDeque::new();
+        keep_hiccups(&mut kept, &[tick(0, 20.0), tick(1_000, 20.0)], 1_000);
+
+        keep_hiccups(&mut kept, &[], 60 * 60_000);
+
+        assert_eq!(kept.len(), 2);
     }
 
     #[test]

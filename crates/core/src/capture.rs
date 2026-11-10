@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{Cause, Confidence, Evidence, NextStep, Suspect};
 
 /// Version of the capture file and row format.
-pub const CAPTURE_VERSION: u8 = 1;
+pub const CAPTURE_VERSION: u8 = 2;
+/// The oldest capture format still read: it differs only in what a capture keeps, not in its layout.
+pub const CAPTURE_VERSION_MIN: u8 = 1;
 /// Lower edges of the duration buckets, in microseconds, as `tracerpt` reports them.
 pub const BUCKET_BOUNDS_US: [u32; 12] = [1, 2, 3, 4, 5, 10, 25, 50, 100, 250, 500, 1000];
 /// One bucket below each bound plus the last one, at or above the final bound.
@@ -15,6 +17,11 @@ pub const BUCKETS: usize = 13;
 pub const LONGEST_KEPT: usize = 50;
 /// Each module's longest routines kept besides the overall longest, so every driver shows some.
 pub const MODULE_LONGEST_KEPT: usize = 5;
+/// Routines of at least `LONG_US` kept for each module in each minute of a capture, so a window
+/// of an occurrence finds its routines however long the capture ran.
+pub const MINUTE_ROUTINES_KEPT: usize = 3;
+/// Hitches kept for each app in each minute of a capture, for the same reason.
+pub const MINUTE_HITCHES_KEPT: usize = 3;
 /// The longest deep capture anyone can ask for, in minutes: a whole day.
 pub const CAPTURE_MINUTES_MAX: u64 = 24 * 60;
 /// A frame over this many times the app's median...
@@ -223,6 +230,8 @@ pub struct RoutineAggregator {
     longest: BinaryHeap<Reverse<Kept>>,
     /// The longest of each routine address, from which each module's longest are taken.
     by_routine: HashMap<u64, BinaryHeap<Reverse<Kept>>>,
+    /// The longest routines of at least `LONG_US` of each routine address in each minute.
+    by_minute: HashMap<(i64, u64), BinaryHeap<Reverse<Kept>>>,
 }
 
 impl RoutineAggregator {
@@ -245,10 +254,19 @@ impl RoutineAggregator {
             kept,
             MODULE_LONGEST_KEPT,
         );
+        if us >= LONG_US {
+            keep_longest(
+                self.by_minute
+                    .entry((ts_ms.div_euclid(MINUTE_MS), routine))
+                    .or_default(),
+                kept,
+                MINUTE_ROUTINES_KEPT,
+            );
+        }
     }
 
     /// Modules by DPC plus ISR time, most first, and the longest routines, longest first: the
-    /// overall longest and each module's own longest.
+    /// overall longest, each module's own longest and each module's longest of every minute.
     pub fn finish(self, modules: &ModuleMap) -> (Vec<DriverLatency>, Vec<LongRoutine>) {
         let name = |addr: u64| modules.find(addr).unwrap_or(UNKNOWN_MODULE).to_string();
         let mut by_module: HashMap<String, DriverLatency> = HashMap::new();
@@ -284,6 +302,17 @@ impl RoutineAggregator {
             own.sort_by(|a, b| b.cmp(a));
             chosen.extend(own.into_iter().take(MODULE_LONGEST_KEPT));
         }
+        let mut by_minute: HashMap<(i64, String), Vec<Kept>> = HashMap::new();
+        for ((minute, routine), heap) in self.by_minute {
+            by_minute
+                .entry((minute, name(routine)))
+                .or_default()
+                .extend(heap.into_iter().map(|Reverse(k)| k));
+        }
+        for mut own in by_minute.into_values() {
+            own.sort_by(|a, b| b.cmp(a));
+            chosen.extend(own.into_iter().take(MINUTE_ROUTINES_KEPT));
+        }
         let mut kept: Vec<Kept> = chosen.into_iter().collect();
         kept.sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
         let longest = kept
@@ -299,6 +328,8 @@ impl RoutineAggregator {
         (drivers, longest)
     }
 }
+
+const MINUTE_MS: i64 = 60_000;
 
 /// Frame times are counted in hundredths of a millisecond, so a day of frames takes kilobytes.
 const BINS_PER_MS: f32 = 100.0;
@@ -322,6 +353,18 @@ struct AppTrack {
     bins: BTreeMap<u32, u32>,
     /// The `HITCHES_KEPT` longest frames of at least `HITCH_MIN_MS`, shortest on top.
     longest: BinaryHeap<Reverse<Long>>,
+    /// The `MINUTE_HITCHES_KEPT` longest such frames of each minute.
+    by_minute: HashMap<i64, BinaryHeap<Reverse<Long>>>,
+}
+
+/// Keeps the `cap` longest frames offered, shortest on top.
+fn keep_long(heap: &mut BinaryHeap<Reverse<Long>>, long: Long, cap: usize) {
+    if heap.len() < cap {
+        heap.push(Reverse(long));
+    } else if heap.peek().is_some_and(|Reverse(min)| *min < long) {
+        heap.pop();
+        heap.push(Reverse(long));
+    }
 }
 
 impl AppTrack {
@@ -334,12 +377,14 @@ impl AppTrack {
             return;
         }
         let long = (bin, Reverse(ts_ms), frame_ms.to_bits());
-        if self.longest.len() < HITCHES_KEPT {
-            self.longest.push(Reverse(long));
-        } else if self.longest.peek().is_some_and(|Reverse(min)| *min < long) {
-            self.longest.pop();
-            self.longest.push(Reverse(long));
-        }
+        keep_long(&mut self.longest, long, HITCHES_KEPT);
+        keep_long(
+            self.by_minute
+                .entry(ts_ms.div_euclid(MINUTE_MS))
+                .or_default(),
+            long,
+            MINUTE_HITCHES_KEPT,
+        );
     }
 
     /// The frame length at `index` of all the frames sorted from shortest to longest.
@@ -374,10 +419,11 @@ impl FrameAggregator {
     }
 
     /// Apps with at least 60 frames, but not the compositor, most hitches first then most frames, and the
-    /// worst hitches of the apps that draw steadily in time order.
+    /// worst hitches of the apps that draw steadily, with each app's worst of every minute, in time order.
     pub fn finish(self) -> (Vec<AppFrames>, Vec<FrameHitch>) {
         let mut apps = Vec::new();
-        let mut hitches = Vec::new();
+        let mut worst: Vec<FrameHitch> = Vec::new();
+        let mut every_minute: Vec<FrameHitch> = Vec::new();
         for ((name, pid), track) in self.apps {
             if (track.frames as usize) < MIN_FRAMES {
                 continue;
@@ -403,17 +449,24 @@ impl FrameAggregator {
             if is_compositor(&app.name) {
                 continue;
             }
-            let steady = renders_steadily(&app);
-            for Reverse((bin, Reverse(ts_ms), bits)) in track.longest {
-                if steady && hitch(ms_of(bin)) {
-                    hitches.push(FrameHitch {
+            if renders_steadily(&app) {
+                let frame = |(bin, Reverse(ts_ms), bits): Long| {
+                    hitch(ms_of(bin)).then(|| FrameHitch {
                         ts_ms,
                         app: app.name.clone(),
                         pid,
                         frame_ms: f32::from_bits(bits),
                         median_ms,
-                    });
-                }
+                    })
+                };
+                worst.extend(track.longest.into_iter().filter_map(|Reverse(l)| frame(l)));
+                every_minute.extend(
+                    track
+                        .by_minute
+                        .into_values()
+                        .flatten()
+                        .filter_map(|Reverse(l)| frame(l)),
+                );
             }
             apps.push(app);
         }
@@ -424,12 +477,16 @@ impl FrameAggregator {
                 .then(a.name.cmp(&b.name))
                 .then(a.pid.cmp(&b.pid))
         });
-        hitches.sort_by(|a, b| {
+        worst.sort_by(|a, b| {
             b.frame_ms
                 .total_cmp(&a.frame_ms)
                 .then(a.ts_ms.cmp(&b.ts_ms))
         });
-        hitches.truncate(HITCHES_KEPT);
+        worst.truncate(HITCHES_KEPT);
+        let key = |h: &FrameHitch| (h.ts_ms, h.pid, h.frame_ms.to_bits());
+        let mut seen: BTreeSet<_> = worst.iter().map(key).collect();
+        let mut hitches = worst;
+        hitches.extend(every_minute.into_iter().filter(|h| seen.insert(key(h))));
         hitches.sort_by_key(|h| h.ts_ms);
         (apps, hitches)
     }
@@ -1471,6 +1528,74 @@ mod tests {
         assert!(capture_findings(&c).is_empty());
         assert!(capture_suspects(START, START + 60_000, &c).is_empty());
         assert!(steady_only(&c).apps.is_empty());
+    }
+
+    #[test]
+    fn window_sees_a_1_4ms_routine_among_a_thousand_longer_ones() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x1000, "busy.sys");
+        let at = START + 10 * 3_600_000 + 17_000;
+        let mut agg = RoutineAggregator::new();
+        for i in 0..1_000u32 {
+            let ts_ms = START + i64::from(i) * 86_400;
+            agg.add(0x1100, RoutineKind::Dpc, 3_000 + i * 6, 0, ts_ms);
+        }
+        agg.add(0x1100, RoutineKind::Dpc, 1_400, 1, at);
+        let (drivers, longest) = agg.finish(&map);
+        let mut c = capture();
+        c.end_ms = START + 24 * 3_600_000;
+        c.drivers = drivers;
+        c.longest = longest;
+        let found = capture_suspects(at - 10_000, at + 10_000, &c);
+        let busy = named(&found, "busy.sys").expect("the routine of the window");
+        assert!(matches!(
+            busy.evidence[0],
+            Evidence::LongRoutine { ts_ms, us: 1_400, .. } if ts_ms == at
+        ));
+    }
+
+    #[test]
+    fn window_sees_the_hitch_of_a_quiet_app() {
+        let at = START + 10_000_000;
+        let mut agg = FrameAggregator::new();
+        for i in 0..20_000 {
+            agg.add("loud.exe", 1, START + i * 4_000, 10.0);
+            agg.add("quiet.exe", 2, START + i * 4_000, 10.0);
+        }
+        for i in 0..250 {
+            agg.add("loud.exe", 1, START + 100_000 + i * 91_000, 300.0);
+        }
+        agg.add("quiet.exe", 2, at, 45.0);
+        let (apps, hitches) = agg.finish();
+        assert_eq!(apps.len(), 2);
+        let mut c = capture();
+        c.apps = apps;
+        c.hitches = hitches;
+        let found = capture_suspects(at - 10_000, at + 10_000, &c);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].cause,
+            Cause::Frames {
+                app: "quiet.exe".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn minutes_keep_their_worst_without_repeating_the_global_lists() {
+        let mut agg = RoutineAggregator::new();
+        for i in 0..200u32 {
+            let us = 5_000 + i;
+            agg.add(0x10, RoutineKind::Dpc, us, 0, i64::from(i) * 100);
+        }
+        agg.add(0x10, RoutineKind::Dpc, 1_100, 0, 130_000);
+        agg.add(0x10, RoutineKind::Dpc, 900, 0, 190_000);
+        let (_, longest) = agg.finish(&ModuleMap::new());
+        let keys: BTreeSet<(i64, u32)> = longest.iter().map(|l| (l.ts_ms, l.us)).collect();
+        assert_eq!(keys.len(), longest.len(), "no routine twice");
+        assert!(keys.contains(&(130_000, 1_100)), "the third minute's");
+        assert!(!keys.contains(&(190_000, 900)), "under 1 ms stays out");
+        assert_eq!(longest.len(), LONGEST_KEPT + 1);
     }
 
     #[test]

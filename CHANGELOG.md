@@ -34,6 +34,11 @@ How to use this file:
   long routine. A driver now needs three routines of 1 ms or more, or one next to a stall or a
   dropped frame; a single one is reported with medium confidence, in the capture and in the
   occurrence it covers.
+- Looking up what a deep capture saw around an occurrence no longer misses a long routine or a
+  dropped frame just because a long capture had worse ones elsewhere: the capture now keeps the
+  worst of every minute, and the monitor keeps the probe's stalls for a whole day instead of 15
+  minutes, so a capture opened late still shows them. The capture format changes, so the window,
+  the monitor and the helper must be updated together; captures already stored still open.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the

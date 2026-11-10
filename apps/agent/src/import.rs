@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
 use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, disk_subject};
 use vestigium_core::{
-    Applier, CAPTURE_VERSION, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION, DeepCapture, DumpDeletion,
-    DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
+    Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
+    DeepCapture, DumpDeletion, DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
 };
 use vestigium_store::Store;
 
@@ -175,8 +175,14 @@ fn is_numbered(path: &Path, extension: &str) -> bool {
     digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// A capture file of any format version still read.
 fn read_capture(path: &Path) -> Option<DeepCapture> {
-    read_versioned(path, CAPTURE_VERSION)
+    let bytes = fs::read(path).ok()?;
+    let (&version, body) = bytes.split_first()?;
+    if !(CAPTURE_VERSION_MIN..=CAPTURE_VERSION).contains(&version) {
+        return None;
+    }
+    postcard::from_bytes(body).ok()
 }
 
 /// A file written as one version byte and a postcard body; `None` for another version.
@@ -265,12 +271,33 @@ mod tests {
     }
 
     #[test]
+    fn import_reads_a_file_of_the_first_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        fs::create_dir(&captures).unwrap();
+        let mut bytes = vec![CAPTURE_VERSION_MIN];
+        bytes.extend(postcard::to_allocvec(&capture(1_000, 2_000)).unwrap());
+        fs::write(captures.join("1.capture"), bytes).unwrap();
+        let mut store = store(dir.path());
+
+        let ids = import_captures(&captures, &[], &mut store);
+
+        assert_eq!(ids.len(), 1);
+        assert!(!captures.join("1.capture").exists());
+    }
+
+    #[test]
     fn import_keeps_unreadable_files() {
         let dir = tempfile::tempdir().unwrap();
         let captures = dir.path().join("captures");
         fs::create_dir(&captures).unwrap();
         fs::write(captures.join("1.capture"), b"").unwrap();
         fs::write(captures.join("2.capture"), [CAPTURE_VERSION + 1, 0, 1, 2]).unwrap();
+        fs::write(
+            captures.join("4.capture"),
+            [CAPTURE_VERSION_MIN - 1, 0, 1, 2],
+        )
+        .unwrap();
         fs::write(captures.join("3.capture"), [CAPTURE_VERSION, 0xff, 0xff]).unwrap();
         let mut store = store(dir.path());
 
@@ -278,7 +305,7 @@ mod tests {
 
         assert!(ids.is_empty());
         assert!(store.captures(i64::MIN, i64::MAX).unwrap().is_empty());
-        for name in ["1.capture", "2.capture", "3.capture"] {
+        for name in ["1.capture", "2.capture", "3.capture", "4.capture"] {
             assert!(captures.join(name).exists(), "{name} may still be written");
         }
     }

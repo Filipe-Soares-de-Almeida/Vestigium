@@ -1,6 +1,6 @@
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use vestigium_core::{CAPTURE_VERSION, DeepCapture};
+use vestigium_core::{CAPTURE_VERSION, CAPTURE_VERSION_MIN, DeepCapture};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -53,7 +53,7 @@ impl Store {
             )
             .optional()?;
         row.map(|(version, data)| {
-            if version != i64::from(CAPTURE_VERSION) {
+            if !(i64::from(CAPTURE_VERSION_MIN)..=i64::from(CAPTURE_VERSION)).contains(&version) {
                 return Err(StoreError::UnknownCode {
                     what: "capture version",
                     code: version,

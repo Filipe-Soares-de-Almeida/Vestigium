@@ -64,6 +64,27 @@ fn capture_roundtrip() {
 }
 
 #[test]
+fn a_capture_of_the_first_format_still_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let id = {
+        let mut store = Store::open(&path).unwrap();
+        store.insert_capture(&capture(1_000, 2_000)).unwrap()
+    };
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    raw.execute("UPDATE capture SET version = 1", []).unwrap();
+    drop(raw);
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.capture(id).unwrap(), Some(capture(1_000, 2_000)));
+
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    raw.execute("UPDATE capture SET version = 99", []).unwrap();
+    drop(raw);
+    assert!(store.capture(id).is_err());
+}
+
+#[test]
 fn migration_from_v2_keeps_everything() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vestigium.db");

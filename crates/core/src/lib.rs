@@ -34,11 +34,12 @@ pub use blackbox::{
     RecentState, Timing,
 };
 pub use capture::{
-    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_MINUTES_MAX, CAPTURE_VERSION, CaptureSource,
-    DeepCapture, DriverLatency, FrameAggregator, FrameHitch, HITCH_FACTOR, HITCH_MIN_MS,
-    HITCHES_KEPT, LONGEST_KEPT, LongRoutine, ModuleMap, ON_DEMAND_SHARE, ProbeHiccup,
-    RoutineAggregator, RoutineKind, RoutineStats, capture_findings, capture_suspects,
-    is_compositor, is_intermediary, is_kernel_core, renders_steadily, steady_only,
+    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_MINUTES_MAX, CAPTURE_VERSION,
+    CAPTURE_VERSION_MIN, CaptureSource, DeepCapture, DriverLatency, FrameAggregator, FrameHitch,
+    HITCH_FACTOR, HITCH_MIN_MS, HITCHES_KEPT, LONGEST_KEPT, LongRoutine, ModuleMap,
+    ON_DEMAND_SHARE, ProbeHiccup, RoutineAggregator, RoutineKind, RoutineStats, capture_findings,
+    capture_suspects, is_compositor, is_intermediary, is_kernel_core, renders_steadily,
+    steady_only,
 };
 pub use dump::{
     Analysis, BugCheckReport, DUMP_DELETION_VERSION, DUMP_FALL_REACH_MS, DUMP_SCAN_VERSION,
