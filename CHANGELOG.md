@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A disk that was removed from the PC no longer keeps a health warning. The hourly check used to
+  keep each disk's last reading until the monitor restarted; it now forgets disks that are no longer
+  in the machine, so their warning closes at the next check.
 - The hourly health check no longer wakes an idle hard disk whose type Windows would not report,
   such as one behind a RAID or host adapter. A disk of unknown type is read only while it is in use
   or when it is an NVMe drive.

@@ -97,6 +97,9 @@ impl<S: HealthSource> HealthPass<S> {
             }
             self.disks.insert(disk.name.clone(), health);
         }
+        let in_machine = |name: &String| now.machine.disks.iter().any(|d| &d.name == name);
+        self.disks.retain(|name, _| in_machine(name));
+        self.smart_day.retain(|name, _| in_machine(name));
         let system_disk = self.source.system_drive().and_then(|number| {
             now.machine
                 .disks
@@ -424,6 +427,36 @@ mod tests {
         let mut pass = HealthPass::new(nvme);
         run_on(&mut pass, &mut store, &machine, NOW, &[]);
         assert_eq!(*asked.borrow(), ["0 C:", "1 D:"]);
+    }
+
+    #[test]
+    fn a_disk_that_left_the_machine_stops_being_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let mut pass = HealthPass::new(FakeHealth {
+            free_gb: 50,
+            failing_disk: true,
+            ..FakeHealth::default()
+        });
+        let smart_of = |store: &Store, name: &str| {
+            store
+                .open_findings()
+                .unwrap()
+                .into_iter()
+                .filter(|f| f.finding.kind == FindingKind::DiskSmart)
+                .filter(|f| matches!(&f.finding.subject, Subject::Disk(disk) if disk == name))
+                .count()
+        };
+
+        run(&mut pass, &mut store, NOW, &["1 D:"]);
+        assert_eq!(smart_of(&store, "1 D:"), 1);
+
+        let mut without_d = machine();
+        without_d.disks.truncate(1);
+        run_on(&mut pass, &mut store, &without_d, NOW + 60_000, &[]);
+
+        assert_eq!(smart_of(&store, "1 D:"), 0);
+        assert_eq!(smart_of(&store, "0 C:"), 1);
     }
 
     #[test]
