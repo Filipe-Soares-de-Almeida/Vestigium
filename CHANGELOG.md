@@ -45,6 +45,11 @@ How to use this file:
 
 ### Fixed
 
+- Startup entries of common antivirus products, such as Avast, AVG, ESET, Kaspersky, Norton, McAfee
+  and Bitdefender, are now shown as protected on the Optimizations screen and can no longer be
+  disabled from it. Before, only names with words such as Defender or Security were protected. A slow
+  startup is also blamed on an entry only when the names are the same program, not when they share
+  four letters, so an entry called Sync is no longer blamed for the delay of Dropbox Sync Helper.
 - The Did it help comparison on the Optimizations screen no longer shows a result for a change made
   so long ago that the days before it fall outside the 30 days of history the watcher keeps. Before,
   a change applied more than 23 days ago was compared against a before period that was cut short or

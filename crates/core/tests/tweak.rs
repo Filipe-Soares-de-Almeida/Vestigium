@@ -367,6 +367,92 @@ fn startup_app_is_never_a_security_product() {
 }
 
 #[test]
+fn a_third_party_antivirus_startup_entry_is_protected() {
+    for exe in ["AvastUI.exe", "avgui.exe", "egui.exe", "avpui.exe"] {
+        let mut pc = inputs();
+        pc.startup = vec![StartupEntry {
+            hive: Hive::CurrentUser,
+            list: StartupList::Run,
+            name: exe.into(),
+            exe: exe.into(),
+        }];
+        let advice = advise(&pc);
+        let entry = advice
+            .iter()
+            .find(|a| a.subject.as_deref() == Some(exe))
+            .expect("the entry");
+        assert_eq!(entry.status, Status::Protected, "{exe}");
+        assert!(entry.changes.is_empty());
+
+        let approval = pc.startup[0].approval();
+        assert!(approval.is_forbidden(), "{exe} is never disabled");
+        let mut plan = item(
+            TweakId::StartupApp,
+            vec![(approval, Value::Bytes(disabled_approval(NOW)))],
+            None,
+        );
+        plan.subject = Some(exe.into());
+        assert!(
+            vestigium_core::check_item(&plan, vestigium_core::Applier::User).is_err(),
+            "{exe} is refused"
+        );
+    }
+}
+
+#[test]
+fn a_word_inside_another_word_is_not_a_security_product() {
+    for name in ["Reset Helper", "ResetTool.exe", "Nuclear.exe"] {
+        let mut pc = inputs();
+        pc.startup = vec![StartupEntry {
+            hive: Hive::CurrentUser,
+            list: StartupList::Run,
+            name: name.into(),
+            exe: name.into(),
+        }];
+        let advice = advise(&pc);
+        let entry = advice
+            .iter()
+            .find(|a| a.subject.as_deref() == Some(name))
+            .expect("the entry");
+        assert_eq!(entry.status, Status::Ready, "{name}");
+    }
+}
+
+#[test]
+fn a_startup_delay_is_not_matched_by_four_letters() {
+    let mut boot = inputs();
+    boot.findings = vec![finding(
+        FindingKind::SlowBoot,
+        Subject::Pc,
+        vec![HealthFact::Delay(BootDelay {
+            ts_ms: NOW - DAY,
+            kind: DelayKind::App,
+            name: "Dropbox Sync Helper".into(),
+            total_ms: 9000,
+            degradation_ms: 6000,
+            security: false,
+        })],
+    )];
+    boot.startup = vec![StartupEntry {
+        hive: Hive::CurrentUser,
+        list: StartupList::Run,
+        name: "Sync".into(),
+        exe: "Sync.exe".into(),
+    }];
+    let advice = advise(&boot);
+    let sync = advice
+        .iter()
+        .find(|a| a.subject.as_deref() == Some("Sync"))
+        .expect("sync");
+    assert!(
+        sync.signals
+            .iter()
+            .all(|s| !matches!(s, Signal::SlowStartup { .. })),
+        "no startup delay is blamed on Sync"
+    );
+}
+
+#[test]
 fn startup_disable_writes_03_and_the_time() {
     let bytes = disabled_approval(0);
     assert_eq!(bytes.len(), 12);

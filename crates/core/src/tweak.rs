@@ -728,11 +728,17 @@ fn slow_startup(entry: &StartupEntry, inputs: &TweakInputs) -> Vec<Signal> {
         .collect()
 }
 
-/// Two names of one program: equal, or one holding the other when that one has four letters or more.
+/// Two names of one program: equal once reduced to lowercase letters and digits, without `.exe`.
 fn same_app(a: &str, b: &str) -> bool {
-    let a = a.trim_end_matches(".exe");
-    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-    short.len() >= 4 && long.contains(short)
+    let reduce = |name: &str| {
+        name.to_lowercase()
+            .trim_end_matches(".exe")
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+    };
+    let (a, b) = (reduce(a), reduce(b));
+    !a.is_empty() && a == b
 }
 
 fn since(inputs: &TweakInputs, days: i64) -> i64 {
