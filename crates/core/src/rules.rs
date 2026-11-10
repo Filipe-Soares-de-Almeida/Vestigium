@@ -295,7 +295,8 @@ pub fn suspects(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         .iter()
         .filter_map(|rule| rule(focus, window))
         .collect();
-    found.extend(app(triggers, window));
+    let system_cause = !found.is_empty();
+    found.extend(app(triggers, window, system_cause));
     found.extend(crash(triggers, window));
     if found.is_empty() {
         found.push(unclear(window));
@@ -590,7 +591,8 @@ fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     })
 }
 
-fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
+/// A hung app is High when its own CPU or I/O shows inside the hang or no system rule matched.
+fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect> {
     if triggers.iter().any(|t| matches!(t, Trigger::Freeze { .. })) {
         return Vec::new();
     }
@@ -616,15 +618,18 @@ fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
             name: name.clone(),
             duration_ms: end_ms - start_ms,
         }];
+        let mut own_load = false;
         for m in [Metric::CpuPct, Metric::IoBytesPerS] {
             let own = window
                 .tops
                 .iter()
+                .filter(|t| (*start_ms..=*end_ms).contains(&t.ts_ms))
                 .flat_map(|t| &t.entries)
                 .filter(|p| p.pid == *pid)
                 .map(|p| process_value(p, m))
                 .max_by(f64::total_cmp);
             if let Some(value) = own {
+                own_load |= value > 0.0;
                 evidence.push(Evidence::Process {
                     pid: *pid,
                     name: name.clone(),
@@ -635,7 +640,11 @@ fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         }
         named.push(Suspect {
             cause: Cause::App { name: name.clone() },
-            confidence: Confidence::High,
+            confidence: if own_load || !system_cause {
+                Confidence::High
+            } else {
+                Confidence::Medium
+            },
             evidence,
             next_steps: vec![NextStep::ReportToAppVendor],
         });

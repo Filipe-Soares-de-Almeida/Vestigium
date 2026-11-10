@@ -367,6 +367,56 @@ fn app_matches() {
     }));
 }
 
+fn hung_pid_99(window_case: Case) -> Case {
+    let (_, window) = window_case;
+    let hang = Trigger::AppHang {
+        pid: 99,
+        name: "stuck.exe".to_string(),
+        start_ms: T,
+        end_ms: T + 9_000,
+        outcome: HangOutcome::Recovered,
+    };
+    (vec![hang], window)
+}
+
+fn app_confidence(found: &[Suspect]) -> Confidence {
+    find(found, |c| matches!(c, Cause::App { .. }))
+        .expect("app")
+        .confidence
+}
+
+#[test]
+fn a_hung_app_absent_from_the_tops_does_not_outrank_memory() {
+    let found = run(&hung_pid_99(memory_case()));
+    assert!(matches!(found[0].cause, Cause::Memory { .. }));
+    assert_eq!(app_confidence(&found), Confidence::Medium);
+}
+
+#[test]
+fn a_hung_app_with_its_own_load_stays_high() {
+    let (triggers, mut window) = hung_pid_99(memory_case());
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![process(99, "stuck.exe", 40.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    assert!(matches!(found[0].cause, Cause::App { .. }));
+    assert_eq!(app_confidence(&found), Confidence::High);
+}
+
+#[test]
+fn load_outside_the_hang_does_not_make_a_hung_app_high() {
+    let (triggers, mut window) = hung_pid_99(memory_case());
+    window.tops.push(ProcessTop {
+        ts_ms: T - 10_000,
+        entries: vec![process(99, "stuck.exe", 90.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    assert_eq!(app_confidence(&found), Confidence::Medium);
+}
+
 #[test]
 fn app_stays_quiet() {
     let (mut triggers, window) = app_case();

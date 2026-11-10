@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- A program that stopped responding is now blamed with high confidence only when its own processor
+  or disk use shows during the freeze, or when nothing else in the system explains the stall.
+  Before, any hung window put its program first, ahead of a measured memory or disk cause, so a
+  program that was only waiting on a starved PC was named as the culprit.
 - A memory shortage now names the program that held the most memory in the 30 seconds before the
   stall, not the biggest of the whole report. Before, a program that grew after the stall began, or
   one that had left and been replaced by a bigger one, could be named, and the advice was to close
