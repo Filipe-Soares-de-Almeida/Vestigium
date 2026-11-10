@@ -143,3 +143,28 @@ fn a_cleared_ring_holds_no_records() {
     assert_eq!(held.samples.first().map(|s| s.ts_ms), Some(BASE + 60_000));
     assert_eq!(held.tops.len(), 1);
 }
+
+#[test]
+fn a_second_start_keeps_an_unsettled_fall() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("blackbox.ring");
+    {
+        let (mut ring, _) = BlackboxRing::open(&path).unwrap();
+        write_seconds(&mut ring, BASE, 10);
+    }
+    {
+        let (mut ring, held) = BlackboxRing::open(&path).unwrap();
+        assert_eq!(held.samples.len(), 10);
+        write_seconds(&mut ring, BASE + 600_000, 2);
+    }
+
+    let (ring, held) = BlackboxRing::open(&path).unwrap();
+    assert!(!held.clean);
+    assert_eq!(held.samples.len(), 10, "the fall not yet settled is kept");
+    assert_eq!(held.samples.last().map(|s| s.ts_ms), Some(BASE + 9_000));
+
+    ring.release_held();
+    drop(ring);
+    let (_ring, after) = BlackboxRing::open(&path).unwrap();
+    assert!(after.samples.is_empty(), "a settled fall is not read again");
+}

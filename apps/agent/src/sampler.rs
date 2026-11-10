@@ -331,8 +331,11 @@ impl Sampler {
                 if let Some(warning) = &held.warning {
                     sampler.report(warning);
                 }
-                sampler.ring = Some(ring);
                 sampler.fall = Fall::after(held, history_last, now);
+                if sampler.fall.is_none() {
+                    ring.release_held();
+                }
+                sampler.ring = Some(ring);
             }
             Some(Err(err)) => sampler.report(&err),
             None => {}
@@ -837,6 +840,9 @@ impl Sampler {
         let Some(fall) = self.fall.take() else {
             return;
         };
+        if let Some(ring) = &self.ring {
+            ring.release_held();
+        }
         let reason = match fall.occurrence(&self.store) {
             Ok(Some(occurrence)) => {
                 let severe = occurrence.severity == Severity::Severe;
@@ -898,6 +904,7 @@ impl Sampler {
         self.blackbox = self.blackbox.emptied();
         if let Some(ring) = self.ring.as_mut() {
             ring.clear();
+            ring.release_held();
         }
         self.health.forget();
         lock(&self.readings).clear();

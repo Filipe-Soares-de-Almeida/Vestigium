@@ -1,5 +1,6 @@
 use std::ffi::c_void;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use vestigium_core::{DiskLoad, ProcessSample, ProcessTop, Sample};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE};
@@ -55,10 +56,15 @@ pub struct BlackboxRing {
     mapping: HANDLE,
     view: MEMORY_MAPPED_VIEW_ADDRESS,
     next: usize,
+    /// Where the bytes of a stop not yet settled wait while the ring runs again.
+    pending: PathBuf,
 }
 
 impl BlackboxRing {
     /// Opens or creates the ring at `path`, returns what it held, and starts it over as unclean.
+    /// What an unclean ring held is also kept in a file beside it until `release_held`, and a
+    /// start that finds that file returns it instead, so a restart does not lose a fall that is
+    /// not settled yet.
     pub fn open(path: &Path) -> Result<(BlackboxRing, RingContents), CollectError> {
         // SAFETY: opens or creates the ring file; the handle is closed on drop.
         let file = unsafe {
@@ -86,11 +92,12 @@ impl BlackboxRing {
             mapping,
             view,
             next: 0,
+            pending: path.with_extension("pending"),
         };
         if view.Value.is_null() {
             return Err(windows::core::Error::from_thread().into());
         }
-        let held = read(ring.bytes(), wall_ms());
+        let held = ring.held(wall_ms());
         let bytes = ring.bytes_mut();
         bytes.fill(0);
         bytes[..4].copy_from_slice(&MAGIC);
@@ -98,6 +105,25 @@ impl BlackboxRing {
         bytes[5] = WATCHING;
         ring.flush()?;
         Ok((ring, held))
+    }
+
+    /// What the previous run left: the bytes of a stop still unsettled, else the ring's own.
+    fn held(&self, now_ms: i64) -> RingContents {
+        if let Ok(kept) = fs::read(&self.pending)
+            && kept.len() == RING_BYTES
+        {
+            return read(&kept, now_ms);
+        }
+        let own = read(self.bytes(), now_ms);
+        if !own.clean && (!own.samples.is_empty() || !own.tops.is_empty()) {
+            let _ = fs::write(&self.pending, self.bytes());
+        }
+        own
+    }
+
+    /// Forgets the stop kept beside the ring: it is settled, or the history it belongs to is gone.
+    pub fn release_held(&self) {
+        let _ = fs::remove_file(&self.pending);
     }
 
     pub fn push_sample(&mut self, sample: &Sample) {

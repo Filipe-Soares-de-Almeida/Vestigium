@@ -53,6 +53,8 @@ How to use this file:
 
 ### Fixed
 
+- Restarting the watcher within five minutes of a crash no longer loses that crash: what the black
+  box held is kept until Windows has confirmed the fall or the wait is over.
 - Pausing watching just as an earlier timed pause ends no longer lets the old pause end the new
   one: the pause shown and the pause in effect stay the same.
 - Logging off, shutting down or an installer's request to close the watcher now also ends the
