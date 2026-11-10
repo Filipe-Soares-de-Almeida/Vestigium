@@ -1,84 +1,17 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
-    Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, GapReason,
-    LanguagePref, MachineInfo, Occurrence, OccurrenceKind, OccurrenceSummary, Retention, Settings,
-    Severity, ThemePref, WinEvent,
+    Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, LanguagePref,
+    MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref, WinEvent,
 };
 
+use crate::codes::{
+    channel_from_code, gap_from_code, kind_code, kind_from_code, meaning_from_code, severity_code,
+    severity_from_code,
+};
 use crate::{Store, StoreError, decode, encode};
 
 /// Layout of the `Occurrence` and `Episode` BLOBs written today.
 const RECORD_VERSION: i64 = 1;
-
-const KINDS: [OccurrenceKind; 5] = [
-    OccurrenceKind::Freeze,
-    OccurrenceKind::Stutter,
-    OccurrenceKind::AppHang,
-    OccurrenceKind::Reported,
-    OccurrenceKind::PostMortem,
-];
-const SEVERITIES: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
-const CHANNELS: [Channel; 2] = [Channel::System, Channel::Application];
-const REASONS: [GapReason; 5] = [
-    GapReason::Paused,
-    GapReason::Suspended,
-    GapReason::Stopped,
-    GapReason::Crashed,
-    GapReason::ClockChanged,
-];
-/// Stored meaning codes are positions in this list plus one; new meanings go at the end.
-const MEANINGS: [EventMeaning; 16] = [
-    EventMeaning::StorageReset,
-    EventMeaning::DiskRetry,
-    EventMeaning::DiskBadBlock,
-    EventMeaning::PagingError,
-    EventMeaning::DisplayReset,
-    EventMeaning::HardwareError,
-    EventMeaning::PowerLoss,
-    EventMeaning::UnexpectedShutdown,
-    EventMeaning::BugCheck,
-    EventMeaning::CpuFirmwareLimit,
-    EventMeaning::LowVirtualMemory,
-    EventMeaning::AppHang,
-    EventMeaning::AppCrash,
-    EventMeaning::ServiceCrash,
-    EventMeaning::NoCrashDump,
-    EventMeaning::MemoryDiagnostic,
-];
-
-/// The stored code of `value`: its position in `list` plus one; a value missing from it is refused.
-fn code<T: PartialEq + std::fmt::Debug>(
-    list: &[T],
-    value: &T,
-    what: &'static str,
-) -> Result<i64, StoreError> {
-    list.iter()
-        .position(|v| v == value)
-        .map(|i| i as i64 + 1)
-        .ok_or_else(|| StoreError::UnwritableValue {
-            what,
-            value: format!("{value:?}"),
-        })
-}
-
-fn from_code<T: Copy>(list: &[T], code: i64, what: &'static str) -> Result<T, StoreError> {
-    usize::try_from(code - 1)
-        .ok()
-        .and_then(|i| list.get(i).copied())
-        .ok_or(StoreError::UnknownCode { what, code })
-}
-
-pub(crate) fn channel_code(channel: Channel) -> Result<i64, StoreError> {
-    code(&CHANNELS, &channel, "channel")
-}
-
-pub(crate) fn meaning_code(meaning: EventMeaning) -> Result<i64, StoreError> {
-    code(&MEANINGS, &meaning, "event meaning")
-}
-
-pub(crate) fn gap_code(reason: GapReason) -> Result<i64, StoreError> {
-    code(&REASONS, &reason, "gap reason")
-}
 
 fn episode_code(kind: &EpisodeKind) -> i64 {
     match kind {
@@ -99,8 +32,8 @@ const SETTING_DETAIL_LEVEL: &str = "detail_level";
 impl Store {
     /// Stores a finished occurrence on its own, right away; returns its id.
     pub fn insert_occurrence(&mut self, occurrence: &Occurrence) -> Result<i64, StoreError> {
-        let kind = code(&KINDS, &occurrence.kind, "occurrence kind")?;
-        let severity = code(&SEVERITIES, &occurrence.severity, "severity")?;
+        let kind = kind_code(occurrence.kind);
+        let severity = severity_code(occurrence.severity);
         self.conn.execute(
             "INSERT INTO occurrence (version, kind, start_ms, end_ms, severity, cause, data)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -196,10 +129,10 @@ impl Store {
             let (id, kind, start_ms, end_ms, severity, cause) = row?;
             found.push(OccurrenceSummary {
                 id,
-                kind: from_code(&KINDS, kind, "occurrence kind")?,
+                kind: kind_from_code(kind)?,
                 start_ms,
                 end_ms,
-                severity: from_code(&SEVERITIES, severity, "severity")?,
+                severity: severity_from_code(severity)?,
                 cause: postcard::from_bytes::<Cause>(&cause)?,
             });
         }
@@ -247,8 +180,8 @@ impl Store {
         for row in rows {
             let (event, channel, meaning) = row?;
             found.push(WinEvent {
-                channel: from_code(&CHANNELS, channel, "channel")?,
-                meaning: from_code(&MEANINGS, meaning, "event meaning")?,
+                channel: channel_from_code(channel)?,
+                meaning: meaning_from_code(meaning)?,
                 ..event
             });
         }
@@ -274,7 +207,7 @@ impl Store {
             found.push(Gap {
                 start_ms,
                 end_ms,
-                reason: from_code(&REASONS, reason, "gap reason")?,
+                reason: gap_from_code(reason)?,
             });
         }
         Ok(found)
@@ -369,20 +302,4 @@ fn one<T: serde::de::DeserializeOwned>(version: i64, data: &[u8]) -> Result<T, S
         });
     }
     decode::<T>(data)?.pop().ok_or(StoreError::EmptySegment)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_value_missing_from_its_table_is_refused() {
-        const PARTIAL: [Severity; 2] = [Severity::Light, Severity::Medium];
-
-        assert_eq!(code(&PARTIAL, &Severity::Medium, "severity").unwrap(), 2);
-        assert!(matches!(
-            code(&PARTIAL, &Severity::Severe, "severity"),
-            Err(StoreError::UnwritableValue { what: "severity", value }) if value == "Severe"
-        ));
-    }
 }

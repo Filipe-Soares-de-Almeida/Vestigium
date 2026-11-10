@@ -1,5 +1,5 @@
 use rusqlite::{Row, params};
-use vestigium_core::{Applier, TWEAK_CHANGE_VERSION, TWEAKS, TweakChange, TweakChangeV1, TweakId};
+use vestigium_core::{Applier, TWEAK_CHANGE_VERSION, TweakChange, TweakChangeV1, TweakId};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -14,12 +14,23 @@ pub struct TweakChangeRow {
     pub change: TweakChange,
 }
 
-/// The tweak's position in the catalog, which only grows at the end.
+/// The stored code of a tweak; codes already written never change, and new tweaks take the next.
 fn tweak_code(tweak: TweakId) -> i64 {
-    TWEAKS
-        .iter()
-        .position(|t| *t == tweak)
-        .unwrap_or(usize::MAX) as i64
+    match tweak {
+        TweakId::FastStartup => 0,
+        TweakId::Hibernation => 1,
+        TweakId::PowerPlan => 2,
+        TweakId::PcieAspm => 3,
+        TweakId::UsbSuspend => 4,
+        TweakId::SysMain => 5,
+        TweakId::WindowsSearch => 6,
+        TweakId::GameDvr => 7,
+        TweakId::GpuScheduling => 8,
+        TweakId::Mpo => 9,
+        TweakId::StartupApp => 10,
+        TweakId::AppDumps => 11,
+        TweakId::CrashDump => 12,
+    }
 }
 
 impl Store {
@@ -136,5 +147,23 @@ impl Store {
             })
         })
         .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vestigium_core::TWEAKS;
+
+    #[test]
+    fn tweak_codes_are_fixed() {
+        let literal: Vec<i64> = (0..13).collect();
+        assert_eq!(
+            TWEAKS.len(),
+            literal.len(),
+            "a tweak has no literal code here"
+        );
+        let stored: Vec<i64> = TWEAKS.into_iter().map(tweak_code).collect();
+        assert_eq!(stored, literal);
     }
 }

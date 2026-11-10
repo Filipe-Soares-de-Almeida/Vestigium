@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, params};
 use vestigium_core::{Gap, WinEvent};
 
-use crate::records::{channel_code, gap_code, meaning_code};
+use crate::codes::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
 pub const SCHEMA_VERSION: u32 = 11;
@@ -321,8 +321,8 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for event in &batch.events {
-                let channel = channel_code(event.channel)?;
-                let meaning = meaning_code(event.meaning)?;
+                let channel = channel_code(event.channel);
+                let meaning = meaning_code(event.meaning);
                 insert.execute(params![
                     event.ts_ms,
                     channel,
@@ -344,7 +344,7 @@ impl Store {
             let mut insert = tx
                 .prepare_cached("INSERT INTO gap (start_ms, end_ms, reason) VALUES (?1, ?2, ?3)")?;
             for gap in &batch.gaps {
-                let reason = gap_code(gap.reason)?;
+                let reason = gap_code(gap.reason);
                 insert.execute(params![gap.start_ms, gap.end_ms, reason])?;
             }
         }

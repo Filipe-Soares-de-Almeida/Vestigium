@@ -228,3 +228,38 @@ fn a_run_stored_with_layout_version_one_still_reads() {
     assert_eq!(check.exit_code, Some(13));
     assert_eq!((check.dirty_before, check.dirty_after), (None, None));
 }
+
+#[test]
+fn every_outcome_round_trips_under_its_own_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let runs: Vec<TestRun> = Outcome::ALL
+        .into_iter()
+        .zip(1..)
+        .map(|(outcome, n)| TestRun {
+            outcome,
+            ..quick(n * DAY)
+        })
+        .collect();
+    for run in &runs {
+        store.record_test_run(run).unwrap();
+    }
+
+    let found: Vec<TestRun> = store
+        .test_runs(0, 10 * DAY)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.run)
+        .collect();
+    let raw = rusqlite::Connection::open(dir.path().join("vestigium.db")).unwrap();
+    let codes: Vec<i64> = raw
+        .prepare("SELECT outcome FROM test_run ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+
+    assert_eq!(found, runs);
+    assert_eq!(codes, [0, 1, 2, 3]);
+}

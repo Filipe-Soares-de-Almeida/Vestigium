@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use vestigium_core::{
@@ -112,30 +113,6 @@ fn event(ts_ms: i64, record_id: u64) -> WinEvent {
         meaning: EventMeaning::StorageReset,
         data_xml: "<EventData/>".to_string(),
     }
-}
-
-/// Every event meaning, walked through a match that stops compiling when a meaning is added.
-fn every_meaning() -> Vec<EventMeaning> {
-    use EventMeaning::*;
-    let next = |meaning: EventMeaning| match meaning {
-        StorageReset => Some(DiskRetry),
-        DiskRetry => Some(DiskBadBlock),
-        DiskBadBlock => Some(PagingError),
-        PagingError => Some(DisplayReset),
-        DisplayReset => Some(HardwareError),
-        HardwareError => Some(PowerLoss),
-        PowerLoss => Some(UnexpectedShutdown),
-        UnexpectedShutdown => Some(BugCheck),
-        BugCheck => Some(CpuFirmwareLimit),
-        CpuFirmwareLimit => Some(LowVirtualMemory),
-        LowVirtualMemory => Some(AppHang),
-        AppHang => Some(AppCrash),
-        AppCrash => Some(ServiceCrash),
-        ServiceCrash => Some(NoCrashDump),
-        NoCrashDump => Some(MemoryDiagnostic),
-        MemoryDiagnostic => None,
-    };
-    std::iter::successors(Some(StorageReset), |&meaning| next(meaning)).collect()
 }
 
 const MEMORY_DIAGNOSTICS: &str = "Microsoft-Windows-MemoryDiagnostics-Results";
@@ -266,7 +243,7 @@ fn events_are_unique_per_channel_and_record() {
 fn every_event_meaning_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = open(dir.path());
-    let stored: Vec<WinEvent> = every_meaning()
+    let stored: Vec<WinEvent> = EventMeaning::ALL
         .into_iter()
         .zip(1..)
         .map(|(meaning, n)| WinEvent {
@@ -283,6 +260,135 @@ fn every_event_meaning_round_trips() {
         .unwrap();
 
     assert_eq!(store.events(i64::MIN, i64::MAX).unwrap(), stored);
+}
+
+/// One column of one table, as stored, in row order.
+fn stored(dir: &Path, sql: &str) -> Vec<i64> {
+    let raw = rusqlite::Connection::open(dir.join("vestigium.db")).unwrap();
+    let mut query = raw.prepare(sql).unwrap();
+    query
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[test]
+fn every_event_meaning_is_stored_under_its_own_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let events = EventMeaning::ALL
+        .into_iter()
+        .zip(1..)
+        .map(|(meaning, n)| WinEvent {
+            meaning,
+            ..event(n * 1_000, n as u64)
+        })
+        .collect();
+    store
+        .append_batch(&Batch {
+            events,
+            ..Batch::default()
+        })
+        .unwrap();
+
+    let codes = stored(dir.path(), "SELECT meaning FROM event ORDER BY id");
+
+    assert_eq!(codes, (1..=16).collect::<Vec<i64>>());
+    assert_eq!(codes.len(), EventMeaning::ALL.len());
+}
+
+#[test]
+fn every_channel_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let stored_events: Vec<WinEvent> = Channel::ALL
+        .into_iter()
+        .zip(1..)
+        .map(|(channel, n)| WinEvent {
+            channel,
+            ..event(n * 1_000, n as u64)
+        })
+        .collect();
+    store
+        .append_batch(&Batch {
+            events: stored_events.clone(),
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.events(i64::MIN, i64::MAX).unwrap(), stored_events);
+    assert_eq!(
+        stored(dir.path(), "SELECT channel FROM event ORDER BY id"),
+        [1, 2]
+    );
+}
+
+#[test]
+fn every_gap_reason_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let gaps: Vec<Gap> = GapReason::ALL
+        .into_iter()
+        .zip(1..)
+        .map(|(reason, n)| Gap {
+            reason,
+            ..gap(n * 1_000, n * 1_000 + 500)
+        })
+        .collect();
+    store
+        .append_batch(&Batch {
+            gaps: gaps.clone(),
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.gaps(i64::MIN, i64::MAX).unwrap(), gaps);
+    assert_eq!(
+        stored(dir.path(), "SELECT reason FROM gap ORDER BY id"),
+        [1, 2, 3, 4, 5]
+    );
+}
+
+#[test]
+fn every_occurrence_kind_and_severity_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let mut expected = Vec::new();
+    for (kind, k) in OccurrenceKind::ALL.into_iter().zip(0..) {
+        for (severity, s) in Severity::ALL.into_iter().zip(0..) {
+            let start_ms = (k * 10 + s) * 1_000;
+            let id = store
+                .insert_occurrence(&Occurrence {
+                    kind,
+                    severity,
+                    ..occurrence(start_ms, start_ms + 500)
+                })
+                .unwrap();
+            expected.push((id, kind, severity));
+        }
+    }
+
+    let found: Vec<_> = store
+        .occurrences(i64::MIN, i64::MAX)
+        .unwrap()
+        .into_iter()
+        .map(|o| (o.id, o.kind, o.severity))
+        .collect();
+
+    assert_eq!(found, expected);
+    assert_eq!(
+        stored(dir.path(), "SELECT kind FROM occurrence ORDER BY id")
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([1, 2, 3, 4, 5])
+    );
+    assert_eq!(
+        stored(dir.path(), "SELECT severity FROM occurrence ORDER BY id")
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([1, 2, 3])
+    );
 }
 
 #[test]

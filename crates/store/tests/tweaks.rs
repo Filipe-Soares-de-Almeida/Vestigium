@@ -339,3 +339,34 @@ fn an_undo_found_written_after_an_interrupted_helper_marks_the_change_undone() {
 
     assert!(store.tweaks_in_place().unwrap().is_empty());
 }
+
+#[test]
+fn every_tweak_is_stored_under_its_own_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    for (tweak, n) in TWEAKS.into_iter().zip(1..) {
+        let made = change(tweak, mpo_change(Value::Absent, Value::Dword(0)), None);
+        store
+            .record_tweak_change(&made, n * 1_000, Applier::User)
+            .unwrap();
+    }
+
+    let found: Vec<TweakId> = store
+        .tweak_changes(0, i64::MAX)
+        .unwrap()
+        .into_iter()
+        .rev()
+        .map(|row| row.change.tweak)
+        .collect();
+    let raw = rusqlite::Connection::open(dir.path().join("vestigium.db")).unwrap();
+    let codes: Vec<i64> = raw
+        .prepare("SELECT tweak FROM tweak_change ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+
+    assert_eq!(found, TWEAKS);
+    assert_eq!(codes, (0..13).collect::<Vec<i64>>());
+}

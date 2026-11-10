@@ -108,3 +108,16 @@ impl Store {
         Ok(runs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kind_and_outcome_codes_are_fixed() {
+        let kinds: Vec<i64> = TestKind::ALL.into_iter().map(kind_code).collect();
+        let outcomes: Vec<i64> = Outcome::ALL.into_iter().map(outcome_code).collect();
+        assert_eq!(kinds, [0, 1, 2, 3]);
+        assert_eq!(outcomes, [0, 1, 2, 3]);
+    }
+}
