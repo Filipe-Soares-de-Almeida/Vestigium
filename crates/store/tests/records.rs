@@ -346,6 +346,7 @@ fn prune_keeps_what_is_inside_retention() {
                 segment(Series::Samples, samples_cutoff - 10, samples_cutoff + 1),
                 segment(Series::Minutes, minutes_cutoff - 10, minutes_cutoff - 1),
                 segment(Series::Minutes, minutes_cutoff - 10, minutes_cutoff + 1),
+                segment(Series::Processes, now - HOUR_MS, now),
             ],
             events: vec![event(records_cutoff - 1, 1), event(records_cutoff + 1, 2)],
             bookmark_xml: None,
@@ -383,6 +384,90 @@ fn prune_keeps_what_is_inside_retention() {
     assert_eq!(store.episodes(all, max).unwrap().len(), 1);
     assert_eq!(store.events(all, max).unwrap().len(), 1);
     assert_eq!(store.gaps(all, max).unwrap().len(), 1);
+}
+
+#[test]
+fn prune_refuses_to_run_far_ahead_of_the_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let now = 1_000 * DAY_MS;
+    store
+        .append_batch(&Batch {
+            segments: vec![segment(Series::Samples, now - HOUR_MS, now)],
+            ..Batch::default()
+        })
+        .unwrap();
+    store
+        .insert_occurrence(&occurrence(now - 60_000, now))
+        .unwrap();
+
+    let report = store
+        .prune(now + 3 * DAY_MS, &Retention::default())
+        .unwrap();
+
+    assert!(report.refused);
+    assert_eq!(report.segments, 0);
+    assert!(!store.samples(now - 2 * HOUR_MS, now).unwrap().is_empty());
+    assert_eq!(store.occurrences(i64::MIN, i64::MAX).unwrap().len(), 1);
+}
+
+#[test]
+fn prune_runs_when_now_is_within_an_hour_of_the_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let now = 1_000 * DAY_MS;
+    let old_end = now - 48 * HOUR_MS - 1;
+    store
+        .append_batch(&Batch {
+            segments: vec![
+                segment(Series::Samples, old_end - 10, old_end),
+                segment(Series::Samples, now - HOUR_MS, now),
+            ],
+            ..Batch::default()
+        })
+        .unwrap();
+
+    let report = store.prune(now + HOUR_MS, &Retention::default()).unwrap();
+
+    assert!(!report.refused);
+    assert_eq!(report.segments, 1);
+}
+
+#[test]
+fn prune_runs_when_the_clock_is_behind_the_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let now = 1_000 * DAY_MS;
+    let old_end = now - 48 * HOUR_MS - 1;
+    store
+        .append_batch(&Batch {
+            segments: vec![
+                segment(Series::Samples, old_end - 10, old_end),
+                segment(Series::Samples, now + 2 * HOUR_MS, now + 3 * HOUR_MS),
+            ],
+            ..Batch::default()
+        })
+        .unwrap();
+
+    let report = store.prune(now, &Retention::default()).unwrap();
+
+    assert!(!report.refused);
+    assert_eq!(report.segments, 1);
+}
+
+#[test]
+fn prune_runs_on_a_store_without_segments() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let now = 1_000 * DAY_MS;
+    store
+        .insert_occurrence(&occurrence(now - 400 * DAY_MS, now - 399 * DAY_MS))
+        .unwrap();
+
+    let report = store.prune(now, &Retention::default()).unwrap();
+
+    assert!(!report.refused);
+    assert_eq!(report.occurrences, 1);
 }
 
 #[test]

@@ -599,6 +599,7 @@ impl Sampler {
         if prune_due(self.pruned_hour, ts_ms) {
             self.pruned_hour = Some(ts_ms.div_euclid(HOUR_MS));
             let retention = lock(&self.settings).retention;
+            // A refused prune is not an error; the next wall hour tries again.
             if let Err(err) = self.store.prune(ts_ms, &retention) {
                 self.report(&err);
             }

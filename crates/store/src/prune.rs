@@ -6,9 +6,13 @@ use crate::{Series, Store, StoreError};
 const HOUR_MS: i64 = 60 * 60_000;
 const DAY_MS: i64 = 24 * HOUR_MS;
 
+/// How far past the newest stored data a prune may run: the interval between prunes.
+const MAX_AHEAD_MS: i64 = HOUR_MS;
+
 /// How many rows a prune deleted, per kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PruneReport {
+    pub refused: bool,
     pub segments: usize,
     pub minutes: usize,
     pub occurrences: usize,
@@ -26,11 +30,20 @@ pub struct PruneReport {
 
 impl Store {
     /// Deletes what ended before its retention, in one transaction; freed pages are reused.
+    /// Deletes nothing and reports `refused` when `now_ms` is over an hour past the newest segment.
     pub fn prune(&mut self, now_ms: i64, retention: &Retention) -> Result<PruneReport, StoreError> {
         let samples_cutoff = now_ms - i64::from(retention.samples_hours) * HOUR_MS;
         let minutes_cutoff = now_ms - i64::from(retention.minutes_days) * DAY_MS;
         let records_cutoff = now_ms - i64::from(retention.records_days) * DAY_MS;
         let tx = self.conn.transaction()?;
+        let newest: Option<i64> =
+            tx.query_row("SELECT max(end_ms) FROM segment", [], |row| row.get(0))?;
+        if newest.is_some_and(|end_ms| now_ms - end_ms > MAX_AHEAD_MS) {
+            return Ok(PruneReport {
+                refused: true,
+                ..PruneReport::default()
+            });
+        }
         let per_second = [
             Series::SamplesV1,
             Series::ProcessesV1,
@@ -45,6 +58,7 @@ impl Store {
             )?;
         }
         let report = PruneReport {
+            refused: false,
             segments,
             minutes: tx.execute(
                 "DELETE FROM segment WHERE series = ?1 AND end_ms < ?2",
