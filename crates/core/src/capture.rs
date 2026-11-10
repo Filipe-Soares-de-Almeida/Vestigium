@@ -373,7 +373,8 @@ impl FrameAggregator {
             .add(ts_ms, frame_ms);
     }
 
-    /// Apps with at least 60 frames, most hitches first then most frames, and the worst hitches in time order.
+    /// Apps with at least 60 frames, but not the compositor, most hitches first then most frames, and the
+    /// worst hitches of the apps that draw steadily in time order.
     pub fn finish(self) -> (Vec<AppFrames>, Vec<FrameHitch>) {
         let mut apps = Vec::new();
         let mut hitches = Vec::new();
@@ -399,11 +400,12 @@ impl FrameAggregator {
                 worst_ms: track.worst_ms,
                 hitches: count,
             };
-            if !renders_steadily(&app) {
+            if is_compositor(&app.name) {
                 continue;
             }
+            let steady = renders_steadily(&app);
             for Reverse((bin, Reverse(ts_ms), bits)) in track.longest {
-                if hitch(ms_of(bin)) {
+                if steady && hitch(ms_of(bin)) {
                     hitches.push(FrameHitch {
                         ts_ms,
                         app: app.name.clone(),
@@ -1421,7 +1423,7 @@ mod tests {
     }
 
     #[test]
-    fn compositor_and_on_demand_apps_are_left_out() {
+    fn compositor_is_left_out_and_on_demand_apps_are_kept_but_never_suspects() {
         let mut agg = FrameAggregator::new();
         for i in 0..200 {
             agg.add("dwm.exe", 10, i * 7, 7.0);
@@ -1435,8 +1437,40 @@ mod tests {
         }
         let (apps, hitches) = agg.finish();
         let names: Vec<&str> = apps.iter().map(|a| a.name.as_str()).collect();
-        assert_eq!(names, ["game.exe"]);
+        assert_eq!(names, ["browser.exe", "game.exe"]);
         assert!(hitches.iter().all(|h| h.app == "game.exe"));
+
+        let mut c = capture();
+        c.apps = apps;
+        c.hitches = hitches;
+        let named = capture_findings(&c);
+        assert!(
+            !named
+                .iter()
+                .any(|s| matches!(&s.cause, Cause::Frames { app } if app == "browser.exe"))
+        );
+    }
+
+    #[test]
+    fn app_over_five_percent_hitched_is_kept_but_never_a_suspect() {
+        let mut agg = FrameAggregator::new();
+        for i in 0..3_000 {
+            agg.add("stutter.exe", 5, i * 7, 7.0);
+        }
+        for i in 0..180 {
+            agg.add("stutter.exe", 5, 30_000 + i * 1_000, 1_000.0);
+        }
+        let (apps, hitches) = agg.finish();
+        assert_eq!(apps.len(), 1);
+        assert_eq!((apps[0].frames, apps[0].hitches), (3_180, 180));
+        assert!(!renders_steadily(&apps[0]));
+        assert!(hitches.is_empty(), "its stalls are not told from idle gaps");
+
+        let mut c = capture();
+        c.apps = apps;
+        assert!(capture_findings(&c).is_empty());
+        assert!(capture_suspects(START, START + 60_000, &c).is_empty());
+        assert!(steady_only(&c).apps.is_empty());
     }
 
     #[test]
