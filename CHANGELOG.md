@@ -38,6 +38,9 @@ How to use this file:
 
 ### Fixed
 
+- A hard disk that was idle when the monitor restarted no longer has its open disk-health alert
+  closed and reopened as a new one, which could hide a critical alert and reset its date. The alert now
+  stays open until the disk is read again, and the idle disk is still never woken up to be read.
 - A wall clock that steps back, as a time correction does after a PC with two operating systems
   starts, no longer hides freezes, app hangs and stutters for as long as it stepped back. Before, a
   stretch of lost watching recorded while the clock was ahead kept covering the time that followed

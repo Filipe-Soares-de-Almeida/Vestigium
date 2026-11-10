@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use vestigium_collect::{HealthSource, physical_drive};
 use vestigium_core::health::{
-    Concern, DiskHealth, HealthInputs, SecurityProduct, evaluate, reconcile,
+    Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, SecurityProduct, Subject,
+    evaluate, reconcile,
 };
 use vestigium_core::hwtest::TEST_REACH_DAYS;
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
@@ -64,21 +65,25 @@ impl<S: HealthSource> HealthPass<S> {
             self.antivirus = self.source.antivirus();
             self.antivirus_read_ms = Some(now.ts_ms);
         }
+        let mut unread: HashSet<&str> = HashSet::new();
         for disk in &now.machine.disks {
             let Some(index) = physical_drive(&disk.name) else {
                 continue;
             };
             if disk.media == Media::Hdd && !now.busy_disks.contains(&disk.name) {
+                unread.insert(&disk.name);
                 continue;
             }
-            if let Some(health) = self.source.disk(index, &disk.name, now.ts_ms) {
-                let day = health.read_ms.div_euclid(DAY_MS);
-                if !health.attributes.is_empty() && self.smart_day.get(&disk.name) != Some(&day) {
-                    store.record_smart(&health)?;
-                    self.smart_day.insert(disk.name.clone(), day);
-                }
-                self.disks.insert(disk.name.clone(), health);
+            let Some(health) = self.source.disk(index, &disk.name, now.ts_ms) else {
+                unread.insert(&disk.name);
+                continue;
+            };
+            let day = health.read_ms.div_euclid(DAY_MS);
+            if !health.attributes.is_empty() && self.smart_day.get(&disk.name) != Some(&day) {
+                store.record_smart(&health)?;
+                self.smart_day.insert(disk.name.clone(), day);
             }
+            self.disks.insert(disk.name.clone(), health);
         }
         let system_disk = self.source.system_drive().and_then(|number| {
             now.machine
@@ -119,7 +124,16 @@ impl<S: HealthSource> HealthPass<S> {
                 .collect(),
         };
         let fresh = evaluate(&inputs);
-        let changes = reconcile(&open, &fresh);
+        let mut changes = reconcile(&open, &fresh);
+        // A disk this pass did not read keeps its open SMART finding.
+        changes.retain(|change| match change {
+            FindingChange::Close { id } => !open.iter().any(|s| {
+                s.id == *id
+                    && s.finding.kind == FindingKind::DiskSmart
+                    && matches!(&s.finding.subject, Subject::Disk(name) if unread.contains(name.as_str()))
+            }),
+            _ => true,
+        });
         store.apply_findings(&changes, now.ts_ms)?;
         Ok(PassOutcome {
             changes: changes.len(),
@@ -152,7 +166,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use vestigium_core::health::{FindingKind, PageFile, VolumeSpace};
+    use vestigium_core::health::{PageFile, VolumeSpace};
     use vestigium_core::{Channel, DiskInfo, Episode, EventMeaning, WinEvent};
     use vestigium_store::Batch;
 
@@ -335,6 +349,34 @@ mod tests {
             2,
             "the HDD's last reading stays once it sleeps again"
         );
+    }
+
+    #[test]
+    fn a_fresh_pass_keeps_the_smart_finding_of_an_idle_hdd() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            failing_disk: true,
+            ..FakeHealth::default()
+        };
+        let mut first = HealthPass::new(fake.clone());
+        run(&mut first, &mut store, NOW, &["1 D:"]);
+        let smart_of_hdd = |store: &Store| {
+            store.open_findings().unwrap().into_iter().find(|f| {
+                f.finding.kind == FindingKind::DiskSmart
+                    && f.finding.subject == Subject::Disk("1 D:".into())
+            })
+        };
+        let opened = smart_of_hdd(&store)
+            .expect("the HDD's finding opens")
+            .opened_ms;
+
+        let mut restarted = HealthPass::new(fake);
+        run(&mut restarted, &mut store, NOW + 60_000, &[]);
+
+        let kept = smart_of_hdd(&store).expect("the idle HDD's finding stays open");
+        assert_eq!(kept.opened_ms, opened);
     }
 
     #[test]
