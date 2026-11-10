@@ -406,6 +406,55 @@ fn drain_closes_pending_and_marks_truncated() {
     assert!(occurrences(bb.poll(T + 100_000)).is_empty());
 }
 
+/// Feeds a calm sample every second and a hang check every two, polling every ten seconds,
+/// while an app hangs from `T` for `hang_s` seconds; returns every occurrence found.
+fn long_hang(hang_s: i64) -> Vec<Occurrence> {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    let mut found = Vec::new();
+    for s in -120..=hang_s + 60 {
+        bb.push_sample(calm(T + s * 1_000));
+        if (0..hang_s).contains(&s) && s % 2 == 0 {
+            bb.push_hangs(T + s * 1_000, &[hung(11, "player.exe")], &running);
+        }
+        if s == hang_s {
+            bb.push_hangs(T + s * 1_000, &[], &running);
+        }
+        if s % 10 == 0 {
+            found.extend(occurrences(bb.poll(T + s * 1_000)));
+        }
+    }
+    found
+}
+
+#[test]
+fn a_window_older_than_the_ring_is_marked_truncated() {
+    let found = long_hang(11 * 60);
+
+    assert_eq!(found.len(), 1);
+    assert!(found[0].window.samples.first().map(|s| s.ts_ms) > Some(found[0].window.from_ms));
+    assert!(found[0].truncated);
+}
+
+#[test]
+fn a_window_inside_the_ring_is_not_truncated() {
+    let found = long_hang(2 * 60);
+
+    assert_eq!(found.len(), 1);
+    assert!(!found[0].truncated);
+}
+
+#[test]
+fn a_window_before_the_first_sample_is_not_truncated() {
+    let mut bb = blackbox();
+    feed(&mut bb, 0, 40);
+    late(&mut bb, T + 5_000, 2_000.0);
+
+    let found = occurrences(bb.poll(T + 40_000));
+    assert_eq!(found.len(), 1);
+    assert!(!found[0].truncated);
+}
+
 #[test]
 fn rings_keep_ten_minutes() {
     let mut bb = blackbox();

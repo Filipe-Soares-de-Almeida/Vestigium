@@ -122,6 +122,8 @@ pub struct Blackbox {
     machine: MachineInfo,
     timing: Timing,
     samples: Ring<Sample>,
+    /// The time of the first sample this black box ever took, before the ring dropped any.
+    first_sample_ms: Option<i64>,
     tops: Ring<ProcessTop>,
     events: Ring<WinEvent>,
     hangs: Ring<HangSpan>,
@@ -149,6 +151,7 @@ impl Blackbox {
             machine,
             timing,
             samples: Ring::with_capacity(660),
+            first_sample_ms: None,
             tops: Ring::with_capacity(140),
             events: Ring::with_capacity(512),
             hangs: Ring::with_capacity(256),
@@ -198,6 +201,7 @@ impl Blackbox {
     pub fn push_sample(&mut self, sample: Sample) {
         let ended = self.episodes.push_sample(&sample, self.sensitive);
         self.ready_episodes(ended);
+        self.first_sample_ms.get_or_insert(sample.ts_ms);
         self.samples.push(sample);
     }
 
@@ -357,6 +361,7 @@ impl Blackbox {
     pub fn clock_changed(&mut self, from_ms: i64, to_ms: i64) -> Vec<Output> {
         let mut outputs = self.drain(from_ms);
         self.samples.clear();
+        self.first_sample_ms = None;
         self.tops.clear();
         self.events.clear();
         self.hangs.clear();
@@ -526,6 +531,7 @@ impl Blackbox {
                 .collect(),
             machine: self.machine.clone(),
         };
+        let truncated = truncated || self.window_lost_its_start(&window);
         let kind = triggers
             .iter()
             .map(OccurrenceKind::of)
@@ -562,6 +568,21 @@ impl Blackbox {
             self.stutters += 1;
         }
         self.ready.push(Output::Occurrence(Box::new(occurrence)));
+    }
+
+    /// Whether the window starts after the black box began watching but its first samples are gone.
+    fn window_lost_its_start(&self, window: &Window) -> bool {
+        let from_ms = window.from_ms;
+        let watched = self.first_sample_ms.is_some_and(|first| from_ms >= first);
+        let first_is_missing = window
+            .samples
+            .first()
+            .is_none_or(|sample| sample.ts_ms > from_ms + GAP_MARGIN_MS);
+        let in_a_gap = window
+            .gaps
+            .iter()
+            .any(|gap| gap.start_ms <= from_ms + GAP_MARGIN_MS && gap.end_ms >= from_ms);
+        watched && first_is_missing && !in_a_gap
     }
 
     fn ready_episodes(&mut self, episodes: Vec<Episode>) {

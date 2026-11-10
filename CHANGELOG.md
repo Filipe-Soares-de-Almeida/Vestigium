@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- An occurrence of a long freeze or a long not-responding app, whose first seconds had already left
+  the ten minutes the monitor keeps in memory, is now marked as cut short instead of looking
+  complete.
 - The privacy page and the reporting page now say that the details Windows logs for an event, which
   Vestigium keeps and shows, can include the path of a program or file and so your user name.
 - A retention setting that is out of range or unreadable no longer resets the other two. Only the

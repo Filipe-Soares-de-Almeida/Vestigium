@@ -60,7 +60,8 @@ pub struct Occurrence {
     pub facts: Vec<Fact>,
     /// Sensitive mode was on while it happened.
     pub sensitive: bool,
-    /// Watching stopped before the window after it was complete.
+    /// Watching stopped before the window after it was complete, or the first seconds of the
+    /// window had already left the rings.
     pub truncated: bool,
 }
 
