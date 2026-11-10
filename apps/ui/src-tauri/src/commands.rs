@@ -25,7 +25,8 @@ use crate::history::{
 use crate::hwtests::{
     DiskDetailDto, RUNS_SHOWN_MS, RunningTest, TestFinished, TestProgress, TestsDto, disk_list,
     disk_scan_args, letter_of, memory_diagnostic_exe, memory_now, read_progress, run_benchmark,
-    run_memory_test, scan_under_way, tests_file, volume_check_args, volume_list, write_versioned,
+    run_memory_test, scan_under_way, stop_file_of, tests_file, volume_check_args, volume_list,
+    write_versioned,
 };
 use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
@@ -765,7 +766,7 @@ pub fn stop_test(state: State<'_, AppState>, scan: Option<String>) -> Result<(),
     }
     let stem = scan.filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
     match (stem, tests_dir()) {
-        (Some(stem), Some(dir)) => std::fs::write(dir.join(format!("{stem}.stop")), b"")
+        (Some(stem), Some(dir)) => std::fs::write(stop_file_of(&dir, &stem), b"")
             .map_err(|err| UiError::Failed(err.to_string())),
         _ => Err(UiError::Failed("no test is running".into())),
     }

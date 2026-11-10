@@ -48,6 +48,8 @@ How to use this file:
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the
   window and the monitor must be updated together.
+- A disk surface scan that is still running now shows its progress when you close and reopen the
+  window, keeps the test buttons busy, and can be stopped from the window.
 
 ## [0.1.0] - 2026-11-09
 
