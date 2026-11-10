@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- Start with Windows now follows the program when it moves. If the entry points to another copy of
+  Vestigium, the monitor rewrites it to itself at the next start, unless you turned it off in Task
+  Manager, and it never creates an entry that was not there. Uninstalling Vestigium now removes
+  its start entry, while an update keeps it.
 - When the PC is about to sleep or hibernate, the monitor now writes what it holds first. The
   suspend notice wakes the sampler at once and waits up to a second and a half for it to save the
   open batch, pending events, gaps and the black box, where before this was done only after the PC

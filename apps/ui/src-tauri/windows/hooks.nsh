@@ -58,8 +58,15 @@ Var VestigiumWatcherWasRunning
   !insertmacro VestigiumStopWatcher
 !macroend
 
+; A plain uninstall removes the start-at-logon entry when it names this install; an update keeps it.
 ; The history lives beside the program, so deleting the app data also deletes it.
 !macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Vestigium"
+    ${If} $0 == '"$INSTDIR\Vestigium.exe"'
+      DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Vestigium"
+    ${EndIf}
+  ${EndIf}
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     RMDir /r "$LOCALAPPDATA\Vestigium\data"

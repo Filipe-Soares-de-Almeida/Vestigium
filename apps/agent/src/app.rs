@@ -559,6 +559,9 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             .map_err(failed)?;
     }
 
+    if let Err(err) = autostart::repair(&shared.exe) {
+        lock(&shared.status).last_error = Some(err.to_string());
+    }
     let lang = lang_for(lock(&shared.settings).language, system);
     let tray =
         Tray::new(&Catalog::load(lang), lang, &shared.exe, paths::ui_exe()).map_err(failed)?;
