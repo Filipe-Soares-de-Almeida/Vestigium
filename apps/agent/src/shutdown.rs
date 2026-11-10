@@ -116,6 +116,8 @@ unsafe extern "system" fn session_proc(
                 && let Some(on_end) = ON_END_SESSION.get()
             {
                 on_end();
+                // The sampler is stopped; the process ends too, as a restart request asks.
+                quit();
             }
             LRESULT(0)
         }
@@ -148,6 +150,19 @@ mod tests {
             let window = watch_session_end(|| {}).unwrap();
             // SAFETY: posts a message carrying no pointers to the window this thread just made.
             unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.unwrap();
+            pump(|| {});
+            let _ = done.send(());
+        });
+        assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    #[test]
+    fn a_session_end_ends_the_message_loop_after_the_handler() {
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            let window = watch_session_end(|| {}).unwrap();
+            // SAFETY: posts a message carrying no pointers to the window this thread just made.
+            unsafe { PostMessageW(Some(window), WM_ENDSESSION, WPARAM(1), LPARAM(1)) }.unwrap();
             pump(|| {});
             let _ = done.send(());
         });

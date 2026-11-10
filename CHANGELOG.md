@@ -53,6 +53,8 @@ How to use this file:
 
 ### Fixed
 
+- Logging off, shutting down or an installer's request to close the watcher now also ends the
+  watcher process, instead of leaving it running without watching.
 - The watcher now tries the Windows event feed again every minute when it could not start, and
   starts again from the start of the retained events when Windows refuses the saved position. An
   event it cannot read is reported instead of being skipped, and the saved position stays before
