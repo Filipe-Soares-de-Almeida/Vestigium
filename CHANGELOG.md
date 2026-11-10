@@ -86,6 +86,9 @@ How to use this file:
   freezes and crashes, the pending events and the periodic writes carry on, and the saved list of
   the machine's disks is no longer emptied when the disk counters return nothing. Before, a reading
   that kept failing left freezes it had already seen unfinished and events unsaved.
+- An event logged just before a freeze no longer moves the report's attention off the freeze: when an
+  occurrence holds a freeze and an earlier event, the causes are judged around the freeze, so a busy
+  processor or a slow disk next to the freeze is found instead of reading as unclear.
 
 ## [0.1.0] - 2026-11-09
 

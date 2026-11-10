@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::episode::MEMORY_HIGH_PCT;
 use crate::process::per_program;
 use crate::{
-    CrashKind, DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, RoutineKind, Sample,
-    Trigger, WinEvent, Window, classify,
+    CrashKind, DiskLoad, EventMeaning, Media, OccurrenceKind, ProcessSample, ProcessTop,
+    RoutineKind, Sample, Trigger, WinEvent, Window, classify,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -200,7 +200,7 @@ pub struct Suspect {
     pub next_steps: Vec<NextStep>,
 }
 
-/// The span the rules look at first: from the first trigger's start to its end.
+/// The span the rules look at first: the gravest triggers' earliest start to their latest end.
 #[derive(Clone, Copy, Debug)]
 struct Focus {
     start: i64,
@@ -209,16 +209,22 @@ struct Focus {
 
 impl Focus {
     fn of(triggers: &[Trigger], window: &Window) -> Focus {
-        triggers.iter().min_by_key(|t| t.start_ms()).map_or(
-            Focus {
+        let rank = |t: &Trigger| OccurrenceKind::of(t).rank();
+        let Some(gravest) = triggers.iter().map(rank).max() else {
+            return Focus {
                 start: window.from_ms,
                 end: window.from_ms,
-            },
-            |first| Focus {
-                start: first.start_ms(),
-                end: first.end_ms(),
-            },
-        )
+            };
+        };
+        let group = triggers.iter().filter(|t| rank(t) == gravest);
+        Focus {
+            start: group
+                .clone()
+                .map(Trigger::start_ms)
+                .min()
+                .unwrap_or(window.from_ms),
+            end: group.map(Trigger::end_ms).max().unwrap_or(window.from_ms),
+        }
     }
 }
 

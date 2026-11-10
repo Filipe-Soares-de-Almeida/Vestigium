@@ -402,3 +402,18 @@ fn suspects_sort_by_confidence() {
         ]
     ));
 }
+
+#[test]
+fn an_earlier_reported_event_does_not_move_the_focus() {
+    let (_, window) = cpu_case();
+    let reported = Trigger::Reported {
+        event: event(T - 20_000, "stornvme", 153, EventMeaning::DiskRetry),
+    };
+    let found = suspects(&[reported, freeze(2)], &window);
+    let first = found.first().expect("a suspect");
+    assert!(
+        matches!(first.cause, Cause::Cpu { .. }),
+        "{:?}",
+        first.cause
+    );
+}
