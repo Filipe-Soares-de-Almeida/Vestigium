@@ -522,7 +522,7 @@ export interface ProbeHiccup {
 }
 
 /** Whether a part of the capture was measured, or why not. */
-export type CaptureSource = "Ok" | { Unavailable: string };
+export type CaptureSource = "Ok" | { Unavailable: string } | { Partial: { covered_secs: number; reason: string } };
 
 export interface CaptureSummary {
   id: number;

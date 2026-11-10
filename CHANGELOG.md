@@ -39,6 +39,9 @@ How to use this file:
   worst of every minute, and the monitor keeps the probe's stalls for a whole day instead of 15
   minutes, so a capture opened late still shows them. The capture format changes, so the window,
   the monitor and the helper must be updated together; captures already stored still open.
+- A deep capture whose frame recorder stopped partway no longer reads as if frames were measured for
+  the whole capture: the window now says the frames were not measured and why. The capture format
+  changes, so the window, the monitor and the helper must be updated together.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the

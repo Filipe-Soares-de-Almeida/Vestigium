@@ -156,6 +156,11 @@ pub struct ProbeHiccup {
 pub enum CaptureSource {
     Ok,
     Unavailable(String),
+    /// Measured for `covered_secs` only, because of `reason`.
+    Partial {
+        covered_secs: u64,
+        reason: String,
+    },
 }
 
 /// What one deep capture measured.
@@ -1442,6 +1447,10 @@ mod tests {
     fn capture_roundtrips_through_postcard() {
         let mut c = capture();
         c.kernel = CaptureSource::Unavailable("denied".to_string());
+        c.frames = CaptureSource::Partial {
+            covered_secs: 180,
+            reason: "PresentMon exited with 1 after 180 of 300 s".to_string(),
+        };
         c.drivers = vec![driver("a.sys", &[1, 2, 3], &[4])];
         c.longest = vec![long(START + 1, "a.sys", 4)];
         c.apps = vec![app("game.exe", 1)];

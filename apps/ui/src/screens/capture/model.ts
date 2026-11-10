@@ -197,7 +197,10 @@ export const framesFailed = (dto: CaptureDto) => dto.frames !== "Ok";
 export const kernelFailed = (dto: CaptureDto) => dto.kernel !== "Ok";
 
 /** Why a source could not be measured, as the helper worded it. */
-export const reasonOf = (source: CaptureDto["frames"]): string => (source === "Ok" ? "" : source.Unavailable);
+export const reasonOf = (source: CaptureDto["frames"]): string => {
+  if (source === "Ok") return "";
+  return "Unavailable" in source ? source.Unavailable : source.Partial.reason;
+};
 
 /** The number that changes between captures: one driver's long calls or one app's late frames. */
 export interface Digest {

@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, KernelRecord, KernelSession, RawEvent,
-    kernel_record, run_presentmon, spawn_consumer, wall_ms,
+    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, KernelRecord, KernelSession,
+    PresentMonOutcome, RawEvent, kernel_record, run_presentmon, spawn_consumer, wall_ms,
 };
 use vestigium_core::{
     AppFrames, CAPTURE_VERSION, CaptureSource, DeepCapture, DriverLatency, FrameAggregator,
@@ -188,18 +188,64 @@ fn frames(length: Duration, clock: Clock) -> (CaptureSource, Vec<AppFrames>, Vec
     });
     drop(tool);
     let source = match outcome {
-        Ok(outcome) => outcome
-            .unavailable()
-            .map_or(CaptureSource::Ok, CaptureSource::Unavailable),
+        Ok(outcome) => frames_source(&outcome),
         Err(e) => CaptureSource::Unavailable(e.to_string()),
     };
     let (apps, hitches) = aggregator.finish();
     (source, apps, hitches)
 }
 
+/// What a finished PresentMon run says about the frames: whole, partial or not measured.
+fn frames_source(outcome: &PresentMonOutcome) -> CaptureSource {
+    if let Some(why) = outcome.unavailable() {
+        CaptureSource::Unavailable(why)
+    } else if let Some((covered_secs, reason)) = outcome.partial() {
+        CaptureSource::Partial {
+            covered_secs,
+            reason,
+        }
+    } else {
+        CaptureSource::Ok
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_that_died_is_a_partial_source() {
+        let died = PresentMonOutcome {
+            rows: 10,
+            exit_code: Some(1),
+            requested_secs: 300,
+            ran_secs: 180,
+            ..Default::default()
+        };
+        assert!(matches!(
+            frames_source(&died),
+            CaptureSource::Partial {
+                covered_secs: 180,
+                ..
+            }
+        ));
+        let whole = PresentMonOutcome {
+            rows: 10,
+            exit_code: Some(0),
+            requested_secs: 300,
+            ran_secs: 301,
+            ..Default::default()
+        };
+        assert_eq!(frames_source(&whole), CaptureSource::Ok);
+        let none = PresentMonOutcome {
+            exit_code: Some(1),
+            ..Default::default()
+        };
+        assert!(matches!(
+            frames_source(&none),
+            CaptureSource::Unavailable(_)
+        ));
+    }
 
     #[test]
     fn clock_converts_qpc_to_wall_and_micros() {
