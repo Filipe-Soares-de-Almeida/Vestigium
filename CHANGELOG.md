@@ -163,6 +163,9 @@ How to use this file:
   program rankings of the last ten minutes are now limited by their number as well as by their age, and
   their list of program names is rebuilt only when it has doubled, which also saves processor time on a
   PC with many short-lived programs.
+- The ten-minute chart on the Now screen no longer stops growing after the wall clock steps back. Before,
+  every new point looked older than the last one and was ignored until the clock caught up; now the
+  points that lie ahead of the new time are dropped and the chart goes on from there.
 - The watcher can no longer freeze for good when the window asks for its status at the very moment the
   tray icon refreshes. Before, two of its threads could each wait for the other, which stopped the
   tray menu and the icon, kept suspend notices from being handled and left the window showing a
