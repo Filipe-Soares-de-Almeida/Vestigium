@@ -24,6 +24,9 @@ How to use this file:
 
 ### Changed
 
+- The Now line and the Today cause line that name the process using the disk now say "probably",
+  as the occurrence summary already did, because the per-process disk figure also counts data
+  that never reaches the disk, such as pipe and inter-process traffic.
 - The crash dumps screen now reads only the blue screen events of the last year from the history
   instead of every kept event, so it opens faster on a PC with a long, busy history.
 
