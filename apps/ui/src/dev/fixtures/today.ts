@@ -1,5 +1,6 @@
 // Synthetic history for Today: ?day=full (default), quiet (no stalls) or empty (nothing watched today);
-// ?history=empty is the first use, ?fall=1 adds a fall at 7:12. Nothing here was measured on a real PC.
+// ?history=empty is the first use, ?fall=1 adds a fall at 7:12, ?same-start=1 adds a second disk episode
+// that starts in the same millisecond as the first. Nothing here was measured on a real PC.
 import type {
   Episode,
   EpisodeDetailDto,
@@ -17,6 +18,7 @@ import type { Handler } from "../mock";
 const query = new URLSearchParams(location.search);
 const shape = query.get("day") ?? "full";
 const firstUse = query.get("history") === "empty";
+const sameStart = query.get("same-start") === "1";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -75,6 +77,18 @@ const episodes: Episode[] =
           culprit: { pid: 2208, name: "Indexer.exe", value: 61 },
           truncated: false,
         },
+        ...(sameStart
+          ? [
+              {
+                kind: { DiskBusy: { disk: "1 D:" } },
+                start_ms: at(14, 31),
+                end_ms: at(14, 32, 30),
+                peak: 99,
+                culprit: { pid: 2208, name: "Indexer.exe", value: 40 },
+                truncated: false,
+              } satisfies Episode,
+            ]
+          : []),
         {
           kind: "MemoryHigh",
           start_ms: at(16, 10),

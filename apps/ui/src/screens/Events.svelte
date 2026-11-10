@@ -12,7 +12,7 @@
   import { t, tn } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
-  import { dayStart, type Item, itemsOf } from "./today/day";
+  import { dayStart, type Item, itemsOf, keyOfItem } from "./today/day";
   import { causeName, episodeDisk, episodeKey, episodeTitle, occurrenceMark, occurrenceTitle } from "./today/text";
 
   const REFRESH_MS = 60_000;
@@ -139,7 +139,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each shown as item (`${item.kind}-${item.start}`)}
+          {#each shown as item, i (keyOfItem(item, i))}
             {@const row = rowOf(item)}
             <tr>
               <td>{formatTime(row.at)}</td>

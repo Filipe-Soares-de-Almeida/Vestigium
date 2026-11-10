@@ -41,6 +41,9 @@ How to use this file:
 
 ### Fixed
 
+- Today, Events and a program's page no longer fail to open when two overload periods start in the
+  same moment, such as two disks at full activity together or the processor and the memory filling at
+  once. Before, the Moments list and the Events table showed an error for the rest of the day.
 - The report of a PC that fell now includes the disk and display events Windows logged in the two
   minutes before the last second the watcher saw. Before, they arrived after the report was written, so
   a freeze caused by the disk or the graphics driver was reported as a power cut of low confidence;

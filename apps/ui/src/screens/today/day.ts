@@ -145,6 +145,17 @@ export function diskLabel(name: string): string {
   return name.replace(/^\d+\s+/, "") || name;
 }
 
+/** A key for an episode row: its kind (with the disk) and start, then its place in the list. */
+export function keyOfEpisode(episode: Episode, index: number): string {
+  const kind = typeof episode.kind === "string" ? episode.kind : JSON.stringify(episode.kind);
+  return `e${episode.start_ms}-${kind}-${index}`;
+}
+
+/** A key for a row of the list: an occurrence by its id, an episode by its identity. */
+export function keyOfItem(item: Item, index: number): string {
+  return item.kind === "occurrence" ? `o${item.occurrence.id}-${index}` : keyOfEpisode(item.episode, index);
+}
+
 /** The day's occurrences and pressure episodes, and the rows they make, oldest first. */
 export function itemsOf(start: number, now: number, marks: MarksDto): { occurrences: OccurrenceSummary[]; episodes: Episode[]; items: Item[] } {
   const occurrences = marks.occurrences

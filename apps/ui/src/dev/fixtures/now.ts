@@ -3,6 +3,7 @@
 import type { Channel } from "@tauri-apps/api/core";
 
 import type {
+  Episode,
   EpisodeKind,
   Lanes,
   LiveMessage,
@@ -189,6 +190,20 @@ const latest: OccurrenceSummary | null =
         cause: { Storage: { disk: "0 C:" } },
       };
 
+/** Two disk episodes of one program that start in the same millisecond. */
+function sameStartEpisodes(): Episode[] {
+  const start = new Date().setHours(0, 30, 0, 0);
+  const culprit = { pid: 2208, name: "Indexer.exe", value: 61 };
+  return ["0 C:", "1 D:"].map((disk) => ({
+    kind: { DiskBusy: { disk } },
+    start_ms: start,
+    end_ms: start + 90_000,
+    peak: 100,
+    culprit,
+    truncated: false,
+  }));
+}
+
 function refuse(kind: UiError["kind"]): Promise<never> {
   return Promise.reject({ kind, message: `mock: ${kind}` } satisfies UiError);
 }
@@ -202,7 +217,10 @@ export const handlers: Record<string, Handler> = {
     run_as: { CurrentUser: { elevated: false } },
     signature: { Valid: { signer: "Example Software Inc." } },
   }),
-  program_marks: () => ({ occurrences: [], episodes: [] }),
+  program_marks: () => ({
+    occurrences: [],
+    episodes: query.get("same-start") === "1" ? sameStartEpisodes() : [],
+  }),
   // Ten minutes of rankings every 5 s, with a busy stretch in the middle.
   program_recent: () =>
     Array.from({ length: 120 }, (_, i) => ({

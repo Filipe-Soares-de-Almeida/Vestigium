@@ -12,7 +12,7 @@
   import { at } from "../dumps/words";
   import { formatBytes, formatRate } from "../now/lanes";
   import { NowStream } from "../now/stream.svelte";
-  import { dayStart } from "../today/day";
+  import { dayStart, keyOfEpisode } from "../today/day";
   import EpisodeRow from "../today/EpisodeRow.svelte";
   import OccurrenceRow from "../today/OccurrenceRow.svelte";
   import DetailPage from "./DetailPage.svelte";
@@ -43,7 +43,7 @@
     marks
       ? [
           ...marks.occurrences.map((o) => ({ at: o.start_ms, key: `o${o.id}`, occurrence: o, episode: null })),
-          ...marks.episodes.map((e) => ({ at: e.start_ms, key: `e${e.start_ms}`, occurrence: null, episode: e })),
+          ...marks.episodes.map((e, i) => ({ at: e.start_ms, key: keyOfEpisode(e, i), occurrence: null, episode: e })),
         ].sort((a, b) => b.at - a.at)
       : [],
   );
