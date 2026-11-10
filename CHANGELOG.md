@@ -38,6 +38,9 @@ How to use this file:
 
 ### Fixed
 
+- An install, update or uninstall that finds the monitor still running after asking it to quit and
+  ending it now stops with a message, before any file changes, instead of going on. The message says
+  to choose Exit on the tray icon and run the installer again.
 - A deep capture cut short by the helper being killed no longer leaves its kernel trace session
   running: the monitor stops it when it starts, as long as no helper is running.
 - A deep capture no longer gives a driver high confidence, nor tells you to update it, because of one

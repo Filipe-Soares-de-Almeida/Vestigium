@@ -1,8 +1,10 @@
-; Installer hooks: the watcher is closed before its files change, and started again after an install.
+﻿; Installer hooks: the watcher is closed before its files change, and started again after an install.
 
 Var VestigiumWatcherWasRunning
 
 ; Asks the watcher's hidden window to close, waits up to 10 s for it to save and exit, then ends it.
+; If the window is still there after that, the install or uninstall stops before any file changes.
+; The message follows the installer language ($LANGUAGE 1046 is Portuguese, Brazil; else English).
 !macro VestigiumStopWatcher
   StrCpy $VestigiumWatcherWasRunning 0
   FindWindow $0 "VestigiumAgentSession"
@@ -21,7 +23,23 @@ Var VestigiumWatcherWasRunning
     ${If} $0 <> 0
       nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM Vestigium.exe'
       Pop $0
-      Sleep 500
+      StrCpy $1 0
+      ${Do}
+        Sleep 200
+        FindWindow $0 "VestigiumAgentSession"
+        IntOp $1 $1 + 1
+        ${If} $1 >= 10
+          ${ExitDo}
+        ${EndIf}
+      ${LoopUntil} $0 = 0
+    ${EndIf}
+    ${If} $0 <> 0
+      ${If} $LANGUAGE = 1046
+        MessageBox MB_OK|MB_ICONSTOP "O monitor do Vestigium ainda está em execução e não pôde ser encerrado, então nada foi alterado.$\r$\n$\r$\nEscolha Sair no ícone do Vestigium na bandeja do sistema e execute este instalador de novo." /SD IDOK
+      ${Else}
+        MessageBox MB_OK|MB_ICONSTOP "The Vestigium watcher is still running and could not be stopped, so nothing was changed.$\r$\n$\r$\nChoose Exit on the Vestigium icon in the system tray, then run this installer again." /SD IDOK
+      ${EndIf}
+      Abort
     ${EndIf}
   ${EndIf}
 !macroend
