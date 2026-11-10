@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- The tray icon now corrects itself when Windows rejects an update. If the icon or the tooltip could
+  not be changed, for example while Explorer was restarting, the monitor tries again on its next
+  refresh instead of showing the old level until the level changed again.
 - Start with Windows now follows the program when it moves. If the entry points to another copy of
   Vestigium, the monitor rewrites it to itself at the next start, unless you turned it off in Task
   Manager, and it never creates an entry that was not there. Uninstalling Vestigium now removes

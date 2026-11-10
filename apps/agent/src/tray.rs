@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use vestigium_brand::Badge;
 use vestigium_collect::wall_ms;
 use vestigium_core::{ColorTheme, GateState, RecentState};
@@ -260,17 +260,10 @@ impl Tray {
             theme,
             taskbar: self.taskbar.get(),
         };
-        let before = self.shown.replace(Some(now));
-        if before == Some(now) {
+        let text = self.text.borrow();
+        if !show(&self.icon, &self.shown, now, &text) {
             return;
         }
-        if before.map(Shown::look) != Some(now.look()) {
-            let _ = self
-                .icon
-                .set_icon(Some(icon::tray(now.badge(), now.theme, now.taskbar)));
-        }
-        let text = self.text.borrow();
-        let _ = self.icon.set_tooltip(Some(&text.tooltip(now)));
         self.pause.set_text(if now.paused {
             &text.resume
         } else {
@@ -278,6 +271,39 @@ impl Tray {
         });
         self.sensitive.set_checked(now.sensitive);
     }
+}
+
+/// What the notification area accepts: a new icon and a new tooltip.
+trait Face {
+    fn set_icon(&self, icon: Icon) -> Result<(), String>;
+    fn set_tooltip(&self, text: &str) -> Result<(), String>;
+}
+
+impl Face for TrayIcon {
+    fn set_icon(&self, icon: Icon) -> Result<(), String> {
+        TrayIcon::set_icon(self, Some(icon)).map_err(|err| err.to_string())
+    }
+
+    fn set_tooltip(&self, text: &str) -> Result<(), String> {
+        TrayIcon::set_tooltip(self, Some(text)).map_err(|err| err.to_string())
+    }
+}
+
+/// Draws `now` on the icon and tooltip and records it in `shown` only when the shell took both.
+/// Returns false when `now` is already shown.
+fn show(face: &impl Face, shown: &Cell<Option<Shown>>, now: Shown, text: &Texts) -> bool {
+    let before = shown.get();
+    if before == Some(now) {
+        return false;
+    }
+    let icon_ok = before.map(Shown::look) == Some(now.look())
+        || face
+            .set_icon(icon::tray(now.badge(), now.theme, now.taskbar))
+            .is_ok();
+    if icon_ok && face.set_tooltip(&text.tooltip(now)).is_ok() {
+        shown.set(Some(now));
+    }
+    true
 }
 
 /// Reads what the icon shows from the shared state: the capture hint, the level and the theme.
@@ -293,11 +319,14 @@ mod tests {
     use vestigium_brand::Badge;
     use vestigium_core::{ColorTheme, RecentState};
 
+    use std::cell::{Cell, RefCell};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
-    use super::{Level, Shown, Texts, read_shared};
+    use tray_icon::Icon;
+
+    use super::{Face, Level, Shown, Texts, read_shared, show};
     use crate::app::lock;
     use crate::app::tests::{both_finish, shared};
     use crate::icon::Taskbar;
@@ -419,6 +448,101 @@ mod tests {
                     drop((recent, status));
                 }
             },
+        );
+    }
+
+    /// A notification area that rejects the first `reject_icons` icons and `reject_tooltips` tooltips.
+    #[derive(Default)]
+    struct Fake {
+        reject_icons: Cell<u32>,
+        reject_tooltips: Cell<u32>,
+        icons: Cell<u32>,
+        tooltips: RefCell<Vec<String>>,
+    }
+
+    impl Face for Fake {
+        fn set_icon(&self, _icon: Icon) -> Result<(), String> {
+            self.icons.set(self.icons.get() + 1);
+            take_rejection(&self.reject_icons)
+        }
+
+        fn set_tooltip(&self, text: &str) -> Result<(), String> {
+            self.tooltips.borrow_mut().push(text.to_string());
+            take_rejection(&self.reject_tooltips)
+        }
+    }
+
+    fn take_rejection(left: &Cell<u32>) -> Result<(), String> {
+        if left.get() == 0 {
+            return Ok(());
+        }
+        left.set(left.get() - 1);
+        Err("the shell refused".to_string())
+    }
+
+    fn texts() -> Texts {
+        Texts {
+            watching: "watching".to_string(),
+            paused: "paused".to_string(),
+            sensitive: "closely".to_string(),
+            attention: "slow {count}".to_string(),
+            problem: "severe {count}".to_string(),
+            health: "health {count}".to_string(),
+            suggest_capture: "look".to_string(),
+            pause: String::new(),
+            resume: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_rejected_icon_update_is_retried_on_the_next_refresh() {
+        let face = Fake::default();
+        face.reject_icons.set(1);
+        let shown_now = Cell::new(None);
+        let now = shown(false, false, Level::Problem(1));
+
+        assert!(show(&face, &shown_now, now, &texts()));
+        assert_eq!(shown_now.get(), None);
+        assert!(show(&face, &shown_now, now, &texts()));
+
+        assert_eq!(face.icons.get(), 2);
+        assert_eq!(shown_now.get(), Some(now));
+        assert!(
+            !show(&face, &shown_now, now, &texts()),
+            "an accepted state is not drawn again"
+        );
+        assert_eq!(face.icons.get(), 2);
+    }
+
+    #[test]
+    fn a_rejected_tooltip_update_is_retried() {
+        let face = Fake::default();
+        face.reject_tooltips.set(1);
+        let shown_now = Cell::new(None);
+        let now = shown(false, false, Level::Normal);
+
+        show(&face, &shown_now, now, &texts());
+        assert_eq!(shown_now.get(), None);
+        show(&face, &shown_now, now, &texts());
+
+        assert_eq!(face.tooltips.borrow().len(), 2);
+        assert_eq!(shown_now.get(), Some(now));
+    }
+
+    #[test]
+    fn a_count_change_updates_the_tooltip_without_redrawing_the_icon() {
+        let face = Fake::default();
+        let shown_now = Cell::new(None);
+        let first = shown(false, false, Level::Attention(2));
+        let second = shown(false, false, Level::Attention(3));
+
+        show(&face, &shown_now, first, &texts());
+        show(&face, &shown_now, second, &texts());
+
+        assert_eq!(face.icons.get(), 1);
+        assert_eq!(
+            face.tooltips.borrow().last().map(String::as_str),
+            Some("slow 3")
         );
     }
 }
