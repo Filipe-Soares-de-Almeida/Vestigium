@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- A file system check whose chkdsk run ends with exit code 3, which Windows uses for "could not
+  check" (access denied, or a volume that cannot be opened), is now always shown as a failed check.
+  Before, a volume that happened to be marked dirty made it read as file system errors.
 - A startup entry or boot step whose name spells it "Anti-Malware" or "Anti-Virus" with a hyphen is
   now recognised as a security product, so it is never offered for removal.
 - A busy system disk during one of the app's own disk tests no longer counts as a reason to suggest

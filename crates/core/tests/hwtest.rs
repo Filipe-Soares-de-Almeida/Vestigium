@@ -181,7 +181,12 @@ fn chkdsk_exit_codes() {
         VolumeResult::CouldNotCheck,
         "access denied, no volume"
     );
-    assert_eq!(volume_result(3, true), VolumeResult::ProblemsFound);
+    assert_eq!(
+        volume_result(3, true),
+        VolumeResult::CouldNotCheck,
+        "3 is never problems, whatever the dirty bit says"
+    );
+    assert_eq!(volume_result(7, true), VolumeResult::ProblemsFound);
     assert_eq!(volume_result(7, false), VolumeResult::CouldNotCheck);
 }
 
