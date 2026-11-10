@@ -53,6 +53,9 @@ How to use this file:
 - The disk speed test no longer starts on a volume with less than 1.5 GiB free, which is its 1 GiB
   file plus a margin; a volume that small used to fill up completely while the test ran. The
   Tests page now says how much space is needed instead.
+- The disk speed test now deletes the 1 GiB temporary file an earlier run left behind (after a power
+  cut, for instance), and when the disk stops answering it waits for the cancelled reads and writes
+  to finish before releasing the memory they use.
 
 ## [0.1.0] - 2026-11-09
 

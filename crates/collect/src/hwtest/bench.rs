@@ -30,6 +30,29 @@ use crate::{monotonic_ms, wall_ms};
 const BUFFERS: usize = 32 << 20;
 /// Longest wait for one I/O before the run gives up.
 const IO_TIMEOUT_MS: u32 = 30_000;
+/// Longest wait for the cancelled I/O to complete before it is left alone.
+const CANCEL_WAIT_MS: u32 = 5_000;
+
+/// Why an I/O run ended without a measurement.
+enum IoError {
+    Failed(String),
+    /// Cancelled I/O never completed, so its buffers and handles may still be in use.
+    Stuck(String),
+}
+
+impl IoError {
+    fn into_message(self) -> String {
+        match self {
+            IoError::Failed(m) | IoError::Stuck(m) => m,
+        }
+    }
+}
+
+impl From<String> for IoError {
+    fn from(message: String) -> IoError {
+        IoError::Failed(message)
+    }
+}
 
 /// The volume a benchmark measures and the disk under it.
 #[derive(Clone, Debug)]
@@ -158,7 +181,8 @@ fn run_io(
     seconds: f64,
     cap: u64,
     stop: &AtomicBool,
-) -> Result<Measured, String> {
+    timeout_ms: u32,
+) -> Result<Measured, IoError> {
     let block_bytes = u64::from(block);
     let blocks = (file_bytes / block_bytes).max(1);
     let mut rng = 0x1234_5678_9abc_def1u64 ^ monotonic_ms().to_bits();
@@ -177,6 +201,7 @@ fn run_io(
     let (mut bytes, mut ios, mut issued, mut max_ms) = (0u64, 0u64, 0u64, 0f64);
     let mut in_flight = 0usize;
     let mut failure = None;
+    let (mut cancelling, mut stuck) = (false, false);
 
     let mut issue = |slot: &mut Slot, issued: &mut u64| -> Result<bool, String> {
         if stop.load(Ordering::Relaxed)
@@ -234,14 +259,24 @@ fn run_io(
     while in_flight > 0 {
         let (mut done, mut key) = (0u32, 0usize);
         let mut ov: *mut OVERLAPPED = std::ptr::null_mut();
+        let wait = if cancelling {
+            CANCEL_WAIT_MS
+        } else {
+            timeout_ms
+        };
         // SAFETY: waits for one completion on the port this run owns.
-        let waited =
-            unsafe { GetQueuedCompletionStatus(port, &mut done, &mut key, &mut ov, IO_TIMEOUT_MS) };
+        let waited = unsafe { GetQueuedCompletionStatus(port, &mut done, &mut key, &mut ov, wait) };
         if ov.is_null() {
             failure.get_or_insert_with(|| "the disk stopped answering".into());
-            // SAFETY: cancels this run's own pending I/O on the file before the slots go away.
+            if cancelling {
+                stuck = true;
+                break;
+            }
+            // SAFETY: cancels this run's own pending I/O on the file; each cancelled operation
+            // still completes on the port and is collected by the next waits.
             let _ = unsafe { CancelIoEx(file, None) };
-            break;
+            cancelling = true;
+            continue;
         }
         in_flight -= 1;
         // SAFETY: every OVERLAPPED issued is the first field of a boxed `Slot` in `slots`.
@@ -261,8 +296,13 @@ fn run_io(
             }
         }
     }
+    if stuck {
+        // The disk may still write into the slots and buffers: leak them instead of freeing.
+        std::mem::forget(slots);
+    }
     match failure {
-        Some(e) => Err(e),
+        Some(e) if stuck => Err(IoError::Stuck(e)),
+        Some(e) => Err(IoError::Failed(e)),
         None => Ok(Measured {
             bytes,
             ios,
@@ -300,12 +340,41 @@ fn open_file(path: &Path) -> Result<Owned, String> {
     file.map(Owned).map_err(|e| e.to_string())
 }
 
+/// Deletes the benchmark files that earlier runs of this program left in `dir`.
+fn remove_old_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let digits = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("vestigium-bench-"))
+            .and_then(|n| n.strip_suffix(".tmp"));
+        if digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Measures the volume with a temporary file of `file_bytes`, written once before measuring;
 /// every mode runs at normal priority for at most `seconds` (`BENCH_SECONDS` on the screen).
 pub fn benchmark(
     target: &BenchTarget,
     file_bytes: u64,
     seconds: f64,
+    stop: &AtomicBool,
+    progress: &mut dyn FnMut(BenchMode),
+) -> TestRun {
+    benchmark_with_timeout(target, file_bytes, seconds, IO_TIMEOUT_MS, stop, progress)
+}
+
+/// `benchmark` with the longest wait for one I/O, in milliseconds, given by the caller.
+pub fn benchmark_with_timeout(
+    target: &BenchTarget,
+    file_bytes: u64,
+    seconds: f64,
+    io_timeout_ms: u32,
     stop: &AtomicBool,
     progress: &mut dyn FnMut(BenchMode),
 ) -> TestRun {
@@ -322,6 +391,7 @@ pub fn benchmark(
     };
     let disk_before = target.disk.and_then(disk_bytes);
     let mut ours = 0u64;
+    remove_old_files(&target.dir);
     let path = target
         .dir
         .join(format!("vestigium-bench-{}.tmp", std::process::id()));
@@ -338,51 +408,63 @@ pub fn benchmark(
             unsafe { CreateIoCompletionPort(file.0, None, 0, 1) }.map_err(|e| e.to_string())?,
         );
         let buffers = Buffers::new().ok_or("no memory for the buffers")?;
-        let prep = run_io(
-            file.0,
-            port.0,
-            &buffers,
-            file_bytes,
-            1 << 20,
-            8,
-            true,
-            true,
-            f64::MAX,
-            file_bytes,
-            stop,
-        )?;
-        bench.written_bytes += prep.bytes;
-        ours += prep.bytes;
-        for mode in BenchMode::ALL {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            progress(mode);
-            let run = run_io(
+        let mut measure = || -> Result<(), IoError> {
+            let prep = run_io(
                 file.0,
                 port.0,
                 &buffers,
                 file_bytes,
-                mode.block_bytes(),
-                mode.depth(),
-                matches!(mode, BenchMode::SeqRead | BenchMode::SeqWrite),
-                mode.writes(),
-                seconds,
-                mode.write_cap(file_bytes),
+                1 << 20,
+                8,
+                true,
+                true,
+                f64::MAX,
+                file_bytes,
                 stop,
+                io_timeout_ms,
             )?;
-            if mode.writes() {
-                bench.written_bytes += run.bytes;
+            bench.written_bytes += prep.bytes;
+            ours += prep.bytes;
+            for mode in BenchMode::ALL {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                progress(mode);
+                let run = run_io(
+                    file.0,
+                    port.0,
+                    &buffers,
+                    file_bytes,
+                    mode.block_bytes(),
+                    mode.depth(),
+                    matches!(mode, BenchMode::SeqRead | BenchMode::SeqWrite),
+                    mode.writes(),
+                    seconds,
+                    mode.write_cap(file_bytes),
+                    stop,
+                    io_timeout_ms,
+                )?;
+                if mode.writes() {
+                    bench.written_bytes += run.bytes;
+                }
+                ours += run.bytes;
+                bench.results.push(BenchResult {
+                    mode,
+                    mb_per_s: (run.bytes as f64 / f64::from(1 << 20) / run.secs) as f32,
+                    iops: (run.ios as f64 / run.secs) as f32,
+                    max_ms: run.max_ms as f32,
+                });
             }
-            ours += run.bytes;
-            bench.results.push(BenchResult {
-                mode,
-                mb_per_s: (run.bytes as f64 / f64::from(1 << 20) / run.secs) as f32,
-                iops: (run.ios as f64 / run.secs) as f32,
-                max_ms: run.max_ms as f32,
-            });
+            Ok(())
+        };
+        let result = measure();
+        if matches!(result, Err(IoError::Stuck(_))) {
+            // Cancelled I/O is still pending: leave the buffers and handles to the process end.
+            std::mem::forget(buffers);
+            std::mem::forget(port);
+            std::mem::forget(file);
         }
-        Ok(())
+        result.map_err(IoError::into_message)
     })();
     if let (Some(before), Some(after)) = (disk_before, target.disk.and_then(disk_bytes)) {
         let all = after.saturating_sub(before);

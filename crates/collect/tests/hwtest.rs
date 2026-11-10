@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use vestigium_collect::{
-    BenchTarget, LockedRegion, Words, benchmark, memory_diagnostic_events, memory_test,
-    run_patterns,
+    BenchTarget, LockedRegion, Words, benchmark, benchmark_with_timeout, memory_diagnostic_events,
+    memory_test, run_patterns,
 };
 use vestigium_core::hwtest::{
     BENCH_FILE_BYTES, BenchMode, Bus, ERRORS_KEPT, Outcome, PATTERNS, Pattern, QUICK_CHUNK,
@@ -163,6 +163,59 @@ fn benchmark_refuses_a_file_larger_than_the_free_space() {
     assert!(bench.failure.is_some_and(|f| f.contains("free space")));
     assert_eq!((bench.written_bytes, seen.len()), (0, 0));
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn benchmark_removes_leftover_files_of_earlier_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = ["vestigium-bench-1.tmp", "vestigium-bench-4294967295.tmp"];
+    let other = [
+        "vestigium-bench-.tmp",
+        "vestigium-bench-x1.tmp",
+        "vestigium-bench-1.tmp.bak",
+        "notes.tmp",
+    ];
+    for name in old.iter().chain(&other) {
+        std::fs::write(dir.path().join(name), b"leftover").unwrap();
+    }
+    let target = BenchTarget {
+        dir: dir.path().to_path_buf(),
+        volume: "C:\\".into(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    let stop = AtomicBool::new(false);
+    let _ = benchmark(&target, 1 << 60, 0.2, &stop, &mut |_| {});
+    for name in old {
+        assert!(!dir.path().join(name).exists(), "{name} stays");
+    }
+    for name in other {
+        assert!(dir.path().join(name).exists(), "{name} is not ours");
+    }
+}
+
+/// Forces the I/O timeout so the cancel path runs; meant for a run under Application Verifier
+/// (Basics, Heaps and Memory enabled for the test executable), where a buffer freed while I/O
+/// is pending is reported. Run it with `cargo test -p vestigium-collect --test hwtest -- --ignored
+/// benchmark_waits_for_cancelled_io`.
+#[test]
+#[ignore = "meant for a run under Application Verifier"]
+fn benchmark_waits_for_cancelled_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = BenchTarget {
+        dir: dir.path().to_path_buf(),
+        volume: "C:\\".into(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    for _ in 0..20 {
+        let stop = AtomicBool::new(false);
+        let run = benchmark_with_timeout(&target, 256 << 20, 0.2, 1, &stop, &mut |_| {});
+        assert!(matches!(run.outcome, Outcome::Clean | Outcome::Failed));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
 }
 
 #[test]

@@ -38,7 +38,7 @@ pub use health::{
 pub use hung::hung_pids;
 pub use hwtest::{
     BenchTarget, LockedRegion, MemoryProgress, PatternRun, Words, benchmark,
-    memory_diagnostic_events, memory_test, run_patterns,
+    benchmark_with_timeout, memory_diagnostic_events, memory_test, run_patterns,
 };
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
