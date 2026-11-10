@@ -4,6 +4,8 @@ use std::path::PathBuf;
 pub const REFUSED: u8 = 2;
 /// Exit code for a job that ran but could not write its result.
 pub const WRITE_FAILED: u8 = 3;
+/// Exit code for a deep capture refused because another one is running.
+pub const CAPTURE_RUNNING: u8 = 4;
 pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 /// Physical drive numbers a disk scan accepts.
 pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;
@@ -11,12 +13,8 @@ pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;
 /// The closed list of jobs.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Job {
-    /// Traces DPC/ISR time per driver and frame times for `minutes`, into `out`; `etl` keeps the raw trace.
-    DeepCapture {
-        minutes: u64,
-        out: PathBuf,
-        etl: Option<PathBuf>,
-    },
+    /// Traces DPC/ISR time per driver and frame times for `minutes`, into `out`.
+    DeepCapture { minutes: u64, out: PathBuf },
     /// Reads the boot diagnostics, which need elevation, into `out`.
     HealthScan { out: PathBuf },
     /// Reads what every crash dump Windows kept says, into `out`.
@@ -128,7 +126,7 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
     if name != "deep-capture" {
         return Err(format!("unknown job {name}"));
     }
-    let (mut minutes, mut out, mut etl) = (None, None, None);
+    let (mut minutes, mut out) = (None, None);
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
         let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -137,7 +135,6 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
                 minutes = Some(value.parse::<u64>().map_err(|e| e.to_string())?)
             }
             "--out" if out.is_none() => out = Some(PathBuf::from(value)),
-            "--etl" if etl.is_none() => etl = Some(PathBuf::from(value)),
             other => return Err(format!("unexpected {other}")),
         }
     }
@@ -151,7 +148,6 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
     Ok(Job::DeepCapture {
         minutes,
         out: out.ok_or("--out is required")?,
-        etl,
     })
 }
 
@@ -344,8 +340,21 @@ mod tests {
             Ok(Job::DeepCapture {
                 minutes: 5,
                 out: PathBuf::from(r"C:\a.capture"),
-                etl: None
             })
         );
+    }
+
+    #[test]
+    fn deep_capture_takes_no_trace_file() {
+        let bad = args(&[
+            "deep-capture",
+            "--minutes",
+            "5",
+            "--out",
+            r"C:\a.capture",
+            "--etl",
+            r"C:\a.etl",
+        ]);
+        assert_eq!(parse(&bad), Err("unexpected --etl".to_string()));
     }
 }

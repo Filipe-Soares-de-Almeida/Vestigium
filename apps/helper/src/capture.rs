@@ -5,8 +5,9 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, KernelRecord, KernelSession,
-    PresentMonOutcome, RawEvent, kernel_record, run_presentmon, spawn_consumer, wall_ms,
+    DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, EventSink, KernelRecord,
+    KernelSession, PresentMonOutcome, RawEvent, kernel_record, run_presentmon, spawn_consumer,
+    wall_ms,
 };
 use vestigium_core::{
     AppFrames, CAPTURE_VERSION, CaptureSource, DeepCapture, DriverLatency, FrameAggregator,
@@ -17,7 +18,7 @@ use windows::Win32::System::Diagnostics::Etw::{
 };
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 
-use crate::{job, output, pinned};
+use crate::{job, lock, output, pinned};
 
 /// Converts raw QPC values of this run to wall-clock milliseconds and microseconds.
 #[derive(Clone, Copy, Debug)]
@@ -126,15 +127,15 @@ impl EventSink for Kernel {
     }
 }
 
-/// Runs the deep capture for `minutes` and writes it to `out`; `etl` also keeps the raw kernel trace.
-pub fn run(minutes: u64, out: &Path, etl: Option<&Path>) -> ExitCode {
-    if etl.is_some_and(|etl| output::check_shape(etl, "captures", "etl").is_err()) {
-        return ExitCode::from(job::REFUSED);
-    }
+/// Runs the deep capture for `minutes` and writes it to `out`, unless another capture is running.
+pub fn run(minutes: u64, out: &Path) -> ExitCode {
+    let Ok(_lock) = lock::take(DEEP_CAPTURE_LOCK) else {
+        return ExitCode::from(job::CAPTURE_RUNNING);
+    };
     let Ok(mut file) = output::create(out, "captures", "capture") else {
         return ExitCode::from(job::REFUSED);
     };
-    let capture = capture(Duration::from_secs(minutes * 60), etl);
+    let capture = capture(Duration::from_secs(minutes * 60));
     let mut bytes = vec![CAPTURE_VERSION];
     match postcard::to_allocvec(&capture) {
         Ok(body) => bytes.extend(body),
@@ -146,10 +147,10 @@ pub fn run(minutes: u64, out: &Path, etl: Option<&Path>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn capture(length: Duration, etl: Option<&Path>) -> DeepCapture {
+fn capture(length: Duration) -> DeepCapture {
     let clock = Clock::now();
     let flags = EVENT_TRACE_FLAG_DPC | EVENT_TRACE_FLAG_INTERRUPT | EVENT_TRACE_FLAG_IMAGE_LOAD;
-    let session = KernelSession::start(DEEP_CAPTURE_SESSION, DEEP_CAPTURE_GUID, flags, etl);
+    let session = KernelSession::start(DEEP_CAPTURE_SESSION, DEEP_CAPTURE_GUID, flags);
     let consumer = session.as_ref().ok().map(|_| {
         spawn_consumer(
             DEEP_CAPTURE_SESSION,

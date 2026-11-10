@@ -18,7 +18,7 @@ fn main() -> ExitCode {
         return ExitCode::from(job::REFUSED);
     };
     match job {
-        job::Job::DeepCapture { minutes, out, etl } => capture::run(minutes, &out, etl.as_deref()),
+        job::Job::DeepCapture { minutes, out } => capture::run(minutes, &out),
         job::Job::HealthScan { out } => scan::run(&out),
         job::Job::DumpScan { out } => dumps::run(&out),
         job::Job::DeleteDumps { list } => delete::run(&list),

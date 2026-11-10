@@ -7,6 +7,7 @@ pub mod delete;
 mod dll_search;
 pub mod dumps;
 pub mod job;
+mod lock;
 mod output;
 mod pinned;
 pub mod scan;

@@ -36,7 +36,6 @@ fn start() -> KernelSession {
         NAME,
         TEST_GUID,
         EVENT_TRACE_FLAG_DPC | EVENT_TRACE_FLAG_INTERRUPT | EVENT_TRACE_FLAG_IMAGE_LOAD,
-        None,
     )
     .expect("an elevated run starts the session")
 }

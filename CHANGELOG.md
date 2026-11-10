@@ -41,6 +41,9 @@ How to use this file:
 
 ### Fixed
 
+- A second deep capture started while one is already running, for example after the window was closed and
+  reopened, is now refused by the administrator helper instead of stopping the first one's recording and
+  leaving it truncated. The helper also no longer accepts a trace file path.
 - A deep capture now credits each slow driver routine to the driver that was loaded at its address when
   it ran, so a driver that took the place of an unloaded one is no longer blamed for the earlier one's
   routines. A stalled frame is also matched with the stall the probe saw over the time each one lasted,

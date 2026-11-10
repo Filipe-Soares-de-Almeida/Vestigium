@@ -29,8 +29,8 @@ pub use dumps::{
     CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, subfolders,
 };
 pub use etw::{
-    Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, IMAGE, KernelRecord,
-    KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, session_exists,
+    Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, EventSink, IMAGE,
+    KernelRecord, KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, session_exists,
     spawn_consumer, stop_session,
 };
 pub use events::{Classifier, Delivered, EventSubscription};

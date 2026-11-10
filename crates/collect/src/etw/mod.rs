@@ -7,8 +7,8 @@ mod session;
 pub use consumer::{Consumed, EventSink, spawn_consumer};
 pub use kernel::{IMAGE, KernelRecord, PERF_INFO, kernel_record};
 pub use session::{
-    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, KernelSession, SessionStats, session_exists,
-    stop_session,
+    DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, KernelSession, SessionStats,
+    session_exists, stop_session,
 };
 
 use windows::core::GUID;
