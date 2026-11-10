@@ -48,6 +48,30 @@ pub enum FindingKind {
     VolumeErrors,
 }
 
+impl FindingKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [FindingKind; 18] = [
+        FindingKind::DiskSmart,
+        FindingKind::LowSpace,
+        FindingKind::PageFile,
+        FindingKind::MemoryOften,
+        FindingKind::DisplayResets,
+        FindingKind::HardwareErrors,
+        FindingKind::StorageErrors,
+        FindingKind::Throttling,
+        FindingKind::WindowsOnHdd,
+        FindingKind::TwoAntivirus,
+        FindingKind::SlowBoot,
+        FindingKind::DirtyRestarts,
+        FindingKind::ShutdownUnfinished,
+        FindingKind::FailuresRising,
+        FindingKind::NoCrashDump,
+        FindingKind::MemoryTestErrors,
+        FindingKind::DiskUnreadable,
+        FindingKind::VolumeErrors,
+    ];
+}
+
 /// What a finding is about: one disk or volume, or the whole PC.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Subject {

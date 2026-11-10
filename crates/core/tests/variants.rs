@@ -1,6 +1,7 @@
 //! Each list of variants below must name every variant of its enum: the `match` stops compiling
 //! when a variant is missing, and the assertion stops the test when `ALL` is not the same list.
 
+use vestigium_core::health::FindingKind;
 use vestigium_core::hwtest::{BenchMode, Bus, Outcome, PATTERNS, Pattern, TestKind, VolumeResult};
 use vestigium_core::{
     Applier, Channel, ColorTheme, Confidence, DetailLevel, DumpKind, EventMeaning, GapReason,
@@ -140,4 +141,12 @@ lists_every_variant!(
     memory_test_patterns_list_every_variant,
     PATTERNS,
     Pattern: OwnAddress, Random, Compare, SolidBits, Checkerboard, WalkingOnes, WalkingZeros
+);
+lists_every_variant!(
+    finding_kind_lists_every_variant,
+    FindingKind::ALL,
+    FindingKind: DiskSmart, LowSpace, PageFile, MemoryOften, DisplayResets, HardwareErrors,
+        StorageErrors, Throttling, WindowsOnHdd, TwoAntivirus, SlowBoot, DirtyRestarts,
+        ShutdownUnfinished, FailuresRising, NoCrashDump, MemoryTestErrors, DiskUnreadable,
+        VolumeErrors
 );
