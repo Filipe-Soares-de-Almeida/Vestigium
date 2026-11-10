@@ -495,3 +495,122 @@ fn turning_sensitive_mode_off_clears_the_suggestion() {
     bb.set_sensitive(true);
     assert!(!bb.suggests_capture());
 }
+
+const HOUR_MS: i64 = 3_600_000;
+
+fn memory_high(ts_ms: i64) -> vestigium_core::Sample {
+    let mut sample = calm(ts_ms);
+    sample.mem_avail_bytes = GIB / 2;
+    sample
+}
+
+#[test]
+fn hang_across_a_clock_jump_is_closed_not_stretched() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [7].into();
+    feed(&mut bb, -60, 0);
+    bb.push_hangs(T + 10_000, &[hung(7, "player.exe")], &running);
+    let mut outputs = bb.clock_changed(T + 10_000, T + 12_000 + HOUR_MS);
+    bb.push_hangs(T + 12_000 + HOUR_MS, &[], &running);
+    outputs.extend(bb.poll(T + 12_000 + HOUR_MS + 100_000));
+
+    for found in occurrences(outputs) {
+        assert!(
+            found.end_ms - found.start_ms < 60_000,
+            "a hang of {} ms",
+            found.end_ms - found.start_ms
+        );
+    }
+}
+
+#[test]
+fn stutter_burst_does_not_span_a_clock_jump() {
+    let mut bb = blackbox();
+    bb.set_sensitive(true);
+    feed(&mut bb, -60, 2);
+    late(&mut bb, T + 1_000, 10.0);
+    late(&mut bb, T + 2_000, 10.0);
+    let mut outputs = bb.clock_changed(T + 2_000, T + 2_500 - HOUR_MS);
+    late(&mut bb, T + 2_500 - HOUR_MS, 10.0);
+    outputs.extend(bb.poll(T + 200_000));
+
+    assert!(
+        occurrences(outputs)
+            .iter()
+            .all(|o| o.kind != OccurrenceKind::Stutter)
+    );
+    assert!(!bb.suggests_capture());
+}
+
+#[test]
+fn disk_episode_ends_at_the_jump() {
+    let mut bb = blackbox();
+    for s in 0..=130 {
+        bb.push_sample(memory_high(T + s * 1_000));
+    }
+    let outputs = bb.clock_changed(T + 130_000, T + 131_000 + HOUR_MS);
+    bb.push_sample(calm(T + 131_000 + HOUR_MS));
+
+    let episodes: Vec<_> = outputs
+        .iter()
+        .filter_map(|o| match o {
+            Output::Episode(episode) => Some(episode),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(episodes.len(), 1);
+    assert!(episodes[0].end_ms - episodes[0].start_ms < 200_000);
+    assert!(bb.open_pressure().is_empty());
+}
+
+#[test]
+fn window_after_a_jump_holds_only_new_samples() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    let jumped_to = T - 30_000;
+    bb.clock_changed(T, jumped_to);
+    for s in 0..=10 {
+        bb.push_sample(calm(jumped_to + s * 1_000));
+    }
+    late(&mut bb, jumped_to + 10_000, 3_000.0);
+    for s in 11..=40 {
+        bb.push_sample(calm(jumped_to + s * 1_000));
+    }
+
+    let found = occurrences(bb.poll(jumped_to + 100_000));
+
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0]
+            .window
+            .samples
+            .iter()
+            .all(|sample| sample.ts_ms >= jumped_to)
+    );
+}
+
+#[test]
+fn a_forward_jump_records_a_gap_over_the_step() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    let outputs = bb.clock_changed(T, T + HOUR_MS);
+
+    assert!(outputs.contains(&Output::Gap(Gap {
+        start_ms: T,
+        end_ms: T + HOUR_MS,
+        reason: GapReason::ClockChanged,
+    })));
+}
+
+#[test]
+fn a_backward_jump_records_a_gap_of_no_width() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 0);
+    let outputs = bb.clock_changed(T, T - HOUR_MS);
+
+    assert!(outputs.contains(&Output::Gap(Gap {
+        start_ms: T - HOUR_MS,
+        end_ms: T - HOUR_MS,
+        reason: GapReason::ClockChanged,
+    })));
+}

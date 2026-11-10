@@ -10,6 +10,8 @@ pub enum GapReason {
     Stopped,
     /// The PC went down while watched, and Windows said so on the next boot.
     Crashed,
+    /// The wall clock was set to another time.
+    ClockChanged,
 }
 
 /// A span with nothing watched; nothing inside it counts as a stall.

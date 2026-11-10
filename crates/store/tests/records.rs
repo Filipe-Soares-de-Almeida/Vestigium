@@ -680,3 +680,22 @@ fn migration_keeps_one_row_of_each_duplicated_result() {
         "an undo of a removed copy points at the kept one"
     );
 }
+
+#[test]
+fn a_clock_changed_gap_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let stepped = Gap {
+        reason: GapReason::ClockChanged,
+        ..gap(5_000, 5_000)
+    };
+
+    store
+        .append_batch(&Batch {
+            gaps: vec![stepped],
+            ..Batch::default()
+        })
+        .unwrap();
+
+    assert_eq!(store.gaps(0, 10_000).unwrap(), vec![stepped]);
+}

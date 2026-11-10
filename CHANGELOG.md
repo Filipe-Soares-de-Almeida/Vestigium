@@ -151,6 +151,10 @@ How to use this file:
 - A wall clock set far ahead, by a time correction, a manual change or a second operating system on the
   same PC, no longer makes the monitor delete real history: the hourly cleanup now skips a run when
   the clock is more than an hour past the newest stored data.
+- A wall clock that jumps, by a time correction, a manual change or a second operating system, no longer
+  makes an app hang or a stutter last for the whole jump, invents a stutter, or fills a freeze's evidence
+  with moments from another hour. The watcher now notices the jump, closes what was open, writes it,
+  starts its short memory over and records the change in the timeline as "PC clock changed".
 - The watcher can no longer freeze for good when the window asks for its status at the very moment the
   tray icon refreshes. Before, two of its threads could each wait for the other, which stopped the
   tray menu and the icon, kept suspend notices from being handled and left the window showing a

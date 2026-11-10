@@ -26,6 +26,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetS
 use vestigium_core::health::Concern;
 
 use crate::app::lock;
+use crate::clock::ClockWatch;
 use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
@@ -191,6 +192,8 @@ struct Sampler {
     critical_findings: u32,
     ring: Option<BlackboxRing>,
     ring_sync: RingSync,
+    /// Tells a step of the wall clock apart from the unbiased clock.
+    clock: ClockWatch,
     /// A stop that may have been a fall, until Windows says so.
     fall: Option<Fall>,
     /// Where the time away began, held until the fall is settled.
@@ -292,6 +295,7 @@ impl Sampler {
             critical_findings: 0,
             ring: None,
             ring_sync: RingSync::new(now),
+            clock: ClockWatch::new(now, unbiased_ms()),
             fall: None,
             held_gap: None,
             started_ms: now,
@@ -373,6 +377,7 @@ impl Sampler {
                     }
                     self.probe_rx.try_iter().for_each(drop);
                     self.come_back(wall_ms());
+                    self.clock.rebase(wall_ms(), unbiased_ms());
                     sources.prime();
                     next_tick = unbiased_ms() + TICK_MS;
                     trim_at = Some(ticks + TRIM_AFTER_TICKS);
@@ -450,6 +455,7 @@ impl Sampler {
             self.forget(ts_ms);
         }
         self.blackbox.cut_gaps_to(ts_ms);
+        self.watch_clock(ts_ms, woke);
         let sensitive = self.sensitive.is_on();
         self.blackbox.set_sensitive(sensitive);
         let mut probe_max_lag_ms: f32 = 0.0;
@@ -623,6 +629,25 @@ impl Sampler {
             self.first_health_ms = None;
             self.check_health(ts_ms);
         }
+    }
+
+    /// Closes the timeline when the wall clock stepped by more than the unbiased clock did:
+    /// everything open is written and the rings start over, so no stamp spans the step.
+    fn watch_clock(&mut self, ts_ms: i64, woke: f64) {
+        let Some(jump) = self.clock.observe(ts_ms, woke) else {
+            return;
+        };
+        self.probe_rx.try_iter().for_each(drop);
+        let outputs = self
+            .blackbox
+            .clock_changed(jump.from_wall_ms, jump.to_wall_ms);
+        self.keep(outputs, ts_ms);
+        self.flush_final();
+        self.ring_sync = RingSync::new(ts_ms);
+        lock(&self.readings).clear();
+        lock(&self.programs).clear();
+        lock(&self.hiccups).clear();
+        self.publish_recent(ts_ms);
     }
 
     /// Lists the dumps Windows kept, without opening any.
@@ -889,6 +914,7 @@ impl Sampler {
                     // Probe ticks and rates measured across the suspension are dropped.
                     self.probe_rx.try_iter().for_each(drop);
                     self.come_back(wall_ms());
+                    self.clock.rebase(wall_ms(), unbiased_ms());
                     sources.reset();
                     sources.prime();
                     self.snapshots.clear();
@@ -1113,7 +1139,7 @@ mod tests {
     use vestigium_collect::ProbeConfig;
     use vestigium_core::{
         Cause, Channel, CrashKind, DEFAULT_PROBE_PERIOD, EventMeaning, OccurrenceKind,
-        SENSITIVE_FOR, Sample, Trigger,
+        ProcessSample, SENSITIVE_FOR, Sample, Trigger,
     };
     use vestigium_store::{Series, decode, encode};
 
@@ -2101,6 +2127,51 @@ mod tests {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let (wiring, _) = wire(dir, Duration::from_secs(300), windows_source_set());
         Sampler::new(store, wiring)
+    }
+
+    #[test]
+    fn a_clock_jump_writes_what_is_open_and_empties_the_rings() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let ts = wall_ms();
+        sampler.clock = ClockWatch::new(ts, 0.0);
+        sampler.batcher.push_sample(quiet(ts));
+        lock(&sampler.readings).push(Reading::of_sample(&quiet(ts)));
+        let program = ProcessSample {
+            pid: 4,
+            name: "editor.exe".to_string(),
+            cpu_pct: 1.0,
+            private_bytes: 0,
+            read_bps: 0.0,
+            write_bps: 0.0,
+            gpu_pct: 0.0,
+        };
+        lock(&sampler.programs).push(ts, &[program]);
+        let back = ts - 3_600_000;
+
+        sampler.watch_clock(back + 1_000, 1_000.0);
+
+        assert!(sampler.batcher.take_final().is_empty());
+        assert!(lock(&sampler.readings).iter().next().is_none());
+        assert!(lock(&sampler.programs).history("editor.exe").is_empty());
+        let gaps = history(dir.path()).gaps(i64::MIN, i64::MAX).unwrap();
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].reason, GapReason::ClockChanged);
+        let (_, count, _) = samples(dir.path());
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn a_steady_clock_leaves_the_batch_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let ts = wall_ms();
+        sampler.clock = ClockWatch::new(ts, 0.0);
+        sampler.batcher.push_sample(quiet(ts));
+
+        sampler.watch_clock(ts + 1_000, 1_000.0);
+
+        assert!(!sampler.batcher.take_final().is_empty());
     }
 
     /// Holds the writer lock of the history file in `dir` until it is dropped.

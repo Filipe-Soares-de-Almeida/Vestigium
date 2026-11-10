@@ -1,10 +1,10 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::{
-    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, HUNG_AFTER_MS, HangSpan,
-    HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan, ProbeTick,
-    ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger, WinEvent, Window, classify,
-    facts, freeze, severity, suspects,
+    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, GapReason, HUNG_AFTER_MS,
+    HangSpan, HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan,
+    ProbeTick, ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger, WinEvent, Window,
+    classify, facts, freeze, severity, suspects,
 };
 
 /// How much the rings keep.
@@ -286,6 +286,31 @@ impl Blackbox {
         self.hang_tracker.reset();
         self.stutter.reset();
         std::mem::take(&mut self.ready)
+    }
+
+    /// Closes what is open and forgets everything stamped before the wall clock moved from
+    /// `from_ms` to `to_ms`, then records the step as a gap; a step back is a gap of no width.
+    pub fn clock_changed(&mut self, from_ms: i64, to_ms: i64) -> Vec<Output> {
+        let mut outputs = self.drain(from_ms);
+        self.samples.clear();
+        self.tops.clear();
+        self.events.clear();
+        self.hangs.clear();
+        self.freezes.clear();
+        self.gaps.clear();
+        self.pressure.clear();
+        let (start_ms, end_ms) = if to_ms >= from_ms {
+            (from_ms, to_ms)
+        } else {
+            (to_ms, to_ms)
+        };
+        self.push_gap(Gap {
+            start_ms,
+            end_ms,
+            reason: GapReason::ClockChanged,
+        });
+        outputs.append(&mut self.ready);
+        outputs
     }
 
     /// The CPU, disk and memory pressure episodes under way; hints are left out.

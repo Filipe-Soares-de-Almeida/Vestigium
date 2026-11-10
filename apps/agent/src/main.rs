@@ -2,6 +2,7 @@
 
 mod app;
 mod autostart;
+mod clock;
 mod dumps;
 mod fall;
 mod health;
