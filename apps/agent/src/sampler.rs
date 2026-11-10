@@ -188,6 +188,8 @@ struct Sampler {
     health: HealthPass<WindowsHealth>,
     /// When the first health pass is due; afterwards a pass runs with every hourly prune.
     first_health_ms: Option<i64>,
+    /// Set until the first stored batch with events has asked for a health pass.
+    event_pass_pending: bool,
     /// When each disk last had I/O.
     disk_active_ms: HashMap<String, i64>,
     commit_limit_bytes: u64,
@@ -294,6 +296,7 @@ impl Sampler {
             own_cpu: CpuWindow::new(OWN_CPU_SPAN_MS),
             health: HealthPass::new(WindowsHealth),
             first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
+            event_pass_pending: true,
             disk_active_ms: HashMap::new(),
             commit_limit_bytes: 0,
             critical_findings: 0,
@@ -1054,6 +1057,7 @@ impl Sampler {
     fn send_waiting(&mut self) {
         while let Some(batch) = self.waiting.pop_front() {
             let Err(err) = self.store.append_batch(&batch) else {
+                self.ask_pass_after_events(&batch);
                 continue;
             };
             self.report(&err);
@@ -1067,6 +1071,14 @@ impl Sampler {
         }
         while self.waiting.len() > BATCHES_KEPT {
             self.shed_oldest();
+        }
+    }
+
+    /// The first stored batch that holds events asks for a health pass, which reads stored events.
+    fn ask_pass_after_events(&mut self, batch: &Batch) {
+        if self.event_pass_pending && !batch.events.is_empty() {
+            self.event_pass_pending = false;
+            self.health_due.store(true, Ordering::Release);
         }
     }
 
@@ -2204,6 +2216,51 @@ mod tests {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let (wiring, _) = wire(dir, Duration::from_secs(300), windows_source_set());
         Sampler::new(store, wiring)
+    }
+
+    #[test]
+    fn the_first_stored_event_batch_requests_a_health_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let due = wiring.health_due.clone();
+        let mut sampler = Sampler::new(store, wiring);
+
+        sampler.flush();
+        assert!(
+            !due.load(Ordering::Acquire),
+            "a batch without events asks nothing"
+        );
+
+        ties.events_tx
+            .send(delivered(
+                1_000,
+                "disk",
+                153,
+                EventMeaning::DiskRetry,
+                String::new(),
+            ))
+            .unwrap();
+        sampler.take_events();
+        sampler.flush();
+        assert!(due.load(Ordering::Acquire));
+
+        due.store(false, Ordering::Release);
+        ties.events_tx
+            .send(delivered(
+                2_000,
+                "disk",
+                153,
+                EventMeaning::DiskRetry,
+                String::new(),
+            ))
+            .unwrap();
+        sampler.take_events();
+        sampler.flush();
+        assert!(
+            !due.load(Ordering::Acquire),
+            "later batches do not ask again"
+        );
     }
 
     #[test]

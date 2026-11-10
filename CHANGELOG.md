@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- After a start, the health check now runs again once the first batch of Windows events is saved.
+  The check a minute after start could not see the boot and crash events still waiting to be
+  saved, so an unexpected restart appeared in the health findings up to an hour late.
 - A disk that was removed from the PC no longer keeps a health warning. The hourly check used to
   keep each disk's last reading until the monitor restarted; it now forgets disks that are no longer
   in the machine, so their warning closes at the next check.
