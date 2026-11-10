@@ -2423,4 +2423,149 @@ mod tests {
         assert!(!prune_due(Some(hour), start + HOUR_MS - 1));
         assert!(prune_due(Some(hour), start + HOUR_MS));
     }
+
+    /// One thread of the lock test: counts its turns and reports when it ends.
+    fn spin(
+        name: &'static str,
+        turns: &Arc<std::sync::atomic::AtomicU64>,
+        stop: &Arc<AtomicBool>,
+        ended: &mpsc::Sender<&'static str>,
+        mut turn: impl FnMut(u64) + Send + 'static,
+    ) {
+        let (turns, stop, ended) = (turns.clone(), stop.clone(), ended.clone());
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                turn(turns.fetch_add(1, Ordering::AcqRel));
+                thread::yield_now();
+            }
+            let _ = ended.send(name);
+        });
+    }
+
+    #[test]
+    fn pipe_tray_and_sampler_share_locks_without_a_deadlock() {
+        use std::sync::atomic::{AtomicI64, AtomicU64};
+        use vestigium_ipc::Request;
+
+        let dir = tempfile::tempdir().unwrap();
+        let shared = Arc::new(crate::app::tests::shared());
+        let (probe_tx, probe_rx) = mpsc::channel();
+        let (_power_tx, power_rx) = mpsc::channel();
+        let (_events_tx, events_rx) = mpsc::channel();
+        let wiring = Wiring {
+            flush: Duration::from_secs(1),
+            timing: QUICK,
+            gate: shared.gate.clone(),
+            probe_rx,
+            power_rx,
+            events_rx,
+            subscription: None,
+            sensitive: shared.sensitive.clone(),
+            status: shared.status.clone(),
+            recent: shared.recent.clone(),
+            now: shared.now.clone(),
+            readings: shared.readings.clone(),
+            programs: shared.programs.clone(),
+            pressure: shared.pressure.clone(),
+            hiccups: shared.hiccups.clone(),
+            settings: shared.settings.clone(),
+            cleared: shared.cleared.clone(),
+            health_due: shared.health_due.clone(),
+            ring_path: Some(dir.path().join("blackbox.ring")),
+            source_set: Box::new(|| Box::new(Quiet)),
+        };
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let sampler = run_sampler(store, wiring).unwrap();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let (ended, ends) = mpsc::channel();
+        let pipe_turns = Arc::new(AtomicU64::new(0));
+        let tray_turns = Arc::new(AtomicU64::new(0));
+        let watch_turns = Arc::new(AtomicU64::new(0));
+
+        let mut pipe_store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let pipe_shared = shared.clone();
+        spin("pipe", &pipe_turns, &stop, &ended, move |turn| {
+            let request = match turn % 100 {
+                0 => Request::SetPaused {
+                    paused: true,
+                    until_ms: None,
+                },
+                1 => Request::SetPaused {
+                    paused: false,
+                    until_ms: None,
+                },
+                2 => Request::SetSettings(Settings::default()),
+                3 => Request::ClearHistory,
+                4 => Request::Settings,
+                5 => Request::SetSensitive { on: true },
+                6 => Request::SetSensitive { on: false },
+                7..=9 => Request::Now,
+                10..=11 => Request::Recent,
+                12 => Request::ProgramRecent {
+                    name: "editor.exe".to_string(),
+                },
+                _ => Request::Status,
+            };
+            crate::app::handle(request, &pipe_shared, Some(&mut pipe_store));
+        });
+
+        let watch_shared = shared.clone();
+        let sampled = Arc::new(AtomicI64::new(0));
+        let watched = sampled.clone();
+        spin("sampler watch", &watch_turns, &stop, &ended, move |_| {
+            let at = lock(&watch_shared.status).last_sample_ms.unwrap_or(0);
+            watched.store(at, Ordering::Release);
+        });
+
+        let tray_shared = shared.clone();
+        spin("tray", &tray_turns, &stop, &ended, move |_| {
+            crate::tray::read_shared(&tray_shared);
+        });
+
+        let count = |turns: &Arc<AtomicU64>| turns.load(Ordering::Acquire);
+        let late_tick = || {
+            let _ = probe_tx.send(ProbeTick {
+                wall_ms: wall_ms(),
+                lag_ms: 1_500.0,
+            });
+        };
+        late_tick();
+        thread::sleep(Duration::from_millis(1_200));
+        let before = (count(&pipe_turns), count(&tray_turns));
+        let sampled_before = sampled.load(Ordering::Acquire);
+        late_tick();
+        thread::sleep(Duration::from_millis(1_200));
+        late_tick();
+        thread::sleep(Duration::from_millis(1_100));
+        let after = (count(&pipe_turns), count(&tray_turns));
+        let sampled_after = sampled.load(Ordering::Acquire);
+
+        stop.store(true, Ordering::Release);
+        shared.gate.set(GateState::Stopping);
+        let mut ended_names = Vec::new();
+        while ended_names.len() < 3 {
+            match ends.recv_timeout(Duration::from_secs(5)) {
+                Ok(name) => ended_names.push(name),
+                Err(_) => break,
+            }
+        }
+
+        for name in ["pipe", "tray", "sampler watch"] {
+            assert!(
+                ended_names.contains(&name),
+                "the {name} loop never came back: two locks were taken in opposite orders"
+            );
+        }
+        assert!(
+            sampler.wait(Duration::from_secs(5)),
+            "the sampler never stopped"
+        );
+        assert!(after.0 > before.0, "the pipe stopped answering");
+        assert!(after.1 > before.1, "the tray stopped reading");
+        assert!(
+            sampled_before > 0 && sampled_after > sampled_before,
+            "the sampler stopped taking samples"
+        );
+    }
 }
