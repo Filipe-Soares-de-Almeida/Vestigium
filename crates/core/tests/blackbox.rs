@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use common::{GIB, T, calm, event, machine, process};
 use vestigium_core::{
     Blackbox, Cause, EpisodeKind, EventMeaning, Gap, GapReason, HungWindow, Occurrence,
-    OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, RING_MS, Severity, Timing,
-    Trigger,
+    OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, REPORTED_EXEMPLARS, RING_MS,
+    Severity, Timing, Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -256,13 +256,89 @@ fn storage_reset_event_is_an_occurrence() {
         EventMeaning::StorageReset,
     ));
 
-    let found = occurrences(bb.poll(T + 100_000));
+    let found = occurrences(bb.poll(T + 130_000));
     assert_eq!(
         found.len(),
         1,
         "events from before watching started stay marks"
     );
     assert_eq!(found[0].kind, OccurrenceKind::Reported);
+}
+
+#[test]
+fn a_storm_of_one_event_keeps_few_triggers() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 330);
+    for i in 0..9_000 {
+        bb.push_event(event(T + i * 33, "disk", 153, EventMeaning::DiskRetry));
+    }
+
+    let found = occurrences(bb.poll(T + 600_000));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].triggers.len(), REPORTED_EXEMPLARS);
+    assert_eq!(
+        found[0].end_ms,
+        T + 8_999 * 33,
+        "the storm still sets the span"
+    );
+}
+
+#[test]
+fn a_storm_keeps_exemplars_of_each_event() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 60);
+    for i in 0..200 {
+        bb.push_event(event(T + i * 100, "disk", 153, EventMeaning::DiskRetry));
+        bb.push_event(event(
+            T + i * 100,
+            "Display",
+            4101,
+            EventMeaning::DisplayReset,
+        ));
+        bb.push_event(event(
+            T + i * 100,
+            "stornvme",
+            129,
+            EventMeaning::StorageReset,
+        ));
+    }
+
+    let found = occurrences(bb.poll(T + 300_000));
+    assert_eq!(found.len(), 1);
+    let kept = |provider: &str, id: u16| {
+        found[0]
+            .triggers
+            .iter()
+            .filter(|t| matches!(t, Trigger::Reported { event } if event.provider == provider && event.id == id))
+            .count()
+    };
+    assert_eq!(kept("disk", 153), REPORTED_EXEMPLARS);
+    assert_eq!(kept("stornvme", 129), REPORTED_EXEMPLARS);
+    assert_eq!(kept("Display", 4101), REPORTED_EXEMPLARS);
+}
+
+#[test]
+fn events_31_seconds_apart_do_not_make_an_occurrence_each() {
+    let mut bb = blackbox();
+    let mut stored = 0;
+    for s in -60..3_600 {
+        bb.push_sample(calm(T + s * 1_000));
+        if s >= 0 && s % 31 == 0 {
+            bb.push_event(event(
+                T + s * 1_000,
+                "stornvme",
+                129,
+                EventMeaning::StorageReset,
+            ));
+        }
+        stored += occurrences(bb.poll(T + s * 1_000)).len();
+    }
+    stored += occurrences(bb.poll(T + 4_000_000)).len();
+
+    assert!(
+        (10..=14).contains(&stored),
+        "about one occurrence per five minutes, got {stored}"
+    );
 }
 
 #[test]

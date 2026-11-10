@@ -31,8 +31,8 @@ mod window;
 mod xml;
 
 pub use blackbox::{
-    Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, RING_MS,
-    RecentState, Timing,
+    Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, REPORTED_EXEMPLARS,
+    REPORTED_MERGE_MS, RING_MS, RecentState, Timing,
 };
 pub use capture::{
     AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_MINUTES_MAX, CAPTURE_VERSION,

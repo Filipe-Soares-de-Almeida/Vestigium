@@ -45,6 +45,11 @@ How to use this file:
 
 ### Fixed
 
+- A storm of repeated Windows events, such as a disk or storage controller logging the same error
+  many times a second, no longer fills one report with thousands of entries or splits into a report
+  every few minutes. A report now keeps the first 16 events of each provider and event number, and
+  events of one provider within two minutes of each other join one report. A report with such an event
+  now appears about two minutes after the event instead of half a minute, because it waits for more.
 - A program that stopped responding is now blamed with high confidence only when its own processor
   or disk use shows during the freeze, or when nothing else in the system explains the stall.
   Before, any hung window put its program first, ahead of a measured memory or disk cause, so a

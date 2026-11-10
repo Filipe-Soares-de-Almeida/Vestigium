@@ -15,6 +15,10 @@ pub const GAP_MARGIN_MS: i64 = 2_000;
 pub const HANG_ECHO_MS: i64 = 10_000;
 /// Freezes shorter than this leave apps responsive.
 pub const ECHOING_FREEZE_MS: i64 = 1_000;
+/// An occurrence keeps this many reported events of one provider and id; the rest are counted out.
+pub const REPORTED_EXEMPLARS: usize = 16;
+/// Reported events of one provider this close join one occurrence, which is held open that long.
+pub const REPORTED_MERGE_MS: i64 = 120_000;
 const DAY_MS: i64 = 24 * 60 * 60_000;
 
 /// How an occurrence's window is cut and when close triggers join one occurrence.
@@ -72,6 +76,42 @@ struct Pending {
     end_ms: i64,
     triggers: Vec<Trigger>,
     sensitive: bool,
+}
+
+impl Pending {
+    /// How long past its end this waits for more: reported events can still join for longer.
+    fn hold_ms(&self, after_ms: i64) -> i64 {
+        if self
+            .triggers
+            .iter()
+            .any(|t| matches!(t, Trigger::Reported { .. }))
+        {
+            after_ms.max(REPORTED_MERGE_MS)
+        } else {
+            after_ms
+        }
+    }
+
+    /// Whether `trigger` is a reported event and one of the same provider is already here.
+    fn reported_by_same_provider(&self, trigger: &Trigger) -> bool {
+        let Trigger::Reported { event } = trigger else {
+            return false;
+        };
+        self.triggers.iter().any(
+            |t| matches!(t, Trigger::Reported { event: kept } if kept.provider == event.provider),
+        )
+    }
+
+    /// How many reported events of the same provider and id as `trigger` are already here.
+    fn repeats(&self, trigger: &Trigger) -> usize {
+        let Trigger::Reported { event } = trigger else {
+            return 0;
+        };
+        self.triggers
+            .iter()
+            .filter(|t| matches!(t, Trigger::Reported { event: kept } if kept.provider == event.provider && kept.id == event.id))
+            .count()
+    }
 }
 
 /// Everything the agent sees goes in; everything worth storing comes out.
@@ -267,7 +307,7 @@ impl Blackbox {
         let after_ms = self.timing.after_ms;
         let (due, waiting): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut self.pending)
             .into_iter()
-            .partition(|p| p.end_ms + after_ms <= now_ms);
+            .partition(|p| p.end_ms + p.hold_ms(after_ms) <= now_ms);
         self.pending = waiting;
         for pending in due {
             self.finish(pending, now_ms, false);
@@ -388,8 +428,13 @@ impl Blackbox {
         let (start, end) = (trigger.start_ms(), trigger.end_ms());
         let timing = self.timing;
         let joins = self.pending.iter_mut().find(|p| {
-            start <= p.end_ms + timing.merge_ms
-                && end >= p.start_ms - timing.merge_ms
+            let merge_ms = if p.reported_by_same_provider(&trigger) {
+                timing.merge_ms.max(REPORTED_MERGE_MS)
+            } else {
+                timing.merge_ms
+            };
+            start <= p.end_ms + merge_ms
+                && end >= p.start_ms - merge_ms
                 && end.max(p.end_ms) - start.min(p.start_ms) <= timing.max_ms
         });
         match joins {
@@ -397,7 +442,9 @@ impl Blackbox {
                 pending.start_ms = pending.start_ms.min(start);
                 pending.end_ms = pending.end_ms.max(end);
                 pending.sensitive |= self.sensitive;
-                pending.triggers.push(trigger);
+                if pending.repeats(&trigger) < REPORTED_EXEMPLARS {
+                    pending.triggers.push(trigger);
+                }
             }
             None => self.pending.push(Pending {
                 start_ms: start,
