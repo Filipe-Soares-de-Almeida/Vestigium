@@ -62,6 +62,8 @@ const HICCUPS_KEPT_MS: i64 = CAPTURE_MINUTES_MAX as i64 * 60_000;
 const HICCUPS_KEPT: usize = 10_000;
 /// Batches kept for another try after a failed write; past this the oldest loses its samples.
 const BATCHES_KEPT: usize = 3;
+/// How long a failed Event Log subscription waits before the next attempt.
+const SUBSCRIBE_RETRY_MS: i64 = 60_000;
 /// Occurrences and episodes kept for another try after a failed write; each one is large.
 const OUTPUTS_KEPT: usize = 5;
 
@@ -81,6 +83,10 @@ impl SamplerHandle {
     }
 }
 
+/// Starts the Event Log subscription again after the stored bookmark, or from the backfill.
+pub type Subscriber =
+    Box<dyn FnMut(Option<&str>) -> Result<EventSubscription, CollectError> + Send>;
+
 /// What the sampler is connected to.
 pub struct Wiring {
     /// How often a batch is written.
@@ -94,6 +100,8 @@ pub struct Wiring {
     pub events_rx: Receiver<Delivered>,
     /// Kept alive as long as the sampler; `None` when the Event Log could not be read.
     pub subscription: Option<EventSubscription>,
+    /// Tried about once a minute while `subscription` is `None`; `None` never tries again.
+    pub resubscribe: Option<Subscriber>,
     pub sensitive: Arc<SensitiveMode>,
     pub status: Arc<Mutex<AgentStatus>>,
     /// What the tray shows about the last 24 h.
@@ -153,7 +161,9 @@ struct Sampler {
     power_rx: Receiver<PowerNotice>,
     wake: Arc<Wake>,
     events_rx: Receiver<Delivered>,
-    _subscription: Option<EventSubscription>,
+    subscription: Option<EventSubscription>,
+    resubscribe: Option<Subscriber>,
+    next_subscribe_ms: i64,
     sensitive: Arc<SensitiveMode>,
     status: Arc<Mutex<AgentStatus>>,
     recent: Arc<Mutex<RecentState>>,
@@ -269,7 +279,9 @@ impl Sampler {
             power_rx: wiring.power_rx,
             wake: wiring.wake,
             events_rx: wiring.events_rx,
-            _subscription: wiring.subscription,
+            next_subscribe_ms: now + SUBSCRIBE_RETRY_MS,
+            subscription: wiring.subscription,
+            resubscribe: wiring.resubscribe,
             sensitive: wiring.sensitive,
             status: wiring.status,
             recent: wiring.recent,
@@ -620,6 +632,7 @@ impl Sampler {
             self.note_own_cpu();
         }
         self.take_events();
+        self.keep_subscribed(ts_ms);
         self.settle_fall(ts_ms, false);
         if mem::take(&mut self.dumps_due) {
             self.check_dumps(ts_ms);
@@ -721,6 +734,29 @@ impl Sampler {
         lock(&self.now).hung = hung;
     }
 
+    /// Reports an event the subscription could not read, and starts a lost subscription again
+    /// once a minute from the stored bookmark.
+    fn keep_subscribed(&mut self, now: i64) {
+        if let Some(subscription) = &self.subscription {
+            if let Some(reason) = subscription.take_failure() {
+                self.report(&reason);
+            }
+            return;
+        }
+        if now < self.next_subscribe_ms {
+            return;
+        }
+        let Some(start) = self.resubscribe.as_mut() else {
+            return;
+        };
+        self.next_subscribe_ms = now + SUBSCRIBE_RETRY_MS;
+        let bookmark = self.store.bookmark_xml().ok().flatten();
+        match start(bookmark.as_deref()) {
+            Ok(subscription) => self.subscription = Some(subscription),
+            Err(err) => self.report(&format!("the Event Log subscription failed: {err}")),
+        }
+    }
+
     /// Moves delivered events into the black box and the next batch, with their bookmark.
     fn take_events(&mut self) {
         let now = wall_ms();
@@ -740,7 +776,9 @@ impl Sampler {
             }
             self.blackbox.push_event(delivered.event.clone());
             self.events.push(delivered.event);
-            self.bookmark_xml = Some(delivered.bookmark_xml);
+            if delivered.bookmark_xml.is_some() {
+                self.bookmark_xml = delivered.bookmark_xml;
+            }
         }
     }
 
@@ -1260,6 +1298,7 @@ mod tests {
             wake: wake.clone(),
             events_rx,
             subscription: None,
+            resubscribe: None,
             sensitive,
             status: status.clone(),
             recent: Arc::new(Mutex::new(RecentState::default())),
@@ -1590,7 +1629,7 @@ mod tests {
             .events_tx
             .send(Delivered {
                 event: event.clone(),
-                bookmark_xml: "<BookmarkList/>".to_string(),
+                bookmark_xml: Some("<BookmarkList/>".to_string()),
             })
             .unwrap();
         let stored = wait_until(PATIENCE, || {
@@ -1951,7 +1990,7 @@ mod tests {
                 meaning,
                 data_xml,
             },
-            bookmark_xml: "<BookmarkList/>".to_string(),
+            bookmark_xml: Some("<BookmarkList/>".to_string()),
         }
     }
 
@@ -2218,7 +2257,7 @@ mod tests {
             .events_tx
             .send(Delivered {
                 event: event.clone(),
-                bookmark_xml: "<BookmarkList/>".to_string(),
+                bookmark_xml: Some("<BookmarkList/>".to_string()),
             })
             .unwrap();
 
@@ -2495,6 +2534,74 @@ mod tests {
         assert!(!sampler.cleared.load(Ordering::Acquire));
     }
 
+    /// A subscription to an event no log holds, so it starts and stays silent.
+    fn quiet_subscription(tx: mpsc::Sender<Delivered>) -> Result<EventSubscription, CollectError> {
+        let query = "<QueryList><Query Id=\"0\"><Select Path=\"Application\">                     *[System[Provider[@Name='VestigiumNoSuchProvider']]]</Select></Query></QueryList>";
+        EventSubscription::start_with_query(query, None, vestigium_core::classify, tx)
+    }
+
+    #[test]
+    fn a_failed_subscription_is_tried_again_every_minute_until_it_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let (tx, _rx) = mpsc::channel();
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = attempts.clone();
+        sampler.resubscribe = Some(Box::new(move |_| {
+            if counted.fetch_add(1, Ordering::AcqRel) < 2 {
+                Err(CollectError::Win32(windows::core::Error::from_hresult(
+                    windows::core::HRESULT(0x8007_0426_u32 as i32),
+                )))
+            } else {
+                quiet_subscription(tx.clone())
+            }
+        }));
+        let start = sampler.next_subscribe_ms;
+
+        sampler.keep_subscribed(start - 1);
+        assert_eq!(
+            attempts.load(Ordering::Acquire),
+            0,
+            "not before the wait is over"
+        );
+
+        sampler.keep_subscribed(start);
+        assert_eq!(attempts.load(Ordering::Acquire), 1);
+        assert!(lock(&sampler.status).last_error.is_some());
+        assert!(sampler.subscription.is_none());
+
+        sampler.keep_subscribed(start + SUBSCRIBE_RETRY_MS - 1);
+        assert_eq!(attempts.load(Ordering::Acquire), 1);
+        sampler.keep_subscribed(start + SUBSCRIBE_RETRY_MS);
+        sampler.keep_subscribed(start + 2 * SUBSCRIBE_RETRY_MS);
+        assert_eq!(attempts.load(Ordering::Acquire), 3);
+        assert!(sampler.subscription.is_some());
+
+        sampler.keep_subscribed(start + 10 * SUBSCRIBE_RETRY_MS);
+        assert_eq!(
+            attempts.load(Ordering::Acquire),
+            3,
+            "a live subscription is never started twice"
+        );
+    }
+
+    #[test]
+    fn an_event_without_a_bookmark_keeps_the_pending_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let mut sampler = Sampler::new(store, wiring);
+        sampler.bookmark_xml = Some("held".to_string());
+        let mut later = delivered(2_000, "disk", 153, EventMeaning::DiskRetry, String::new());
+        later.bookmark_xml = None;
+        ties.events_tx.send(later).unwrap();
+
+        sampler.take_events();
+
+        assert_eq!(sampler.events.len(), 1);
+        assert_eq!(sampler.bookmark_xml.as_deref(), Some("held"));
+    }
+
     #[test]
     fn a_batch_with_an_unstorable_value_keeps_only_samples_and_bookmark() {
         let batch = Batch {
@@ -2728,6 +2835,7 @@ mod tests {
             wake: Arc::new(Wake::new().unwrap()),
             events_rx,
             subscription: None,
+            resubscribe: None,
             sensitive: shared.sensitive.clone(),
             status: shared.status.clone(),
             recent: shared.recent.clone(),

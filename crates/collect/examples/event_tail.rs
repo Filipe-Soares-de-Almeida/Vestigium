@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
     let (tx, rx) = mpsc::channel();
-    let _resumed = EventSubscription::start(Some(&last.bookmark_xml), Duration::ZERO, tx)?;
+    let _resumed = EventSubscription::start(last.bookmark_xml.as_deref(), Duration::ZERO, tx)?;
     let replayed = std::iter::from_fn(|| rx.recv_timeout(QUIET).ok()).count();
     println!("resumed after the last one: {replayed} events read again");
     Ok(())

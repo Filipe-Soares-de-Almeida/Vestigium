@@ -492,9 +492,10 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     let (events_tx, events_rx) = mpsc::channel();
     // Without a readable bookmark the backfill runs again; stored events are not duplicated.
     let bookmark = store.bookmark_xml().ok().flatten();
-    let subscription = EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx)
-        .inspect_err(|err| lock(&shared.status).last_error = Some(err.to_string()))
-        .ok();
+    let subscription =
+        EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx.clone())
+            .inspect_err(|err| lock(&shared.status).last_error = Some(err.to_string()))
+            .ok();
     spawn_probe(shared.sensitive.probe(), shared.gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
         run_sampler(
@@ -508,6 +509,9 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 wake: wake.clone(),
                 events_rx,
                 subscription,
+                resubscribe: Some(Box::new(move |bookmark| {
+                    EventSubscription::start(bookmark, EVENT_BACKFILL, events_tx.clone())
+                })),
                 sensitive: shared.sensitive.clone(),
                 status: shared.status.clone(),
                 recent: shared.recent.clone(),

@@ -53,6 +53,10 @@ How to use this file:
 
 ### Fixed
 
+- The watcher now tries the Windows event feed again every minute when it could not start, and
+  starts again from the start of the retained events when Windows refuses the saved position. An
+  event it cannot read is reported instead of being skipped, and the saved position stays before
+  it so the next start reads it again.
 - A Clear history that fails, for example because the database is busy, no longer discards the
   minutes of samples and events the watcher still holds in memory, and nothing recorded before a
   successful clear is written after it. The black box, the daily SMART reading and the live graph
