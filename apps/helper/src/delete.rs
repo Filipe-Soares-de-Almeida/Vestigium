@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::ExitCode;
@@ -43,12 +43,13 @@ impl DeletePlaces {
 /// Deletes the dumps a `.delete` list names, each checked again here, and writes what happened
 /// to a `.deleted` file beside the list.
 pub fn run(list: &Path) -> ExitCode {
-    if output::check_existing(list, "dumps", "delete").is_err() {
-        return ExitCode::from(job::REFUSED);
-    }
-    let Ok(text) = std::fs::read_to_string(list) else {
+    let Ok(mut input) = output::open_existing(list, "dumps", "delete") else {
         return ExitCode::from(job::REFUSED);
     };
+    let mut text = String::new();
+    if input.read_to_string(&mut text).is_err() {
+        return ExitCode::from(job::REFUSED);
+    }
     let Ok(mut file) = output::create(&list.with_extension("deleted"), "dumps", "deleted") else {
         return ExitCode::from(job::REFUSED);
     };

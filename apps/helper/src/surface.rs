@@ -340,8 +340,8 @@ pub fn run(number: u32, from_mib: u64, out: &Path) -> ExitCode {
             as_run(scan, stopped, started_ms)
         }
     };
+    let _ = output::delete_through(&progress_file);
     drop(progress_file);
-    let _ = std::fs::remove_file(out.with_extension("progress"));
     if write_run(&mut file, &run) {
         ExitCode::SUCCESS
     } else {

@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf, Prefix};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_GENERIC_WRITE,
-    FILE_NAME_NORMALIZED, FileDispositionInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
+    FILE_NAME_NORMALIZED, FILE_SHARE_READ, FileDispositionInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
     GetFinalPathNameByHandleW, GetLongPathNameW, SetFileInformationByHandle, VOLUME_NAME_DOS,
 };
 use windows::core::HSTRING;
@@ -62,6 +62,19 @@ pub fn check_existing(path: &Path, folder: &str, extension: &str) -> Result<(), 
     } else {
         Err(format!("{} is not a file", path.display()))
     }
+}
+
+/// Opens an existing input file for reading: `check_existing` passes, other writers are locked
+/// out, and the handle's final path is the path asked for.
+pub fn open_existing(path: &Path, folder: &str, extension: &str) -> Result<File, String> {
+    check_existing(path, folder, extension)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    same_final_path(&file, path)?;
+    Ok(file)
 }
 
 /// Creates the result file: right shape, every folder on the way real (no junction or link), and new.
@@ -233,6 +246,56 @@ mod tests {
         let plain = real.join("2.capture");
         let file = File::create_new(&plain).unwrap();
         assert_eq!(same_final_path(&file, &plain), Ok(()));
+    }
+
+    #[test]
+    fn opens_an_existing_file_and_locks_out_writers() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Vestigium").join("data").join("tweaks");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("3.plan");
+        std::fs::write(&path, b"plan").unwrap();
+        let mut file = open_existing(&path, "tweaks", "plan").unwrap();
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut file, &mut text).unwrap();
+        assert_eq!(text, "plan");
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        assert!(open_existing(&folder.join("4.plan"), "tweaks", "plan").is_err());
+    }
+
+    #[test]
+    fn open_existing_refuses_a_link_on_the_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("Elsewhere");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("1.plan"), b"plan").unwrap();
+        let data = dir.path().join("Vestigium").join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(data.join("tweaks"))
+            .arg(&real)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "could not make a junction");
+        let through = data.join("tweaks").join("1.plan");
+        assert!(open_existing(&through, "tweaks", "plan").is_err());
+    }
+
+    #[test]
+    fn deletes_the_file_it_opened_not_the_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Vestigium").join("data").join("tests");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("5.progress");
+        let file = create(&path, "tests", "progress").unwrap();
+        let moved = folder.join("moved.txt");
+        std::fs::rename(&path, &moved).unwrap();
+        std::fs::write(&path, b"another file").unwrap();
+        assert!(delete_through(&file).is_ok());
+        drop(file);
+        assert!(!moved.exists(), "the opened file is gone");
+        assert_eq!(std::fs::read(&path).unwrap(), b"another file");
     }
 
     #[test]

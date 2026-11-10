@@ -32,6 +32,9 @@ How to use this file:
 - The administrator helper now checks, from the open result file itself, that it was created in the
   folder it was asked for, and deletes it through that same handle if a link was swapped in on the
   way, so a result file can no longer end up in another folder.
+- The administrator helper now reads a tweak plan or a dump deletion list through one open handle that
+  no one else can write to, and removes the surface scan's progress file through the handle that
+  created it, so a folder swapped for a link while a job runs cannot redirect those steps.
 
 ### Fixed
 

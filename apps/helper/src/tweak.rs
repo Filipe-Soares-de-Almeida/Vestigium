@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use std::thread::sleep;
@@ -41,10 +41,14 @@ const DAY_MS: i64 = 24 * 60 * 60_000;
 
 /// Carries out a `.plan` of elevated tweaks and writes what happened to a `.tweaked` file beside it.
 pub fn run(plan_path: &Path) -> ExitCode {
-    if output::check_existing(plan_path, "tweaks", "plan").is_err() {
+    let Ok(mut input) = output::open_existing(plan_path, "tweaks", "plan") else {
+        return ExitCode::from(job::REFUSED);
+    };
+    let mut bytes = Vec::new();
+    if input.read_to_end(&mut bytes).is_err() {
         return ExitCode::from(job::REFUSED);
     }
-    let Some(plan) = std::fs::read(plan_path).ok().and_then(|b| read_plan(&b)) else {
+    let Some(plan) = read_plan(&bytes) else {
         return ExitCode::from(job::REFUSED);
     };
     let Ok(mut file) = output::create(&plan_path.with_extension("tweaked"), "tweaks", "tweaked")
