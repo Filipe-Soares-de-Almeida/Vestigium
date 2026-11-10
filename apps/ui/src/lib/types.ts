@@ -800,7 +800,7 @@ export type TweakSetting =
   | { Dword: { hive: Hive; key: string; name: string } }
   | { Key: { hive: Hive; key: string } }
   | { Service: { name: string } }
-  | { PowerAc: { subgroup: string; setting: string } }
+  | { PowerAc: { subgroup: string; setting: string; scheme: string | null } }
   | "ActiveScheme"
   | "Hibernation"
   | { StartupApproval: { hive: Hive; list: StartupList; name: string } };

@@ -5,7 +5,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

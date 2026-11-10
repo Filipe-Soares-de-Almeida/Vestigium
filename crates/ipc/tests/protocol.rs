@@ -12,6 +12,7 @@ fn aspm_item() -> PlanItem {
             setting: Setting::PowerAc {
                 subgroup: SUB_PCIEXPRESS,
                 setting: PCIE_ASPM,
+                scheme: None,
             },
             from: Value::Index(2),
             to: Value::Index(0),

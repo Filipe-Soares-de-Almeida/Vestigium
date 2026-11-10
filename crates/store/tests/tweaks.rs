@@ -1,6 +1,6 @@
 use vestigium_core::{
-    Applier, Hive, RestorePoint, Retention, Setting, SettingChange, SettingResult, TweakChange,
-    TweakId, Value, undo,
+    Applier, Hive, RestorePoint, Retention, Setting, SettingChange, SettingResult, TWEAKS,
+    TweakChange, TweakId, Value, undo,
 };
 use vestigium_store::{SCHEMA_VERSION, Store};
 
@@ -175,4 +175,59 @@ fn prune_keeps_changes_still_in_place() {
     assert_eq!(report.tweak_changes, 2);
     let left = store.tweak_changes(0, 900 * DAY).unwrap();
     assert_eq!(left.iter().map(|r| r.id).collect::<Vec<_>>(), vec![kept]);
+}
+
+#[test]
+fn a_change_stored_before_the_scheme_was_kept_still_reads() {
+    use vestigium_core::{
+        PCIE_ASPM, SUB_PCIEXPRESS, SettingChangeV1, SettingResultV1, SettingV1, TweakChangeV1,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let old = TweakChangeV1 {
+        tweak: TweakId::PcieAspm,
+        subject: None,
+        undo_of: None,
+        results: vec![SettingResultV1 {
+            change: SettingChangeV1 {
+                setting: SettingV1::PowerAc {
+                    subgroup: SUB_PCIEXPRESS,
+                    setting: PCIE_ASPM,
+                },
+                from: Value::Index(2),
+                to: Value::Index(0),
+            },
+            error: None,
+        }],
+        restore_point: None,
+    };
+    let mut blob = vec![1u8];
+    blob.extend(postcard::to_stdvec(&vec![old]).unwrap());
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO tweak_change (version, tweak, subject, applied_ms, undone_ms, undo_of,
+                 elevated, data) VALUES (1, ?1, NULL, ?2, NULL, NULL, 0, ?3)",
+            rusqlite::params![
+                TWEAKS.iter().position(|t| *t == TweakId::PcieAspm).unwrap() as i64,
+                DAY,
+                blob
+            ],
+        )
+        .unwrap();
+
+    let rows = Store::open(&path).unwrap().tweaks_in_place().unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].change.results[0].change.setting,
+        Setting::PowerAc {
+            subgroup: SUB_PCIEXPRESS,
+            setting: PCIE_ASPM,
+            scheme: None
+        }
+    );
+    assert_eq!(rows[0].change.results[0].change.to, Value::Index(0));
 }

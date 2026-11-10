@@ -1,5 +1,5 @@
 use rusqlite::{Row, params};
-use vestigium_core::{Applier, TWEAK_CHANGE_VERSION, TWEAKS, TweakChange, TweakId};
+use vestigium_core::{Applier, TWEAK_CHANGE_VERSION, TWEAKS, TweakChange, TweakChangeV1, TweakId};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -98,12 +98,16 @@ impl Store {
         })?;
         rows.map(|row| {
             let (id, applied_ms, undone_ms, elevated, version, data) = row?;
-            if version != i64::from(TWEAK_CHANGE_VERSION) {
+            let change = if version == i64::from(TWEAK_CHANGE_VERSION) {
+                decode::<TweakChange>(&data)?.pop()
+            } else if version == 1 {
+                decode::<TweakChangeV1>(&data)?.pop().map(TweakChange::from)
+            } else {
                 return Err(StoreError::UnknownCode {
                     what: "tweak change version",
                     code: version,
                 });
-            }
+            };
             Ok(TweakChangeRow {
                 id,
                 applied_ms,
@@ -113,9 +117,7 @@ impl Store {
                 } else {
                     Applier::User
                 },
-                change: decode::<TweakChange>(&data)?
-                    .pop()
-                    .ok_or(StoreError::EmptySegment)?,
+                change: change.ok_or(StoreError::EmptySegment)?,
             })
         })
         .collect()

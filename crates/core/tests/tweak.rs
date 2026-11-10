@@ -1,3 +1,4 @@
+use vestigium_core::SettingStore as _;
 use vestigium_core::health::{
     BootDelay, Concern, DelayKind, Finding, FindingKind, HealthFact, Measure, Reference, Subject,
 };
@@ -547,6 +548,121 @@ fn carry_out_refuses_a_setting_changed_since() {
         Some(vestigium_core::ERROR_CHANGED_SINCE)
     );
     assert_eq!(store.writes, 0);
+}
+
+fn aspm(scheme: Option<vestigium_core::Guid>) -> Setting {
+    Setting::PowerAc {
+        subgroup: vestigium_core::SUB_PCIEXPRESS,
+        setting: vestigium_core::PCIE_ASPM,
+        scheme,
+    }
+}
+
+fn two_schemes() -> FakeStore {
+    FakeStore {
+        values: vec![
+            (Setting::ActiveScheme, Value::Scheme(SCHEME_POWER_SAVER)),
+            (aspm(Some(SCHEME_POWER_SAVER)), Value::Index(2)),
+            (aspm(Some(SCHEME_BALANCED)), Value::Index(1)),
+        ],
+        fails: None,
+        writes: 0,
+    }
+}
+
+fn set(store: &mut FakeStore, setting: Setting, value: Value) {
+    store.values.retain(|(s, _)| *s != setting);
+    store.values.push((setting, value));
+}
+
+fn written_changes(done: &vestigium_core::TweakChange) -> Vec<SettingChange> {
+    done.results.iter().map(|r| r.change.clone()).collect()
+}
+
+#[test]
+fn an_undo_goes_to_the_scheme_that_was_changed() {
+    let mut store = two_schemes();
+    let apply = item(TweakId::PcieAspm, vec![(aspm(None), Value::Index(0))], None);
+    let done = vestigium_core::carry_out(&apply, &mut store);
+    assert_eq!(done.results[0].error, None);
+    assert_eq!(
+        done.results[0].change.setting,
+        aspm(Some(SCHEME_POWER_SAVER))
+    );
+    assert_eq!(done.results[0].change.from, Value::Index(2));
+
+    set(
+        &mut store,
+        Setting::ActiveScheme,
+        Value::Scheme(SCHEME_BALANCED),
+    );
+    let back = item(TweakId::PcieAspm, Vec::new(), Some(1));
+    let back = vestigium_core::PlanItem {
+        changes: undo(&written_changes(&done)),
+        ..back
+    };
+    let undone = vestigium_core::carry_out(&back, &mut store);
+
+    assert_eq!(undone.results[0].error, None);
+    assert_eq!(
+        store.read(&aspm(Some(SCHEME_POWER_SAVER))),
+        Some(Value::Index(2))
+    );
+    assert_eq!(
+        store.read(&aspm(Some(SCHEME_BALANCED))),
+        Some(Value::Index(1))
+    );
+}
+
+#[test]
+fn an_undo_is_refused_when_its_scheme_is_gone() {
+    let mut store = two_schemes();
+    let apply = item(TweakId::PcieAspm, vec![(aspm(None), Value::Index(0))], None);
+    let done = vestigium_core::carry_out(&apply, &mut store);
+    store
+        .values
+        .retain(|(s, _)| *s != aspm(Some(SCHEME_POWER_SAVER)));
+    set(
+        &mut store,
+        Setting::ActiveScheme,
+        Value::Scheme(SCHEME_BALANCED),
+    );
+    let writes = store.writes;
+    let back = vestigium_core::PlanItem {
+        changes: undo(&written_changes(&done)),
+        ..item(TweakId::PcieAspm, Vec::new(), Some(1))
+    };
+
+    let undone = vestigium_core::carry_out(&back, &mut store);
+
+    assert_eq!(
+        undone.results[0].error,
+        Some(vestigium_core::ERROR_UNREADABLE)
+    );
+    assert_eq!(store.writes, writes);
+    assert_eq!(
+        store.read(&aspm(Some(SCHEME_BALANCED))),
+        Some(Value::Index(1))
+    );
+}
+
+#[test]
+fn a_power_change_without_a_scheme_is_still_in_the_catalog() {
+    for scheme in [None, Some(SCHEME_BALANCED)] {
+        let plan = item(
+            TweakId::PcieAspm,
+            vec![(aspm(scheme), Value::Index(0))],
+            None,
+        );
+        assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::User).is_ok());
+    }
+    let other = Setting::PowerAc {
+        subgroup: vestigium_core::SUB_USB,
+        setting: vestigium_core::PCIE_ASPM,
+        scheme: None,
+    };
+    let plan = item(TweakId::PcieAspm, vec![(other, Value::Index(0))], None);
+    assert!(vestigium_core::check_item(&plan, vestigium_core::Applier::User).is_err());
 }
 
 #[test]

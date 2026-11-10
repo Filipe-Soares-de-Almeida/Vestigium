@@ -6,8 +6,8 @@ use crate::{
     WinEvent, power_loss_detail,
 };
 
-/// Layout of the `TweakChange` BLOB written today.
-pub const TWEAK_CHANGE_VERSION: u8 = 1;
+/// Layout of the `TweakChange` BLOB written today; version 1 had no scheme in `Setting::PowerAc`.
+pub const TWEAK_CHANGE_VERSION: u8 = 2;
 /// A hibernation file this big is worth giving back when the system drive runs short.
 pub const BIG_HIBERFILE: u64 = 1 << 30;
 
@@ -191,10 +191,12 @@ pub enum Setting {
     Service {
         name: String,
     },
-    /// A plugged-in value of the active power scheme.
+    /// A plugged-in value of a power scheme: `scheme` when known, the active one when `None`.
     PowerAc {
         subgroup: Guid,
         setting: Guid,
+        #[serde(default)]
+        scheme: Option<Guid>,
     },
     ActiveScheme,
     /// Whether Windows keeps a hibernation file.
@@ -237,6 +239,20 @@ impl Setting {
     fn service(name: &str) -> Setting {
         Setting::Service {
             name: name.to_string(),
+        }
+    }
+
+    /// The setting with the scheme of a plugged-in power value left out, as the catalog lists it.
+    fn without_scheme(&self) -> Setting {
+        match self {
+            Setting::PowerAc {
+                subgroup, setting, ..
+            } => Setting::PowerAc {
+                subgroup: *subgroup,
+                setting: *setting,
+                scheme: None,
+            },
+            other => other.clone(),
         }
     }
 
@@ -320,10 +336,12 @@ impl TweakId {
             TweakId::PcieAspm => vec![Setting::PowerAc {
                 subgroup: SUB_PCIEXPRESS,
                 setting: PCIE_ASPM,
+                scheme: None,
             }],
             TweakId::UsbSuspend => vec![Setting::PowerAc {
                 subgroup: SUB_USB,
                 setting: USB_SELECTIVE_SUSPEND,
+                scheme: None,
             }],
             TweakId::SysMain => vec![Setting::service("SysMain")],
             TweakId::WindowsSearch => vec![Setting::service("WSearch")],
@@ -1111,7 +1129,7 @@ pub fn check_item(item: &PlanItem, applier: Applier) -> Result<(), String> {
                 item.subject.as_deref() == Some(name.as_str())
             }
             (TweakId::StartupApp, _) => false,
-            _ => catalog.contains(setting),
+            _ => catalog.contains(&setting.without_scheme()),
         };
         if !belongs {
             return Err(format!("{setting:?} is not part of {:?}", item.tweak));
@@ -1142,12 +1160,36 @@ pub trait SettingStore {
     fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32>;
 }
 
+/// The setting a change acts on: a plugged-in power value being applied is pinned to the scheme
+/// active now, so its undo goes back to that scheme; every other setting is as the change names it.
+fn target_of(
+    change: &SettingChange,
+    undoing: bool,
+    store: &mut impl SettingStore,
+) -> Option<Setting> {
+    match &change.setting {
+        Setting::PowerAc {
+            subgroup, setting, ..
+        } if !undoing => match store.read(&Setting::ActiveScheme) {
+            Some(Value::Scheme(scheme)) => Some(Setting::PowerAc {
+                subgroup: *subgroup,
+                setting: *setting,
+                scheme: Some(scheme),
+            }),
+            _ => None,
+        },
+        other => Some(other.clone()),
+    }
+}
+
 /// Carries out one checked item: each setting is read again, written only when the tweak still
 /// leads to the value asked for, and recorded with what it really held. Stops at the first failure.
 pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange {
     let mut results = Vec::new();
     for change in &item.changes {
-        let Some(current) = store.read(&change.setting) else {
+        let target = target_of(change, item.undo_of.is_some(), store);
+        let current = target.as_ref().and_then(|setting| store.read(setting));
+        let (Some(target), Some(current)) = (target, current) else {
             results.push(SettingResult {
                 change: change.clone(),
                 error: Some(ERROR_UNREADABLE),
@@ -1158,20 +1200,18 @@ pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange 
             || current == change.to
             || match (item.tweak, &change.to) {
                 (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
-                _ => {
-                    apply_value(item.tweak, &change.setting, &current).as_ref() == Some(&change.to)
-                }
+                _ => apply_value(item.tweak, &target, &current).as_ref() == Some(&change.to),
             };
         let error = if !leads_there {
             Some(ERROR_CHANGED_SINCE)
         } else if current == change.to {
             None
         } else {
-            store.write(&change.setting, &change.to).err()
+            store.write(&target, &change.to).err()
         };
         results.push(SettingResult {
             change: SettingChange {
-                setting: change.setting.clone(),
+                setting: target,
                 from: current,
                 to: change.to.clone(),
             },

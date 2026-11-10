@@ -15,9 +15,10 @@ use windows::Win32::System::EventLog::{
     EvtRenderEventXml,
 };
 use windows::Win32::System::Power::{
-    CallNtPowerInformation, GetSystemPowerStatus, PowerGetActiveScheme, PowerReadACValueIndex,
-    PowerSetActiveScheme, PowerWriteACValueIndex, SYSTEM_POWER_CAPABILITIES, SYSTEM_POWER_STATUS,
-    SystemPowerCapabilities, SystemReserveHiberFile,
+    ACCESS_SCHEME, CallNtPowerInformation, GetSystemPowerStatus, PowerEnumerate,
+    PowerGetActiveScheme, PowerReadACValueIndex, PowerSetActiveScheme, PowerWriteACValueIndex,
+    SYSTEM_POWER_CAPABILITIES, SYSTEM_POWER_STATUS, SystemPowerCapabilities,
+    SystemReserveHiberFile,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_BINARY, REG_DWORD,
@@ -78,10 +79,14 @@ pub fn read_setting(setting: &Setting) -> Option<Value> {
             }
         }
         Setting::Service { name } => read_service(name),
-        Setting::PowerAc { subgroup, setting } => {
-            let scheme = active_scheme()?;
+        Setting::PowerAc {
+            subgroup,
+            setting,
+            scheme,
+        } => {
+            let scheme = scheme_of(*scheme)?;
             let mut value = 0u32;
-            // SAFETY: reads one AC value of the active scheme into a u32.
+            // SAFETY: reads one AC value of one scheme into a u32.
             let status = unsafe {
                 PowerReadACValueIndex(
                     None,
@@ -220,6 +225,42 @@ fn read_service(name: &str) -> Option<Value> {
         delayed,
         running: status.dwCurrentState == SERVICE_RUNNING,
     })
+}
+
+/// The scheme a power value is read from or written to: the one named when it still exists,
+/// otherwise the active one when none is named.
+fn scheme_of(named: Option<Guid>) -> Option<Guid> {
+    match named {
+        Some(scheme) => scheme_exists(scheme).then_some(scheme),
+        None => active_scheme(),
+    }
+}
+
+/// Whether Windows still lists a power scheme with this GUID.
+fn scheme_exists(wanted: Guid) -> bool {
+    for index in 0.. {
+        let mut found = GUID::default();
+        let mut size = size_of::<GUID>() as u32;
+        // SAFETY: the buffer is a GUID and its size is passed with it.
+        let status = unsafe {
+            PowerEnumerate(
+                None,
+                None,
+                None,
+                ACCESS_SCHEME,
+                index,
+                Some((&raw mut found).cast()),
+                &mut size,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return false;
+        }
+        if found.to_u128() == wanted.0 {
+            return true;
+        }
+    }
+    false
 }
 
 fn active_scheme() -> Option<Guid> {
@@ -563,9 +604,17 @@ pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
                 running,
             },
         ) => write_service(name, *start, *delayed, *running),
-        (Setting::PowerAc { subgroup, setting }, Value::Index(index)) => {
-            let scheme = GUID::from_u128(active_scheme().ok_or(ERROR_FILE_NOT_FOUND.0)?.0);
-            // SAFETY: writes one AC value of the active scheme.
+        (
+            Setting::PowerAc {
+                subgroup,
+                setting,
+                scheme,
+            },
+            Value::Index(index),
+        ) => {
+            let chosen = scheme_of(*scheme).ok_or(ERROR_FILE_NOT_FOUND.0)?;
+            let scheme = GUID::from_u128(chosen.0);
+            // SAFETY: writes one AC value of one existing scheme.
             ok(unsafe {
                 PowerWriteACValueIndex(
                     None,
@@ -575,8 +624,11 @@ pub fn write_setting(setting: &Setting, value: &Value) -> Result<(), u32> {
                     *index,
                 )
             })?;
-            // SAFETY: applies the scheme again so the new value takes effect.
-            ok(unsafe { PowerSetActiveScheme(None, Some(&scheme)) })
+            if active_scheme() == Some(chosen) {
+                // SAFETY: applies the active scheme again so the new value takes effect.
+                ok(unsafe { PowerSetActiveScheme(None, Some(&scheme)) })?;
+            }
+            Ok(())
         }
         (Setting::ActiveScheme, Value::Scheme(scheme)) => {
             // SAFETY: makes an existing scheme the active one.

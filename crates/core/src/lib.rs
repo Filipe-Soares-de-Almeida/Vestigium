@@ -26,6 +26,7 @@ mod shutdown;
 mod stutter;
 mod trigger;
 mod tweak;
+mod tweak_v1;
 mod window;
 mod xml;
 
@@ -90,4 +91,5 @@ pub use tweak::{
     USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, check_item, disabled_approval,
     helped, undo,
 };
+pub use tweak_v1::{SettingChangeV1, SettingResultV1, SettingV1, TweakChangeV1};
 pub use window::{Gap, GapReason, HangSpan, Window};

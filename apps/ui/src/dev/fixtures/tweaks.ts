@@ -89,7 +89,7 @@ const ALL: Advice[] = [
   advice("PcieAspm", {
     changes: [
       change(
-        { PowerAc: { subgroup: "501a4d13-42af-4429-9fd1-a8218c268e20", setting: "ee12f906-d277-404b-b6da-e5fa1a576df5" } },
+        { PowerAc: { subgroup: "501a4d13-42af-4429-9fd1-a8218c268e20", setting: "ee12f906-d277-404b-b6da-e5fa1a576df5", scheme: null } },
         { Index: 1 },
         { Index: 0 },
       ),
@@ -99,7 +99,7 @@ const ALL: Advice[] = [
   advice("UsbSuspend", {
     changes: [
       change(
-        { PowerAc: { subgroup: "2a737441-1930-4402-8d77-b2bebba308a3", setting: "48e6b7a6-50f5-4782-a5d4-53bb8f07e226" } },
+        { PowerAc: { subgroup: "2a737441-1930-4402-8d77-b2bebba308a3", setting: "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", scheme: null } },
         { Index: 1 },
         { Index: 0 },
       ),

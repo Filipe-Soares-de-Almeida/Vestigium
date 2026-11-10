@@ -38,6 +38,12 @@ How to use this file:
 
 ### Fixed
 
+- Undoing a power tweak, such as the PCIe power saving or USB suspend setting, now puts the old value
+  back in the power plan that was changed, not in whichever plan is active when you click Undo, and
+  refuses with an error if that plan no longer exists. Before, switching plans between applying and
+  undoing left the first plan changed and altered the second. Changes made before this update are
+  undone as they were. The watcher and the window changed how they talk to each other, so they must
+  be updated together.
 - A helper that stops halfway, because of a full disk, a power cut or the process being ended, no
   longer leaves an empty result file that the monitor reads again at every import. The helper now writes
   its result under a temporary name and gives it the final one only when it is complete, and the

@@ -1,5 +1,8 @@
-use vestigium_collect::{RESTORE_SKIPPED, exe_of, read_setting, restore_event};
-use vestigium_core::{Hive, Setting, StartupList, Value};
+use vestigium_collect::{RESTORE_SKIPPED, WindowsSettings, exe_of, read_setting, restore_event};
+use vestigium_core::{
+    Hive, PCIE_ASPM, PlanItem, SCHEME_BALANCED, SCHEME_POWER_SAVER, SUB_PCIEXPRESS, Setting,
+    SettingChange, StartupList, TweakId, Value, carry_out, undo,
+};
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_DWORD, RegDeleteTreeW, RegSetKeyValueW,
@@ -146,4 +149,72 @@ fn writes_and_deletes_a_dword_and_an_empty_key() {
     vestigium_collect::write_setting(&inside, &Value::Absent).unwrap();
     vestigium_collect::write_setting(&sub, &Value::Absent).unwrap();
     assert_eq!(read_setting(&sub), Some(Value::Absent));
+}
+
+/// Changes the power schemes of the machine: run it by hand on a disposable virtual machine with
+/// `cargo test -p vestigium-collect --test tweaks -- --ignored power_undo_goes_to_the_scheme_changed`.
+#[test]
+#[ignore = "changes the active power scheme; run on a disposable virtual machine"]
+fn power_undo_goes_to_the_scheme_changed() {
+    let aspm = |scheme| Setting::PowerAc {
+        subgroup: SUB_PCIEXPRESS,
+        setting: PCIE_ASPM,
+        scheme: Some(scheme),
+    };
+    let mut store = WindowsSettings;
+    let Some(Value::Scheme(original)) = read_setting(&Setting::ActiveScheme) else {
+        panic!("the active scheme could not be read");
+    };
+    let item = |setting, to, undo_of| PlanItem {
+        tweak: TweakId::PcieAspm,
+        subject: None,
+        undo_of,
+        changes: vec![SettingChange {
+            setting,
+            from: Value::Absent,
+            to,
+        }],
+    };
+    let set_active = |scheme| {
+        let plan = PlanItem {
+            tweak: TweakId::PowerPlan,
+            subject: None,
+            undo_of: None,
+            changes: vec![SettingChange {
+                setting: Setting::ActiveScheme,
+                from: Value::Absent,
+                to: Value::Scheme(scheme),
+            }],
+        };
+        assert!(carry_out(&plan, &mut WindowsSettings).succeeded());
+    };
+    set_active(SCHEME_POWER_SAVER);
+    let saver_before = read_setting(&aspm(SCHEME_POWER_SAVER));
+    let balanced_before = read_setting(&aspm(SCHEME_BALANCED));
+
+    let applied = carry_out(
+        &item(
+            Setting::PowerAc {
+                subgroup: SUB_PCIEXPRESS,
+                setting: PCIE_ASPM,
+                scheme: None,
+            },
+            Value::Index(0),
+            None,
+        ),
+        &mut store,
+    );
+    assert!(applied.succeeded());
+    set_active(SCHEME_BALANCED);
+    let written: Vec<_> = applied.results.iter().map(|r| r.change.clone()).collect();
+    let back = PlanItem {
+        changes: undo(&written),
+        ..item(aspm(SCHEME_POWER_SAVER), Value::Absent, Some(1))
+    };
+    let undone = carry_out(&back, &mut store);
+
+    assert!(undone.succeeded());
+    assert_eq!(read_setting(&aspm(SCHEME_POWER_SAVER)), saver_before);
+    assert_eq!(read_setting(&aspm(SCHEME_BALANCED)), balanced_before);
+    set_active(original);
 }
