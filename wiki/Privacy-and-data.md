@@ -12,7 +12,7 @@ Nothing, unless you allow the update check. There is no account and no telemetry
 
 - Readings of the CPU, the memory, the disks and the GPU, once a second, and a summary of each minute.
 - The busiest programs every few seconds: their names, and how much CPU, memory, disk and GPU each used.
-- The Windows events that matter for freezes and crashes, read from Windows' own logs: disk errors, shutdowns, blue screens, crashes and hardware errors.
+- The Windows events that matter for freezes and crashes, read from Windows' own logs: disk errors, shutdowns, blue screens, crashes and hardware errors, with the details Windows logs for each, which can include the path of a program or file and so your user name.
 - Reports, overload periods, Health alerts, test results, captures and what each dump said.
 - The Windows settings changed in Optimizations, with their previous values.
 - Your settings, and the PC's processor count, memory size and disk list.

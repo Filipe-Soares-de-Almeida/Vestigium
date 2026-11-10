@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- The privacy page and the reporting page now say that the details Windows logs for an event, which
+  Vestigium keeps and shows, can include the path of a program or file and so your user name.
 - A retention setting that is out of range or unreadable no longer resets the other two. Only the
   bad value goes back to its default, and the monitor records which one it replaced.
 - A deep capture whose frame tool wrote lines but no usable frame now shows the frames as not

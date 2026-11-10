@@ -18,6 +18,8 @@ In **Captures**, open the capture and select **Copy result**. Vestigium says **R
 
 Issues are public. A pasted report names the programs that were running, your disks and drivers, and the times. Read it and remove anything you want to keep private before you post.
 
+The technical detail of a Windows event shown in the window can contain the path of a program or file, which can include your user name. Read it before you paste it.
+
 Do not attach crash dump files to a public issue. A dump is a copy of memory and can hold personal data.
 
 ## Where to post
