@@ -198,7 +198,8 @@ fn migration_repairs_memory_diagnostics_stored_without_a_meaning() {
     {
         let raw = rusqlite::Connection::open(&path).unwrap();
         raw.execute_batch(
-            "PRAGMA user_version = 9;
+            "DROP INDEX tweak_change_key;
+             PRAGMA user_version = 9;
              INSERT INTO event (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
              VALUES (1000, 1, 'stornvme', 129, 1, 3, 1, '<EventData/>'),
                     (2000, 1, 'Microsoft-Windows-MemoryDiagnostics-Results', 1201, 2, 4, 0,
@@ -611,4 +612,71 @@ fn settings_outside_bounds_are_refused() {
         Err(StoreError::Setting(_))
     ));
     assert_eq!(store.settings().unwrap(), Settings::default());
+}
+
+#[test]
+fn migration_keeps_one_row_of_each_duplicated_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute_batch(
+            "DROP INDEX capture_start;
+             DROP INDEX scan_ts;
+             CREATE INDEX capture_start ON capture (start_ms);
+             CREATE INDEX scan_ts ON scan (ts_ms);
+             DROP INDEX IF EXISTS tweak_change_key;
+             PRAGMA user_version = 10;
+             INSERT INTO capture (version, start_ms, end_ms, data) VALUES
+                 (2, 1000, 2000, x'01'), (2, 1000, 2000, x'02'), (2, 5000, 6000, x'03');
+             INSERT INTO scan (version, ts_ms, data) VALUES
+                 (1, 10, x'01'), (1, 10, x'02'), (1, 20, x'03');
+             INSERT INTO tweak_change (version, tweak, subject, applied_ms, undone_ms, undo_of,
+                                       elevated, data) VALUES
+                 (2, 0, NULL, 100, NULL, NULL, 1, x'01'),
+                 (2, 0, NULL, 100, 300, NULL, 1, x'02'),
+                 (2, 0, 'a', 100, NULL, NULL, 1, x'03'),
+                 (2, 0, NULL, 300, NULL, 2, 1, x'04'),
+                 (2, 0, NULL, 300, NULL, 1, 1, x'05');",
+        )
+        .unwrap();
+    }
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    let count = |table: &str| -> i64 {
+        raw.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    };
+    assert_eq!(count("capture"), 2);
+    assert_eq!(count("scan"), 2);
+    assert_eq!(count("tweak_change"), 3);
+    let kept: i64 = raw
+        .query_row("SELECT id FROM capture WHERE start_ms = 1000", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(kept, 1, "the lowest id stays");
+    let undone: Option<i64> = raw
+        .query_row("SELECT undone_ms FROM tweak_change WHERE id = 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(undone, Some(300), "the kept change remembers it was undone");
+    let undo_of: i64 = raw
+        .query_row(
+            "SELECT undo_of FROM tweak_change WHERE applied_ms = 300",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        undo_of, 1,
+        "an undo of a removed copy points at the kept one"
+    );
 }

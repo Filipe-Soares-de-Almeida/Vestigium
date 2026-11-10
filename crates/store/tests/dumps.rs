@@ -45,6 +45,10 @@ fn migrates_v4_to_v5() {
              CREATE TABLE finding (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
                  opened_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL, closed_ms INTEGER,
                  data BLOB NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE scan (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 ts_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 4;",
         )
         .unwrap();

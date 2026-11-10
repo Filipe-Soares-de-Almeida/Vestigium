@@ -46,6 +46,14 @@ fn migrates_v6_to_v7() {
              CREATE TABLE finding (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
                  opened_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL, closed_ms INTEGER,
                  data BLOB NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE scan (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 ts_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE tweak_change (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 tweak INTEGER NOT NULL, subject TEXT, applied_ms INTEGER NOT NULL,
+                 undone_ms INTEGER, undo_of INTEGER, elevated INTEGER NOT NULL,
+                 data BLOB NOT NULL);
              PRAGMA user_version = 6;",
         )
         .unwrap();

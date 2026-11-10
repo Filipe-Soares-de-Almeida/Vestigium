@@ -55,6 +55,10 @@ fn migrates_v5_to_v6() {
              CREATE TABLE finding (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
                  opened_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL, closed_ms INTEGER,
                  data BLOB NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE scan (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 ts_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 5;",
         )
         .unwrap();
@@ -251,4 +255,65 @@ fn a_change_stored_before_the_scheme_was_kept_still_reads() {
         }
     );
     assert_eq!(rows[0].change.results[0].change.to, Value::Index(0));
+}
+
+#[test]
+fn the_same_change_recorded_twice_is_one_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let forward = mpo_change(Value::Absent, Value::Dword(5));
+    let applied = change(TweakId::Mpo, forward.clone(), None);
+
+    let first = store
+        .record_tweak_change(&applied, DAY, Applier::Elevated)
+        .unwrap();
+    let again = store
+        .record_tweak_change(&applied, DAY, Applier::Elevated)
+        .unwrap();
+    let later = store
+        .record_tweak_change(&applied, 2 * DAY, Applier::Elevated)
+        .unwrap();
+    let back = change(TweakId::Mpo, undo(&forward), Some(first));
+    let undone = store
+        .record_tweak_change(&back, 3 * DAY, Applier::Elevated)
+        .unwrap();
+    let undone_again = store
+        .record_tweak_change(&back, 3 * DAY, Applier::Elevated)
+        .unwrap();
+
+    assert_eq!(again, first);
+    assert_ne!(later, first);
+    assert_eq!(undone_again, undone);
+    assert_eq!(store.tweak_changes(0, 10 * DAY).unwrap().len(), 3);
+}
+
+#[test]
+fn changes_of_one_tweak_for_different_subjects_at_one_time_are_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let mut one = change(
+        TweakId::Mpo,
+        mpo_change(Value::Absent, Value::Dword(5)),
+        None,
+    );
+    one.subject = Some("one".into());
+    let mut two = one.clone();
+    two.subject = Some("two".into());
+    let none = change(
+        TweakId::Mpo,
+        mpo_change(Value::Absent, Value::Dword(5)),
+        None,
+    );
+
+    let ids: Vec<i64> = [&one, &two, &none]
+        .iter()
+        .map(|c| {
+            store
+                .record_tweak_change(c, DAY, Applier::Elevated)
+                .unwrap()
+        })
+        .collect();
+
+    assert_eq!(ids.len(), 3);
+    assert_eq!(store.tweak_changes(0, 10 * DAY).unwrap().len(), 3);
 }

@@ -84,17 +84,25 @@ impl Store {
         Ok(())
     }
 
-    /// Stores what a full scan read; returns its id.
+    /// Stores what a full scan read and returns its id; a scan taken when a stored one was is the
+    /// same scan, and the stored id comes back.
     pub fn insert_scan(&mut self, scan: &ScanResult) -> Result<i64, StoreError> {
-        self.conn.execute(
-            "INSERT INTO scan (version, ts_ms, data) VALUES (?1, ?2, ?3)",
+        let stored = self.conn.execute(
+            "INSERT OR IGNORE INTO scan (version, ts_ms, data) VALUES (?1, ?2, ?3)",
             params![
                 i64::from(SCAN_VERSION),
                 scan.ts_ms,
                 encode(std::slice::from_ref(scan))
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        if stored > 0 {
+            return Ok(self.conn.last_insert_rowid());
+        }
+        Ok(self.conn.query_row(
+            "SELECT id FROM scan WHERE ts_ms = ?1",
+            params![scan.ts_ms],
+            |row| row.get(0),
+        )?)
     }
 
     /// The most recent full scan.

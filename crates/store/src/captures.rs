@@ -13,10 +13,12 @@ pub struct CaptureSummary {
 }
 
 impl Store {
-    /// Stores a finished deep capture; returns its id.
+    /// Stores a finished deep capture and returns its id; one that starts when a stored one does
+    /// is the same capture, and the stored id comes back.
     pub fn insert_capture(&mut self, capture: &DeepCapture) -> Result<i64, StoreError> {
-        self.conn.execute(
-            "INSERT INTO capture (version, start_ms, end_ms, data) VALUES (?1, ?2, ?3, ?4)",
+        let stored = self.conn.execute(
+            "INSERT OR IGNORE INTO capture (version, start_ms, end_ms, data)
+             VALUES (?1, ?2, ?3, ?4)",
             params![
                 i64::from(CAPTURE_VERSION),
                 capture.start_ms,
@@ -24,7 +26,14 @@ impl Store {
                 encode(std::slice::from_ref(capture)),
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        if stored > 0 {
+            return Ok(self.conn.last_insert_rowid());
+        }
+        Ok(self.conn.query_row(
+            "SELECT id FROM capture WHERE start_ms = ?1",
+            params![capture.start_ms],
+            |row| row.get(0),
+        )?)
     }
 
     /// Captures that overlap `[from_ms, to_ms]`, oldest first.

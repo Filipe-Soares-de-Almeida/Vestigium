@@ -119,7 +119,7 @@ fn prune_keeps_captures_inside_retention() {
         .insert_capture(&capture(cutoff - 10, cutoff - 1))
         .unwrap();
     store
-        .insert_capture(&capture(cutoff - 10, cutoff + 1))
+        .insert_capture(&capture(cutoff - 9, cutoff + 1))
         .unwrap();
 
     let report = store.prune(now, &Retention::default()).unwrap();
@@ -137,4 +137,18 @@ fn clear_history_deletes_captures() {
     store.clear_history().unwrap();
 
     assert!(store.captures(i64::MIN, i64::MAX).unwrap().is_empty());
+}
+
+#[test]
+fn the_same_capture_stored_twice_is_one_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+
+    let first = store.insert_capture(&capture(1_000, 2_000)).unwrap();
+    let again = store.insert_capture(&capture(1_000, 2_000)).unwrap();
+    let other = store.insert_capture(&capture(5_000, 6_000)).unwrap();
+
+    assert_eq!(again, first);
+    assert_ne!(other, first);
+    assert_eq!(store.captures(i64::MIN, i64::MAX).unwrap().len(), 2);
 }

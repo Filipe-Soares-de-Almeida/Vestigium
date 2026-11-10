@@ -23,7 +23,8 @@ fn tweak_code(tweak: TweakId) -> i64 {
 }
 
 impl Store {
-    /// Keeps one change; an undo also marks the change it undoes. Returns the new row's id.
+    /// Keeps one change; an undo also marks the change it undoes. Returns the new row's id, or the
+    /// stored one when the same change was recorded at the same time before.
     pub fn record_tweak_change(
         &mut self,
         change: &TweakChange,
@@ -31,9 +32,9 @@ impl Store {
         applier: Applier,
     ) -> Result<i64, StoreError> {
         let tx = self.conn.transaction()?;
-        tx.execute(
-            "INSERT INTO tweak_change (version, tweak, subject, applied_ms, undone_ms, undo_of,
-                 elevated, data)
+        let stored = tx.execute(
+            "INSERT OR IGNORE INTO tweak_change (version, tweak, subject, applied_ms, undone_ms,
+                 undo_of, elevated, data)
              VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)",
             params![
                 i64::from(TWEAK_CHANGE_VERSION),
@@ -45,6 +46,20 @@ impl Store {
                 encode(std::slice::from_ref(change))
             ],
         )?;
+        if stored == 0 {
+            return Ok(tx.query_row(
+                "SELECT id FROM tweak_change
+                 WHERE applied_ms = ?1 AND tweak = ?2 AND COALESCE(subject, '') = COALESCE(?3, '')
+                   AND COALESCE(undo_of, 0) = COALESCE(?4, 0)",
+                params![
+                    applied_ms,
+                    tweak_code(change.tweak),
+                    change.subject,
+                    change.undo_of
+                ],
+                |row| row.get(0),
+            )?);
+        }
         let id = tx.last_insert_rowid();
         if let Some(undone) = change.undo_of.filter(|_| change.succeeded()) {
             tx.execute(

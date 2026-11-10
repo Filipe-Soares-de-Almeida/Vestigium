@@ -485,6 +485,57 @@ mod tests {
         assert_eq!(rows[0].applier, Applier::Elevated);
     }
 
+    #[test]
+    fn a_result_file_that_survives_its_delete_is_not_stored_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let captures = dir.path().join("captures");
+        let scans = dir.path().join("scans");
+        let tweaks = dir.path().join("tweaks");
+        for folder in [&captures, &scans, &tweaks] {
+            fs::create_dir(folder).unwrap();
+        }
+        let scan = vestigium_core::health::ScanResult {
+            ts_ms: 70,
+            boot: None,
+        };
+        let mpo = vestigium_core::TweakId::Mpo;
+        let results = TweakResults {
+            ts_ms: 80,
+            changes: vec![vestigium_core::TweakChange {
+                tweak: mpo,
+                subject: None,
+                undo_of: None,
+                results: Vec::new(),
+                restore_point: None,
+            }],
+        };
+        let write_all = || {
+            write_capture(&captures, "1.capture", &capture(1_000, 2_000));
+            write_versioned(&scans.join("2.scan"), SCAN_VERSION, &scan);
+            write_versioned(&tweaks.join("3.tweaked"), TWEAK_PLAN_VERSION, &results);
+        };
+
+        write_all();
+        let first = (
+            import_captures(&captures, &[], &mut store),
+            import_scans(&scans, &mut store),
+            import_tweaks(&tweaks, &mut store),
+        );
+        write_all();
+        let second = (
+            import_captures(&captures, &[], &mut store),
+            import_scans(&scans, &mut store),
+            import_tweaks(&tweaks, &mut store),
+        );
+
+        assert_eq!(second, first, "the stored rows answer for the copies");
+        assert_eq!(store.captures(i64::MIN, i64::MAX).unwrap().len(), 1);
+        assert_eq!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().len(), 1);
+        assert!(!captures.join("1.capture").exists());
+        assert!(!scans.join("2.scan").exists() && !tweaks.join("3.tweaked").exists());
+    }
+
     fn age(path: &Path, by: Duration) {
         let file = fs::OpenOptions::new().write(true).open(path).unwrap();
         file.set_modified(SystemTime::now() - by).unwrap();

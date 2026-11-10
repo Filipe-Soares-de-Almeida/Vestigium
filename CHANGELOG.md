@@ -48,6 +48,10 @@ How to use this file:
   seconds no longer makes the window report a silent watcher: these requests now wait up to a minute
   for the answer, while a request that only reads the watcher's memory still gives up after three
   seconds.
+- A deep capture, a health scan or a tweak result file that the watcher could not delete after storing
+  it is no longer stored again at the next import: each is kept once. Copies a database already holds
+  are removed when it is opened by this version, so the window and the watcher must be updated
+  together.
 - If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
   it again after a second, and exits only when that keeps failing, instead of carrying on with no
   channel while the window says it is not running.

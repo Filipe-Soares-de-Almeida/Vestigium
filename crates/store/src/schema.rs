@@ -6,7 +6,7 @@ use vestigium_core::{Gap, WinEvent};
 use crate::records::{channel_code, gap_code, meaning_code};
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -152,6 +152,33 @@ const MIGRATIONS: &[&str] = &[
     // Memory Diagnostic events once stored with meaning 0 get their code, 16.
     "UPDATE event SET meaning = 16
      WHERE meaning = 0 AND provider = 'Microsoft-Windows-MemoryDiagnostics-Results';",
+    // A capture, a scan and a tweak change are each stored once: copies from a result file that
+    // was imported twice go, the lowest id stays, and an undo of a removed copy follows the kept one.
+    "DELETE FROM capture WHERE id NOT IN (SELECT MIN(id) FROM capture GROUP BY start_ms);
+    DROP INDEX IF EXISTS capture_start;
+    CREATE UNIQUE INDEX capture_start ON capture (start_ms);
+    DELETE FROM scan WHERE id NOT IN (SELECT MIN(id) FROM scan GROUP BY ts_ms);
+    DROP INDEX IF EXISTS scan_ts;
+    CREATE UNIQUE INDEX scan_ts ON scan (ts_ms);
+    UPDATE tweak_change SET undo_of = (
+        SELECT MIN(k.id) FROM tweak_change k, tweak_change t
+        WHERE t.id = tweak_change.undo_of AND k.applied_ms = t.applied_ms AND k.tweak = t.tweak
+          AND COALESCE(k.subject, '') = COALESCE(t.subject, '')
+          AND COALESCE(k.undo_of, 0) = COALESCE(t.undo_of, 0))
+    WHERE undo_of IN (SELECT id FROM tweak_change);
+    UPDATE tweak_change SET undone_ms = (
+        SELECT d.undone_ms FROM tweak_change d
+        WHERE d.undone_ms IS NOT NULL AND d.applied_ms = tweak_change.applied_ms
+          AND d.tweak = tweak_change.tweak
+          AND COALESCE(d.subject, '') = COALESCE(tweak_change.subject, '')
+          AND COALESCE(d.undo_of, 0) = COALESCE(tweak_change.undo_of, 0)
+        ORDER BY d.id LIMIT 1)
+    WHERE undone_ms IS NULL;
+    DELETE FROM tweak_change WHERE id NOT IN (
+        SELECT MIN(id) FROM tweak_change
+        GROUP BY applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));
+    CREATE UNIQUE INDEX tweak_change_key
+        ON tweak_change (applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));",
 ];
 
 /// What the agent writes in one transaction, every batch.

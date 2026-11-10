@@ -200,6 +200,8 @@ fn migration_from_v3_adds_findings_and_scans() {
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
              CREATE TABLE event (id INTEGER PRIMARY KEY, provider TEXT NOT NULL,
                  meaning INTEGER NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 3;",
         )
         .unwrap();
@@ -286,4 +288,22 @@ fn smart_readings_follow_the_records_retention() {
 
     assert_eq!(report.smart_readings, 2, "both attributes of the old day");
     assert_eq!(store.smart_history("0 C:", 5, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn the_same_scan_stored_twice_is_one_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+
+    let first = store.insert_scan(&scan(DAY, 90_000)).unwrap();
+    let again = store.insert_scan(&scan(DAY, 90_000)).unwrap();
+    let other = store.insert_scan(&scan(2 * DAY, 80_000)).unwrap();
+
+    assert_eq!(again, first);
+    assert_ne!(other, first);
+    let count: i64 = rusqlite::Connection::open(dir.path().join("vestigium.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM scan", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
 }
