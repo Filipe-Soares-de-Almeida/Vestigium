@@ -45,6 +45,9 @@ How to use this file:
 
 ### Fixed
 
+- The hourly health check no longer wakes an idle hard disk whose type Windows would not report,
+  such as one behind a RAID or host adapter. A disk of unknown type is read only while it is in use
+  or when it is an NVMe drive.
 - The tray icon now corrects itself when Windows rejects an update. If the icon or the tooltip could
   not be changed, for example while Explorer was restarting, the monitor tries again on its next
   refresh instead of showing the old level until the level changed again.

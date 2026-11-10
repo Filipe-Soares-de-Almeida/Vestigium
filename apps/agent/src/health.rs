@@ -5,7 +5,7 @@ use vestigium_core::health::{
     Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, SecurityProduct, Subject,
     evaluate, reconcile, unread_kinds,
 };
-use vestigium_core::hwtest::TEST_REACH_DAYS;
+use vestigium_core::hwtest::{Bus, TEST_REACH_DAYS};
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
 use vestigium_store::{Store, StoreError};
 
@@ -57,6 +57,16 @@ impl<S: HealthSource> HealthPass<S> {
         }
     }
 
+    /// An idle disk is left alone when it is an HDD, or when its media is unknown and it is not NVMe.
+    fn skips_idle(&mut self, index: u32, media: Media, busy: bool) -> bool {
+        !busy
+            && match media {
+                Media::Hdd => true,
+                Media::Unknown => self.source.bus(index) != Bus::Nvme,
+                _ => false,
+            }
+    }
+
     pub fn run(&mut self, store: &mut Store, now: &PassNow) -> Result<PassOutcome, StoreError> {
         // A failed read is asked again on the next pass; only an answer is kept for a day.
         let asked_security_center = self.antivirus.is_none()
@@ -72,7 +82,7 @@ impl<S: HealthSource> HealthPass<S> {
             let Some(index) = physical_drive(&disk.name) else {
                 continue;
             };
-            if disk.media == Media::Hdd && !now.busy_disks.contains(&disk.name) {
+            if self.skips_idle(index, disk.media, now.busy_disks.contains(&disk.name)) {
                 unread.insert(&disk.name);
                 continue;
             }
@@ -185,6 +195,7 @@ mod tests {
         asked_disks: Rc<RefCell<Vec<String>>>,
         asked_antivirus: Rc<RefCell<u32>>,
         failing_disk: bool,
+        bus: Option<Bus>,
         two_antivirus: bool,
         antivirus_down: Rc<Cell<bool>>,
         page_files_down: Rc<Cell<bool>>,
@@ -205,6 +216,10 @@ mod tests {
                 }],
                 nvme: None,
             })
+        }
+
+        fn bus(&mut self, _index: u32) -> Bus {
+            self.bus.unwrap_or(Bus::Other)
         }
 
         fn volumes(&mut self) -> Vec<VolumeSpace> {
@@ -277,11 +292,20 @@ mod tests {
         at: i64,
         busy: &[&str],
     ) -> PassOutcome {
-        let machine = machine();
+        run_on(pass, store, &machine(), at, busy)
+    }
+
+    fn run_on(
+        pass: &mut HealthPass<FakeHealth>,
+        store: &mut Store,
+        machine: &MachineInfo,
+        at: i64,
+        busy: &[&str],
+    ) -> PassOutcome {
         let busy: HashSet<String> = busy.iter().map(|s| s.to_string()).collect();
         let now = PassNow {
             ts_ms: at,
-            machine: &machine,
+            machine,
             busy_disks: &busy,
             commit_limit_bytes: 40 * GB,
         };
@@ -367,6 +391,39 @@ mod tests {
             2,
             "the HDD's last reading stays once it sleeps again"
         );
+    }
+
+    #[test]
+    fn an_idle_disk_of_unknown_media_is_not_asked_unless_nvme() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let mut machine = machine();
+        machine.disks[1].media = Media::Unknown;
+        let other = FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        };
+        let asked = other.asked_disks.clone();
+        let mut pass = HealthPass::new(other);
+
+        run_on(&mut pass, &mut store, &machine, NOW, &[]);
+        assert_eq!(*asked.borrow(), ["0 C:"]);
+        run_on(&mut pass, &mut store, &machine, NOW + 60_000, &["1 D:"]);
+        assert_eq!(
+            *asked.borrow(),
+            ["0 C:", "0 C:", "1 D:"],
+            "a busy disk is read"
+        );
+
+        let nvme = FakeHealth {
+            free_gb: 50,
+            bus: Some(Bus::Nvme),
+            ..FakeHealth::default()
+        };
+        let asked = nvme.asked_disks.clone();
+        let mut pass = HealthPass::new(nvme);
+        run_on(&mut pass, &mut store, &machine, NOW, &[]);
+        assert_eq!(*asked.borrow(), ["0 C:", "1 D:"]);
     }
 
     #[test]
