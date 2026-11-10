@@ -48,6 +48,12 @@ How to use this file:
 - A volume check can now be stopped, and it no longer runs without a limit. Stopping it ends
   chkdsk within a second or two and the check is recorded as not completed; a check that is still
   running after six hours is ended the same way.
+- Stop on a disk surface scan now takes effect within seconds even on a failing disk. Before, it was
+  only looked at between 1 MiB blocks, and a block that failed was read sector by sector with no
+  limit, which could take minutes. The stop is now checked before every sector and while a read is in
+  progress, a read that is still unanswered after 30 seconds is cancelled, and a block that takes more
+  than 30 seconds to narrow down counts as unreadable. A block cut short by Stop is left out of the
+  map and read again when the scan resumes.
 - The crash dump scan no longer hangs on a dump the Windows debugger engine cannot load. Each dump
   gets at most one minute, the whole scan at most ten minutes, and a dump left out of the analysis is
   still listed with its size and date.

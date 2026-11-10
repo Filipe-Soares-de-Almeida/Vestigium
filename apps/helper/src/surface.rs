@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use vestigium_collect::{disk_io_bytes, disk_media, wall_ms};
 use vestigium_core::Media;
@@ -12,13 +12,15 @@ use vestigium_core::hwtest::{
     Outcome, SLOW_BLOCK_MS, SURFACE_BLOCK, SurfaceAggregator, SurfaceProgress, SurfaceScan,
     TEST_RUN_VERSION, TestData, TestRun, outside_traffic,
 };
-use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, GENERIC_READ, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_BEGIN, FILE_FLAG_NO_BUFFERING, FILE_IO_PRIORITY_HINT_INFO, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FileIoPriorityHintInfo, IoPriorityHintVeryLow, OPEN_EXISTING, ReadFile,
-    SetFileInformationByHandle, SetFilePointerEx,
+    CreateFileW, FILE_FLAG_NO_BUFFERING, FILE_FLAG_OVERLAPPED, FILE_IO_PRIORITY_HINT_INFO,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FileIoPriorityHintInfo, IoPriorityHintVeryLow,
+    OPEN_EXISTING, ReadFile, SetFileInformationByHandle,
 };
-use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::IO::{
+    CancelIoEx, CreateIoCompletionPort, DeviceIoControl, GetQueuedCompletionStatus, OVERLAPPED,
+};
 use windows::Win32::System::Ioctl::{
     GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO, IOCTL_STORAGE_QUERY_PROPERTY,
     PropertyStandardQuery, STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
@@ -46,6 +48,15 @@ const DEVICE_GONE: [u32; 7] = [6, 21, 55, 433, 1006, 1112, 1167];
 const FAILING_STREAK: usize = 3;
 /// Why a scan ended when the disk went away.
 const GONE_REASON: &str = "the disk stopped answering";
+/// Longest one read may stay in flight before it is cancelled.
+const READ_LIMIT: Duration = Duration::from_secs(30);
+/// How often a read in flight looks at the stop file, in milliseconds.
+const READ_POLL_MS: u32 = 250;
+/// Longest wait for a cancelled read to complete before it is left alone, in milliseconds.
+const CANCEL_WAIT_MS: u32 = 5_000;
+/// Longest a block may take, narrowing included, before its unread sectors count as unreadable.
+const BLOCK_BUDGET: Duration = Duration::from_secs(30);
+const ERROR_DEVICE_NOT_CONNECTED: u32 = 1167;
 
 /// A disk read in place, block by block.
 pub trait Disk {
@@ -59,31 +70,68 @@ pub trait Disk {
     fn io_bytes(&self) -> Option<u64>;
 }
 
-/// A physical drive opened for reading only, with I/O at the lowest priority.
+/// A physical drive opened for reading only, with I/O at the lowest priority. Reads run
+/// overlapped on a second handle so that one in flight can be cancelled.
 pub struct PhysicalDisk {
     number: u32,
+    /// Answers the length and alignment queries.
     handle: HANDLE,
+    /// The same drive opened for overlapped reads, bound to `port`.
+    reader: HANDLE,
+    port: HANDLE,
     bytes: u64,
     sector: u32,
     buffer: *mut u8,
+    /// Asked while a read is in flight; a read is cancelled when it says stop.
+    stop: Box<dyn Fn() -> bool>,
+    /// A cancelled read never completed, so the disk may still write into the buffer: nothing is
+    /// freed or closed and every later read fails as a disk that is gone.
+    stuck: bool,
+    /// How long a read waits between looks at `stop`, in milliseconds.
+    poll_ms: u32,
+    /// How long a read may stay in flight before it is cancelled.
+    read_limit: Duration,
 }
 
 impl PhysicalDisk {
-    pub fn open(number: u32) -> Result<PhysicalDisk, String> {
+    pub fn open(number: u32, stop: Box<dyn Fn() -> bool>) -> Result<PhysicalDisk, String> {
         let path = HSTRING::from(format!(r"\\.\PhysicalDrive{number}"));
-        // SAFETY: opens the device for reading only; `Drop` closes the handle.
-        let handle = unsafe {
-            CreateFileW(
-                &path,
-                DISK_ACCESS,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None,
-                OPEN_EXISTING,
-                FILE_FLAG_NO_BUFFERING,
-                None,
-            )
-        }
-        .map_err(|e| e.to_string())?;
+        let open = |flags| {
+            // SAFETY: opens the device for reading only; `Drop` closes the handle.
+            unsafe {
+                CreateFileW(
+                    &path,
+                    DISK_ACCESS,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    flags,
+                    None,
+                )
+            }
+            .map_err(|e| e.to_string())
+        };
+        let handle = open(FILE_FLAG_NO_BUFFERING)?;
+        let reader = match open(FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED) {
+            Ok(reader) => reader,
+            Err(e) => {
+                // SAFETY: the handle was opened above and is closed once.
+                let _ = unsafe { CloseHandle(handle) };
+                return Err(e);
+            }
+        };
+        // SAFETY: binds the reader to a new completion port, closed by `Drop`.
+        let port = match unsafe { CreateIoCompletionPort(reader, None, 0, 1) } {
+            Ok(port) => port,
+            Err(e) => {
+                // SAFETY: both handles were opened above and are closed once.
+                unsafe {
+                    let _ = CloseHandle(reader);
+                    let _ = CloseHandle(handle);
+                }
+                return Err(e.to_string());
+            }
+        };
         // SAFETY: a fresh read-write buffer of one block, released in `Drop`.
         let buffer = unsafe {
             VirtualAlloc(
@@ -96,9 +144,15 @@ impl PhysicalDisk {
         let mut disk = PhysicalDisk {
             number,
             handle,
+            reader,
+            port,
             bytes: 0,
             sector: 512,
             buffer: buffer.cast(),
+            stop,
+            stuck: false,
+            poll_ms: READ_POLL_MS,
+            read_limit: READ_LIMIT,
         };
         if buffer.is_null() {
             return Err("no memory for the read buffer".into());
@@ -140,7 +194,7 @@ impl PhysicalDisk {
         // SAFETY: a live hint struct of the size passed, on the handle this value owns.
         let _ = unsafe {
             SetFileInformationByHandle(
-                disk.handle,
+                disk.reader,
                 FileIoPriorityHintInfo,
                 (&raw const hint).cast::<c_void>(),
                 size_of_val(&hint) as u32,
@@ -184,15 +238,55 @@ impl Disk for PhysicalDisk {
 
     fn read(&mut self, offset: u64, len: u32) -> Result<(), u32> {
         let code = |e: windows::core::Error| (e.code().0 as u32) & 0xFFFF;
-        // SAFETY: moves the file pointer of the handle this value owns.
-        unsafe { SetFilePointerEx(self.handle, offset as i64, None, FILE_BEGIN) }.map_err(code)?;
+        if self.stuck {
+            return Err(ERROR_DEVICE_NOT_CONNECTED);
+        }
+        let mut ov = Box::new(OVERLAPPED::default());
+        ov.Anonymous.Anonymous.Offset = offset as u32;
+        ov.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
         // SAFETY: the page-aligned buffer holds one block, and `len` is at most one block.
         let buf =
             unsafe { std::slice::from_raw_parts_mut(self.buffer, len.min(SURFACE_BLOCK) as usize) };
-        let mut read = 0u32;
-        // SAFETY: a synchronous read into the buffer above.
-        unsafe { ReadFile(self.handle, Some(buf), Some(&mut read), None) }.map_err(code)?;
-        if read == len { Ok(()) } else { Err(0) }
+        // SAFETY: the buffer and the OVERLAPPED outlive the read, which is collected on the port
+        // below before they are reused; if it never completes both are leaked instead.
+        match unsafe { ReadFile(self.reader, Some(buf), None, Some(&mut *ov)) } {
+            Ok(()) => {}
+            Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {}
+            Err(e) => return Err(code(e)),
+        }
+        let started = Instant::now();
+        let mut cancelling = false;
+        loop {
+            let (mut done, mut key) = (0u32, 0usize);
+            let mut finished: *mut OVERLAPPED = std::ptr::null_mut();
+            let wait = if cancelling {
+                CANCEL_WAIT_MS
+            } else {
+                self.poll_ms
+            };
+            // SAFETY: waits for the one read this call issued on the port this value owns.
+            let waited = unsafe {
+                GetQueuedCompletionStatus(self.port, &mut done, &mut key, &mut finished, wait)
+            };
+            if finished.is_null() {
+                if cancelling {
+                    self.stuck = true;
+                    std::mem::forget(ov);
+                    return Err(ERROR_DEVICE_NOT_CONNECTED);
+                }
+                if (self.stop)() || started.elapsed() >= self.read_limit {
+                    // SAFETY: cancels this value's own read; it still completes on the port.
+                    let _ = unsafe { CancelIoEx(self.reader, None) };
+                    cancelling = true;
+                }
+                continue;
+            }
+            return match waited {
+                Ok(()) if done == len => Ok(()),
+                Ok(()) => Err(0),
+                Err(e) => Err(code(e)),
+            };
+        }
     }
 
     fn io_bytes(&self) -> Option<u64> {
@@ -213,23 +307,31 @@ impl Disk for PhysicalDisk {
 
 impl Drop for PhysicalDisk {
     fn drop(&mut self) {
-        // SAFETY: releases the buffer and closes the handle `open` made, once each.
+        if self.stuck {
+            return;
+        }
+        // SAFETY: releases the buffer and closes the handles `open` made, once each.
         unsafe {
             if !self.buffer.is_null() {
                 let _ = VirtualFree(self.buffer.cast(), 0, MEM_RELEASE);
             }
+            let _ = CloseHandle(self.port);
+            let _ = CloseHandle(self.reader);
             let _ = CloseHandle(self.handle);
         }
     }
 }
 
 /// Reads `disk` from `from_bytes` to its end, or until `stop` says so; a slow block is read again
-/// and counts by its faster time, and a block that fails is narrowed down to its sectors.
+/// and counts by its faster time, and a block that fails is narrowed down to its sectors within
+/// `block_budget`, after which its unread sectors count as unreadable. A stop in the middle of a
+/// block leaves that block out of the map, so a later scan resumes at it.
 pub fn scan(
     disk: &mut impl Disk,
     number: u32,
     media: Media,
     from_bytes: u64,
+    block_budget: Duration,
     stop: &mut dyn FnMut() -> bool,
     progress: &mut dyn FnMut(SurfaceProgress),
 ) -> (SurfaceScan, bool) {
@@ -271,8 +373,20 @@ pub fn scan(
         } else {
             let mut bad = Vec::new();
             let mut vanished = first.is_err_and(|code| DEVICE_GONE.contains(&code));
-            for at in (offset..offset + u64::from(len)).step_by(sector as usize) {
+            let mut interrupted = false;
+            let sectors = (offset..offset + u64::from(len)).step_by(sector as usize);
+            for at in sectors.clone() {
                 if vanished {
+                    break;
+                }
+                if stop() {
+                    interrupted = true;
+                    break;
+                }
+                if started.elapsed() >= block_budget {
+                    // The rest of the block was not read; it counts with the sectors that failed.
+                    let room = SECTORS_NARROWED.saturating_sub(bad.len());
+                    bad.extend(sectors.clone().filter(|s| *s >= at).take(room));
                     break;
                 }
                 ours += u64::from(sector);
@@ -283,6 +397,10 @@ pub fn scan(
                         break;
                     }
                 }
+            }
+            if interrupted || (stop() && !vanished) {
+                stopped = true;
+                break;
             }
             if vanished {
                 gone = true;
@@ -395,7 +513,8 @@ pub fn run(number: u32, from_mib: u64, out: &Path) -> ExitCode {
     unsafe {
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     }
-    let run = match PhysicalDisk::open(number) {
+    let read_stop = stop_path.clone();
+    let run = match PhysicalDisk::open(number, Box::new(move || read_stop.exists())) {
         Err(reason) => failed_run(number, media, reason, started_ms),
         Ok(mut disk) => {
             let (scan, stopped) = scan(
@@ -403,6 +522,7 @@ pub fn run(number: u32, from_mib: u64, out: &Path) -> ExitCode {
                 number,
                 media,
                 from_mib.saturating_mul(1 << 20),
+                BLOCK_BUDGET,
                 &mut || stop_path.exists(),
                 &mut |p| rewrite(&mut progress_file, &p),
             );
@@ -428,6 +548,8 @@ mod tests {
     use super::*;
 
     const MIB: u64 = 1 << 20;
+    /// A block budget no test reaches.
+    const NO_BUDGET: Duration = Duration::from_secs(3600);
 
     /// A disk in memory: one sector that never reads, and blocks that read slowly the first time.
     struct FakeDisk {
@@ -443,6 +565,8 @@ mod tests {
         outside_per_read: u64,
         /// What the length query says once reads fail.
         answers: bool,
+        /// How long a read that fails takes to fail.
+        fail_takes: Duration,
     }
 
     impl FakeDisk {
@@ -456,6 +580,7 @@ mod tests {
                 counter: None,
                 outside_per_read: 0,
                 answers: true,
+                fail_takes: Duration::ZERO,
             }
         }
     }
@@ -485,6 +610,7 @@ mod tests {
             if let Some((from, code)) = self.fails_from
                 && offset + u64::from(len) > from
             {
+                std::thread::sleep(self.fail_takes);
                 return Err(code);
             }
             match self.bad_sector {
@@ -516,7 +642,15 @@ mod tests {
     }
 
     fn scan_all(disk: &mut FakeDisk, from: u64) -> (SurfaceScan, bool) {
-        scan(disk, 1, Media::Hdd, from, &mut || false, &mut |_| {})
+        scan(
+            disk,
+            1,
+            Media::Hdd,
+            from,
+            NO_BUDGET,
+            &mut || false,
+            &mut |_| {},
+        )
     }
 
     #[test]
@@ -543,6 +677,7 @@ mod tests {
             1,
             Media::Hdd,
             0,
+            NO_BUDGET,
             &mut || {
                 asked += 1;
                 asked > 10
@@ -557,7 +692,15 @@ mod tests {
     #[test]
     fn resumes_from_the_stop_point() {
         let mut disk = FakeDisk::new(64);
-        let (first, _) = scan(&mut disk, 1, Media::Hdd, 0, &mut || false, &mut |_| {});
+        let (first, _) = scan(
+            &mut disk,
+            1,
+            Media::Hdd,
+            0,
+            NO_BUDGET,
+            &mut || false,
+            &mut |_| {},
+        );
         let first = SurfaceScan {
             to_bytes: 32 * MIB,
             ..first
@@ -628,12 +771,109 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_in_the_middle_of_a_bad_block_ends_the_scan() {
+        let mut disk = FakeDisk::new(8);
+        disk.fails_from = Some((2 * MIB, 23));
+        disk.fail_takes = Duration::from_millis(20);
+        let mut asked = 0;
+        let began = Instant::now();
+        let (scan, stopped) = scan(
+            &mut disk,
+            1,
+            Media::Hdd,
+            0,
+            NO_BUDGET,
+            &mut || {
+                asked += 1;
+                asked > 6
+            },
+            &mut |_| {},
+        );
+        assert!(stopped);
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "a whole block would take over 1 s"
+        );
+        assert_eq!(
+            scan.to_bytes,
+            2 * MIB,
+            "the block that was cut is read again later"
+        );
+        assert_eq!(scan.unreadable_blocks, 0);
+        assert_eq!(as_run(scan, true, 0).outcome, Outcome::Interrupted);
+    }
+
+    #[test]
+    fn a_block_that_takes_too_long_is_given_up() {
+        let mut disk = FakeDisk::new(4);
+        disk.fails_from = Some((2 * MIB, 23));
+        disk.fail_takes = Duration::from_millis(10);
+        let (scan, stopped) = scan(
+            &mut disk,
+            1,
+            Media::Hdd,
+            0,
+            Duration::from_millis(50),
+            &mut || false,
+            &mut |_| {},
+        );
+        assert!(!stopped);
+        assert!(disk.reads < 2 + 2 * 20, "{} reads", disk.reads);
+        assert_eq!(
+            scan.unreadable_blocks, 2,
+            "the unread sectors are not healthy"
+        );
+        assert!(scan.failure.is_none());
+        assert_eq!(as_run(scan, false, 0).outcome, Outcome::Problems);
+    }
+
+    #[test]
     fn a_slow_block_counts_by_its_faster_read() {
         let mut disk = FakeDisk::new(4);
         disk.slow_once = vec![2 * MIB];
         let (scan, _) = scan_all(&mut disk, 0);
         assert_eq!(scan.slow_blocks(), 0);
         assert_eq!(disk.reads, 5, "the slow block is read twice");
+    }
+
+    // Reads a physical drive, so it needs elevation and the number of a throwaway virtual disk in
+    // VESTIGIUM_TEST_DISK; run by hand with
+    // `cargo test -p vestigium-helper -- --ignored reads_a_virtual_disk_overlapped`.
+    #[test]
+    #[ignore = "reads a physical drive named by VESTIGIUM_TEST_DISK; needs elevation"]
+    fn reads_a_virtual_disk_overlapped() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let number: u32 = std::env::var("VESTIGIUM_TEST_DISK")
+            .expect("VESTIGIUM_TEST_DISK names a throwaway disk")
+            .parse()
+            .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let mut disk =
+            PhysicalDisk::open(number, Box::new(move || flag.load(Ordering::Relaxed))).unwrap();
+        assert!(disk.bytes() > 0);
+        let (whole, stopped) = scan(
+            &mut disk,
+            number,
+            Media::Unknown,
+            0,
+            NO_BUDGET,
+            &mut || false,
+            &mut |_| {},
+        );
+        assert!(!stopped && whole.whole_disk() && whole.unreadable_blocks == 0);
+
+        // A read that is asked to stop at once is cancelled, completes and leaves the disk usable.
+        disk.poll_ms = 0;
+        cancel.store(true, Ordering::Relaxed);
+        let began = Instant::now();
+        let _ = disk.read(0, SURFACE_BLOCK);
+        assert!(began.elapsed() < Duration::from_secs(6));
+        cancel.store(false, Ordering::Relaxed);
+        disk.poll_ms = READ_POLL_MS;
+        assert_eq!(disk.read(0, SURFACE_BLOCK), Ok(()));
     }
 
     #[test]
