@@ -24,6 +24,10 @@ How to use this file:
 
 ### Security
 
+- The release build no longer has the update signing key in its environment. The installer is built
+  with no secret, a separate job that receives only the installer signs it, and a third job holds the
+  permissions to publish the draft release, so a compromised build dependency cannot use the key or
+  alter the installer before it is signed. The actions the release uses are pinned to commits.
 - A tweak plan can no longer be swapped while the administrator permission prompt is open. The window
   now keeps the plan file locked against writing and passes the helper its SHA-256, and the helper
   refuses to run a plan that does not match it.

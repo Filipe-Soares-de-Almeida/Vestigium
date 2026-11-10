@@ -2,24 +2,26 @@ name: Release
 
 # A v* tag on main builds a draft release to check and publish by hand. Run by hand, it builds and signs
 # the installer and keeps it as a workflow artifact, publishing nothing.
+# Three jobs: build holds no secret, sign holds the update key and nothing else, publish holds the write
+# permissions and never builds.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+permissions: {}
 
 jobs:
-  release:
-    name: Build, sign and publish
+  build:
+    name: Build the installer
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Check that the tag is on main
         if: github.event_name == 'push'
@@ -29,7 +31,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The tag $env:GITHUB_REF_NAME does not point at a commit on main." }
           "VERSION=$($env:GITHUB_REF_NAME.TrimStart('v'))" >> $env:GITHUB_ENV
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -38,29 +40,111 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
-      - name: Build and sign the installer
+      - name: Build the installer
         shell: pwsh
+        run: |
+          ./tools/bundle.ps1
+          $name = if ($env:VERSION) { "Vestigium_$($env:VERSION)_x64-setup.exe" } else { '*-setup.exe' }
+          if (-not (Get-ChildItem target/release/bundle/nsis -Filter $name)) { throw "The installer $name was not built." }
+
+      - name: Keep the unsigned installer for the signing job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign the installer
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            apps/ui/package.json
+            apps/ui/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-installer
+          path: installer
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Install the signer without running dependency scripts
+        shell: pwsh
+        working-directory: apps/ui
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Find the installer and its version
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem installer -Filter '*-setup.exe')
+          if ($setup.Count -ne 1) { throw "Expected one installer, found $($setup.Count)." }
+          if ($setup[0].Name -match '^Vestigium_(.+)_x64-setup\.exe$') { $version = $Matches[1] }
+          else { throw "Unexpected installer name $($setup[0].Name)." }
+          "INSTALLER=$($setup[0].FullName)" >> $env:GITHUB_ENV
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Sign the installer
+        shell: pwsh
+        working-directory: apps/ui
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          ./tools/bundle.ps1
-          if (-not (Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe.sig')) { throw "The installer was not signed." }
+          npm run tauri -- signer sign --app-version $env:APP_VERSION $env:INSTALLER
+          if ($LASTEXITCODE -ne 0) { throw "Signing failed with exit code $LASTEXITCODE." }
+
+      - name: Check the signature file
+        shell: pwsh
+        run: |
+          $sig = Get-Item "$env:INSTALLER.sig" -ErrorAction SilentlyContinue
+          if (-not $sig -or $sig.Length -eq 0) { throw "The installer was not signed." }
 
       - name: Keep the signed installer
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer
-          path: target/release/bundle/nsis/*-setup.exe*
+          path: installer/*-setup.exe*
+          if-no-files-found: error
+
+  publish:
+    name: Draft the release
+    needs: [build, sign]
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer
+          path: target/release/bundle/nsis
+
+      - name: Read the version from the tag
+        shell: pwsh
+        run: '"VERSION=$($env:GITHUB_REF_NAME.TrimStart(''v''))" >> $env:GITHUB_ENV'
 
       - name: Write the release notes and the update feed
-        if: github.event_name == 'push'
         shell: pwsh
         run: ./tools/release.ps1 -Version $env:VERSION -Out release
 
       - name: Write the checksums
-        if: github.event_name == 'push'
         shell: pwsh
         run: |
           $setup = "target/release/bundle/nsis/Vestigium_$($env:VERSION)_x64-setup.exe"
@@ -70,13 +154,11 @@ jobs:
           [System.IO.File]::WriteAllText("$PWD/release/SHA256SUMS.txt", ($lines -join "`n") + "`n")
 
       - name: Attest where the installer was built
-        if: github.event_name == 'push'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: target/release/bundle/nsis/*-setup.exe
 
       - name: Draft the release
-        if: github.event_name == 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
