@@ -10,7 +10,9 @@ use std::thread;
 use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::{EventSubscription, ProbeConfig, WindowsSettings, spawn_probe, wall_ms};
+use vestigium_collect::{
+    EventSubscription, ProbeConfig, Wake, WindowsSettings, spawn_probe, wall_ms,
+};
 use vestigium_core::{
     Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
     PressureSpan, ProbeHiccup, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate,
@@ -485,6 +487,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();
+    let wake = Arc::new(Wake::new().map_err(failed)?);
     let (events_tx, events_rx) = mpsc::channel();
     // Without a readable bookmark the backfill runs again; stored events are not duplicated.
     let bookmark = store.bookmark_xml().ok().flatten();
@@ -501,6 +504,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 gate: shared.gate.clone(),
                 probe_rx,
                 power_rx,
+                wake: wake.clone(),
                 events_rx,
                 subscription,
                 sensitive: shared.sensitive.clone(),
@@ -522,8 +526,10 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     );
     let stop = {
         let gate = shared.gate.clone();
+        let wake = wake.clone();
         move || {
             gate.set(GateState::Stopping);
+            wake.set();
             sampler.wait(STOP_TIMEOUT);
         }
     };
@@ -561,7 +567,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         let stop = stop.clone();
         let window = shutdown::watch_session_end(move || stop()).map_err(failed)?;
         power::watch(window, move |event| {
-            let _ = power_tx.send(event);
+            power::announce(event, &power_tx, &wake, power::SUSPEND_WAIT);
         })
         .map_err(failed)?;
     }

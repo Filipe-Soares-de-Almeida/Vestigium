@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use vestigium_collect::{
     CollectError, CpuReading, CpuSampler, HighResTimer, MemoryInfo, PdhReading, PdhSampler,
-    ProcessSnapshotter, memory_info,
+    ProcessSnapshotter, Waited, Wake, memory_info,
 };
 use vestigium_core::ProcessCounters;
 
@@ -10,12 +10,13 @@ const SNAPSHOT_BUFFER: usize = 512 * 1024;
 
 /// Blocks the sampler thread until the next tick.
 pub trait Waiter {
-    fn wait(&self, due: Duration) -> Result<(), CollectError>;
+    /// Waits `due`, or until `wake` is set, and says which came first.
+    fn wait(&self, due: Duration, wake: &Wake) -> Result<Waited, CollectError>;
 }
 
 impl Waiter for HighResTimer {
-    fn wait(&self, due: Duration) -> Result<(), CollectError> {
-        HighResTimer::wait(self, due)
+    fn wait(&self, due: Duration, wake: &Wake) -> Result<Waited, CollectError> {
+        self.wait_or_wake(due, wake)
     }
 }
 

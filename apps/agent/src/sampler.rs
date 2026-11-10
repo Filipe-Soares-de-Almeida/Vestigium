@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    BlackboxRing, CollectError, Delivered, EventSubscription, WindowsHealth, disk_media, hung_pids,
-    logical_cpus, memory_info, physical_drive, unbiased_ms, wall_ms,
+    BlackboxRing, CollectError, Delivered, EventSubscription, Waited, Wake, WindowsHealth,
+    disk_media, hung_pids, logical_cpus, memory_info, physical_drive, unbiased_ms, wall_ms,
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
@@ -30,7 +30,7 @@ use crate::clock::ClockWatch;
 use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
-use crate::power::PowerEvent;
+use crate::power::PowerNotice;
 use crate::readings::{Backoff, Readings, Source, SourceHealths, SourceSet, Waiter};
 use crate::sensitive::SensitiveMode;
 use crate::shutdown;
@@ -88,7 +88,9 @@ pub struct Wiring {
     pub timing: Timing,
     pub gate: Arc<RunGate>,
     pub probe_rx: Receiver<ProbeTick>,
-    pub power_rx: Receiver<PowerEvent>,
+    pub power_rx: Receiver<PowerNotice>,
+    /// Set to end the sampler's wait for the next tick at once.
+    pub wake: Arc<Wake>,
     pub events_rx: Receiver<Delivered>,
     /// Kept alive as long as the sampler; `None` when the Event Log could not be read.
     pub subscription: Option<EventSubscription>,
@@ -148,7 +150,8 @@ struct Sampler {
     batcher: Batcher,
     blackbox: Blackbox,
     probe_rx: Receiver<ProbeTick>,
-    power_rx: Receiver<PowerEvent>,
+    power_rx: Receiver<PowerNotice>,
+    wake: Arc<Wake>,
     events_rx: Receiver<Delivered>,
     _subscription: Option<EventSubscription>,
     sensitive: Arc<SensitiveMode>,
@@ -262,6 +265,7 @@ impl Sampler {
             blackbox: Blackbox::new(machine, wiring.timing),
             probe_rx: wiring.probe_rx,
             power_rx: wiring.power_rx,
+            wake: wiring.wake,
             events_rx: wiring.events_rx,
             _subscription: wiring.subscription,
             sensitive: wiring.sensitive,
@@ -387,7 +391,15 @@ impl Sampler {
             }
 
             let due_ms = (next_tick - unbiased_ms()).max(0.0);
-            self.pace(&mut sources, Duration::from_secs_f64(due_ms / 1000.0), gate);
+            let woken = self.pace(&mut sources, Duration::from_secs_f64(due_ms / 1000.0), gate);
+            if woken {
+                // Woken before the tick: handle what woke us and wait out the rest of the second.
+                if gate.state() == GateState::Running && self.on_power(&mut sources) {
+                    next_tick = unbiased_ms() + TICK_MS;
+                    trim_at = Some(ticks + TRIM_AFTER_TICKS);
+                }
+                continue;
+            }
             let woke = unbiased_ms();
             let sampler_lag_ms = (woke - next_tick).max(0.0) as f32;
             // After a long stall, start a fresh schedule instead of catching up.
@@ -417,9 +429,10 @@ impl Sampler {
         }
     }
 
-    /// Waits `due` for the next tick on the timer, or with a plain sleep while there is none.
-    /// The timer is created again on a growing wait; a pause or a stop ends the sleep at once.
-    fn pace(&mut self, sources: &mut Sources, due: Duration, gate: &RunGate) {
+    /// Waits `due` for the next tick on the timer, or with a plain sleep while there is none;
+    /// true when the wake event ended the wait early. The timer is created again on a growing
+    /// wait; a pause or a stop ends the sleep at once.
+    fn pace(&mut self, sources: &mut Sources, due: Duration, gate: &RunGate) -> bool {
         if sources.timer.is_none() && sources.timer_backoff.due() {
             match self.read(Source::Timer, sources.readings.open_timer()) {
                 Ok(timer) => {
@@ -430,14 +443,15 @@ impl Sampler {
             }
         }
         if let Some(timer) = &sources.timer {
-            let waited = timer.wait(due);
-            if self.read(Source::Timer, waited).is_ok() {
-                return;
+            let waited = timer.wait(due, &self.wake);
+            if let Ok(waited) = self.read(Source::Timer, waited) {
+                return waited == Waited::Woken;
             }
             sources.timer = None;
             sources.timer_backoff.failed();
         }
         gate.wait_while_running_for(due);
+        false
     }
 
     /// Tries to open the performance counters; a failure schedules the next attempt.
@@ -904,13 +918,17 @@ impl Sampler {
         self.blackbox.set_machine(machine);
     }
 
-    /// Handles pending suspend and resume notices; true when a resume restarted the sources.
+    /// Handles pending suspend and resume notices; true when a resume restarted the sources. A
+    /// suspend is answered once everything is written.
     fn on_power(&mut self, sources: &mut Sources) -> bool {
         let mut resumed = false;
         while let Ok(event) = self.power_rx.try_recv() {
             match event {
-                PowerEvent::Suspend => self.leave(GapReason::Suspended),
-                PowerEvent::Resume => {
+                PowerNotice::Suspend(done) => {
+                    self.leave(GapReason::Suspended);
+                    let _ = done.send(());
+                }
+                PowerNotice::Resume => {
                     // Probe ticks and rates measured across the suspension are dropped.
                     self.probe_rx.try_iter().for_each(drop);
                     self.come_back(wall_ms());
@@ -1154,7 +1172,8 @@ mod tests {
         status: Arc<Mutex<AgentStatus>>,
         now: Arc<Mutex<NowFrame>>,
         probe_tx: mpsc::Sender<ProbeTick>,
-        power_tx: mpsc::Sender<PowerEvent>,
+        power_tx: mpsc::Sender<PowerNotice>,
+        wake: Arc<Wake>,
         events_tx: mpsc::Sender<Delivered>,
     }
 
@@ -1164,7 +1183,8 @@ mod tests {
         status: Arc<Mutex<AgentStatus>>,
         now: Arc<Mutex<NowFrame>>,
         probe_tx: mpsc::Sender<ProbeTick>,
-        power_tx: mpsc::Sender<PowerEvent>,
+        power_tx: mpsc::Sender<PowerNotice>,
+        wake: Arc<Wake>,
         events_tx: mpsc::Sender<Delivered>,
     }
 
@@ -1190,6 +1210,7 @@ mod tests {
             now: ties.now,
             probe_tx: ties.probe_tx,
             power_tx: ties.power_tx,
+            wake: ties.wake,
             events_tx: ties.events_tx,
         }
     }
@@ -1199,6 +1220,7 @@ mod tests {
         let gate = RunGate::new();
         let (probe_tx, probe_rx) = mpsc::channel();
         let (power_tx, power_rx) = mpsc::channel();
+        let wake = Arc::new(Wake::new().unwrap());
         let (events_tx, events_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(AgentStatus::default()));
         let sensitive = SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR);
@@ -1209,6 +1231,7 @@ mod tests {
             gate: gate.clone(),
             probe_rx,
             power_rx,
+            wake: wake.clone(),
             events_rx,
             subscription: None,
             sensitive,
@@ -1234,6 +1257,7 @@ mod tests {
             now,
             probe_tx,
             power_tx,
+            wake,
             events_tx,
         };
         (wiring, ties)
@@ -1284,9 +1308,9 @@ mod tests {
     struct Sleeper;
 
     impl Waiter for Sleeper {
-        fn wait(&self, due: Duration) -> Result<(), CollectError> {
+        fn wait(&self, due: Duration, _wake: &Wake) -> Result<Waited, CollectError> {
             thread::sleep(due);
-            Ok(())
+            Ok(Waited::Elapsed)
         }
     }
 
@@ -1707,13 +1731,15 @@ mod tests {
             "no sample taken"
         );
 
-        running.power_tx.send(PowerEvent::Suspend).unwrap();
+        let (done, _answered) = mpsc::channel();
+        running.power_tx.send(PowerNotice::Suspend(done)).unwrap();
+        running.wake.set();
         assert!(
             wait_until(PATIENCE, || samples(dir.path()).0 == 1),
             "suspending did not write the buffered batch"
         );
         let resumed_at = wall_ms();
-        running.power_tx.send(PowerEvent::Resume).unwrap();
+        running.power_tx.send(PowerNotice::Resume).unwrap();
         let sampled_again = wait_until(PATIENCE, || {
             lock(&running.status)
                 .last_sample_ms
@@ -1727,6 +1753,54 @@ mod tests {
 
         assert!(sampled_again, "no sample after resuming");
         assert_eq!(lock(&running.status).last_error, None);
+    }
+
+    #[test]
+    fn suspend_is_acknowledged_after_the_batch_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), NEVER_DUE);
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
+
+        let (done, answered) = mpsc::channel();
+        running.power_tx.send(PowerNotice::Suspend(done)).unwrap();
+        running.wake.set();
+        assert!(
+            answered.recv_timeout(PATIENCE).is_ok(),
+            "the suspend was not answered"
+        );
+        assert_eq!(
+            samples(dir.path()).0,
+            1,
+            "the answer came before the batch was written"
+        );
+        stop(&running);
+    }
+
+    #[test]
+    fn a_suspend_notice_wakes_the_sampler_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let running = start(dir.path(), NEVER_DUE);
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
+        // The sampler is now part way through its second, waiting for the next tick.
+        thread::sleep(Duration::from_millis(150));
+
+        let (done, answered) = mpsc::channel();
+        let sent = Instant::now();
+        running.power_tx.send(PowerNotice::Suspend(done)).unwrap();
+        running.wake.set();
+        assert!(answered.recv_timeout(PATIENCE).is_ok());
+        assert!(
+            sent.elapsed() < Duration::from_millis(700),
+            "answered after {:?}, the tick is a second long",
+            sent.elapsed()
+        );
+        stop(&running);
     }
 
     #[test]
@@ -2532,6 +2606,7 @@ mod tests {
             gate: shared.gate.clone(),
             probe_rx,
             power_rx,
+            wake: Arc::new(Wake::new().unwrap()),
             events_rx,
             subscription: None,
             sensitive: shared.sensitive.clone(),

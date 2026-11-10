@@ -45,6 +45,10 @@ How to use this file:
 
 ### Fixed
 
+- When the PC is about to sleep or hibernate, the monitor now writes what it holds first. The
+  suspend notice wakes the sampler at once and waits up to a second and a half for it to save the
+  open batch, pending events, gaps and the black box, where before this was done only after the PC
+  woke up, or lost if it never did.
 - A volume check can now be stopped, and it no longer runs without a limit. Stopping it ends
   chkdsk within a second or two and the check is recorded as not completed; a check that is still
   running after six hours is ended the same way.
