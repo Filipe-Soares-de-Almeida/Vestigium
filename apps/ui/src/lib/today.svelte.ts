@@ -1,6 +1,7 @@
 import { dayStart, itemsOf, worstOf } from "../screens/today/day";
 import { marks } from "./api";
 import type { OccurrenceSummary } from "./types";
+import { pollWhileShown } from "./visibility";
 
 const REFRESH_MS = 60_000;
 
@@ -14,17 +15,7 @@ class TodayMarks {
   /** Reads now and every minute while the window is visible; returns the function that stops it. */
   watch(): () => void {
     void this.load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void this.load();
-    }, REFRESH_MS);
-    const onvisible = () => {
-      if (!document.hidden) void this.load();
-    };
-    document.addEventListener("visibilitychange", onvisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onvisible);
-    };
+    return pollWhileShown(() => this.load(), REFRESH_MS);
   }
 
   /** A failed read keeps what is shown. */

@@ -9,6 +9,7 @@
   import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { ProcessFacts, ProgramMarks, ProgramPoint, RunAs, Signature } from "../../lib/types";
+  import { pollWhileShown } from "../../lib/visibility";
   import { at } from "../dumps/words";
   import { formatBytes, formatRate } from "../now/lanes";
   import { NowStream } from "../now/stream.svelte";
@@ -58,10 +59,7 @@
         () => undefined,
       );
     load();
-    const timer = setInterval(() => {
-      if (!document.hidden) load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(load, REFRESH_MS);
   });
 
   const loadMarks = () => {

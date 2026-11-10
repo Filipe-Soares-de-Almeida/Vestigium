@@ -16,6 +16,7 @@
   import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import type { Episode } from "../lib/types";
+  import { pollWhileShown } from "../lib/visibility";
   import { AREAS, areaState } from "./health/areas";
   import { checkText, findingTitle } from "./health/words";
   import { formatBytes, formatDayShort } from "./occurrence/format";
@@ -46,10 +47,7 @@
       }
     };
     untrack(() => void read());
-    const timer = setInterval(() => {
-      if (!document.hidden) void read();
-    }, 60_000);
-    return () => clearInterval(timer);
+    return pollWhileShown(read, 60_000);
   });
 
   const standing = $derived(dto ? memoryState(dto, hwtests.running !== null) : null);

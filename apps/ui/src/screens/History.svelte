@@ -12,6 +12,7 @@
   import { lang, t, tn } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
   import { type HistoryScope, href } from "../lib/router.svelte";
+  import { pollWhileShown } from "../lib/visibility";
   import Calendar from "./history/Calendar.svelte";
   import {
     buildHistory,
@@ -57,10 +58,7 @@
   $effect(() => {
     if (app.history !== "ready") return;
     untrack(() => void load());
-    const timer = setInterval(() => {
-      if (!document.hidden) void load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(load, REFRESH_MS);
   });
 
   const month = $derived(data ? clampMonth(data, askedMonth) : null);

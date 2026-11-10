@@ -3,6 +3,7 @@ import { errorKind } from "./errors";
 import { t, tn } from "./i18n.svelte";
 import { toast } from "./toast.svelte";
 import type { DumpsDto } from "./types";
+import { pollWhileShown } from "./visibility";
 
 const REFRESH_MS = 5 * 60_000;
 
@@ -29,10 +30,7 @@ class Dumps {
   /** Reads now and every five minutes while the window is visible; returns the function that stops it. */
   watch(): () => void {
     void this.load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void this.load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(() => this.load(), REFRESH_MS);
   }
 
   /** A failed read keeps what is on screen; the error shows only when there is nothing yet. */

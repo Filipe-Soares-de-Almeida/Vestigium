@@ -4,6 +4,7 @@ import { t } from "./i18n.svelte";
 import { applySettings } from "./prefs";
 import { toast } from "./toast.svelte";
 import type { AgentLink, HistoryState, Settings, SettingsDto } from "./types";
+import { pollWhileShown } from "./visibility";
 
 const POLL_MS = 5000;
 const PROBE_MS = 60_000;
@@ -39,17 +40,7 @@ class App {
   /** Loads everything, then keeps the watcher's state current; returns the function that stops it. */
   start(): () => void {
     void this.load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void this.refresh();
-    }, POLL_MS);
-    const onvisible = () => {
-      if (!document.hidden) void this.refresh();
-    };
-    document.addEventListener("visibilitychange", onvisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onvisible);
-    };
+    return pollWhileShown(() => this.refresh(), POLL_MS);
   }
 
   async load(): Promise<void> {

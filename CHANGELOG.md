@@ -33,6 +33,9 @@ How to use this file:
   history each time they refresh, which was about 2 MB every five minutes for 90 days of a busy
   PC; the event page still shows its full details. The History calendar also builds its day counts
   in a single pass, so a history with tens of thousands of freezes no longer stalls the screen.
+- While the window is minimized it no longer asks the watcher for anything: the status check every
+  five seconds and the refreshes of today, health, crash dumps, optimizations, events, memory and
+  history stop, and each one reads again as soon as the window is restored.
 
 ### Security
 
