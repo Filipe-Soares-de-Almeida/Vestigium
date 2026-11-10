@@ -22,6 +22,11 @@ How to use this file:
 
 ## [Unreleased]
 
+### Changed
+
+- The crash dumps screen now reads only the blue screen events of the last year from the history
+  instead of every kept event, so it opens faster on a PC with a long, busy history.
+
 ### Security
 
 - The release build no longer has the update signing key in its environment. The installer is built

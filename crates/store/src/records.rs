@@ -1,7 +1,8 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
-    Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, LanguagePref,
-    MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref, WinEvent, classify,
+    CURATED, Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap,
+    LanguagePref, MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref,
+    WinEvent, classify,
 };
 
 use crate::codes::{
@@ -171,10 +172,39 @@ impl Store {
     /// Curated events logged in `[from_ms, to_ms]`, oldest first, each meaning judged again by the
     /// current rules; a stored event the rules no longer recognise is left out.
     pub fn events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<WinEvent>, StoreError> {
-        let mut query = self.conn.prepare_cached(
+        self.events_matching(from_ms, to_ms, None)
+    }
+
+    /// The events `events` returns whose meaning is `wanted`; rows whose id no rule of that
+    /// meaning uses are skipped by the query itself.
+    pub fn events_with_meaning(
+        &self,
+        wanted: EventMeaning,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<WinEvent>, StoreError> {
+        self.events_matching(from_ms, to_ms, Some(wanted))
+    }
+
+    fn events_matching(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        wanted: Option<EventMeaning>,
+    ) -> Result<Vec<WinEvent>, StoreError> {
+        let ids = wanted.map(|wanted| {
+            CURATED
+                .iter()
+                .filter(|entry| entry.meaning == wanted)
+                .flat_map(|entry| entry.ids.iter().map(u16::to_string))
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        let filter = ids.map_or_else(String::new, |ids| format!("AND event_id IN ({ids}) "));
+        let mut query = self.conn.prepare_cached(&format!(
             "SELECT ts_ms, channel, provider, event_id, record_id, level, data_xml
-             FROM event WHERE ts_ms BETWEEN ?1 AND ?2 ORDER BY ts_ms, id",
-        )?;
+             FROM event WHERE ts_ms BETWEEN ?1 AND ?2 {filter}ORDER BY ts_ms, id"
+        ))?;
         let rows = query.query_map(params![from_ms, to_ms], event_row)?;
         let mut found = Vec::new();
         for row in rows {
@@ -183,6 +213,9 @@ impl Store {
             let Some(meaning) = classify(channel, &event.provider, event.id) else {
                 continue;
             };
+            if wanted.is_some_and(|wanted| wanted != meaning) {
+                continue;
+            }
             found.push(WinEvent {
                 channel,
                 meaning,

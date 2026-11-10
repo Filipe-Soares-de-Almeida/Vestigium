@@ -280,6 +280,39 @@ fn events_are_unique_per_channel_and_record() {
 }
 
 #[test]
+fn events_of_one_meaning_match_the_filter_of_all_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let stored: Vec<WinEvent> = EventMeaning::ALL
+        .into_iter()
+        .cycle()
+        .take(40)
+        .zip(1..)
+        .map(|(meaning, n)| curated_event(meaning, n))
+        .collect();
+    store
+        .append_batch(&Batch {
+            events: stored,
+            ..Batch::default()
+        })
+        .unwrap();
+
+    for wanted in EventMeaning::ALL {
+        let filtered: Vec<WinEvent> = store
+            .events(5_000, 30_000)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.meaning == wanted)
+            .collect();
+        assert!(!filtered.is_empty(), "{wanted:?}");
+        assert_eq!(
+            store.events_with_meaning(wanted, 5_000, 30_000).unwrap(),
+            filtered
+        );
+    }
+}
+
+#[test]
 fn every_event_meaning_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = open(dir.path());

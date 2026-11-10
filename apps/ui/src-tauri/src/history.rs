@@ -709,7 +709,11 @@ impl History {
             Ok((
                 store.dumps(i64::MIN, i64::MAX)?,
                 store.dump_space()?,
-                store.events(now_ms - REPORTS_SHOWN_MS, now_ms)?,
+                store.events_with_meaning(
+                    EventMeaning::BugCheck,
+                    now_ms - REPORTS_SHOWN_MS,
+                    now_ms,
+                )?,
             ))
         })?;
         let Some((rows, space_bytes, events)) = read else {
@@ -717,7 +721,6 @@ impl History {
         };
         let mut reports: Vec<BugCheckDto> = events
             .iter()
-            .filter(|e| e.meaning == EventMeaning::BugCheck)
             .filter_map(|e| {
                 bug_check_event(&e.data_xml).map(|r| BugCheckDto {
                     ts_ms: e.ts_ms,
