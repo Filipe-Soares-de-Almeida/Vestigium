@@ -6,6 +6,7 @@ mod frame;
 mod pipe;
 mod protocol;
 mod security;
+mod timed;
 
 pub use frame::{MAX_FRAME, read_frame, write_frame};
 pub use pipe::{PipeClient, PipeServer, pipe_name};

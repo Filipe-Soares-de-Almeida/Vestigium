@@ -1,8 +1,10 @@
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use vestigium_ipc::{
     AgentStatus, IpcError, PROTOCOL_VERSION, PipeClient, PipeServer, Request, Response,
@@ -124,4 +126,81 @@ fn server_serves_clients_one_after_another() {
             Response::Status(_)
         ));
     }
+}
+
+#[test]
+fn call_to_a_mute_server_times_out() {
+    let name = unique_name();
+    let (release, hold) = mpsc::channel::<()>();
+    let server = PipeServer::bind(&name).unwrap();
+    thread::spawn(move || {
+        server.serve(move |request| match request {
+            Request::Hello { .. } => answer(request),
+            _ => {
+                let _ = hold.recv();
+                Response::Done
+            }
+        })
+    });
+    let exe = std::env::current_exe().unwrap();
+    let mut client = PipeClient::connect(&name, &exe).unwrap();
+    client
+        .call(&Request::Hello {
+            protocol: PROTOCOL_VERSION,
+        })
+        .unwrap();
+
+    let started = Instant::now();
+    let result = client.call(&Request::Status);
+
+    assert!(
+        matches!(&result, Err(IpcError::Io(err)) if err.kind() == ErrorKind::TimedOut),
+        "got {result:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(6));
+    drop(release);
+}
+
+#[test]
+fn silent_client_does_not_hold_the_server() {
+    let name = unique_name();
+    start_server(&name);
+    let silent = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&name)
+        .unwrap();
+    thread::sleep(Duration::from_millis(3000));
+
+    let exe = std::env::current_exe().unwrap();
+    let mut client = PipeClient::connect(&name, &exe).unwrap();
+
+    assert!(matches!(
+        client.call(&Request::Status).unwrap(),
+        Response::Status(_)
+    ));
+    drop(silent);
+}
+
+#[test]
+fn half_a_frame_is_dropped() {
+    let name = unique_name();
+    start_server(&name);
+    let mut half = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&name)
+        .unwrap();
+    half.write_all(&100u32.to_le_bytes()).unwrap();
+    half.write_all(b"{\"type\"").unwrap();
+    thread::sleep(Duration::from_millis(4500));
+
+    let exe = std::env::current_exe().unwrap();
+    let mut client = PipeClient::connect(&name, &exe).unwrap();
+
+    assert!(matches!(
+        client.call(&Request::Status).unwrap(),
+        Response::Status(_)
+    ));
+    drop(half);
 }

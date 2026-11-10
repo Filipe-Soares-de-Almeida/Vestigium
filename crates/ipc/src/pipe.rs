@@ -10,11 +10,12 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
+    SECURITY_IDENTIFICATION,
 };
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
-    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW,
+    CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId, PIPE_READMODE_BYTE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -22,10 +23,19 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PWSTR};
 
 use crate::security::{SecurityDescriptor, current_user_sid, user_only_sddl};
+use crate::timed::TimedPipe;
 use crate::{ErrorCode, IpcError, Request, Response, read_frame, write_frame};
 
 const BUFFER_BYTES: u32 = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// The client's limit for one read or one write.
+const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a new client may stay silent before the server drops it.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(2);
+/// The server's limit for the rest of a frame, and for one write.
+const SERVER_IO_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a connected client may wait between requests before the server drops it.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Full pipe path for `suffix`; the agent uses the user's SID.
 pub fn pipe_name(suffix: &str) -> String {
@@ -51,7 +61,7 @@ impl PipeServer {
         let handle = unsafe {
             CreateNamedPipeW(
                 &HSTRING::from(name),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 1,
                 BUFFER_BYTES,
@@ -78,14 +88,13 @@ impl PipeServer {
     pub fn serve(&self, mut handler: impl FnMut(Request) -> Response) -> Result<(), IpcError> {
         let handle = HANDLE(self.pipe.as_raw_handle());
         loop {
-            // SAFETY: `handle` stays valid while `self.pipe` lives; synchronous connect.
-            match unsafe { ConnectNamedPipe(handle, None) } {
+            match TimedPipe::connect(handle) {
                 Ok(()) => self.answer(&mut handler),
-                Err(err) if err.code() == ERROR_PIPE_CONNECTED.to_hresult() => {
+                Err(err) if err.raw_os_error() == Some(ERROR_PIPE_CONNECTED.0 as i32) => {
                     self.answer(&mut handler)
                 }
                 // A client that connected and left before this call; drop it and listen again.
-                Err(err) if err.code() == ERROR_NO_DATA.to_hresult() => {}
+                Err(err) if err.raw_os_error() == Some(ERROR_NO_DATA.0 as i32) => {}
                 Err(err) => return Err(err.into()),
             }
             // SAFETY: drops the current client so the next one can connect.
@@ -93,10 +102,15 @@ impl PipeServer {
         }
     }
 
-    /// Answers one client until it disconnects or sends something malformed.
+    /// Answers one client until it disconnects, sends something malformed or goes quiet.
     fn answer(&self, handler: &mut impl FnMut(Request) -> Response) {
-        let mut pipe = &self.pipe;
+        let handle = HANDLE(self.pipe.as_raw_handle());
+        let Ok(mut pipe) = TimedPipe::new(handle, SERVER_IO_TIMEOUT, SERVER_IO_TIMEOUT) else {
+            return;
+        };
+        let mut wait = FIRST_FRAME_TIMEOUT;
         loop {
+            pipe.first_read_within(wait);
             let response = match read_frame::<_, Request>(&mut pipe) {
                 Ok(request) => handler(request),
                 Err(IpcError::Io(_)) => return,
@@ -114,6 +128,7 @@ impl PipeServer {
             if write_frame(&mut pipe, &response).is_err() {
                 return;
             }
+            wait = IDLE_TIMEOUT;
         }
     }
 }
@@ -131,6 +146,7 @@ impl PipeClient {
             let opened = OpenOptions::new()
                 .read(true)
                 .write(true)
+                .custom_flags(FILE_FLAG_OVERLAPPED.0)
                 .security_qos_flags(SECURITY_IDENTIFICATION.0)
                 .open(name);
             match opened {
@@ -152,9 +168,12 @@ impl PipeClient {
         Ok(PipeClient { pipe })
     }
 
+    /// Sends one request and reads its answer; either step fails with `TimedOut` after 3 s.
     pub fn call(&mut self, request: &Request) -> Result<Response, IpcError> {
-        write_frame(&mut &self.pipe, request)?;
-        read_frame(&mut &self.pipe)
+        let handle = HANDLE(self.pipe.as_raw_handle());
+        let mut pipe = TimedPipe::new(handle, CLIENT_IO_TIMEOUT, CLIENT_IO_TIMEOUT)?;
+        write_frame(&mut pipe, request)?;
+        read_frame(&mut pipe)
     }
 }
 
