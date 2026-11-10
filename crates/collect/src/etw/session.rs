@@ -99,6 +99,26 @@ impl Drop for KernelSession {
     }
 }
 
+/// Whether a session called `name` exists, asked without elevation.
+pub fn session_exists(name: &str) -> bool {
+    control(
+        CONTROLTRACE_HANDLE::default(),
+        name,
+        EVENT_TRACE_CONTROL_QUERY,
+    )
+    .is_ok()
+}
+
+/// Stops the session called `name`; `false` when there is none or the caller may not stop it.
+pub fn stop_session(name: &str) -> bool {
+    control(
+        CONTROLTRACE_HANDLE::default(),
+        name,
+        EVENT_TRACE_CONTROL_STOP,
+    )
+    .is_ok()
+}
+
 fn properties(guid: GUID, flags: EVENT_TRACE_FLAG, etl: Option<&Path>) -> Box<Properties> {
     // SAFETY: Properties is plain data; all-zero is its documented starting state.
     let mut p: Box<Properties> = Box::new(unsafe { std::mem::zeroed() });

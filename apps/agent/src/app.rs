@@ -23,6 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
 use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
+use crate::orphan::release_orphaned_capture;
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::tray::{Action, Level, Tray};
@@ -339,6 +340,8 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             lock(&shared.status).last_error = Some(err.to_string());
         }
     }
+
+    release_orphaned_capture();
 
     let (probe_tx, probe_rx) = mpsc::channel();
     let (power_tx, power_rx) = mpsc::channel();

@@ -29,7 +29,8 @@ pub use dumps::{
 };
 pub use etw::{
     Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, IMAGE, KernelRecord,
-    KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, spawn_consumer,
+    KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, session_exists,
+    spawn_consumer, stop_session,
 };
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};

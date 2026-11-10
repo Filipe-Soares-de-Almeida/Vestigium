@@ -35,6 +35,8 @@ How to use this file:
 
 ### Fixed
 
+- A deep capture cut short by the helper being killed no longer leaves its kernel trace session
+  running: the monitor stops it when it starts, as long as no helper is running.
 - A deep capture no longer gives a driver high confidence, nor tells you to update it, because of one
   long routine. A driver now needs three routines of 1 ms or more, or one next to a stall or a
   dropped frame; a single one is reported with medium confidence, in the capture and in the

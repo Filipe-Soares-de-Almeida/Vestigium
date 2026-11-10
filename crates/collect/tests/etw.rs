@@ -4,7 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    EventSink, KernelRecord, KernelSession, RawEvent, kernel_record, spawn_consumer,
+    EventSink, KernelRecord, KernelSession, RawEvent, kernel_record, session_exists,
+    spawn_consumer, stop_session,
 };
 use windows::Win32::System::Diagnostics::Etw::{
     EVENT_TRACE_FLAG_DPC, EVENT_TRACE_FLAG_IMAGE_LOAD, EVENT_TRACE_FLAG_INTERRUPT,
@@ -87,4 +88,14 @@ fn session_stops_on_drop() {
     drop(start());
     let fresh = start();
     fresh.stop().unwrap();
+}
+
+#[test]
+#[ignore]
+fn an_orphan_session_is_found_and_stopped_by_name() {
+    std::mem::forget(start());
+    assert!(session_exists(NAME));
+    assert!(stop_session(NAME));
+    assert!(!session_exists(NAME));
+    assert!(!stop_session(NAME));
 }
