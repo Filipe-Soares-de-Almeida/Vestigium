@@ -36,6 +36,8 @@ How to use this file:
 - While the window is minimized it no longer asks the watcher for anything: the status check every
   five seconds and the refreshes of today, health, crash dumps, optimizations, events, memory and
   history stop, and each one reads again as soon as the window is restored.
+- The Tests, Capture and Dumps screens load the first time they are opened instead of at startup,
+  which makes the script the window loads at startup about 8% smaller.
 
 ### Security
 
