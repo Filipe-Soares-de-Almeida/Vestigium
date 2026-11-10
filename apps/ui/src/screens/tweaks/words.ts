@@ -60,7 +60,10 @@ export type Shown = "signal" | "quiet" | "applied" | "set" | "unavailable" | "pr
 
 /** Windows reported no error, or reported that a write failed and the old value may not be back. */
 const ERROR_MAY_HAVE_CHANGED = 0x2000_0001;
-const wrote = (x: { error: number | null }) => x.error === null || x.error === ERROR_MAY_HAVE_CHANGED;
+/** The helper stopped before it reported, and Windows holds the value it was to write. */
+const ERROR_INTERRUPTED_WRITTEN = 0x2000_0002;
+const wrote = (x: { error: number | null }) =>
+  x.error === null || x.error === ERROR_MAY_HAVE_CHANGED || x.error === ERROR_INTERRUPTED_WRITTEN;
 
 /** The change still in place for this tweak, if Vestigium made one and Windows still holds it. */
 export function inPlace(a: Advice, history: TweakRow[]): TweakRow | null {
@@ -249,7 +252,7 @@ export function helpedVerdict(before: number, after: number): string {
 
 /** Where a history row stands, in words. */
 export function rowState(r: TweakRow): { mark: "Ok" | "Attention" | "Closed"; text: string } {
-  const failed = r.change.results.some((x) => x.error !== null);
+  const failed = r.change.results.some((x) => x.error !== null && x.error !== ERROR_INTERRUPTED_WRITTEN);
   const written = r.change.results.some(wrote);
   if (r.change.undo_of !== null) return { mark: "Closed", text: k("row.undo") };
   if (r.undone_ms !== null) return { mark: "Closed", text: k("row.undone", { when: at(r.undone_ms) }) };

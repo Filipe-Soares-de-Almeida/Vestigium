@@ -268,7 +268,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 shared.health_due.store(true, Ordering::Release);
             }
             let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
-            let tweaks = import_tweaks(&shared.tweaks_dir, store);
+            let tweaks = import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
             let tests = import_tests(&shared.tests_dir, store);
             if !tests.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
@@ -470,7 +470,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             import_captures(&shared.captures_dir, &[], store);
             import_scans(&shared.scans_dir, store);
             import_dumps(&shared.dumps_dir, store);
-            import_tweaks(&shared.tweaks_dir, store);
+            import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
             import_tests(&shared.tests_dir, store);
         }
         let mut first = Some((server, settings_store));

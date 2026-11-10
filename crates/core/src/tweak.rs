@@ -1099,15 +1099,22 @@ pub struct TweakChange {
 
 impl TweakChange {
     pub fn succeeded(&self) -> bool {
-        self.results.iter().all(|r| r.error.is_none())
+        self.results
+            .iter()
+            .all(|r| r.error.is_none() || r.error == Some(ERROR_INTERRUPTED_WRITTEN))
     }
 
-    /// The changes Windows holds or may hold, which an undo puts back: the writes that succeeded
-    /// and those that failed with `ERROR_MAY_HAVE_CHANGED`, leaving out what did not move.
+    /// The changes Windows holds or may hold, which an undo puts back: the writes that succeeded,
+    /// those found in place after an interrupted helper and those that failed with
+    /// `ERROR_MAY_HAVE_CHANGED`, leaving out what did not move.
     pub fn written(&self) -> Vec<SettingChange> {
         self.results
             .iter()
-            .filter(|r| r.error.is_none() || r.error == Some(ERROR_MAY_HAVE_CHANGED))
+            .filter(|r| {
+                r.error.is_none()
+                    || r.error == Some(ERROR_MAY_HAVE_CHANGED)
+                    || r.error == Some(ERROR_INTERRUPTED_WRITTEN)
+            })
             .filter(|r| r.change.from != r.change.to)
             .map(|r| r.change.clone())
             .collect()
@@ -1123,6 +1130,14 @@ pub const ERROR_UNREADABLE: u32 = 1168;
 pub const ERROR_CHANGED_SINCE: u32 = 13;
 /// A write failed and putting the old value back failed too, so the setting may hold either.
 pub const ERROR_MAY_HAVE_CHANGED: u32 = 0x2000_0001;
+/// The helper stopped before it reported, and Windows holds the value it was to write.
+pub const ERROR_INTERRUPTED_WRITTEN: u32 = 0x2000_0002;
+/// The helper stopped before it reported, and Windows still holds the value from before.
+pub const ERROR_INTERRUPTED_UNCHANGED: u32 = 0x2000_0003;
+/// The helper stopped before it reported, and Windows holds neither value, or it cannot be read.
+pub const ERROR_INTERRUPTED_UNKNOWN: u32 = 0x2000_0004;
+/// Layout of the `TweakIntent` the helper writes before its first change.
+pub const TWEAK_INTENT_VERSION: u8 = 1;
 
 /// One tweak to apply or undo, as the window asks for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1239,6 +1254,100 @@ fn target_of(
             _ => None,
         },
         other => Some(other.clone()),
+    }
+}
+
+/// What the helper recorded before its first change: for every item it will carry out, each
+/// setting with the value read and the value it is to write.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TweakIntent {
+    pub ts_ms: i64,
+    pub items: Vec<IntentItem>,
+}
+
+/// One item of a `TweakIntent`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentItem {
+    pub tweak: TweakId,
+    pub subject: Option<String>,
+    pub undo_of: Option<i64>,
+    pub settings: Vec<IntentSetting>,
+}
+
+/// One setting of an `IntentItem`, as the change will act on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentSetting {
+    pub setting: Setting,
+    /// What the setting held when the intent was recorded; `None` when it could not be read.
+    pub before: Option<Value>,
+    pub to: Value,
+}
+
+/// Reads every setting the checked `items` will write, to record before the first write.
+pub fn intent_of(items: &[&PlanItem], store: &mut impl SettingStore, ts_ms: i64) -> TweakIntent {
+    let items = items
+        .iter()
+        .map(|item| IntentItem {
+            tweak: item.tweak,
+            subject: item.subject.clone(),
+            undo_of: item.undo_of,
+            settings: item
+                .changes
+                .iter()
+                .map(|change| {
+                    let target = target_of(change, item.undo_of.is_some(), store);
+                    IntentSetting {
+                        before: target.as_ref().and_then(|setting| store.read(setting)),
+                        setting: target.unwrap_or_else(|| change.setting.clone()),
+                        to: change.to.clone(),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    TweakIntent { ts_ms, items }
+}
+
+/// What an intent with no result left in Windows: each setting is found written, found as it was
+/// or found otherwise, and recorded as such; the restore point is not known.
+pub fn settle_interrupted(intent: &TweakIntent, store: &mut impl SettingStore) -> TweakResults {
+    let changes = intent
+        .items
+        .iter()
+        .map(|item| TweakChange {
+            tweak: item.tweak,
+            subject: item.subject.clone(),
+            undo_of: item.undo_of,
+            results: item
+                .settings
+                .iter()
+                .map(|planned| settle_setting(planned, store))
+                .collect(),
+            restore_point: Some(RestorePoint::Unconfirmed),
+        })
+        .collect();
+    TweakResults {
+        ts_ms: intent.ts_ms,
+        changes,
+    }
+}
+
+fn settle_setting(planned: &IntentSetting, store: &mut impl SettingStore) -> SettingResult {
+    let now = store.read(&planned.setting);
+    let held = |value: &Value| now.as_ref().is_some_and(|now| same_state(now, value));
+    let error = match &planned.before {
+        _ if now.is_none() => ERROR_INTERRUPTED_UNKNOWN,
+        Some(before) if held(before) => ERROR_INTERRUPTED_UNCHANGED,
+        Some(_) if held(&planned.to) => ERROR_INTERRUPTED_WRITTEN,
+        _ => ERROR_INTERRUPTED_UNKNOWN,
+    };
+    SettingResult {
+        change: SettingChange {
+            setting: planned.setting.clone(),
+            from: planned.before.clone().unwrap_or(Value::Absent),
+            to: planned.to.clone(),
+        },
+        error: Some(error),
     }
 }
 

@@ -52,6 +52,12 @@ How to use this file:
   it is no longer stored again at the next import: each is kept once. Copies a database already holds
   are removed when it is opened by this version, so the window and the watcher must be updated
   together.
+- A tweak that the administrator helper started but never finished, because it was stopped or the PC
+  lost power partway, now leaves an entry in the tweaks history instead of nothing. The helper writes
+  down what it is about to change before it changes anything and changes nothing when it cannot. About
+  ten minutes later the watcher compares each setting with what Windows holds: a setting that holds
+  the new value is recorded as written and can be undone, one that holds the old value as unchanged,
+  and anything else as unknown, with no Undo. The window and the watcher must be updated together.
 - If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
   it again after a second, and exits only when that keeps failing, instead of carrying on with no
   channel while the window says it is not running.

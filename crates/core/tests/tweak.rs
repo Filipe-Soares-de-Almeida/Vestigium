@@ -872,3 +872,166 @@ fn guid_reads_and_writes_its_usual_text() {
     );
     assert!("381b4222".parse::<vestigium_core::Guid>().is_err());
 }
+
+fn app_dump_settings() -> (Setting, Setting) {
+    let settings = TweakId::AppDumps.settings();
+    (settings[0].clone(), settings[2].clone())
+}
+
+#[test]
+fn an_intent_holds_what_each_setting_held_before_the_write() {
+    let (first, second) = app_dump_settings();
+    let plan = item(
+        TweakId::AppDumps,
+        vec![
+            (first.clone(), Value::Dword(1)),
+            (second.clone(), Value::Dword(25)),
+        ],
+        None,
+    );
+    let mut store = FakeStore {
+        values: vec![
+            (first.clone(), Value::Dword(0)),
+            (second.clone(), Value::Absent),
+        ],
+        fails: None,
+        writes: 0,
+    };
+
+    let intent = vestigium_core::intent_of(&[&plan], &mut store, 42);
+
+    assert_eq!(intent.ts_ms, 42);
+    assert_eq!(store.writes, 0, "recording an intent writes nothing");
+    let held: Vec<_> = intent.items[0]
+        .settings
+        .iter()
+        .map(|s| (s.setting.clone(), s.before.clone(), s.to.clone()))
+        .collect();
+    assert_eq!(
+        held,
+        vec![
+            (first, Some(Value::Dword(0)), Value::Dword(1)),
+            (second, Some(Value::Absent), Value::Dword(25)),
+        ]
+    );
+}
+
+#[test]
+fn an_intent_survives_the_file_it_is_written_to() {
+    let (first, _) = app_dump_settings();
+    let intent = vestigium_core::TweakIntent {
+        ts_ms: 7,
+        items: vec![vestigium_core::IntentItem {
+            tweak: TweakId::AppDumps,
+            subject: Some("a".into()),
+            undo_of: Some(3),
+            settings: vec![vestigium_core::IntentSetting {
+                setting: first,
+                before: None,
+                to: Value::Dword(1),
+            }],
+        }],
+    };
+    let bytes = postcard::to_allocvec(&intent).unwrap();
+    assert_eq!(
+        postcard::from_bytes::<vestigium_core::TweakIntent>(&bytes).unwrap(),
+        intent
+    );
+}
+
+fn settled(now: [Value; 2]) -> vestigium_core::TweakChange {
+    let (first, second) = app_dump_settings();
+    let plan = item(
+        TweakId::AppDumps,
+        vec![
+            (first.clone(), Value::Dword(1)),
+            (second.clone(), Value::Dword(25)),
+        ],
+        None,
+    );
+    let mut store = FakeStore {
+        values: vec![
+            (first.clone(), Value::Dword(0)),
+            (second.clone(), Value::Dword(10)),
+        ],
+        fails: None,
+        writes: 0,
+    };
+    let intent = vestigium_core::intent_of(&[&plan], &mut store, 42);
+    let [one, two] = now;
+    store.values = vec![(first, one), (second, two)];
+    let mut results = vestigium_core::settle_interrupted(&intent, &mut store);
+    assert_eq!(results.ts_ms, 42);
+    results.changes.pop().unwrap()
+}
+
+#[test]
+fn a_setting_found_at_its_planned_value_is_written_and_can_be_undone() {
+    let change = settled([Value::Dword(1), Value::Dword(25)]);
+
+    let errors: Vec<_> = change.results.iter().map(|r| r.error).collect();
+    assert_eq!(errors, [Some(vestigium_core::ERROR_INTERRUPTED_WRITTEN); 2]);
+    assert!(change.succeeded());
+    assert_eq!(change.written().len(), 2);
+    assert_eq!(change.written()[0].from, Value::Dword(0));
+    assert_eq!(
+        change.restore_point,
+        Some(vestigium_core::RestorePoint::Unconfirmed)
+    );
+}
+
+#[test]
+fn a_setting_found_as_it_was_is_unchanged_and_cannot_be_undone() {
+    let change = settled([Value::Dword(0), Value::Dword(10)]);
+
+    let errors: Vec<_> = change.results.iter().map(|r| r.error).collect();
+    assert_eq!(
+        errors,
+        [Some(vestigium_core::ERROR_INTERRUPTED_UNCHANGED); 2]
+    );
+    assert!(!change.succeeded());
+    assert!(change.written().is_empty());
+}
+
+#[test]
+fn a_setting_someone_else_changed_is_unknown_and_cannot_be_undone() {
+    let change = settled([Value::Dword(9), Value::Dword(25)]);
+
+    assert_eq!(
+        change.results[0].error,
+        Some(vestigium_core::ERROR_INTERRUPTED_UNKNOWN)
+    );
+    assert_eq!(
+        change.results[1].error,
+        Some(vestigium_core::ERROR_INTERRUPTED_WRITTEN)
+    );
+    assert!(!change.succeeded());
+    assert_eq!(
+        change.written().len(),
+        1,
+        "only what is known to be written"
+    );
+}
+
+#[test]
+fn a_setting_that_cannot_be_read_is_unknown() {
+    let (first, second) = app_dump_settings();
+    let plan = item(
+        TweakId::AppDumps,
+        vec![(first.clone(), Value::Dword(1)), (second, Value::Dword(25))],
+        None,
+    );
+    let mut store = FakeStore {
+        values: Vec::new(),
+        fails: None,
+        writes: 0,
+    };
+    let intent = vestigium_core::intent_of(&[&plan], &mut store, 1);
+    assert_eq!(intent.items[0].settings[0].before, None);
+    store.values.push((first, Value::Dword(1)));
+
+    let results = vestigium_core::settle_interrupted(&intent, &mut store);
+
+    let errors: Vec<_> = results.changes[0].results.iter().map(|r| r.error).collect();
+    assert_eq!(errors, [Some(vestigium_core::ERROR_INTERRUPTED_UNKNOWN); 2]);
+}

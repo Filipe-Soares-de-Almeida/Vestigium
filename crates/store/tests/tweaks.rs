@@ -317,3 +317,25 @@ fn changes_of_one_tweak_for_different_subjects_at_one_time_are_kept() {
     assert_eq!(ids.len(), 3);
     assert_eq!(store.tweak_changes(0, 10 * DAY).unwrap().len(), 3);
 }
+
+#[test]
+fn an_undo_found_written_after_an_interrupted_helper_marks_the_change_undone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let forward = mpo_change(Value::Absent, Value::Dword(5));
+    let id = store
+        .record_tweak_change(
+            &change(TweakId::Mpo, forward.clone(), None),
+            DAY,
+            Applier::Elevated,
+        )
+        .unwrap();
+    let mut back = change(TweakId::Mpo, undo(&forward), Some(id));
+    back.results[0].error = Some(vestigium_core::ERROR_INTERRUPTED_WRITTEN);
+
+    store
+        .record_tweak_change(&back, 3 * DAY, Applier::Elevated)
+        .unwrap();
+
+    assert!(store.tweaks_in_place().unwrap().is_empty());
+}

@@ -8,8 +8,9 @@ use vestigium_collect::{
     RESTORE_CREATED, RESTORE_SKIPPED, WindowsSettings, restore_events, sha256_hex, wall_ms,
 };
 use vestigium_core::{
-    Applier, PlanItem, RestorePoint, SettingResult, SettingStore, TWEAK_PLAN_VERSION, TweakChange,
-    TweakPlan, TweakResults, carry_out, check_item,
+    Applier, PlanItem, RestorePoint, SettingResult, SettingStore, TWEAK_INTENT_VERSION,
+    TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakPlan, TweakResults, carry_out, check_item,
+    intent_of,
 };
 use windows::Win32::Foundation::{E_FAIL, ERROR_SERVICE_DISABLED};
 use windows::Win32::System::Com::{
@@ -58,7 +59,12 @@ pub fn run(plan_path: &Path, sha256: &str) -> ExitCode {
     else {
         return ExitCode::from(job::REFUSED);
     };
-    let results = apply(&plan, &mut WindowsSettings, ask_restore_point);
+    let intent_path = plan_path.with_extension("intent");
+    let Ok(results) = apply(&plan, &mut WindowsSettings, ask_restore_point, |intent| {
+        write_intent(&intent_path, intent)
+    }) else {
+        return ExitCode::from(job::REFUSED);
+    };
     let mut bytes = vec![TWEAK_PLAN_VERSION];
     match postcard::to_allocvec(&results) {
         Ok(body) => bytes.extend(body),
@@ -68,6 +74,15 @@ pub fn run(plan_path: &Path, sha256: &str) -> ExitCode {
         return ExitCode::from(job::WRITE_FAILED);
     }
     ExitCode::SUCCESS
+}
+
+/// Writes the intent to `<digits>.intent` beside the plan and puts it on disk before returning.
+fn write_intent(path: &Path, intent: &TweakIntent) -> Result<(), String> {
+    let mut file = output::create(path, "tweaks", "intent")?;
+    let mut bytes = vec![TWEAK_INTENT_VERSION];
+    bytes.extend(postcard::to_allocvec(intent).map_err(|e| e.to_string())?);
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    file.commit()
 }
 
 /// Whether the plan's bytes hash to the SHA-256 the window passed, in either letter case.
@@ -85,13 +100,15 @@ pub fn read_plan(bytes: &[u8]) -> Option<TweakPlan> {
     (plan.items.len() <= MOST_ITEMS).then_some(plan)
 }
 
-/// Checks every item, asks for one restore point when something will be written, then carries
-/// out the items that passed in order. Without a point, nothing is written unless the plan says so.
+/// Checks every item, asks for one restore point when something will be written, records the
+/// intent, then carries out the items that passed in order. Without a point, nothing is written
+/// unless the plan says so; when the intent cannot be recorded, nothing is written at all.
 pub fn apply(
     plan: &TweakPlan,
     store: &mut impl SettingStore,
     restore_point: impl FnOnce() -> RestorePoint,
-) -> TweakResults {
+    record_intent: impl FnOnce(&TweakIntent) -> Result<(), String>,
+) -> Result<TweakResults, String> {
     let checked: Vec<bool> = plan
         .items
         .iter()
@@ -102,6 +119,15 @@ pub fn apply(
         point,
         Some(RestorePoint::Off | RestorePoint::Failed { .. } | RestorePoint::Unconfirmed)
     ) && !plan.without_restore_point;
+    if checked.contains(&true) && !blocked {
+        let writing: Vec<&PlanItem> = plan
+            .items
+            .iter()
+            .zip(&checked)
+            .filter_map(|(item, &ok)| ok.then_some(item))
+            .collect();
+        record_intent(&intent_of(&writing, store, wall_ms()))?;
+    }
     let changes = plan
         .items
         .iter()
@@ -117,10 +143,10 @@ pub fn apply(
             }
         })
         .collect();
-    TweakResults {
+    Ok(TweakResults {
         ts_ms: wall_ms(),
         changes,
-    }
+    })
 }
 
 fn refused(item: &PlanItem, point: Option<RestorePoint>) -> TweakChange {
@@ -339,7 +365,9 @@ pub fn create_restore_point(description: &str) -> windows::core::Result<u32> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::process::Command;
+    use std::rc::Rc;
 
     use vestigium_core::{Hive, Setting, SettingChange, TweakId, Value};
 
@@ -411,7 +439,7 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Created);
+        let results = apply(&plan, &mut store, || RestorePoint::Created, |_| Ok(())).unwrap();
         let errors: Vec<_> = results.changes.iter().map(|c| c.results[0].error).collect();
         assert_eq!(errors, [Some(ERROR_REFUSED), Some(ERROR_REFUSED), None]);
         assert_eq!(store.writes, 1);
@@ -432,11 +460,11 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Off);
+        let results = apply(&plan, &mut store, || RestorePoint::Off, |_| Ok(())).unwrap();
         assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
         assert_eq!(store.writes, 0);
         plan.without_restore_point = true;
-        let results = apply(&plan, &mut store, || RestorePoint::Off);
+        let results = apply(&plan, &mut store, || RestorePoint::Off, |_| Ok(())).unwrap();
         assert_eq!(results.changes[0].results[0].error, None);
         assert_eq!(store.writes, 1);
     }
@@ -486,7 +514,7 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Unconfirmed);
+        let results = apply(&plan, &mut store, || RestorePoint::Unconfirmed, |_| Ok(())).unwrap();
         assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
         assert_eq!(
             results.changes[0].restore_point,
@@ -494,7 +522,7 @@ mod tests {
         );
         assert_eq!(store.writes, 0);
         plan.without_restore_point = true;
-        apply(&plan, &mut store, || RestorePoint::Unconfirmed);
+        apply(&plan, &mut store, || RestorePoint::Unconfirmed, |_| Ok(())).unwrap();
         assert_eq!(store.writes, 1);
     }
 
@@ -510,7 +538,7 @@ mod tests {
                 values: vec![(setting.clone(), Value::Absent)],
                 writes: 0,
             };
-            apply(&plan, &mut store, || point);
+            apply(&plan, &mut store, || point, |_| Ok(())).unwrap();
             assert_eq!(store.writes, 1, "{point:?}");
         }
     }
@@ -525,7 +553,13 @@ mod tests {
             values: Vec::new(),
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || panic!("no point for refused items"));
+        let results = apply(
+            &plan,
+            &mut store,
+            || panic!("no point for refused items"),
+            |_| panic!("no intent for refused items"),
+        )
+        .unwrap();
         assert_eq!(results.changes[0].restore_point, None);
     }
 
@@ -551,6 +585,138 @@ mod tests {
         bytes[0] = TWEAK_PLAN_VERSION + 1;
         assert_eq!(read_plan(&bytes), None);
         assert_eq!(read_plan(&[]), None);
+    }
+
+    /// A store that notes each write in a log shared with the intent sink.
+    struct Logged {
+        inner: Fake,
+        log: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl SettingStore for Logged {
+        fn read(&mut self, setting: &Setting) -> Option<Value> {
+            self.inner.read(setting)
+        }
+
+        fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32> {
+            self.log.borrow_mut().push("write");
+            self.inner.write(setting, value)
+        }
+    }
+
+    #[test]
+    fn the_intent_is_recorded_before_the_first_write() {
+        let (setting, item) = mpo();
+        let plan = TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        };
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let mut store = Logged {
+            inner: Fake {
+                values: vec![(setting.clone(), Value::Absent)],
+                writes: 0,
+            },
+            log: log.clone(),
+        };
+        let mut recorded = None;
+
+        let results = apply(
+            &plan,
+            &mut store,
+            || RestorePoint::Created,
+            |intent| {
+                log.borrow_mut().push("intent");
+                recorded = Some(intent.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*log.borrow(), ["intent", "write"]);
+        assert_eq!(results.changes[0].results[0].error, None);
+        let intent = recorded.unwrap();
+        assert_eq!(intent.items.len(), 1);
+        assert_eq!(intent.items[0].settings[0].setting, setting);
+        assert_eq!(intent.items[0].settings[0].before, Some(Value::Absent));
+        assert_eq!(intent.items[0].settings[0].to, Value::Dword(5));
+    }
+
+    #[test]
+    fn nothing_is_written_when_the_intent_cannot_be_recorded() {
+        let (setting, item) = mpo();
+        let plan = TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        };
+        let mut store = Fake {
+            values: vec![(setting, Value::Absent)],
+            writes: 0,
+        };
+
+        let result = apply(
+            &plan,
+            &mut store,
+            || RestorePoint::Created,
+            |_| Err("disk full".into()),
+        );
+
+        assert_eq!(result, Err("disk full".to_string()));
+        assert_eq!(store.writes, 0);
+    }
+
+    #[test]
+    fn no_intent_is_recorded_when_nothing_will_be_written() {
+        let (setting, item) = mpo();
+        let plan = TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        };
+        let mut store = Fake {
+            values: vec![(setting, Value::Absent)],
+            writes: 0,
+        };
+
+        let results = apply(
+            &plan,
+            &mut store,
+            || RestorePoint::Off,
+            |_| panic!("the restore point blocks the write"),
+        )
+        .unwrap();
+
+        assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
+    }
+
+    #[test]
+    fn the_intent_file_is_written_whole_beside_the_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let tweaks = dir.path().join("Vestigium").join("data").join("tweaks");
+        std::fs::create_dir_all(&tweaks).unwrap();
+        let (_, item) = mpo();
+        let intent = intent_of(
+            &[&item],
+            &mut Fake {
+                values: Vec::new(),
+                writes: 0,
+            },
+            9,
+        );
+
+        write_intent(&tweaks.join("30.intent"), &intent).unwrap();
+
+        let bytes = std::fs::read(tweaks.join("30.intent")).unwrap();
+        assert_eq!(bytes[0], TWEAK_INTENT_VERSION);
+        assert_eq!(
+            postcard::from_bytes::<TweakIntent>(&bytes[1..]).unwrap(),
+            intent
+        );
+        assert!(!tweaks.join("30.intent.tmp").exists());
+        assert!(
+            write_intent(&tweaks.join("30.intent"), &intent).is_err(),
+            "an intent is never replaced"
+        );
+        assert!(write_intent(&tweaks.join("x.intent"), &intent).is_err());
     }
 
     #[test]
