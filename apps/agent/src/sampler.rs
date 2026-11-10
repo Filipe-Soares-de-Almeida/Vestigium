@@ -999,14 +999,18 @@ impl Sampler {
                 (end - wall_ms()).clamp(0, PAUSE_CHECK_MS)
             });
             if until.is_some() && left_ms == 0 {
-                {
-                    let mut status = lock(&self.status);
+                // A pause asked for meanwhile replaces this one; the status and the gate change
+                // under one guard, so a new pause is never ended by the old one.
+                let mut status = lock(&self.status);
+                if status.paused_until_ms.is_some_and(|end| end <= wall_ms()) {
                     status.paused = false;
                     status.paused_until_ms = None;
+                    gate.set(GateState::Running);
+                    drop(status);
+                    shutdown::wake();
+                    return GateState::Running;
                 }
-                gate.set(GateState::Running);
-                shutdown::wake();
-                return GateState::Running;
+                continue;
             }
             match gate.wait_while_paused_for(Duration::from_millis(left_ms as u64)) {
                 GateState::Paused => continue,

@@ -53,6 +53,8 @@ How to use this file:
 
 ### Fixed
 
+- Pausing watching just as an earlier timed pause ends no longer lets the old pause end the new
+  one: the pause shown and the pause in effect stay the same.
 - Logging off, shutting down or an installer's request to close the watcher now also ends the
   watcher process, instead of leaving it running without watching.
 - The watcher now tries the Windows event feed again every minute when it could not start, and

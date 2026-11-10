@@ -159,11 +159,10 @@ fn apply_user_tweak(
 
 /// Pauses or resumes watching; a pause with `until_ms` ends by itself at that time.
 pub fn set_paused(shared: &Shared, paused: bool, until_ms: Option<i64>) {
-    {
-        let mut status = lock(&shared.status);
-        status.paused = paused;
-        status.paused_until_ms = until_ms.filter(|_| paused);
-    }
+    // The status and the gate change under one guard, so they never disagree.
+    let mut status = lock(&shared.status);
+    status.paused = paused;
+    status.paused_until_ms = until_ms.filter(|_| paused);
     shared.gate.set(if paused {
         GateState::Paused
     } else {
@@ -1270,6 +1269,31 @@ pub(crate) mod tests {
             None,
         );
         assert_eq!(shared.gate.state(), GateState::Running);
+    }
+
+    #[test]
+    fn the_pause_status_and_the_gate_never_disagree_while_the_status_is_held() {
+        let shared = Arc::new(shared());
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (shared, done) = (shared.clone(), done.clone());
+            thread::spawn(move || {
+                for round in 0..200_000 {
+                    set_paused(&shared, round % 2 == 0, None);
+                }
+                done.store(true, Ordering::Release);
+            })
+        };
+        let mut disagreements = 0;
+        while !done.load(Ordering::Acquire) {
+            let status = lock(&shared.status);
+            if status.paused != (shared.gate.state() == GateState::Paused) {
+                disagreements += 1;
+            }
+        }
+        writer.join().unwrap();
+
+        assert_eq!(disagreements, 0);
     }
 
     #[test]
