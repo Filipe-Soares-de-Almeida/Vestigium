@@ -1718,7 +1718,7 @@
   "ui.tweaks.why_not.FastStartup": "No interrupted shutdowns in 30 days and no Health alert about it.",
   "ui.tweaks.why_not.Hibernation": "Enough space on the system drive.",
   "ui.tweaks.why_not.PowerPlan": "The PC is not on the Power saver plan, or it is on battery.",
-  "ui.tweaks.why_not.PcieAspm": "No capture pointed at a disk or network driver, and no freeze came from driver latency.",
+  "ui.tweaks.why_not.PcieAspm": "No capture pointed at a disk or network driver.",
   "ui.tweaks.why_not.UsbSuspend": "No capture pointed at a USB driver.",
   "ui.tweaks.why_not.SysMain": "Windows is not on an HDD, or the system disk was not saturated for long.",
   "ui.tweaks.why_not.WindowsSearch": "Indexing never showed up as the cause of an overloaded disk or CPU.",

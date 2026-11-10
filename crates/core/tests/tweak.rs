@@ -3,10 +3,10 @@ use vestigium_core::health::{
     BootDelay, Concern, DelayKind, Finding, FindingKind, HealthFact, Measure, Reference, Subject,
 };
 use vestigium_core::{
-    Cause, Channel, Culprit, Episode, EpisodeKind, EventMeaning, Hive, OccurrenceKind,
-    OccurrenceSummary, SCHEME_BALANCED, SCHEME_POWER_SAVER, Setting, SettingChange, Severity,
-    Signal, StartupEntry, StartupList, Status, TWEAKS, TweakId, TweakInputs, Value, WinEvent,
-    advise, disabled_approval, helped, undo,
+    CaptureCauses, Cause, Channel, Culprit, Episode, EpisodeKind, EventMeaning, Hive,
+    OccurrenceKind, OccurrenceSummary, SCHEME_BALANCED, SCHEME_POWER_SAVER, Setting, SettingChange,
+    Severity, Signal, StartupEntry, StartupList, Status, TWEAKS, TweakId, TweakInputs, Value,
+    WinEvent, advise, disabled_approval, helped, undo,
 };
 
 const DAY: i64 = 24 * 60 * 60_000;
@@ -172,6 +172,48 @@ fn every_tweak_has_an_undo_in_its_domain() {
         assert_eq!(back.len(), a.changes.len());
         assert_eq!(undo(&back), a.changes);
     }
+}
+
+#[test]
+fn pcie_aspm_needs_a_storage_or_network_module() {
+    let mut stalls = with(inputs(), TweakId::PcieAspm, &[Value::Index(2)]);
+    stalls.occurrences = vec![
+        occurrence(
+            NOW - DAY,
+            OccurrenceKind::Stutter,
+            Cause::Driver { core: 2 },
+        ),
+        occurrence(
+            NOW - 3 * DAY,
+            OccurrenceKind::Stutter,
+            Cause::Driver { core: 2 },
+        ),
+    ];
+    let advice = advice_for(&stalls, TweakId::PcieAspm);
+    assert_eq!(advice.status, Status::Ready);
+    assert!(!advice.recommended(), "driver time alone names no module");
+
+    stalls.captures = vec![CaptureCauses {
+        start_ms: NOW - 2 * DAY,
+        causes: vec![Cause::DriverModule {
+            module: "dxgkrnl.sys".into(),
+            intermediary: false,
+        }],
+    }];
+    assert!(!advice_for(&stalls, TweakId::PcieAspm).recommended());
+
+    stalls.captures[0].causes = vec![Cause::DriverModule {
+        module: "storahci.sys".into(),
+        intermediary: false,
+    }];
+    let advice = advice_for(&stalls, TweakId::PcieAspm);
+    assert!(advice.recommended());
+    assert!(
+        advice
+            .signals
+            .iter()
+            .any(|s| matches!(s, Signal::DpcIsrStalls { count: 2 }))
+    );
 }
 
 #[test]

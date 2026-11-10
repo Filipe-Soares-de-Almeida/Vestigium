@@ -45,6 +45,8 @@ How to use this file:
 
 ### Fixed
 
+- PCI Express power saving is no longer suggested because of high driver time alone. It now needs a
+  deep capture that pointed at a disk or network driver, and its explanation says so.
 - The failures-rising finding no longer closes and reopens as the weekly count of crashes and hangs
   moves around its threshold. Once open it stays open until the week falls below two failures or
   below one and a half times the weekly average of the weeks before, so its history is one

@@ -940,10 +940,12 @@ fn signals(tweak: TweakId, inputs: &TweakInputs) -> Vec<Signal> {
             let count = count_occurrences(inputs, since(inputs, 14), now, |o| {
                 matches!(o.cause, Cause::Driver { .. })
             });
-            if count >= 2 {
+            let modules = capture_drivers(inputs, 14, &[Bus::Storage, Bus::Network]);
+            // Driver time without a storage or network module in a capture is no evidence.
+            if count >= 2 && !modules.is_empty() {
                 out.push(Signal::DpcIsrStalls { count });
             }
-            out.extend(capture_drivers(inputs, 14, &[Bus::Storage, Bus::Network]));
+            out.extend(modules);
         }
         TweakId::UsbSuspend => out.extend(capture_drivers(inputs, 14, &[Bus::Usb])),
         TweakId::SysMain => {

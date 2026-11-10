@@ -1718,7 +1718,7 @@
   "ui.tweaks.why_not.FastStartup": "Nenhum desligamento interrompido em 30 dias e nenhum alerta da Saúde sobre isso.",
   "ui.tweaks.why_not.Hibernation": "Espaço suficiente no disco do sistema.",
   "ui.tweaks.why_not.PowerPlan": "O PC não usa o plano Economia de energia, ou está na bateria.",
-  "ui.tweaks.why_not.PcieAspm": "Nenhuma captura apontou driver de disco ou de rede, e nenhum travamento veio de latência de driver.",
+  "ui.tweaks.why_not.PcieAspm": "Nenhuma captura apontou driver de disco ou de rede.",
   "ui.tweaks.why_not.UsbSuspend": "Nenhuma captura apontou driver USB.",
   "ui.tweaks.why_not.SysMain": "O Windows não está em HD, ou o disco do sistema não ficou saturado por muito tempo.",
   "ui.tweaks.why_not.WindowsSearch": "A indexação nunca apareceu como causa de disco ou CPU sobrecarregados.",
