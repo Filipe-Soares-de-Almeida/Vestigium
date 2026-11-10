@@ -72,8 +72,8 @@ fn recent(link: &Link, to_ms: i64, now_ms: i64) -> Recent {
     if to_ms < now_ms - RECENT_MS {
         return Recent::default();
     }
-    match link.call(&Request::Recent) {
-        Ok(Response::Recent { readings, pressure }) => Recent {
+    match link.try_call(&Request::Recent) {
+        Some(Ok(Response::Recent { readings, pressure })) => Recent {
             readings,
             pressure: pressure
                 .iter()
@@ -834,11 +834,12 @@ pub async fn apply_tweaks(
     let (history, link) = (state.history.clone(), state.link.clone());
     blocking(move || {
         crate::tweaks::apply(
-            &mut lock(&history),
+            &history,
             &link,
             &picks,
             without_restore_point,
             now_ms(),
+            crate::tweaks::run_helper,
         )
     })
     .await
@@ -854,11 +855,12 @@ pub async fn undo_tweak(
     let (history, link) = (state.history.clone(), state.link.clone());
     blocking(move || {
         crate::tweaks::undo_change(
-            &mut lock(&history),
+            &history,
             &link,
             id,
             without_restore_point,
             now_ms(),
+            crate::tweaks::run_helper,
         )
     })
     .await
@@ -874,4 +876,42 @@ async fn blocking<T: Send + 'static>(
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn recent_is_empty_when_the_watcher_does_not_answer() {
+        let (link, release) = crate::agent::mute::link();
+        let now = now_ms();
+        let started = Instant::now();
+
+        let found = recent(&link, now, now);
+
+        assert_eq!(found, Recent::default());
+        assert!(started.elapsed() < Duration::from_secs(7));
+        drop(release);
+    }
+
+    #[test]
+    fn a_busy_link_gives_an_empty_recent_at_once() {
+        let (link, release) = crate::agent::mute::link();
+        let link = Arc::new(link);
+        let slow = link.clone();
+        let busy = std::thread::spawn(move || slow.call(&Request::Status));
+        std::thread::sleep(Duration::from_millis(500));
+        let now = now_ms();
+        let started = Instant::now();
+
+        let found = recent(&link, now, now);
+
+        assert_eq!(found, Recent::default());
+        assert!(started.elapsed() < Duration::from_millis(200));
+        let _ = busy.join();
+        drop(release);
+    }
 }

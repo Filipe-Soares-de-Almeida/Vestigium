@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use vestigium_collect::{
@@ -141,15 +142,24 @@ fn changed_since(row: &TweakChangeRow) -> bool {
         .any(|r| read_setting(&r.change.setting).is_some_and(|now| now != r.change.to))
 }
 
-/// Applies the tweaks picked: the user's own through the watcher, the rest in one elevated batch.
+/// Runs the helper elevated with `args` and waits for it; its exit code, when it has one.
+pub fn run_helper(args: &str) -> Result<Option<u32>, UiError> {
+    let helper = sibling_helper()
+        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    Ok(launch_elevated(&helper, args)?.wait())
+}
+
+/// Applies the tweaks picked: the user's own through the watcher, the rest in one elevated batch
+/// that `launch` runs. The history is locked only while it is read, never while `launch` waits.
 pub fn apply(
-    history: &mut History,
+    history: &Mutex<History>,
     link: &Link,
     picks: &[TweakPick],
     without_restore_point: bool,
     now_ms: i64,
+    launch: impl FnOnce(&str) -> Result<Option<u32>, UiError>,
 ) -> Result<TweaksApplied, UiError> {
-    let found = history.tweak_history(now_ms, EVIDENCE_MS, HISTORY_SHOWN_MS)?;
+    let found = lock(history).tweak_history(now_ms, EVIDENCE_MS, HISTORY_SHOWN_MS)?;
     let advice = advise(&inputs(&found, now_ms));
     let items: Vec<(PlanItem, Applier)> = picks
         .iter()
@@ -168,18 +178,19 @@ pub fn apply(
             })
         })
         .collect();
-    carry(history, link, items, without_restore_point, now_ms)
+    carry(history, link, items, without_restore_point, now_ms, launch)
 }
 
 /// Puts back what one change wrote, by the same way it was written.
 pub fn undo_change(
-    history: &mut History,
+    history: &Mutex<History>,
     link: &Link,
     id: i64,
     without_restore_point: bool,
     now_ms: i64,
+    launch: impl FnOnce(&str) -> Result<Option<u32>, UiError>,
 ) -> Result<TweaksApplied, UiError> {
-    let row = history
+    let row = lock(history)
         .tweak_change(id)?
         .ok_or_else(|| UiError::Failed(format!("no change {id}")))?;
     if row.undone_ms.is_some() || row.change.undo_of.is_some() {
@@ -207,15 +218,17 @@ pub fn undo_change(
         vec![(item, row.applier)],
         without_restore_point,
         now_ms,
+        launch,
     )
 }
 
 fn carry(
-    history: &History,
+    history: &Mutex<History>,
     link: &Link,
     items: Vec<(PlanItem, Applier)>,
     without_restore_point: bool,
     now_ms: i64,
+    launch: impl FnOnce(&str) -> Result<Option<u32>, UiError>,
 ) -> Result<TweaksApplied, UiError> {
     let mut ids = Vec::new();
     let (user, elevated): (Vec<_>, Vec<_>) =
@@ -232,25 +245,27 @@ fn carry(
             items: elevated.into_iter().map(|(item, _)| item).collect(),
             without_restore_point,
         };
-        let path = history
-            .data_dir()
+        let data_dir = lock(history).data_dir();
+        let path = data_dir
             .map(|dir| dir.join("tweaks").join(format!("{now_ms}.plan")))
             .ok_or_else(|| UiError::Failed("no data folder".into()))?;
         let held = write_plan(&path, &plan)?;
-        let helper = sibling_helper()
-            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
         let args = format!(
             "tweak --plan \"{}\" --sha256 {}",
             path.display(),
             held.sha256
         );
-        exit_code = launch_elevated(&helper, &args)?.wait();
+        exit_code = launch(&args)?;
         drop(held);
         if let Ok(Response::Imported { tweaks, .. }) = link.call(&Request::ImportResults) {
             ids.extend(tweaks);
         }
     }
     Ok(TweaksApplied { ids, exit_code })
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// A plan file kept open without write sharing, with the SHA-256 of the bytes written to it.
@@ -294,7 +309,44 @@ fn write_plan(path: &Path, plan: &TweakPlan) -> Result<HeldPlan, UiError> {
 
 #[cfg(test)]
 mod tests {
+    use vestigium_core::{SettingChange, Value};
+
     use super::*;
+
+    #[test]
+    fn the_history_is_free_while_the_helper_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = Mutex::new(History::new(Some(dir.path().join("vestigium.db"))));
+        let link = Link::new(None);
+        let setting = TweakId::GameDvr.settings().remove(0);
+        let item = PlanItem {
+            tweak: TweakId::GameDvr,
+            subject: None,
+            undo_of: None,
+            changes: vec![SettingChange {
+                setting,
+                from: Value::Dword(1),
+                to: Value::Dword(0),
+            }],
+        };
+        let mut was_free = false;
+
+        let applied = carry(
+            &history,
+            &link,
+            vec![(item, Applier::Elevated)],
+            false,
+            7,
+            |_| {
+                was_free = history.try_lock().is_ok();
+                Ok(Some(0))
+            },
+        )
+        .unwrap();
+
+        assert!(was_free, "the history stayed locked while the helper ran");
+        assert_eq!(applied.exit_code, Some(0));
+    }
 
     #[test]
     fn a_held_plan_cannot_be_rewritten_and_must_match_what_was_written() {

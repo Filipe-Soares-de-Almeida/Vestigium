@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
 use serde::{Serialize, Serializer};
@@ -151,7 +151,7 @@ impl Link {
 
     /// A link to the pipe called `pipe`, for tests that run a watcher of their own.
     #[cfg(test)]
-    fn on_pipe(agent_exe: Option<PathBuf>, pipe: &str) -> Link {
+    pub(crate) fn on_pipe(agent_exe: Option<PathBuf>, pipe: &str) -> Link {
         Link {
             pipe: Some(pipe.to_string()),
             ..Link::new(agent_exe)
@@ -168,7 +168,24 @@ impl Link {
     /// is replaced once; a request that may already have run is not sent again after its answer
     /// was lost. A failed call drops the connection.
     pub fn call(&self, request: &Request) -> Result<Response, UiError> {
-        let mut client = lock(&self.client);
+        self.exchange(&mut lock(&self.client), request)
+    }
+
+    /// Like `call`, but gives up with `None` at once when another call holds the connection.
+    pub fn try_call(&self, request: &Request) -> Option<Result<Response, UiError>> {
+        let mut client = match self.client.try_lock() {
+            Ok(client) => client,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return None,
+        };
+        Some(self.exchange(&mut client, request))
+    }
+
+    fn exchange(
+        &self,
+        client: &mut Option<PipeClient>,
+        request: &Request,
+    ) -> Result<Response, UiError> {
         let mut fresh = client.is_none();
         loop {
             let mut open = match client.take() {
@@ -268,6 +285,40 @@ pub fn refused(response: Response) -> UiError {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A watcher that answers the Hello and then never replies, for tests of the window's side.
+#[cfg(test)]
+pub(crate) mod mute {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::mpsc::{self, Sender};
+
+    use vestigium_ipc::{PROTOCOL_VERSION, PipeServer};
+
+    use super::*;
+
+    /// A link to a mute watcher; dropping the sender lets the watcher's handler go.
+    pub(crate) fn link() -> (Link, Sender<()>) {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let name = pipe_name(&format!("mute-test-{}-{n}", std::process::id()));
+        let (release, hold) = mpsc::channel::<()>();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || {
+            server.serve(move |request| match request {
+                Request::Hello { .. } => Response::Hello {
+                    protocol: PROTOCOL_VERSION,
+                    agent_version: "test".into(),
+                },
+                _ => {
+                    let _ = hold.recv();
+                    Response::Done
+                }
+            })
+        });
+        let exe = std::env::current_exe().unwrap();
+        (Link::on_pipe(Some(exe), &name), release)
+    }
 }
 
 #[cfg(test)]
@@ -403,19 +454,7 @@ mod tests {
 
     #[test]
     fn a_mute_agent_times_out_instead_of_blocking() {
-        let name = unique_pipe();
-        let (release, hold) = mpsc::channel::<()>();
-        let server = PipeServer::bind(&name).unwrap();
-        std::thread::spawn(move || {
-            server.serve(move |request| match request {
-                Request::Hello { .. } => answer(request),
-                _ => {
-                    let _ = hold.recv();
-                    Response::Done
-                }
-            })
-        });
-        let link = link_to(&name);
+        let (link, release) = mute::link();
         let started = Instant::now();
 
         let result = link.call(&Request::Status);
@@ -425,6 +464,23 @@ mod tests {
             Err(UiError::Ipc(IpcError::Io(err))) if err.kind() == std::io::ErrorKind::TimedOut
         ));
         assert!(started.elapsed() < Duration::from_secs(7));
+        drop(release);
+    }
+
+    #[test]
+    fn a_busy_link_is_not_waited_for() {
+        let (link, release) = mute::link();
+        let link = Arc::new(link);
+        let slow = link.clone();
+        let busy = std::thread::spawn(move || slow.call(&Request::Status));
+        std::thread::sleep(Duration::from_millis(500));
+        let started = Instant::now();
+
+        let result = link.try_call(&Request::Status);
+
+        assert!(result.is_none());
+        assert!(started.elapsed() < Duration::from_millis(200));
+        assert!(busy.join().unwrap().is_err());
         drop(release);
     }
 

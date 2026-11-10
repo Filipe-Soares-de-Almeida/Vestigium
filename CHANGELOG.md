@@ -54,6 +54,10 @@ How to use this file:
 - After the watcher restarts, the window now reconnects on its own instead of showing the warning
   about another program or version for a few seconds, and then the Start button. A request that may
   already have been carried out, such as clearing the history, is never sent a second time.
+- The history screens, Today included, now open straight from the database while the watcher is stuck
+  or busy, instead of freezing until it answers; only the last few minutes not yet written are missing
+  until it replies. Applying or undoing a tweak no longer freezes the other screens while the
+  permission prompt is open or the elevated helper runs.
 - A disk surface scan now notes when other programs were using the disk while it ran, shows that on its
   result with a suggestion to repeat it with the PC idle, and no longer raises the "very slow reads"
   attention finding on a hard disk for it. Unreadable sectors are still critical. Scan results are now
