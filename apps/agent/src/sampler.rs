@@ -1169,15 +1169,26 @@ impl Sampler {
         }
     }
 
-    /// Drops the samples of the oldest waiting batch; its events, gaps and bookmark move into
-    /// the next one.
+    /// Drops the samples of the oldest waiting batch and records a gap over their span; its
+    /// events, gaps and bookmark move into the next one.
     fn shed_oldest(&mut self) {
         let Some(oldest) = self.waiting.pop_front() else {
             return;
         };
+        let span = oldest
+            .segments
+            .iter()
+            .map(|s| s.start_ms)
+            .min()
+            .zip(oldest.segments.iter().map(|s| s.end_ms).max());
         if let Some(next) = self.waiting.front_mut() {
             next.events.splice(0..0, oldest.events);
             next.gaps.splice(0..0, oldest.gaps);
+            next.gaps.extend(span.map(|(start_ms, end_ms)| Gap {
+                start_ms,
+                end_ms,
+                reason: GapReason::NotSaved,
+            }));
             next.bookmark_xml = next.bookmark_xml.take().or(oldest.bookmark_xml);
         }
     }
@@ -2614,12 +2625,21 @@ mod tests {
         let mut sampler = manual_sampler(dir.path());
         let refusal = Refusal::of(dir.path(), "segment");
         let ts = wall_ms();
+        let mut lost = None;
         for n in 1..=4u64 {
             sampler.batcher.push_sample(quiet(ts + n as i64 * 60_000));
             sampler.events.push(disk_event(n));
             sampler.bookmark_xml = Some(format!("bookmark {n}"));
             sampler.flush_final();
+            if n == 1 {
+                let first = &sampler.waiting[0].segments;
+                lost = Some((
+                    first.iter().map(|s| s.start_ms).min().unwrap(),
+                    first.iter().map(|s| s.end_ms).max().unwrap(),
+                ));
+            }
         }
+        let (lost_start, lost_end) = lost.unwrap();
 
         assert_eq!(sampler.waiting.len(), BATCHES_KEPT);
         assert_eq!(sampler.waiting[0].events.len(), 2);
@@ -2631,6 +2651,35 @@ mod tests {
         assert_eq!(samples(dir.path()).1, 3);
         assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("bookmark 4"));
         assert!(sampler.waiting.is_empty());
+        assert_eq!(
+            store.gaps(i64::MIN, i64::MAX).unwrap(),
+            vec![Gap {
+                start_ms: lost_start,
+                end_ms: lost_end,
+                reason: GapReason::NotSaved,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_batch_without_samples_that_is_dropped_leaves_no_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let refusal = Refusal::of(dir.path(), "event");
+        for n in 1..=4u64 {
+            sampler.events.push(disk_event(n));
+            sampler.flush();
+        }
+        drop(refusal);
+
+        sampler.flush();
+
+        assert!(
+            history(dir.path())
+                .gaps(i64::MIN, i64::MAX)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

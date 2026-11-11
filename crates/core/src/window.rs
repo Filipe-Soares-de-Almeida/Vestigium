@@ -12,16 +12,19 @@ pub enum GapReason {
     Crashed,
     /// The wall clock was set to another time.
     ClockChanged,
+    /// Samples that could not be written to the history and were dropped.
+    NotSaved,
 }
 
 impl GapReason {
     /// Every variant, in declaration order.
-    pub const ALL: [GapReason; 5] = [
+    pub const ALL: [GapReason; 6] = [
         GapReason::Paused,
         GapReason::Suspended,
         GapReason::Stopped,
         GapReason::Crashed,
         GapReason::ClockChanged,
+        GapReason::NotSaved,
     ];
 }
 

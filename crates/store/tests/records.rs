@@ -557,7 +557,7 @@ fn every_gap_reason_round_trips() {
     assert_eq!(store.gaps(i64::MIN, i64::MAX).unwrap(), gaps);
     assert_eq!(
         stored(dir.path(), "SELECT reason FROM gap ORDER BY id"),
-        [1, 2, 3, 4, 5]
+        [1, 2, 3, 4, 5, 6]
     );
 }
 

@@ -40,7 +40,7 @@ lists_every_variant!(
 lists_every_variant!(
     gap_reason_lists_every_variant,
     GapReason::ALL,
-    GapReason: Paused, Suspended, Stopped, Crashed, ClockChanged
+    GapReason: Paused, Suspended, Stopped, Crashed, ClockChanged, NotSaved
 );
 lists_every_variant!(
     event_meaning_lists_every_variant,

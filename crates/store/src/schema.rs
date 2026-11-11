@@ -7,7 +7,7 @@ use crate::codes::{channel_code, gap_code, meaning_code};
 use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -181,6 +181,9 @@ const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX tweak_change_key
         ON tweak_change (applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));",
     "CREATE INDEX segment_series_start ON segment (series, start_ms, end_ms);",
+    // Gap reason 6, samples that could not be written, is now stored; a reader of version 12
+    // refuses the file instead of failing on the unknown code.
+    "SELECT 1;",
 ];
 
 /// What the agent writes in one transaction, every batch.

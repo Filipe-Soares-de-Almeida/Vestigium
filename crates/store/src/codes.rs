@@ -50,6 +50,7 @@ stored_codes!(GapReason, "gap reason", gap_code, gap_from_code, {
     Stopped = 3,
     Crashed = 4,
     ClockChanged = 5,
+    NotSaved = 6,
 });
 
 stored_codes!(EventMeaning, "event meaning", meaning_code, meaning_from_code, {
@@ -129,7 +130,7 @@ mod tests {
         gap_code,
         gap_from_code,
         "gap reason",
-        [1, 2, 3, 4, 5]
+        [1, 2, 3, 4, 5, 6]
     );
     codes_are!(
         event_meaning_codes_are_fixed,
