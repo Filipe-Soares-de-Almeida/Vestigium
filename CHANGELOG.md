@@ -38,7 +38,7 @@ How to use this file:
   and the line at the bottom of the side pane and on the home screen says "No reading since" the time
   instead of "Monitoring". When only some data sources fail, the banner says "Partial monitoring" and
   names the source, or how many, and the status line says "Partial reading". When the hourly health
-  check has not finished for three hours, the status line says "Monitoring Â· health not verified" and
+  check has not finished for three hours, the status line says "Monitoring · health not verified" and
   the Health screen shows a banner with the time of the last check that finished. The banners are
   neutral in colour, so they do not look like a freeze alert, and at the technical level they add what
   Windows reported for each failing source.

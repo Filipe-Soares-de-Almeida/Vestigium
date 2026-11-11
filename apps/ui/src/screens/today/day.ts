@@ -94,9 +94,8 @@ export function runsOf(timeline: TimelineDto, start: number, end: number): Run[]
 }
 
 /**
- * Settles the stretches without a reading that touch the open tail of the day: when the watcher is
- * away (paused or stopped) the one that reaches `end` is an absence, so it is suspended; the others
- * leave the newest minutes empty until the watcher writes what explains them.
+ * Leaves the newest minutes without a reading empty; when the watcher is away (`away`), the stretch
+ * that reaches `end` is an absence and becomes suspended.
  */
 export function settleTail(runs: Run[], end: number, away: boolean, realNow = Date.now()): Run[] {
   const tail = realNow - OPEN_TAIL_MS;
