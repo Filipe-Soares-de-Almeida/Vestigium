@@ -589,12 +589,12 @@ function stutters(): OccurrenceDto {
 }
 
 /** The PC fell with a blue screen five seconds after the last stored second, memory nearly full. */
-function blueScreen(): OccurrenceDto {
-  const last = at(7, 12, 25);
+function blueScreen(id = 8, code = 0x50, hour = 7, steps: Suspect["next_steps"] = ["ReadCrashDump"]): OccurrenceDto {
+  const last = at(hour, 12, 25);
   const down = last + 5000;
-  const boot = at(7, 19, 2);
-  const n = noise(8);
-  const crash: CrashKind = { BlueScreen: { code: 0x50, params: [0, 0, 0, 0] } };
+  const boot = at(hour, 19, 2);
+  const n = noise(id);
+  const crash: CrashKind = { BlueScreen: { code, params: [0, 0, 0, 0] } };
   const loss = event(boot + 1000, "Microsoft-Windows-Kernel-Power", 41, "PowerLoss", 91002);
   const unexpected = event(boot, "EventLog", 6008, "UnexpectedShutdown", 91001);
   const report = event(boot + 12_000, "Microsoft-Windows-WER-SystemErrorReporting", 1001, "BugCheck", 91010);
@@ -602,7 +602,7 @@ function blueScreen(): OccurrenceDto {
     Event: { ts_ms: e.ts_ms, provider: e.provider, id: e.id, meaning: e.meaning },
   });
   return build({
-    id: 8,
+    id,
     start: last,
     end: down,
     kind: "PostMortem",
@@ -625,10 +625,10 @@ function blueScreen(): OccurrenceDto {
     events: [unexpected, loss, report],
     truncated: true,
     suspects: [
-      suspect({ BlueScreen: { code: 0x50 } }, "High", [loss, unexpected, report].map(asEvidence), ["UpdateDriver"]),
-      suspect({ Memory: { process: "Browser.exe" } }, "Medium", [m(last - 20_000, "MemAvailPct", 3, 5)], [
-        "CloseMemoryHeavyApp",
-      ]),
+      suspect({ BlueScreen: { code } }, "High", [loss, unexpected, report].map(asEvidence), steps),
+      ...(id === 8
+        ? [suspect({ Memory: { process: "Browser.exe" } }, "Medium", [m(last - 20_000, "MemAvailPct", 3, 5)], ["CloseMemoryHeavyApp"])]
+        : []),
     ],
     facts: [
       [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 14.2 * GB } }],
@@ -658,6 +658,7 @@ const FIXTURES = new Map(
     lowThrottling(),
     mediumFrames(),
     notMeasured(),
+    blueScreen(13, 0x124, 5, ["CheckHardwareStability", "RunMemoryDiagnostic"]),
   ].map((o) => [o.id, o]),
 );
 

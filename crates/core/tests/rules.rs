@@ -2,8 +2,8 @@ mod common;
 
 use common::{T, event, process, quiet_window, tweak};
 use vestigium_core::{
-    Cause, Confidence, EventMeaning, Evidence, HangOutcome, Metric, NextStep, ProcessTop, Sample,
-    Suspect, Trigger, Window, suspects,
+    Cause, Confidence, CrashKind, EventMeaning, Evidence, HangOutcome, Metric, NextStep,
+    ProcessTop, Sample, Suspect, Trigger, Window, suspects,
 };
 
 type Case = (Vec<Trigger>, Window);
@@ -558,6 +558,43 @@ fn ordinary_gpu_and_disk_activity_stay_unlisted() {
             ..
         }
     )));
+}
+
+fn blue_screen(code: u32) -> Vec<NextStep> {
+    let crash = Trigger::Crash {
+        last_ms: T,
+        down_ms: T + 5_000,
+        kind: CrashKind::BlueScreen {
+            code,
+            params: [0; 4],
+        },
+    };
+    let found = suspects(&[crash], &quiet_window());
+    let screen = find(&found, |c| matches!(c, Cause::BlueScreen { .. })).expect("blue screen");
+    screen.next_steps.clone()
+}
+
+#[test]
+fn a_hardware_stop_code_asks_for_hardware_checks() {
+    assert_eq!(
+        blue_screen(0x124),
+        [
+            NextStep::CheckHardwareStability,
+            NextStep::RunMemoryDiagnostic
+        ]
+    );
+    assert_eq!(
+        blue_screen(0x9C),
+        [
+            NextStep::CheckHardwareStability,
+            NextStep::RunMemoryDiagnostic
+        ]
+    );
+}
+
+#[test]
+fn another_stop_code_points_to_the_dump() {
+    assert_eq!(blue_screen(0x50), [NextStep::ReadCrashDump]);
 }
 
 #[test]

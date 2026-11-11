@@ -149,7 +149,8 @@ export type NextStep =
   | "MoveWindowsToSsd"
   | "RunMemoryDiagnostic"
   | "RunMemTest86"
-  | "RepairVolume";
+  | "RepairVolume"
+  | "ReadCrashDump";
 
 export type Cause =
   | { Storage: { disk: string | null } }

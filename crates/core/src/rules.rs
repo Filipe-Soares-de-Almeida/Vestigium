@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::dump::HARDWARE_STOPS;
 use crate::episode::MEMORY_HIGH_PCT;
 use crate::postmortem::POSTMORTEM_BEFORE_MS;
 use crate::process::per_program;
@@ -215,6 +216,8 @@ pub enum NextStep {
     RunMemTest86,
     /// Let Windows repair the file system; Vestigium only checks it.
     RepairVolume,
+    /// Open the crash dump, which says what Windows blamed.
+    ReadCrashDump,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -686,7 +689,14 @@ fn crash(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         CrashKind::BlueScreen { code, .. } => (
             Cause::BlueScreen { code },
             Confidence::High,
-            vec![NextStep::UpdateDriver],
+            if HARDWARE_STOPS.contains(&code) {
+                vec![
+                    NextStep::CheckHardwareStability,
+                    NextStep::RunMemoryDiagnostic,
+                ]
+            } else {
+                vec![NextStep::ReadCrashDump]
+            },
         ),
         CrashKind::PowerButton => (
             Cause::Unresponsive,

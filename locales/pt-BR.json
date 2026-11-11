@@ -577,6 +577,7 @@
   "ui.occurrence.step.FreeDiskSpace.any": "Para liberar espaço, use Configurações › Sistema › Armazenamento › Recomendações de limpeza ou mova vídeos e downloads grandes para outro disco.",
   "ui.occurrence.step.LetWindowsManagePageFile": "Em Propriedades do Sistema › Avançado › Desempenho › Memória virtual, deixe o Windows gerenciar o tamanho do arquivo de paginação.",
   "ui.occurrence.step.CheckHardwareStability": "Desfaça qualquer overclock de CPU, memória ou GPU e verifique as temperaturas.",
+  "ui.occurrence.step.ReadCrashDump": "Abra Dumps para ler o dump da queda; ele mostra o que o Windows apontou.",
   "ui.occurrence.step.KeepOneAntivirus": "Mantenha um só antivírus: desinstale o que você não usa.",
   "ui.occurrence.step.ReviewStartupApps": "Desative os aplicativos de inicialização que não usa (Gerenciador de Tarefas › Aplicativos de inicialização).",
   "ui.occurrence.step.WaitForShutdown": "Espere a tela e os LEDs do PC apagarem antes de cortar a energia.",

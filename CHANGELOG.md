@@ -84,6 +84,10 @@ How to use this file:
 
 ### Fixed
 
+- The report of a blue screen no longer tells you to update the graphics and chipset drivers by
+  default. A blue screen with a hardware stop code now asks you to undo overclocks, check the
+  temperatures and run the memory diagnostic, and any other blue screen asks you to open Dumps to
+  read the crash dump. Reports already stored keep their old step.
 - A report whose window holds no readings no longer says that no resource was overloaded: it says
   that Vestigium has no measurements for that moment. When readings exist but nothing crossed a
   limit, it says that none of the limits Vestigium uses was crossed, and lists the GPU and the disk

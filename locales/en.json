@@ -577,6 +577,7 @@
   "ui.occurrence.step.FreeDiskSpace.any": "To free up space, use Settings › System › Storage › Cleanup recommendations or move large videos and downloads to another disk.",
   "ui.occurrence.step.LetWindowsManagePageFile": "In System Properties › Advanced › Performance › Virtual memory, let Windows manage the page file size.",
   "ui.occurrence.step.CheckHardwareStability": "Undo any CPU, memory or GPU overclock and check the temperatures.",
+  "ui.occurrence.step.ReadCrashDump": "Open Dumps to read the crash dump; it shows what Windows blamed.",
   "ui.occurrence.step.KeepOneAntivirus": "Keep only one antivirus: uninstall the one you do not need.",
   "ui.occurrence.step.ReviewStartupApps": "Turn off the startup apps you do not use (Task Manager › Startup apps).",
   "ui.occurrence.step.WaitForShutdown": "Wait for the screen and the PC's LEDs to go off before cutting power.",
