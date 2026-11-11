@@ -8,7 +8,16 @@
   import { formatBytes, formatRate } from "./lanes";
   import { type ProgramSort, sortPrograms } from "./sort";
 
-  let { top, programs }: { top: ProcessTop | null; programs: ProcessTop | null } = $props();
+  let {
+    top,
+    programs,
+    notice,
+  }: {
+    top: ProcessTop | null;
+    programs: ProcessTop | null;
+    /** Set while the monitor is silent: the list is old. */
+    notice?: string;
+  } = $props();
 
   let sort = $state<ProgramSort>("cpu");
   /** Every program when the watcher sends them all, else its busiest by processor; five show. */
@@ -28,8 +37,10 @@
   </label>
 {/snippet}
 
-<Block title={t("ui.now.top.title")} actions={sorter}>
-  {#if rows.length === 0}
+<Block title={t("ui.now.top.title")} actions={sorter} {notice}>
+  {#if rows.length === 0 && notice !== undefined}
+    <!-- Nothing to list: the notice says nothing arrived. -->
+  {:else if rows.length === 0}
     <p class="empty">{t("ui.now.top.waiting")}</p>
   {:else}
     <table class="tbl">

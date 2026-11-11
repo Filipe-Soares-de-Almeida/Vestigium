@@ -92,15 +92,12 @@ test("an_unverified_health_check_shows_a_banner_only_on_the_health_screen", () =
   expect(onHealth.querySelectorAll("button")).toHaveLength(0);
 });
 
-test("a_silent_watcher_gets_its_own_neutral_banner_not_the_version_one", () => {
+test("a_silent_watcher_shows_no_banner_and_is_not_the_version_one", () => {
   app.link = { link: "silent", seconds: 3 };
   const page = show(Banner);
 
-  const banner = page.querySelector(".banner");
-  expect(banner?.classList.contains("neutral")).toBe(true);
-  expect(banner?.textContent).toContain(t("ui.shell.silent.title"));
-  expect(banner?.textContent).toContain("3 s");
-  expect(banner?.textContent).not.toContain(t("ui.shell.unreachable.title"));
+  expect(page.querySelector(".banner")).toBeNull();
+  expect(page.textContent).not.toContain(t("ui.shell.unreachable.title"));
   expect(shellStatus().tone).toBe("silent");
   expect(shellStatus().text).toBe(t("ui.shell.status.silent"));
 });

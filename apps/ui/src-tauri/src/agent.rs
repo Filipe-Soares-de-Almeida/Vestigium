@@ -44,7 +44,7 @@ pub enum UiError {
 
 impl UiError {
     /// The watcher is there but did not answer in time.
-    fn is_silent(&self) -> bool {
+    pub(crate) fn is_silent(&self) -> bool {
         matches!(self, UiError::Ipc(IpcError::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut)
     }
 }

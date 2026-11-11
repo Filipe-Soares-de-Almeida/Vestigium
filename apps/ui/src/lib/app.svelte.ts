@@ -22,6 +22,9 @@ class App {
   starting = $state(false);
   startError = $state<unknown>(null);
 
+  /** When the watcher last answered, Unix milliseconds; the time the window opened until it does. */
+  answeredAt = $state(Date.now());
+
   #languageSet = false;
   /** The refresh under way, so polls and clicks never ask twice at once; `#queued` asks once more after it. */
   #refreshing: Promise<void> | null = null;
@@ -38,8 +41,6 @@ class App {
   unreachable = $derived(this.link?.link === "mismatch");
   /** The watcher owns the pipe but did not answer in time; the history on disk still reads. */
   silent = $derived(this.link?.link === "silent");
-  /** How long the window waited, in seconds, while the watcher is silent. */
-  silentSeconds = $derived(this.link?.link === "silent" ? this.link.seconds : 0);
   /** Sensitive mode saw stutters worth a deep capture. */
   suggestCapture = $derived(this.link?.link === "running" && this.link.suggest_capture);
   /** The watcher's account of its own watching; `null` unless it runs. */
@@ -68,7 +69,7 @@ class App {
   async load(): Promise<void> {
     this.failure = null;
     let [link, history] = await Promise.allSettled([askStatus(), probeHistory()]);
-    if (link.status === "fulfilled" && link.value !== null) this.link = link.value;
+    if (link.status === "fulfilled" && link.value !== null) this.#take(link.value);
     // A history from an older version is unreadable until the watcher updates it: start the watcher if it
     // is stopped, then ask again for a few seconds while it does.
     let started = false;
@@ -117,13 +118,18 @@ class App {
     return this.#refreshing;
   }
 
+  #take(link: AgentLink): void {
+    this.link = link;
+    if (link.link === "running") this.answeredAt = Date.now();
+  }
+
   async #ask(): Promise<void> {
     if (this.link === null) return;
     try {
       const before = this.link.link;
       const next = await askStatus();
       if (next === null) return;
-      this.link = next;
+      this.#take(next);
       if (this.history === "empty") this.history = await probeHistory();
       if (next.link !== before) await this.loadSettings();
     } catch {

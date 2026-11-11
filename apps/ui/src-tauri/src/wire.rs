@@ -1817,6 +1817,7 @@ fn render() -> String {
             Recent => LiveMessage::Recent { points: vec![live_point()] },
             Now => LiveMessage::Now { point: Some(live_point()), frame: Box::new(now_frame(true)) },
             Stopped => LiveMessage::Stopped,
+            Silent => LiveMessage::Silent,
         )
         .into_iter()
         .chain([LiveMessage::Now {

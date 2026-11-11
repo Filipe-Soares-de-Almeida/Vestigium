@@ -43,12 +43,16 @@ How to use this file:
   neutral in colour, so they do not look like a freeze alert, and at the technical level they add what
   Windows reported for each failing source.
 - The window now tells a monitor that is running but not answering apart from one of another
-  version. When the monitor does not answer a status request within three seconds, a neutral banner
-  says "The monitor is not answering", with the time the window waited, the status line says "The
-  monitor is not answering", and the history on disk keeps showing. The window no longer says the two
-  are different versions, which it did for any answer that failed. It asks again every five seconds
-  and recovers by itself when the monitor answers; a poll that is still waiting is never repeated, so
-  a stuck monitor no longer leaves a blocked thread for every poll.
+  version. When the monitor does not answer within three seconds, the status line says "Monitor not
+  answering" and the history on disk keeps showing; the window no longer says the two are different
+  versions, which it did for any answer that failed. There is no banner: on the Now screen, the
+  program list and a program's page, the live parts stay where they are, faded, with the last values
+  received, and each says "The monitor has not answered since" the time of the last value. "Programs
+  not responding" says it cannot tell instead of "No program is not responding", and the chart says
+  "No answer" where it said "Live". A live view that loses the monitor says so at once instead of
+  "stopped", and starts again by itself when the monitor answers. The window asks again every five seconds and
+  recovers by itself; a poll that is still waiting is never repeated, so a stuck monitor no longer
+  leaves a blocked thread for every poll.
 
 ### Changed
 

@@ -10,6 +10,7 @@ import {
 import { answer } from "../dev/test-ipc";
 import { show, until } from "../dev/test-mount";
 import { app } from "../lib/app.svelte";
+import { formatClock } from "../lib/format";
 import { t } from "../lib/i18n.svelte";
 import type { LiveMessage, ProcessSample } from "../lib/types";
 import Programs from "./Programs.svelte";
@@ -76,4 +77,33 @@ test("the_filter_says_so_when_no_program_matches", async () => {
   await until(() => page.querySelector(".empty-cell") !== null, "the empty row");
   expect(page.querySelector(".empty-cell")!.textContent).toBe(t("ui.now.all.none"));
   expect(page.querySelector(".note")!.textContent).toBe(t("ui.now.all.count", { shown: 0, total: 0 }));
+});
+
+test("a_silent_monitor_leaves_the_last_programs_faded_under_a_notice", async () => {
+  app.link = running;
+  stream(programs);
+  const page = show(Programs);
+  await until(() => names(page).length === 4, "the four programs");
+
+  app.link = { link: "silent", seconds: 3 };
+  await until(() => page.querySelector(".silent-note") !== null, "the notice");
+
+  expect(names(page)).toHaveLength(4);
+  expect(page.querySelector(".wide")?.classList.contains("veiled")).toBe(true);
+  const last = (liveMessageSamples[1] as Extract<LiveMessage, { kind: "now" }>).point!.reading.ts_ms;
+  expect(page.querySelector(".silent-note")?.textContent).toContain(t("ui.now.silent.top", { time: formatClock(last) }));
+  expect(page.querySelector(".sub")?.textContent).toBe(t("ui.now.lede.silent"));
+  expect(page.querySelector(".failure")).toBeNull();
+});
+
+test("a_silent_monitor_at_opening_shows_no_rows_and_no_loading", async () => {
+  app.link = { link: "silent", seconds: 3 };
+  answer({ agent_status: () => ({ link: "silent", seconds: 3 }) });
+  const page = show(Programs);
+
+  await until(() => page.querySelector(".silent-note") !== null, "the notice");
+
+  expect(names(page)).toHaveLength(0);
+  expect(page.querySelector(".empty-cell")).toBeNull();
+  expect(page.querySelector(".silent-note")?.textContent).toContain(t("ui.now.silent.nothing", { time: formatClock(app.answeredAt) }));
 });

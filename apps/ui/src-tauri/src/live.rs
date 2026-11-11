@@ -46,6 +46,17 @@ pub enum LiveMessage {
     },
     /// The watcher stopped answering; nothing follows.
     Stopped,
+    /// The watcher is running but did not answer in time; nothing follows.
+    Silent,
+}
+
+/// What ends the stream when a request fails: silence from a running watcher, or a stop.
+fn ending(err: &UiError) -> LiveMessage {
+    if err.is_silent() {
+        LiveMessage::Silent
+    } else {
+        LiveMessage::Stopped
+    }
 }
 
 /// One second of the live chart: the reading, the state of the PC and of each lane.
@@ -130,7 +141,11 @@ pub fn run_live(
 ) {
     let (readings, pressure) = match call(&Request::Recent) {
         Ok(Response::Recent { readings, pressure }) => (readings, pressure),
-        _ => {
+        Err(err) => {
+            send(ending(&err));
+            return;
+        }
+        Ok(_) => {
             send(LiveMessage::Stopped);
             return;
         }
@@ -152,7 +167,11 @@ pub fn run_live(
     loop {
         let frame = match call(&Request::Now) {
             Ok(Response::Now(frame)) => frame,
-            _ => {
+            Err(err) => {
+                send(ending(&err));
+                return;
+            }
+            Ok(_) => {
                 send(LiveMessage::Stopped);
                 return;
             }
@@ -177,6 +196,7 @@ mod tests {
     use std::sync::mpsc;
 
     use vestigium_core::{EpisodeKind, PressureSpan, Sample};
+    use vestigium_ipc::IpcError;
 
     use super::*;
 
@@ -230,6 +250,71 @@ mod tests {
         assert_eq!(sent.len(), 3);
         assert!(matches!(sent[0], LiveMessage::Recent { .. }));
         assert!(matches!(sent[2], LiveMessage::Now { point: None, .. }));
+    }
+
+    fn timed_out() -> UiError {
+        UiError::Ipc(IpcError::Io(std::io::ErrorKind::TimedOut.into()))
+    }
+
+    #[test]
+    fn a_watcher_that_stops_answering_ends_the_stream_as_silent() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+        let mut asked = 0;
+
+        run_live(
+            |request| {
+                asked += 1;
+                if asked > 2 {
+                    return Err(timed_out());
+                }
+                agent(request)
+            },
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert!(matches!(sent.last(), Some(LiveMessage::Silent)));
+    }
+
+    #[test]
+    fn a_silent_first_request_ends_the_stream_as_silent() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+
+        run_live(
+            |_| Err(timed_out()),
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(sent, [LiveMessage::Silent]);
+    }
+
+    #[test]
+    fn a_gone_watcher_ends_the_stream_as_stopped() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+
+        run_live(
+            |_| Err(UiError::AgentStopped),
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(sent, [LiveMessage::Stopped]);
     }
 
     #[test]

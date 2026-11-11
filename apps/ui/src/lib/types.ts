@@ -493,7 +493,9 @@ export interface LivePoint {
 export type LiveMessage =
   | { kind: "recent"; points: LivePoint[] }
   | { kind: "now"; point: LivePoint | null; frame: NowFrame }
-  | { kind: "stopped" };
+  | { kind: "stopped" }
+  /** The watcher is running but did not answer in time. */
+  | { kind: "silent" };
 
 export type UiErrorKind =
   | "agent_stopped"

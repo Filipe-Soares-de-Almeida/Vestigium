@@ -48,7 +48,6 @@ test("a_silent_watcher_is_a_state_of_its_own_and_comes_back_when_it_answers", as
 
   await app.refresh();
   expect(app.silent).toBe(true);
-  expect(app.silentSeconds).toBe(3);
   expect(app.unreachable).toBe(false);
   expect(app.settings).toBeNull();
 
@@ -73,3 +72,17 @@ test("a_busy_connection_leaves_what_the_window_knew", async () => {
 function vi_tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+test("the_time_of_the_last_answer_moves_only_when_the_watcher_answers", async () => {
+  app.link = running;
+  app.history = "ready";
+  app.answeredAt = 1_000;
+  answer({ agent_status: () => ({ link: "silent", seconds: 3 }), settings: () => Promise.reject({ kind: "ipc", message: "silent" }) });
+
+  await app.refresh();
+  expect(app.answeredAt).toBe(1_000);
+
+  answer({ agent_status: () => running, settings: () => ({ settings: {}, autostart: true, editable: true }) });
+  await app.refresh();
+  expect(app.answeredAt).toBeGreaterThan(1_000);
+});

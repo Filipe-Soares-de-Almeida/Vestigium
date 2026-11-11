@@ -4,11 +4,13 @@
   import { t } from "../../lib/i18n.svelte";
   import type { Hung } from "./live.svelte";
 
-  let { hung, nowMs }: { hung: Hung[]; nowMs: number } = $props();
+  let { hung, nowMs, notice }: { hung: Hung[]; nowMs: number; /** Set while the monitor is silent: the list is old and cannot say "none". */ notice?: string } = $props();
 </script>
 
-<Block title={t("ui.now.hung.title")}>
-  {#if hung.length === 0}
+<Block title={t("ui.now.hung.title")} {notice}>
+  {#if hung.length === 0 && notice !== undefined}
+    <!-- Nothing to list: the notice says it cannot tell. -->
+  {:else if hung.length === 0}
     <p class="empty">{t("ui.now.hung.none")}</p>
   {:else}
     <ul class="ev-l">

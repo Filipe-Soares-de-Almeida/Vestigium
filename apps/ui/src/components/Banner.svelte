@@ -8,21 +8,21 @@
   import { router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
 
-  type Kind = "paused" | "stopped" | "unreachable" | "silent" | "no_reading" | "degraded" | "unverified";
+  type Kind = "paused" | "stopped" | "unreachable" | "no_reading" | "degraded" | "unverified";
 
   // One banner above the screen title; none while every source reads. A health check that has not
-  // finished shows only on the Health screen.
+  // finished shows only on the Health screen. A monitor that does not answer has none: each live part
+  // of a screen says so itself.
   const kind = $derived.by((): Kind | null => {
     if (app.paused) return "paused";
     if (app.stopped) return "stopped";
     if (app.unreachable) return "unreachable";
-    if (app.silent) return "silent";
     if (app.noReading) return "no_reading";
     if (app.degraded) return "degraded";
     if (app.unverified !== null && router.current.screen === "health") return "unverified";
     return null;
   });
-  const neutral = $derived(kind === "silent" || kind === "no_reading" || kind === "degraded" || kind === "unverified");
+  const neutral = $derived(kind === "no_reading" || kind === "degraded" || kind === "unverified");
   const technical = $derived(app.settings?.settings.detail_level === "Technical");
 
   /** The sentence under the title for the states the monitor reports about itself. */
@@ -31,7 +31,6 @@
     if (kind === "paused") {
       return app.pausedUntil !== null ? t("ui.shell.paused.body_until", { time: formatTime(app.pausedUntil) }) : t("ui.shell.paused.body");
     }
-    if (kind === "silent") return t("ui.shell.silent.body", { seconds: app.silentSeconds });
     if (monitor === null) return kind === null ? "" : t(`ui.shell.${kind}.body`);
     if (kind === "no_reading") {
       const since = monitor.no_reading_since_ms ?? app.started;

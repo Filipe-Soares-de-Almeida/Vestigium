@@ -69,7 +69,7 @@ function needsWatcher(): Promise<never> | null {
 
 const base: Record<string, Handler> = {
   agent_status: () =>
-    state.link === "running" && monitorMode === "silent"
+    state.link === "running" && (monitorMode === "silent" || (window as unknown as { __mute?: boolean }).__mute)
       ? { link: "silent", seconds: 3 }
       : state.link === "running"
       ? {

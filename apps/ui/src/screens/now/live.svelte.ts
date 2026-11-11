@@ -17,6 +17,8 @@ export class Live {
   started = $state(false);
   /** The watcher stopped answering. */
   ended = $state(false);
+  /** It ended because the watcher is running but did not answer in time. */
+  silent = $state(false);
 
   #fresh = true;
   #hungTracker = new HungTracker();
@@ -25,6 +27,7 @@ export class Live {
   reset(): void {
     this.started = false;
     this.ended = false;
+    this.silent = false;
   }
 
   take(message: LiveMessage): void {
@@ -34,10 +37,12 @@ export class Live {
       this.#fresh = true;
       this.started = true;
       this.ended = false;
+      this.silent = false;
       return;
     }
-    if (message.kind === "stopped") {
+    if (message.kind === "stopped" || message.kind === "silent") {
       this.ended = true;
+      this.silent = message.kind === "silent";
       return;
     }
     const now = message.point?.reading.ts_ms ?? Date.now();

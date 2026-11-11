@@ -1,5 +1,5 @@
 // A simulated live stream for the Now screen.
-// URL: ?now=calm|busy|pressure|hung|stops&last=none, plus the base mock's link, history and fail.
+// URL: ?now=calm|busy|pressure|hung|stops|mute&last=none, plus the base mock's link, history and fail.
 import type { Channel } from "@tauri-apps/api/core";
 
 import type {
@@ -17,7 +17,7 @@ import type {
 } from "../../lib/types";
 import type { Handler } from "../mock";
 
-type Scenario = "calm" | "busy" | "pressure" | "hung" | "stops";
+type Scenario = "calm" | "busy" | "pressure" | "hung" | "stops" | "mute";
 
 const query = new URLSearchParams(location.search);
 const scenario = (query.get("now") ?? "calm") as Scenario;
@@ -51,11 +51,12 @@ const HEAVY: Record<Scenario, Target> = {
   calm: CALM,
   hung: CALM,
   stops: CALM,
+  mute: CALM,
   busy: { cpu: 62, memory: 61, disk: 12, gpu: 8, latency: 2.2 },
   pressure: { cpu: 98, memory: 66, disk: 9, gpu: 7, latency: 2.6 },
 };
 /** How many seconds before now the heavy stretch began. */
-const HEAVY_FOR_S: Record<Scenario, number> = { calm: 0, hung: 0, stops: 0, busy: 200, pressure: 150 };
+const HEAVY_FOR_S: Record<Scenario, number> = { calm: 0, hung: 0, stops: 0, mute: 0, busy: 200, pressure: 150 };
 
 function clamp(value: number): number {
   return Math.min(100, Math.max(0, value));
@@ -254,8 +255,10 @@ export const handlers: Record<string, Handler> = {
     const tick = () => {
       ticks++;
       const now = Date.now();
-      if (scenario === "stops" && ticks > 4) {
-        send({ kind: "stopped" });
+      if ((scenario === "stops" || scenario === "mute") && ticks > 4) {
+        // A mute watcher answers nothing in time; the status call says so too.
+        if (scenario === "mute") (window as unknown as { __mute: boolean }).__mute = true;
+        send({ kind: scenario === "mute" ? "silent" : "stopped" });
         if (timer) clearInterval(timer);
         timer = null;
         return;
