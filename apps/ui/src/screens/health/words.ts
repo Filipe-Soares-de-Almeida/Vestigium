@@ -24,8 +24,8 @@ type Args = Record<string, string | number>;
 const k = (key: string, args?: Args) => t(`ui.health.${key}`, args);
 const kn = (key: string, count: number, args?: Args) => tn(`ui.health.${key}`, count, args);
 
-/** The text of `key.<concern>` when the catalog has one, else of `key`. */
-function byConcern(key: string, concern: Concern, args?: Args): string {
+/** The text of `key.<variant>` when the catalog has one, else of `key`. */
+function byConcern(key: string, concern: Concern | "Hot", args?: Args): string {
   const specific = `ui.health.${key}.${concern}`;
   const text = t(specific, args);
   return text === specific ? k(key, args) : text;
@@ -58,11 +58,21 @@ export function when(ms: number): string {
   return sameDay(ms, Date.now()) ? k("today_at", { time: formatTime(ms) }) : formatDayShort(ms);
 }
 
+/** An NVMe disk that only ran hot: its one next step is the cooling check. */
+function ranHot(f: FindingDto): boolean {
+  return (
+    f.kind === "DiskSmart" &&
+    f.concern === "Attention" &&
+    f.next_steps.length === 1 &&
+    f.next_steps[0] === "CheckCooling"
+  );
+}
+
 export function findingTitle(f: FindingDto, level: DetailLevel): string {
   const subject = subjectName(f.subject);
   return level === "Technical"
     ? k(`kind.${f.kind}.tech`, { subject })
-    : byConcern(`kind.${f.kind}.title`, f.concern, { subject });
+    : byConcern(`kind.${f.kind}.title`, ranHot(f) ? "Hot" : f.concern, { subject });
 }
 
 export function findingView(f: FindingDto, level: DetailLevel): FindingView {
@@ -70,7 +80,10 @@ export function findingView(f: FindingDto, level: DetailLevel): FindingView {
   return {
     title: findingTitle(f, level),
     since: k("since", { when: when(f.opened_ms) }),
-    why: level === "Technical" ? k(`kind.${f.kind}.rule`) : byConcern(`kind.${f.kind}.why`, f.concern),
+    why:
+      level === "Technical"
+        ? k(`kind.${f.kind}.rule`)
+        : byConcern(`kind.${f.kind}.why`, ranHot(f) ? "Hot" : f.concern),
     value: valueText(f.kind, f.value),
     reference: referenceText(f.kind, f.reference),
     evidence: evidenceTexts(f).map((texts) => lineFor(level, texts)),

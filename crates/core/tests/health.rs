@@ -267,6 +267,56 @@ fn nvme_critical_warning_is_critical_and_wear_is_attention() {
 }
 
 #[test]
+fn an_nvme_temperature_bit_alone_is_attention() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0b010, 12, 0));
+    let found = evaluate(&inputs);
+    let hot = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(hot.concern, Concern::Attention);
+    assert_eq!(hot.next_steps, vec![NextStep::CheckCooling]);
+    assert!(hot.evidence.contains(&HealthFact::Nvme(nvme(0b010, 12, 0))));
+}
+
+#[test]
+fn an_nvme_temperature_bit_with_wear_keeps_the_wear_steps() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0b010, 93, 0));
+    let found = evaluate(&inputs);
+    let worn = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(worn.concern, Concern::Attention);
+    assert_eq!(
+        worn.next_steps,
+        vec![NextStep::BackUpNow, NextStep::RunDiskTest]
+    );
+}
+
+#[test]
+fn an_nvme_reliability_bit_stays_critical() {
+    for bits in [0b1u8, 0b100, 0b1000, 0b1_0000, 0b10_0000, 0b110] {
+        let mut inputs = healthy();
+        inputs.disks[0].nvme = Some(nvme(bits, 12, 0));
+        let found = evaluate(&inputs);
+        let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+        assert_eq!(smart.concern, Concern::Critical, "bits {bits:#b}");
+        assert!(smart.next_steps.contains(&NextStep::ReplaceDisk));
+    }
+}
+
+#[test]
+fn nvme_media_errors_are_attention_with_the_nvme_evidence() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0, 12, 3));
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.concern, Concern::Attention);
+    assert!(smart.evidence.contains(&HealthFact::Nvme(nvme(0, 12, 3))));
+}
+
+#[test]
 fn smart_block_with_a_bad_checksum_is_ignored() {
     let mut block = vec![0u8; 512];
     block[2..14].copy_from_slice(&[5, 0x33, 0, 100, 99, 5, 0, 0, 0, 0, 0, 0]);

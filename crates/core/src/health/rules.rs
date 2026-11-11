@@ -40,6 +40,8 @@ const TREND_DAYS: i64 = 35;
 /// Events shown as evidence of one finding, newest first.
 const EVENTS_SHOWN: usize = 10;
 const DELAYS_SHOWN: usize = 5;
+/// The NVMe critical-warning bit for a temperature outside the safe range; it clears on cooling.
+const NVME_TEMPERATURE_BIT: u8 = 0b10;
 
 /// Every finding of one health pass, the most worrying first and in table order otherwise.
 pub fn evaluate(inputs: &HealthInputs) -> Vec<Finding> {
@@ -136,14 +138,18 @@ fn disk_smart(disk: &DiskHealth, hdd: bool) -> Option<Finding> {
         })
         .filter(|a| a.raw > 0)
         .collect();
-    let nvme_critical = disk
+    let nvme_critical = disk.nvme.is_some_and(|n| {
+        n.critical_warning & !NVME_TEMPERATURE_BIT != 0
+            || n.available_spare_pct < n.spare_threshold_pct
+    });
+    let nvme_hot = disk
         .nvme
-        .is_some_and(|n| n.critical_warning != 0 || n.available_spare_pct < n.spare_threshold_pct);
+        .is_some_and(|n| n.critical_warning & NVME_TEMPERATURE_BIT != 0);
     let nvme_worn = disk
         .nvme
         .is_some_and(|n| n.percentage_used >= NVME_WORN_PCT || n.media_errors > 0);
     let critical = disk.predict_failure || nvme_critical;
-    if !critical && !nvme_worn && watched.is_empty() {
+    if !critical && !nvme_worn && !nvme_hot && watched.is_empty() {
         return None;
     }
     let mut evidence = Vec::new();
@@ -172,6 +178,8 @@ fn disk_smart(disk: &DiskHealth, hdd: bool) -> Option<Finding> {
             Concern::Critical,
             vec![NextStep::BackUpNow, NextStep::ReplaceDisk],
         )
+    } else if nvme_hot && !nvme_worn && watched.is_empty() {
+        (Concern::Attention, vec![NextStep::CheckCooling])
     } else {
         (
             Concern::Attention,

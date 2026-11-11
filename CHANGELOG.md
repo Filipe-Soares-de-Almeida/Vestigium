@@ -76,6 +76,10 @@ How to use this file:
 
 ### Fixed
 
+- An NVMe disk that only reported a temperature outside its safe range is no longer shown as a
+  critical alert that tells you to back up and replace the disk. It now raises an attention alert,
+  "Disk ran hot", that says the disk is not failing and points to the vents and fans, and it closes
+  once the disk cools down. The other critical warnings of an NVMe disk are still critical.
 - A result file the monitor cannot read, such as one a newer helper wrote in a layout it does not
   know, is now deleted from the data folder once it has stayed unchanged for 30 days instead of
   staying there forever, and the privacy page says so.
