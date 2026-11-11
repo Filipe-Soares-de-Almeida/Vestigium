@@ -15,6 +15,8 @@ use vestigium_store::Store;
 /// Stores the finished capture files of `dir` and deletes them; returns the ids in name order.
 /// A file that does not decode is kept until it has sat unchanged for 30 days.
 pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -> Vec<i64> {
+    // A stop file a helper never read is an empty leftover; the listing removes it once stale.
+    let _ = numbered_files(dir, "stop");
     let mut ids = Vec::new();
     for path in numbered_files(dir, "capture") {
         let Some(mut capture) = read_capture(&path) else {

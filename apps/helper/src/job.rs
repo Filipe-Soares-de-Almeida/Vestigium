@@ -8,6 +8,8 @@ pub const REFUSED: u8 = 2;
 pub const WRITE_FAILED: u8 = 3;
 /// Exit code for a deep capture refused because another one is running.
 pub const CAPTURE_RUNNING: u8 = 4;
+/// Exit code for a deep capture ended by its stop file; nothing was written.
+pub const CANCELLED: u8 = 5;
 pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 /// Physical drive numbers a disk scan accepts.
 pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;

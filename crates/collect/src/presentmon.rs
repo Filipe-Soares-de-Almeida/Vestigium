@@ -3,6 +3,7 @@ use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,6 +22,8 @@ pub const PRESENTMON_SESSION: &str = "Vestigium PresentMon";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// How long past its own timer a PresentMon run may last before it is killed.
 const DEADLINE_MARGIN_SECS: u64 = 15;
+/// How often a run that waits for output looks at its cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(200);
 
 /// One presented frame: the app's own cadence, start time in raw QPC.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +52,8 @@ pub struct PresentMonOutcome {
     pub ran_secs: u64,
     /// The process outlived its deadline and was killed.
     pub timed_out: bool,
+    /// The run was ended on request before its timer.
+    pub cancelled: bool,
 }
 
 /// A run ends about a second after its timer; this much shorter than asked is an early end.
@@ -217,14 +222,22 @@ impl FrameReader {
 }
 
 /// Runs PresentMon at `exe` for `seconds` with no window, handing each frame to `on_frame`; a run
-/// that outlives its timer by more than a margin is killed.
+/// that outlives its timer by more than a margin, or that `cancel` ends, is killed.
 pub fn run_presentmon(
     exe: &Path,
     seconds: u64,
+    cancel: &AtomicBool,
     on_frame: impl FnMut(FrameRow),
 ) -> Result<PresentMonOutcome, CollectError> {
     let deadline = Duration::from_secs(seconds + DEADLINE_MARGIN_SECS);
-    run_with_args(exe, &presentmon_args(seconds), seconds, deadline, on_frame)
+    run_until(
+        exe,
+        &presentmon_args(seconds),
+        seconds,
+        deadline,
+        cancel,
+        on_frame,
+    )
 }
 
 /// A job object that ends every process in it when its handle closes.
@@ -274,11 +287,24 @@ impl Drop for KillOnClose {
     }
 }
 
+#[cfg(test)]
 fn run_with_args(
     exe: &Path,
     args: &[String],
     requested_secs: u64,
     deadline: Duration,
+    on_frame: impl FnMut(FrameRow),
+) -> Result<PresentMonOutcome, CollectError> {
+    let never = AtomicBool::new(false);
+    run_until(exe, args, requested_secs, deadline, &never, on_frame)
+}
+
+fn run_until(
+    exe: &Path,
+    args: &[String],
+    requested_secs: u64,
+    deadline: Duration,
+    cancel: &AtomicBool,
     mut on_frame: impl FnMut(FrameRow),
 ) -> Result<PresentMonOutcome, CollectError> {
     let started = Instant::now();
@@ -317,7 +343,7 @@ fn run_with_args(
     let mut read_error = None;
     loop {
         let left = deadline.saturating_sub(started.elapsed());
-        match incoming.recv_timeout(left) {
+        match incoming.recv_timeout(left.min(CANCEL_POLL)) {
             Ok(Ok(line)) => reader.line(&line, &mut on_frame),
             Ok(Err(e)) => {
                 read_error = Some(e);
@@ -325,12 +351,18 @@ fn run_with_args(
             }
             Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {
-                outcome.timed_out = true;
-                break;
+                if cancel.load(Ordering::Acquire) {
+                    outcome.cancelled = true;
+                    break;
+                }
+                if started.elapsed() >= deadline {
+                    outcome.timed_out = true;
+                    break;
+                }
             }
         }
     }
-    if outcome.timed_out || read_error.is_some() {
+    if outcome.timed_out || outcome.cancelled || read_error.is_some() {
         match &job {
             Some(job) => job.kill(),
             None => {
@@ -614,6 +646,30 @@ game.exe,x,y,2
         ["-n", &secs.to_string(), "127.0.0.1"]
             .map(String::from)
             .to_vec()
+    }
+
+    #[test]
+    fn a_cancelled_run_is_killed_well_before_its_deadline() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let trigger = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(600));
+            flag.store(true, Ordering::Release);
+        });
+        let started = Instant::now();
+        let outcome = run_until(
+            Path::new("ping.exe"),
+            &ping_for(40),
+            300,
+            Duration::from_secs(120),
+            &cancel,
+            |_| {},
+        )
+        .unwrap();
+        trigger.join().unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(outcome.cancelled && !outcome.timed_out);
     }
 
     #[test]

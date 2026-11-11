@@ -24,6 +24,9 @@ How to use this file:
 
 ### Added
 
+- The helper that runs a deep capture can now be told to stop. A stop file beside the capture ends
+  it within a quarter of a second: the trace and the frame reader are closed, nothing is saved and
+  the helper exits with its own code for a cancelled capture.
 - The tray icon and its tooltip now say when the monitor is not reading the PC. With no sample for
   more than a few seconds and nothing paused, the icon takes a dash badge and the tooltip says "no
   reading since" the time of the last sample; when only some data sources fail it takes an

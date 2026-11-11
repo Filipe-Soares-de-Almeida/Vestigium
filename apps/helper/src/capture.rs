@@ -1,8 +1,10 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vestigium_collect::{
     DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, EventSink, KernelRecord,
@@ -127,7 +129,26 @@ impl EventSink for Kernel {
     }
 }
 
-/// Runs the deep capture for `minutes` and writes it to `out`, unless another capture is running.
+/// How often a running capture looks for its stop file.
+const STOP_POLL: Duration = Duration::from_millis(250);
+
+/// Sleeps for `length`, looking at `stop` every `poll`; true when `stop` ended the wait early.
+fn wait_out(length: Duration, poll: Duration, stop: &mut dyn FnMut() -> bool) -> bool {
+    let started = Instant::now();
+    loop {
+        if stop() {
+            return true;
+        }
+        let left = length.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return false;
+        }
+        thread::sleep(left.min(poll));
+    }
+}
+
+/// Runs the deep capture for `minutes` and writes it to `out`, unless another capture is running;
+/// a `.stop` file beside `out` ends it at once and keeps nothing.
 pub fn run(minutes: u64, out: &Path) -> ExitCode {
     let Ok(_lock) = lock::take(DEEP_CAPTURE_LOCK) else {
         return ExitCode::from(job::CAPTURE_RUNNING);
@@ -135,7 +156,12 @@ pub fn run(minutes: u64, out: &Path) -> ExitCode {
     let Ok(mut file) = output::create(out, "captures", "capture") else {
         return ExitCode::from(job::REFUSED);
     };
-    let capture = capture(Duration::from_secs(minutes * 60));
+    let stop_path = out.with_extension("stop");
+    let Some(capture) = capture(Duration::from_secs(minutes * 60), &mut || {
+        stop_path.exists()
+    }) else {
+        return ExitCode::from(job::CANCELLED);
+    };
     let mut bytes = vec![CAPTURE_VERSION];
     match postcard::to_allocvec(&capture) {
         Ok(body) => bytes.extend(body),
@@ -147,7 +173,9 @@ pub fn run(minutes: u64, out: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn capture(length: Duration) -> DeepCapture {
+/// The capture of `length`, or `None` when `stop` ended it early; the trace and PresentMon are
+/// closed either way.
+fn capture(length: Duration, stop: &mut dyn FnMut() -> bool) -> Option<DeepCapture> {
     let clock = Clock::now();
     let flags = EVENT_TRACE_FLAG_DPC | EVENT_TRACE_FLAG_INTERRUPT | EVENT_TRACE_FLAG_IMAGE_LOAD;
     let session = KernelSession::start(DEEP_CAPTURE_SESSION, DEEP_CAPTURE_GUID, flags);
@@ -161,8 +189,13 @@ fn capture(length: Duration) -> DeepCapture {
             },
         )
     });
-    let frames = thread::spawn(move || frames(length, clock));
-    thread::sleep(length);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let frames = {
+        let cancel = cancel.clone();
+        thread::spawn(move || frames(length, clock, &cancel))
+    };
+    let stopped = wait_out(length, STOP_POLL, stop);
+    cancel.store(stopped, Ordering::Release);
 
     let mut kernel = CaptureSource::Ok;
     let mut lost_events = 0;
@@ -197,6 +230,9 @@ fn capture(length: Duration) -> DeepCapture {
             vec![],
         )
     });
+    if stopped {
+        return None;
+    }
     let clock = clock.ended();
     for routine in &mut longest {
         routine.ts_ms = clock.corrected(routine.ts_ms);
@@ -217,10 +253,14 @@ fn capture(length: Duration) -> DeepCapture {
         hiccups: vec![],
     };
     capture.fit_to_ceiling();
-    capture
+    Some(capture)
 }
 
-fn frames(length: Duration, clock: Clock) -> (CaptureSource, Vec<AppFrames>, Vec<FrameHitch>) {
+fn frames(
+    length: Duration,
+    clock: Clock,
+    cancel: &AtomicBool,
+) -> (CaptureSource, Vec<AppFrames>, Vec<FrameHitch>) {
     let dir = match std::env::current_exe() {
         Ok(exe) => exe.parent().map(Path::to_path_buf).unwrap_or_default(),
         Err(e) => return (CaptureSource::Unavailable(e.to_string()), vec![], vec![]),
@@ -230,7 +270,7 @@ fn frames(length: Duration, clock: Clock) -> (CaptureSource, Vec<AppFrames>, Vec
         Err(why) => return (CaptureSource::Unavailable(why), vec![], vec![]),
     };
     let mut aggregator = FrameAggregator::new();
-    let outcome = run_presentmon(&tool.path, length.as_secs(), |row| {
+    let outcome = run_presentmon(&tool.path, length.as_secs(), cancel, |row| {
         if let Some(ms) = row.between_presents_ms {
             aggregator.add(&row.app, row.pid, clock.wall_ms(row.cpu_start_qpc), ms);
         }
@@ -270,6 +310,34 @@ fn frames_source(outcome: &PresentMonOutcome) -> CaptureSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stop_ends_the_wait_before_the_length() {
+        let started = Instant::now();
+        let mut looks = 0;
+        let stopped = wait_out(
+            Duration::from_secs(60),
+            Duration::from_millis(10),
+            &mut || {
+                looks += 1;
+                looks > 3
+            },
+        );
+        assert!(stopped);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_wait_nobody_stops_lasts_the_length() {
+        let started = Instant::now();
+        let stopped = wait_out(
+            Duration::from_millis(120),
+            Duration::from_millis(10),
+            &mut || false,
+        );
+        assert!(!stopped);
+        assert!(started.elapsed() >= Duration::from_millis(120));
+    }
 
     #[test]
     fn a_reader_that_failed_or_saw_nothing_is_not_trusted() {
