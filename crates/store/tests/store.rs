@@ -340,6 +340,64 @@ fn segments_query_returns_overlaps() {
 }
 
 #[test]
+fn a_segment_that_began_before_the_range_and_ends_inside_it_is_returned() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let hour = 3_600_000;
+    store
+        .append(&[
+            segment(10 * hour, 10 * hour + 300_000),
+            segment(20 * hour, 20 * hour + 300_000),
+            segment(30 * hour, 30 * hour + 300_000),
+        ])
+        .unwrap();
+
+    let found = store
+        .segments(Series::Samples, 20 * hour + 200_000, 40 * hour)
+        .unwrap();
+
+    let starts: Vec<i64> = found.iter().map(|s| s.start_ms).collect();
+    assert_eq!(starts, vec![20 * hour, 30 * hour]);
+}
+
+#[test]
+fn a_segment_longer_than_the_span_bound_is_missed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let hour = 3_600_000;
+    store.append(&[segment(0, 5 * hour)]).unwrap();
+
+    assert_eq!(
+        store.segments(Series::Samples, hour + 1, 6 * hour).unwrap(),
+        Vec::new()
+    );
+    assert_eq!(
+        store
+            .segments(Series::Samples, hour, 6 * hour)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn reading_the_whole_range_returns_every_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    store
+        .append(&[
+            segment(i64::MIN / 2, 0),
+            segment(0, 10),
+            segment(10, i64::MAX / 2),
+        ])
+        .unwrap();
+
+    let found = store.segments(Series::Samples, i64::MIN, i64::MAX).unwrap();
+
+    assert_eq!(found.len(), 3);
+}
+
+#[test]
 fn segments_query_filters_by_series() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();

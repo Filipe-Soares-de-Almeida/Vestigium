@@ -4,9 +4,10 @@ use rusqlite::{Connection, OpenFlags, params};
 use vestigium_core::{Gap, WinEvent};
 
 use crate::codes::{channel_code, gap_code, meaning_code};
+use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -179,6 +180,7 @@ const MIGRATIONS: &[&str] = &[
         GROUP BY applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));
     CREATE UNIQUE INDEX tweak_change_key
         ON tweak_change (applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));",
+    "CREATE INDEX segment_series_start ON segment (series, start_ms, end_ms);",
 ];
 
 /// What the agent writes in one transaction, every batch.
@@ -201,6 +203,11 @@ impl Batch {
 }
 
 const _: () = assert!(MIGRATIONS.len() == SCHEMA_VERSION as usize);
+
+/// Segments of one series overlapping a range, oldest first; `?4` is the earliest start read.
+pub(crate) const SEGMENTS_SQL: &str = "SELECT start_ms, end_ms, data FROM segment
+     WHERE series = ?1 AND start_ms >= ?4 AND start_ms <= ?3 AND end_ms >= ?2
+     ORDER BY start_ms";
 
 /// The history database.
 #[derive(Debug)]
@@ -359,19 +366,19 @@ impl Store {
         from_ms: i64,
         to_ms: i64,
     ) -> Result<Vec<Segment>, StoreError> {
-        let mut query = self.conn.prepare_cached(
-            "SELECT start_ms, end_ms, data FROM segment
-             WHERE series = ?1 AND start_ms <= ?3 AND end_ms >= ?2
-             ORDER BY start_ms",
+        let mut query = self.conn.prepare_cached(SEGMENTS_SQL)?;
+        let earliest_start = from_ms.saturating_sub(MAX_SEGMENT_SPAN_MS);
+        let rows = query.query_map(
+            params![series as u8, from_ms, to_ms, earliest_start],
+            |row| {
+                Ok(Segment {
+                    series,
+                    start_ms: row.get(0)?,
+                    end_ms: row.get(1)?,
+                    data: row.get(2)?,
+                })
+            },
         )?;
-        let rows = query.query_map(params![series as u8, from_ms, to_ms], |row| {
-            Ok(Segment {
-                series,
-                start_ms: row.get(0)?,
-                end_ms: row.get(1)?,
-                data: row.get(2)?,
-            })
-        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 }

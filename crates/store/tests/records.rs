@@ -184,6 +184,41 @@ fn migration_from_v1_keeps_segments() {
 }
 
 #[test]
+fn migration_indexes_the_segments_already_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    {
+        let mut store = Store::open(&path).unwrap();
+        store
+            .append(&[
+                segment(Series::Samples, 1_000, 2_000),
+                segment(Series::Minutes, 1_000, 2_000),
+            ])
+            .unwrap();
+    }
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute_batch("DROP INDEX segment_series_start; PRAGMA user_version = 11;")
+            .unwrap();
+    }
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    let indexed: i64 = raw
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name = 'segment_series_start'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed, 1);
+    let rows = store.segments(Series::Samples, 0, 10_000).unwrap();
+    assert_eq!(rows, vec![segment(Series::Samples, 1_000, 2_000)]);
+}
+
+#[test]
 fn migration_repairs_memory_diagnostics_stored_without_a_meaning() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vestigium.db");
@@ -192,6 +227,7 @@ fn migration_repairs_memory_diagnostics_stored_without_a_meaning() {
         let raw = rusqlite::Connection::open(&path).unwrap();
         raw.execute_batch(
             "DROP INDEX tweak_change_key;
+             DROP INDEX segment_series_start;
              PRAGMA user_version = 9;
              INSERT INTO event (ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml)
              VALUES (1000, 1, 'stornvme', 129, 1, 3, 1, '<EventData/>'),
@@ -716,6 +752,28 @@ fn prune_runs_when_now_is_within_an_hour_of_the_data() {
 }
 
 #[test]
+fn prune_measures_the_data_by_the_latest_end_of_any_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let now = 1_000 * DAY_MS;
+    store
+        .append_batch(&Batch {
+            segments: vec![
+                segment(Series::Samples, now - 50 * 60_000, now),
+                segment(Series::Processes, now - 10 * 60_000, now - 9 * 60_000),
+            ],
+            ..Batch::default()
+        })
+        .unwrap();
+
+    let report = store
+        .prune(now + HOUR_MS - 1, &Retention::default())
+        .unwrap();
+
+    assert!(!report.refused);
+}
+
+#[test]
 fn prune_runs_when_the_clock_is_behind_the_data() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = open(dir.path());
@@ -977,7 +1035,8 @@ fn migration_keeps_one_row_of_each_duplicated_result() {
     {
         let raw = rusqlite::Connection::open(&path).unwrap();
         raw.execute_batch(
-            "DROP INDEX capture_start;
+            "DROP INDEX segment_series_start;
+             DROP INDEX capture_start;
              DROP INDEX scan_ts;
              CREATE INDEX capture_start ON capture (start_ms);
              CREATE INDEX scan_ts ON scan (ts_ms);

@@ -60,6 +60,10 @@ How to use this file:
   the shutdown as the possible causes, since the event alone cannot tell them apart.
 - The Portuguese Now line for a disk cause now reads "provavelmente quase todo por" the process,
   instead of the clumsy "provavelmente principalmente por".
+- Reading the history for a chart and the hourly cleanup of old history no longer look at every
+  stored row older than the period asked for, so they stay fast as the kept history grows instead
+  of slowing down with it. The history database moves to a new version, so the window and the
+  watcher must be updated together.
 
 ### Fixed
 

@@ -249,6 +249,8 @@ fn migration_from_v3_adds_findings_and_scans() {
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
              CREATE TABLE event (id INTEGER PRIMARY KEY, provider TEXT NOT NULL,
                  meaning INTEGER NOT NULL);
+             CREATE TABLE segment (id INTEGER PRIMARY KEY, series INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
              CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
                  start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 3;",
