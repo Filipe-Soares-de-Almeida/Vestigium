@@ -94,6 +94,9 @@ How to use this file:
   monitor reads about the last fall comes through a read-only connection that never waits for a
   write. An occurrence that cannot be stored is still tried again every second and given up after
   five failed tries, as before.
+- The hourly clean-up of history past its retention and the listing of crash dumps now run on the
+  storage thread too, so neither can hold up a sample while it works through a large history or a
+  slow folder.
 - Once the crash dump of a blue screen is read, the report page and the copied report use the
   dump's own next steps instead of the generic driver update. When the dump blames a Windows
   component that serves other drivers, such as storport.sys, the Dumps screen no longer says to

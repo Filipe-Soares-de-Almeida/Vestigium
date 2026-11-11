@@ -8,11 +8,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vestigium_core::{Episode, Gap, GapReason, MachineInfo, Occurrence, OccurrenceSummary, Output};
+use vestigium_core::{
+    Episode, Gap, GapReason, MachineInfo, Occurrence, OccurrenceSummary, Output, Retention,
+};
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Store, StoreError};
 
 use crate::app::{lock, panic_text};
+use crate::dumps::{DumpPlaces, take_inventory};
 
 /// Jobs the queue holds before a sender has to keep its work to itself.
 pub const QUEUE_BOUND: usize = 32;
@@ -62,6 +65,16 @@ pub enum Job {
     Episode(Episode),
     /// The machine facts the disk counters made known.
     Machine(MachineInfo),
+    /// Deletes what is past its retention; a prune the store refuses is not an error.
+    Prune {
+        now_ms: i64,
+        retention: Retention,
+    },
+    /// Lists the dumps Windows kept and stores the changes; `None` looks where this PC keeps them.
+    Dumps {
+        places: Option<DumpPlaces>,
+        now_ms: i64,
+    },
     /// Tries again what failed to write: batches, occurrences and episodes.
     Retry,
     /// Answers once every job before it has run.
@@ -250,6 +263,21 @@ impl Worker {
             Job::Machine(machine) => {
                 if let Err(err) = self.store.set_machine(&machine) {
                     self.report(&err);
+                }
+            }
+            Job::Prune { now_ms, retention } => {
+                if let Err(err) = self.store.prune(now_ms, &retention) {
+                    self.report(&err);
+                }
+            }
+            Job::Dumps { places, now_ms } => {
+                // The listing is of the files on disk, so one made before a clear is skipped only
+                // because the next one is due anyway.
+                if epoch >= self.links.epoch.current() {
+                    let places = places.unwrap_or_else(DumpPlaces::of_this_pc);
+                    if let Err(err) = take_inventory(&mut self.store, &places, now_ms) {
+                        self.report(&err);
+                    }
                 }
             }
             #[cfg(test)]
@@ -868,5 +896,102 @@ mod tests {
 
         assert!(waited >= Duration::from_millis(50), "waited {waited:?}");
         assert_eq!(rig.links.epoch.current(), 1);
+    }
+
+    fn old_gap() -> Gap {
+        Gap {
+            start_ms: 1_000,
+            end_ms: 2_000,
+            reason: GapReason::Paused,
+        }
+    }
+
+    #[test]
+    fn a_prune_job_deletes_what_is_past_its_retention() {
+        let rig = Rig::new();
+        rig.batch(Batch {
+            gaps: vec![old_gap()],
+            ..Batch::default()
+        });
+        assert!(rig.service.flush(PATIENCE));
+        assert_eq!(rig.history().gaps(i64::MIN, i64::MAX).unwrap().len(), 1);
+
+        rig.send(Job::Prune {
+            now_ms: 400 * 24 * 60 * 60_000,
+            retention: Retention::default(),
+        });
+        assert!(rig.service.flush(PATIENCE));
+
+        assert!(rig.history().gaps(i64::MIN, i64::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_prune_behind_a_sleeping_job_does_not_delay_a_later_submit() {
+        let rig = Rig::new();
+        rig.send(Job::Run(Box::new(|_| {
+            thread::sleep(Duration::from_millis(600));
+        })));
+
+        let started = Instant::now();
+        rig.send(Job::Prune {
+            now_ms: 1,
+            retention: Retention::default(),
+        });
+        rig.batch(Batch {
+            events: vec![disk_event(1)],
+            ..Batch::default()
+        });
+
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "two submits took {:?}",
+            started.elapsed()
+        );
+        assert!(rig.service.flush(PATIENCE));
+        assert_eq!(event_ids(&rig.history()), [1]);
+    }
+
+    fn places_with_a_dump(dir: &std::path::Path) -> DumpPlaces {
+        let apps = dir.join("CrashDumps");
+        std::fs::create_dir(&apps).unwrap();
+        std::fs::write(apps.join("Game.exe.1.dmp"), [0u8; 64]).unwrap();
+        DumpPlaces {
+            app_dir: Some(apps),
+            crash: None,
+        }
+    }
+
+    #[test]
+    fn a_dumps_job_stores_what_it_lists() {
+        let rig = Rig::new();
+        let files = tempfile::tempdir().unwrap();
+
+        rig.send(Job::Dumps {
+            places: Some(places_with_a_dump(files.path())),
+            now_ms: 1_000,
+        });
+        assert!(rig.service.flush(PATIENCE));
+
+        assert_eq!(rig.history().present_dumps().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_dumps_job_made_before_a_clear_is_skipped() {
+        let rig = Rig::new();
+        let files = tempfile::tempdir().unwrap();
+        let job = Queued {
+            epoch: 0,
+            job: Job::Dumps {
+                places: Some(places_with_a_dump(files.path())),
+                now_ms: 1_000,
+            },
+        };
+        let mut pipe = rig.history();
+        rig.links.epoch.clear(|| pipe.clear_history()).unwrap();
+
+        assert!(rig.service.submit(job).is_ok());
+        assert!(rig.service.flush(PATIENCE));
+
+        assert!(rig.history().present_dumps().unwrap().is_empty());
     }
 }

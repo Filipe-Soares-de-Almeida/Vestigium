@@ -28,7 +28,6 @@ use vestigium_core::health::Concern;
 
 use crate::app::lock;
 use crate::clock::ClockWatch;
-use crate::dumps::{DumpPlaces, take_inventory};
 use crate::fall::{Fall, RingSync, Strain};
 use crate::health::{HealthPass, PassNow};
 use crate::power::PowerNotice;
@@ -724,16 +723,8 @@ impl Sampler {
         if self.batcher.due(ts_ms) || self.events_due(ts_ms) {
             self.flush();
         }
-        if prune_due(self.pruned_hour, ts_ms) {
-            self.pruned_hour = Some(ts_ms.div_euclid(HOUR_MS));
-            let retention = lock(&self.settings).retention;
-            // A refused prune is not an error; the next wall hour tries again.
-            if let Err(err) = self.store.prune(ts_ms, &retention) {
-                self.report(&err);
-            }
-            if self.first_health_ms.is_none() {
-                self.check_health(ts_ms);
-            }
+        if self.prune_if_due(ts_ms) && self.first_health_ms.is_none() {
+            self.check_health(ts_ms);
         }
         let scanned = self.health_due.swap(false, Ordering::AcqRel);
         if scanned || self.first_health_ms.is_some_and(|at| ts_ms >= at) {
@@ -761,11 +752,27 @@ impl Sampler {
         self.publish_recent(ts_ms);
     }
 
-    /// Lists the dumps Windows kept, without opening any.
-    fn check_dumps(&mut self, ts_ms: i64) {
-        if let Err(err) = take_inventory(&mut self.store, &DumpPlaces::of_this_pc(), ts_ms) {
-            self.report(&err);
+    /// Asks the storage thread to prune when the wall clock entered a new hour; true when it did.
+    /// A refused prune is not an error, and the next wall hour tries again.
+    fn prune_if_due(&mut self, ts_ms: i64) -> bool {
+        if !prune_due(self.pruned_hour, ts_ms) {
+            return false;
         }
+        self.pruned_hour = Some(ts_ms.div_euclid(HOUR_MS));
+        let retention = lock(&self.settings).retention;
+        self.send(Job::Prune {
+            now_ms: ts_ms,
+            retention,
+        });
+        true
+    }
+
+    /// Asks the storage thread to list the dumps Windows kept, without opening any.
+    fn check_dumps(&mut self, ts_ms: i64) {
+        self.send(Job::Dumps {
+            places: None,
+            now_ms: ts_ms,
+        });
     }
 
     /// Runs a health pass and lists the dumps: a minute after start, then every full hour.
@@ -3146,6 +3153,54 @@ mod tests {
         assert!(!prune_due(Some(hour), start));
         assert!(!prune_due(Some(hour), start + HOUR_MS - 1));
         assert!(prune_due(Some(hour), start + HOUR_MS));
+    }
+
+    #[test]
+    fn the_prune_is_sent_once_an_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let mut writer = history(dir.path());
+        let old_gap = || Batch {
+            gaps: vec![Gap {
+                start_ms: 1_000,
+                end_ms: 2_000,
+                reason: GapReason::Paused,
+            }],
+            ..Batch::default()
+        };
+        let now = 400 * DAY_MS;
+        writer.append_batch(&old_gap()).unwrap();
+
+        assert!(sampler.prune_if_due(now));
+        sampler.drain();
+        assert!(writer.gaps(i64::MIN, i64::MAX).unwrap().is_empty());
+
+        writer.append_batch(&old_gap()).unwrap();
+        assert!(!sampler.prune_if_due(now + HOUR_MS - 1));
+        sampler.drain();
+        assert_eq!(writer.gaps(i64::MIN, i64::MAX).unwrap().len(), 1);
+        assert!(sampler.prune_if_due(now + HOUR_MS));
+        sampler.drain();
+        assert!(writer.gaps(i64::MIN, i64::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_prune_behind_a_stuck_thread_does_not_hold_up_the_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let release = hold_the_thread(&sampler.service);
+        let began = Instant::now();
+
+        assert!(sampler.prune_if_due(wall_ms()));
+        sampler.check_dumps(wall_ms());
+        sampler.write(Vec::new());
+
+        assert!(
+            began.elapsed() < Duration::from_millis(500),
+            "the prune and the inventory waited for the thread"
+        );
+        release.store(true, Ordering::Release);
+        sampler.drain();
     }
 
     /// One thread of the lock test: counts its turns and reports when it ends.
