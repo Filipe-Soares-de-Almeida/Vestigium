@@ -337,13 +337,34 @@ fn storage_reset(focus: Focus, window: &Window) -> Option<Suspect> {
             Confidence::Medium
         },
         cause: Cause::Storage { disk: slow },
+        next_steps: storage_steps(&evidence),
         evidence,
-        next_steps: vec![
+    })
+}
+
+/// Steps for the gravest disk event kept: a bad block or paging error, then a reset, then a retry.
+fn storage_steps(evidence: &[Evidence]) -> Vec<NextStep> {
+    let has = |wanted: &[EventMeaning]| {
+        evidence.iter().any(|e| match e {
+            Evidence::Event { meaning, .. } => wanted.contains(meaning),
+            _ => false,
+        })
+    };
+    if has(&[EventMeaning::DiskBadBlock, EventMeaning::PagingError]) {
+        vec![NextStep::BackUpNow, NextStep::RunDiskTest]
+    } else if has(&[EventMeaning::StorageReset]) {
+        vec![
             NextStep::UpdateStorageDriver,
             NextStep::CheckDiskCable,
             NextStep::RunDiskTest,
-        ],
-    })
+        ]
+    } else {
+        vec![
+            NextStep::RunDiskTest,
+            NextStep::CheckDiskCable,
+            NextStep::UpdateStorageDriver,
+        ]
+    }
 }
 
 fn disk_latency(focus: Focus, window: &Window) -> Option<Suspect> {

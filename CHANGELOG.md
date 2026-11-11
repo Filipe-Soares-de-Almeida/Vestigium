@@ -441,6 +441,10 @@ How to use this file:
   to 5 seconds after it count; one further away no longer hides a busy processor or another measured
   cause. A disk event near the stall is reported with high confidence only when the disk was also
   answering slowly (over 200 ms) in that span, and with medium confidence otherwise.
+- The next steps for a disk cause now follow the kind of event Windows logged, not one fixed list.
+  A bad block or a paging error asks you to back up your data and test the disk; a repeated disk
+  operation asks you to test the disk first, then check the cable and update the driver; the driver
+  and cable steps come first only for a reset of the connection to the disk.
 
 ## [0.1.0] - 2026-11-09
 

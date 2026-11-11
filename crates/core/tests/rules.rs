@@ -698,6 +698,74 @@ fn slow_reads_outside_the_span_do_not_raise_a_disk_event() {
     assert_eq!(storage.confidence, Confidence::Medium);
 }
 
+fn storage_steps(events: &[(i64, u16, EventMeaning)]) -> Vec<NextStep> {
+    let (triggers, mut window) = quiet_case();
+    for (ts, id, meaning) in events {
+        let provider = if *meaning == EventMeaning::StorageReset {
+            "stornvme"
+        } else {
+            "disk"
+        };
+        window.events.push(event(*ts, provider, *id, *meaning));
+    }
+    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = 400.0);
+    let found = suspects(&triggers, &window);
+    storage_of(&found).expect("storage").next_steps.clone()
+}
+
+#[test]
+fn a_bad_block_asks_for_a_surface_test_first() {
+    let steps = storage_steps(&[(T - 2_000, 7, EventMeaning::DiskBadBlock)]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+}
+
+#[test]
+fn a_paging_error_asks_for_a_surface_test_first() {
+    let steps = storage_steps(&[(T - 2_000, 51, EventMeaning::PagingError)]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+}
+
+#[test]
+fn a_retry_checks_the_disk_before_the_cable_and_driver() {
+    let steps = storage_steps(&[(T - 2_000, 153, EventMeaning::DiskRetry)]);
+    assert_eq!(
+        steps,
+        [
+            NextStep::RunDiskTest,
+            NextStep::CheckDiskCable,
+            NextStep::UpdateStorageDriver
+        ]
+    );
+}
+
+#[test]
+fn a_reset_keeps_the_driver_cable_and_test_steps() {
+    let steps = storage_steps(&[(T - 2_000, 129, EventMeaning::StorageReset)]);
+    assert_eq!(
+        steps,
+        [
+            NextStep::UpdateStorageDriver,
+            NextStep::CheckDiskCable,
+            NextStep::RunDiskTest
+        ]
+    );
+}
+
+#[test]
+fn the_gravest_event_picks_the_steps() {
+    let steps = storage_steps(&[
+        (T - 3_000, 153, EventMeaning::DiskRetry),
+        (T - 2_000, 129, EventMeaning::StorageReset),
+        (T - 1_000, 7, EventMeaning::DiskBadBlock),
+    ]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+    let steps = storage_steps(&[
+        (T - 3_000, 153, EventMeaning::DiskRetry),
+        (T - 2_000, 129, EventMeaning::StorageReset),
+    ]);
+    assert_eq!(steps[0], NextStep::UpdateStorageDriver);
+}
+
 #[test]
 fn a_reported_event_alone_keeps_its_cause() {
     let reset = event(T, "stornvme", 129, EventMeaning::StorageReset);
