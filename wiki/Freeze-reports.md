@@ -4,7 +4,7 @@ What a report says about a freeze, a stutter, a program that stopped responding 
 
 | Kind | When |
 |---|---|
-| **Freeze** | The whole PC stopped responding for at least a quarter of a second. Under 1 second it is light, up to 5 seconds medium, longer severe. |
+| **Freeze** | The whole PC stopped responding for at least a quarter of a second. Under 1 second it is light, up to 5 seconds medium, longer severe. Vestigium sees it as its own probe not running, so the report says the PC probably stopped: a delay of Vestigium's own process looks the same. |
 | **Stutters** | Several short hitches in a row, the kind that break a game, a call or a video. Caught while sensitive mode is on. |
 | **Program not responding** | One program's window stopped responding while the rest of the PC worked. Windows marks a window this way after 5 seconds. |
 | **Windows event** | Windows logged a problem by itself, such as resetting its connection to a disk, retrying a disk operation, restarting the graphics driver or a hardware error. |

@@ -268,6 +268,10 @@ How to use this file:
   monitoring stopped". Before, a hang that was open at that moment was forgotten and never
   appeared. The window and the watcher must be updated together, because the stored report and
   the pipe protocol changed.
+- A freeze report no longer states as fact that the whole PC stopped. The line now reads "the
+  monitor's probe did not run for 6.8 s; the PC probably stopped responding", because a delay of
+  Vestigium's own process, such as the monitor being suspended, looks the same to it as a stop of
+  the PC. The line is worded this way in English and Portuguese.
 - A program that stopped responding is now blamed with high confidence only when its own processor
   or disk use shows during the freeze, or when nothing else in the system explains the stall.
   Before, any hung window put its program first, ahead of a measured memory or disk cause, so a

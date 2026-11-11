@@ -304,3 +304,16 @@ fn format_replaces_placeholders() {
 
     assert_eq!(catalog.format("k", &[("error", "boom")]), "x boom y boom");
 }
+
+#[test]
+fn the_freeze_fact_names_the_delayed_probe_and_hedges_the_pc() {
+    for lang in [Lang::En, Lang::PtBr] {
+        let text = Catalog::load(lang)
+            .format("ui.occurrence.fact.FreezeStarted", &[("duration", "6.8 s")]);
+        assert!(text.contains("6.8 s"), "{lang:?}: {text}");
+    }
+    let english = Catalog::load(Lang::En)
+        .format("ui.occurrence.fact.FreezeStarted", &[("duration", "6.8 s")]);
+    assert!(english.contains("probe"), "{english}");
+    assert!(english.contains("probably"), "{english}");
+}

@@ -521,8 +521,8 @@ function factTexts(kind: FactKind): Texts {
   if ("FreezeStarted" in kind) {
     const ms = kind.FreezeStarted.duration_ms;
     return {
-      plain: k("fact.FreezeStarted"),
-      figures: k("fact.FreezeStarted.figures", { duration: formatDuration(ms) }),
+      plain: k("fact.FreezeStarted", { duration: formatDuration(ms) }),
+      figures: null,
       tech: k("fact.FreezeStarted.tech", { lag: formatMs(ms) }),
     };
   }
