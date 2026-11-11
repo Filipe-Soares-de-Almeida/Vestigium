@@ -1,13 +1,14 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use vestigium_core::health::FindingKind;
 use vestigium_core::{
     EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, ProgramPoint,
     Reading, Sample, Settings, TweakChange,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// How long the watcher may take to answer a request that only reads memory or flips a flag.
 pub const ANSWER_SHORT: Duration = Duration::from_secs(3);
@@ -167,6 +168,70 @@ pub struct AgentStatus {
     /// The agent's own share of the whole machine over the last minute, 0 to 100.
     #[serde(default)]
     pub cpu_pct: Option<f32>,
+    /// The machine went to sleep and has not woken up again.
+    #[serde(default)]
+    pub suspended: bool,
+    /// How the watching itself is going.
+    #[serde(default)]
+    pub monitor: MonitorStatus,
+}
+
+/// Whether the agent is reading the machine, as the tray and the window say it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorState {
+    /// Reading, or paused or suspended on purpose.
+    #[default]
+    Watching,
+    /// Reading, but a source fails.
+    Degraded,
+    /// No sample for a while although nothing stopped the watching.
+    NoReading,
+}
+
+/// A data source the sampler reads every second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorSource {
+    Memory,
+    Cpu,
+    /// The performance counters: disks, GPU and the rest.
+    Counters,
+    Processes,
+    Timer,
+}
+
+/// A source that fails now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SourceFailure {
+    pub source: MonitorSource,
+    /// Unix epoch, milliseconds.
+    pub since_ms: i64,
+    pub error: String,
+}
+
+/// The agent's account of its own watching.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MonitorStatus {
+    pub state: MonitorState,
+    /// Sources failing now, each with its error; empty when all read.
+    #[serde(default)]
+    pub failing: Vec<SourceFailure>,
+    /// Unix epoch, milliseconds: the last sample, or the last start or resume when that is newer.
+    /// Set only while the state is no reading.
+    #[serde(default)]
+    pub no_reading_since_ms: Option<i64>,
+    /// When watching last started or resumed; a sample is expected a few seconds after it.
+    #[serde(default)]
+    pub resumed_ms: Option<i64>,
+    /// When the latest health pass was asked for, and when one last finished; Unix epoch ms.
+    #[serde(default)]
+    pub health_attempt_ms: Option<i64>,
+    #[serde(default)]
+    pub health_ok_ms: Option<i64>,
+    /// Finding kinds the latest finished pass could not read.
+    #[serde(default)]
+    pub health_unread: Vec<FindingKind>,
 }
 
 /// The latest second watched.

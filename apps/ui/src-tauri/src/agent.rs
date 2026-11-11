@@ -116,7 +116,7 @@ impl Serialize for UiError {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "link", rename_all = "snake_case")]
 pub enum AgentLink {
-    Running(AgentStatus),
+    Running(Box<AgentStatus>),
     Stopped,
     /// Something else owns the pipe, or the watcher speaks another protocol.
     Mismatch,
@@ -223,7 +223,7 @@ impl Link {
 
     pub fn status(&self) -> AgentLink {
         match self.call(&Request::Status) {
-            Ok(Response::Status(status)) => AgentLink::Running(status),
+            Ok(Response::Status(status)) => AgentLink::Running(Box::new(status)),
             Err(UiError::AgentStopped) => AgentLink::Stopped,
             _ => AgentLink::Mismatch,
         }

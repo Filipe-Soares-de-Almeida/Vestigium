@@ -20,8 +20,10 @@ fn aspm_item() -> PlanItem {
         }],
     }
 }
+use vestigium_core::health::FindingKind;
 use vestigium_ipc::{
-    AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
+    AgentStatus, ErrorCode, MonitorSource, MonitorState, MonitorStatus, NowFrame, PROTOCOL_VERSION,
+    Request, Response, SourceFailure, TrayState,
 };
 
 fn roundtrip<T>(value: &T) -> T
@@ -75,6 +77,20 @@ fn every_response_roundtrips_as_json() {
             sensitive_until_ms: Some(42),
             state: TrayState::Attention,
             suggest_capture: true,
+            suspended: true,
+            monitor: MonitorStatus {
+                state: MonitorState::Degraded,
+                failing: vec![SourceFailure {
+                    source: MonitorSource::Counters,
+                    since_ms: 1_700_000_000_000,
+                    error: "counter query failed".to_string(),
+                }],
+                no_reading_since_ms: Some(1_700_000_100_000),
+                resumed_ms: Some(1_699_999_000_000),
+                health_attempt_ms: Some(1_700_000_200_000),
+                health_ok_ms: Some(1_700_000_000_000),
+                health_unread: vec![FindingKind::TwoAntivirus, FindingKind::DiskSmart],
+            },
             ..AgentStatus::default()
         }),
         Response::Now(Box::default()),
@@ -210,4 +226,15 @@ fn status_without_suggest_capture_still_decodes() {
         panic!("not a status");
     };
     assert!(!status.suggest_capture);
+}
+
+#[test]
+fn a_status_without_the_monitor_fields_still_reads() {
+    let old = r#"{"paused":false,"sensitive_until_ms":null,"state":"normal","started_at_ms":1,
+        "last_sample_ms":null,"last_error":null}"#;
+
+    let status: AgentStatus = serde_json::from_str(old).unwrap();
+
+    assert_eq!(status.monitor, MonitorStatus::default());
+    assert!(!status.suspended);
 }

@@ -56,6 +56,16 @@ const base: Record<string, Handler> = {
           last_error: null,
           suggest_capture: query.get("suggest") === "1",
           cpu_pct: 0.1,
+          suspended: false,
+          monitor: {
+            state: "watching",
+            failing: [],
+            no_reading_since_ms: null,
+            resumed_ms: startedAt,
+            health_attempt_ms: null,
+            health_ok_ms: null,
+            health_unread: [],
+          },
         }
       : { link: state.link },
   settings: () => {

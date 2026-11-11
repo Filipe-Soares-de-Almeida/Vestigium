@@ -48,6 +48,8 @@ pub struct HealthReadings {
     disks: Vec<DiskHealth>,
     /// Disks this pass did not read.
     unread: HashSet<String>,
+    /// Disks this pass asked and got no answer from; an idle HDD left alone is not one.
+    failed: HashSet<String>,
     system_disk: Option<String>,
     volumes: Vec<VolumeSpace>,
     page_files: Option<Vec<PageFile>>,
@@ -56,12 +58,21 @@ pub struct HealthReadings {
     asked_security_center: bool,
 }
 
+impl HealthReadings {
+    /// When the pass was asked for; Unix epoch, milliseconds.
+    pub fn ts_ms(&self) -> i64 {
+        self.ts_ms
+    }
+}
+
 /// What one pass did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PassOutcome {
     pub changes: usize,
     /// Findings rated critical after this pass.
     pub critical: u32,
+    /// Finding kinds a source gave no answer for, so the pass could not tell if they hold.
+    pub unread: Vec<FindingKind>,
 }
 
 /// Reads the health sources. Any of them may block for seconds, so this runs on its own thread.
@@ -105,6 +116,7 @@ impl<S: HealthSource> HealthReader<S> {
             self.antivirus_read_ms = self.antivirus.is_some().then_some(request.ts_ms);
         }
         let mut unread: HashSet<String> = HashSet::new();
+        let mut failed: HashSet<String> = HashSet::new();
         let mut fresh = Vec::new();
         for disk in &request.machine.disks {
             let Some(index) = physical_drive(&disk.name) else {
@@ -116,6 +128,7 @@ impl<S: HealthSource> HealthReader<S> {
             }
             let Some(health) = self.source.disk(index, &disk.name, request.ts_ms) else {
                 unread.insert(disk.name.clone());
+                failed.insert(disk.name.clone());
                 continue;
             };
             fresh.push(health.clone());
@@ -138,6 +151,7 @@ impl<S: HealthSource> HealthReader<S> {
             fresh,
             disks: self.disks.values().cloned().collect(),
             unread,
+            failed,
             system_disk,
             volumes: self.source.volumes(),
             page_files: self.source.page_files(),
@@ -208,7 +222,8 @@ impl HealthKeeper {
                 .collect(),
         };
         let fresh = evaluate(&inputs);
-        let mut changes = reconcile(&open, &fresh, &unread_kinds(&inputs));
+        let mut unread = unread_kinds(&inputs);
+        let mut changes = reconcile(&open, &fresh, &unread);
         // A disk this pass did not read keeps its open SMART finding.
         changes.retain(|change| match change {
             FindingChange::Close { id } => !open.iter().any(|s| {
@@ -219,8 +234,12 @@ impl HealthKeeper {
             _ => true,
         });
         store.apply_findings(&changes, now_ms)?;
+        if !readings.failed.is_empty() {
+            unread.push(FindingKind::DiskSmart);
+        }
         Ok(PassOutcome {
             changes: changes.len(),
+            unread,
             critical: fresh
                 .iter()
                 .filter(|f| f.concern == Concern::Critical)
@@ -308,7 +327,9 @@ impl HealthThread {
                             }
                         }
                         Err(payload) => {
-                            lock(&status).last_error = Some(format!(
+                            let mut status = lock(&status);
+                            status.monitor.health_attempt_ms = Some(request.ts_ms);
+                            status.last_error = Some(format!(
                                 "a health read stopped: {}",
                                 panic_text(payload.as_ref())
                             ));
@@ -397,11 +418,15 @@ mod tests {
         two_antivirus: bool,
         antivirus_down: Rc<Cell<bool>>,
         page_files_down: Rc<Cell<bool>>,
+        disks_down: Rc<Cell<bool>>,
     }
 
     impl HealthSource for FakeHealth {
         fn disk(&mut self, _index: u32, name: &str, now_ms: i64) -> Option<DiskHealth> {
             self.asked_disks.borrow_mut().push(name.to_string());
+            if self.disks_down.get() {
+                return None;
+            }
             Some(DiskHealth {
                 name: name.to_string(),
                 read_ms: now_ms,
@@ -494,6 +519,7 @@ mod tests {
     struct Ran {
         changes: usize,
         critical: u32,
+        unread: Vec<FindingKind>,
         asked_security_center: bool,
     }
 
@@ -515,6 +541,7 @@ mod tests {
             Ok(Ran {
                 changes: outcome.changes,
                 critical: outcome.critical,
+                unread: outcome.unread,
                 asked_security_center: readings.asked_security_center,
             })
         }
@@ -756,6 +783,53 @@ mod tests {
             .iter()
             .map(|f| f.finding.kind)
             .collect()
+    }
+
+    #[test]
+    fn an_antivirus_query_that_fails_is_reported_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        };
+        let down = fake.antivirus_down.clone();
+        let mut pass = HealthPass::new(fake);
+
+        down.set(true);
+        let failed = run(&mut pass, &mut store, NOW, &[]);
+        down.set(false);
+        let answered = run(&mut pass, &mut store, NOW + 60 * 60_000, &[]);
+
+        assert_eq!(failed.unread, [FindingKind::TwoAntivirus]);
+        assert!(answered.unread.is_empty());
+    }
+
+    #[test]
+    fn a_disk_that_answers_nothing_is_unread_but_an_idle_hdd_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        };
+        let down = fake.disks_down.clone();
+        let mut pass = HealthPass::new(fake);
+
+        let idle = run(&mut pass, &mut store, NOW, &[]);
+        down.set(true);
+        let silent = run(&mut pass, &mut store, NOW + 60 * 60_000, &[]);
+        let busy = run(&mut pass, &mut store, NOW + 120 * 60_000, &["1 D:"]);
+
+        assert!(
+            !idle.unread.contains(&FindingKind::DiskSmart),
+            "an idle HDD is left alone"
+        );
+        assert!(
+            silent.unread.contains(&FindingKind::DiskSmart),
+            "the SSD was asked"
+        );
+        assert!(busy.unread.contains(&FindingKind::DiskSmart));
     }
 
     #[test]

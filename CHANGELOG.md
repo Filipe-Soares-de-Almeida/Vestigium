@@ -82,6 +82,10 @@ How to use this file:
   stored row older than the period asked for, so they stay fast as the kept history grows instead
   of slowing down with it. The history database moves to a new version, so the window and the
   watcher must be updated together.
+- The watcher now tells the window how its own watching is going: which data sources fail and why,
+  whether the PC is asleep, when watching last resumed, and when the last health check ran and which
+  checks it could not read. The window and the watcher must be updated together, because the pipe
+  protocol changed.
 
 ### Fixed
 

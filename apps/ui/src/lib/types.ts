@@ -395,6 +395,36 @@ export interface AgentStatus {
   suggest_capture: boolean;
   /** The watcher's own share of the whole machine over the last minute, 0 to 100. */
   cpu_pct?: number | null;
+  /** The machine went to sleep and has not woken up again. */
+  suspended: boolean;
+  /** How the watching itself is going. */
+  monitor: MonitorStatus;
+}
+
+/** Reading, reading with a failing source, or no sample for a while with nothing paused. */
+export type MonitorState = "watching" | "degraded" | "no_reading";
+
+export type MonitorSource = "memory" | "cpu" | "counters" | "processes" | "timer";
+
+export interface SourceFailure {
+  source: MonitorSource;
+  since_ms: number;
+  error: string;
+}
+
+export interface MonitorStatus {
+  state: MonitorState;
+  /** Sources failing now, each with its error; empty when all read. */
+  failing: SourceFailure[];
+  /** The last sample (or the last start or resume when newer), while there is no reading. */
+  no_reading_since_ms: number | null;
+  /** When watching last started or resumed. */
+  resumed_ms: number | null;
+  /** When the latest health pass was asked for, and when one last finished. */
+  health_attempt_ms: number | null;
+  health_ok_ms: number | null;
+  /** Finding kinds the latest finished pass could not read. */
+  health_unread: FindingKind[];
 }
 
 export type AgentLink =

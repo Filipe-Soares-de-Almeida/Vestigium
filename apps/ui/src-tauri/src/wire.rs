@@ -28,7 +28,10 @@ use vestigium_core::{
     SettingResult, SettingValue, Settings, Severity, Signal, Signature, StartupList, Status,
     Suspect, TWEAKS, Takes, ThemePref, Trigger, TweakChange, Value, WinEvent, Window,
 };
-use vestigium_ipc::{AgentStatus, IpcError, NowFrame, TrayState};
+use vestigium_ipc::{
+    AgentStatus, IpcError, MonitorSource, MonitorState, MonitorStatus, NowFrame, SourceFailure,
+    TrayState,
+};
 use vestigium_store::{CaptureSummary, StoreError};
 
 use crate::about::AboutDto;
@@ -1437,7 +1440,55 @@ fn agent_status(full: bool) -> AgentStatus {
         last_error: some(full, "pipe closed"),
         suggest_capture: full,
         cpu_pct: full.then_some(1.5),
+        suspended: full,
+        monitor: monitor_status(full),
     }
+}
+
+fn monitor_status(full: bool) -> MonitorStatus {
+    MonitorStatus {
+        state: [MonitorState::Watching, MonitorState::NoReading][usize::from(full)],
+        failing: if full {
+            vec![source_failure()]
+        } else {
+            Vec::new()
+        },
+        no_reading_since_ms: full.then_some(1_790_000_000_000),
+        resumed_ms: full.then_some(1_789_999_000_000),
+        health_attempt_ms: full.then_some(1_790_000_200_000),
+        health_ok_ms: full.then_some(1_790_000_100_000),
+        health_unread: if full {
+            vec![FindingKind::TwoAntivirus, FindingKind::DiskSmart]
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+fn source_failure() -> SourceFailure {
+    SourceFailure {
+        source: MonitorSource::Counters,
+        since_ms: 1_789_999_900_000,
+        error: string("counter query failed"),
+    }
+}
+
+fn monitor_states() -> Vec<MonitorState> {
+    variants!(MonitorState:
+        Watching => MonitorState::Watching,
+        Degraded => MonitorState::Degraded,
+        NoReading => MonitorState::NoReading,
+    )
+}
+
+fn monitor_sources() -> Vec<MonitorSource> {
+    variants!(MonitorSource:
+        Memory => MonitorSource::Memory,
+        Cpu => MonitorSource::Cpu,
+        Counters => MonitorSource::Counters,
+        Processes => MonitorSource::Processes,
+        Timer => MonitorSource::Timer,
+    )
 }
 
 fn tray_states() -> Vec<TrayState> {
@@ -1698,16 +1749,20 @@ fn render() -> String {
     );
     wire.add(TYPES, "TrayState", tray_states());
     wire.add(TYPES, "AgentStatus", both(agent_status));
+    wire.add(TYPES, "MonitorStatus", both(monitor_status));
+    wire.add(TYPES, "MonitorState", monitor_states());
+    wire.add(TYPES, "MonitorSource", monitor_sources());
+    wire.add(TYPES, "SourceFailure", vec![source_failure()]);
     wire.add(
         TYPES,
         "AgentLink",
         variants!(AgentLink:
-            Running => AgentLink::Running(agent_status(true)),
+            Running => AgentLink::Running(Box::new(agent_status(true))),
             Stopped => AgentLink::Stopped,
             Mismatch => AgentLink::Mismatch,
         )
         .into_iter()
-        .chain([AgentLink::Running(agent_status(false))])
+        .chain([AgentLink::Running(Box::new(agent_status(false)))])
         .collect(),
     );
     wire.add(

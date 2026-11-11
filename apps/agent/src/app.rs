@@ -37,7 +37,7 @@ use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
 use crate::service::Epoch;
 use crate::tray::{Action, Level, Tray};
-use crate::{autostart, paths, power, shutdown};
+use crate::{autostart, monitor, paths, power, shutdown};
 
 /// How often the history is written to the database.
 const DEFAULT_FLUSH: Duration = Duration::from_secs(300);
@@ -174,6 +174,9 @@ pub fn set_paused(shared: &Shared, paused: bool, until_ms: Option<i64>) {
     // The status and the gate change under one guard, so they never disagree.
     let mut status = lock(&shared.status);
     status.paused = paused;
+    if !paused {
+        status.monitor.resumed_ms = Some(wall);
+    }
     status.paused_until_ms = until_ms
         .filter(|_| paused)
         .map(|end| wall_to_steady(end, wall, steady));
@@ -211,6 +214,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 paused_until_ms: base.paused_until_ms.map(shown),
                 sensitive_until_ms: shared.sensitive.until_ms().map(shown),
                 state,
+                monitor: monitor::view(&base, wall),
                 ..base
             })
         }
@@ -689,7 +693,7 @@ fn report_setting_notes(store: &Store, status: &Mutex<AgentStatus>) {
 #[cfg(test)]
 pub(crate) mod tests {
     use vestigium_core::{EpisodeKind, HungWindow, Retention};
-    use vestigium_ipc::{PROTOCOL_VERSION, TrayState};
+    use vestigium_ipc::{MonitorState, PROTOCOL_VERSION, TrayState};
 
     use super::*;
 
@@ -930,6 +934,63 @@ pub(crate) mod tests {
         let end = status.sensitive_until_ms.unwrap();
         assert!((end - (wall_ms() + 30 * 60 * 1_000)).abs() < 2_000, "{end}");
         assert_eq!(status.state, TrayState::Problem);
+    }
+
+    fn status_of(shared: &Shared) -> AgentStatus {
+        let Response::Status(status) = handle(Request::Status, shared, None) else {
+            panic!("not a status");
+        };
+        status
+    }
+
+    #[test]
+    fn status_says_no_reading_when_the_last_sample_is_old() {
+        let shared = shared();
+        {
+            let mut status = lock(&shared.status);
+            status.started_at_ms = wall_ms() - 3_600_000;
+            status.last_sample_ms = Some(wall_ms() - 60_000);
+            status.last_error = Some("the counters closed".to_string());
+        }
+
+        let status = status_of(&shared);
+
+        assert_eq!(status.monitor.state, MonitorState::NoReading);
+        assert!(
+            status
+                .monitor
+                .no_reading_since_ms
+                .is_some_and(|at| at < wall_ms() - 59_000)
+        );
+
+        lock(&shared.status).last_sample_ms = Some(wall_ms());
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
+    }
+
+    #[test]
+    fn a_pause_or_a_suspend_is_not_no_reading() {
+        let shared = shared();
+        {
+            let mut status = lock(&shared.status);
+            status.started_at_ms = wall_ms() - 3_600_000;
+            status.last_sample_ms = Some(wall_ms() - 600_000);
+        }
+
+        set_paused(&shared, true, None);
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
+
+        set_paused(&shared, false, None);
+        assert_eq!(
+            status_of(&shared).monitor.state,
+            MonitorState::Watching,
+            "a resume gives the sampler a few seconds"
+        );
+
+        lock(&shared.status).monitor.resumed_ms = None;
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::NoReading);
+
+        lock(&shared.status).suspended = true;
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
     }
 
     #[test]

@@ -443,11 +443,19 @@ impl Worker {
             self.health.store(&mut self.store, readings)
         };
         match kept {
-            Ok(outcome) => self
-                .links
-                .critical
-                .store(outcome.critical, Ordering::Release),
-            Err(err) => self.report(&err),
+            Ok(outcome) => {
+                self.links
+                    .critical
+                    .store(outcome.critical, Ordering::Release);
+                let mut status = lock(&self.links.status);
+                status.monitor.health_attempt_ms = Some(readings.ts_ms());
+                status.monitor.health_ok_ms = Some(readings.ts_ms());
+                status.monitor.health_unread = outcome.unread;
+            }
+            Err(err) => {
+                lock(&self.links.status).monitor.health_attempt_ms = Some(readings.ts_ms());
+                self.report(&err);
+            }
         }
     }
 
@@ -797,6 +805,63 @@ mod tests {
         assert_eq!(kept.bookmark_xml.as_deref(), Some("mark"));
         assert!(kept.events.is_empty() && kept.gaps.is_empty());
         assert_eq!(without_unstorable(kept), None);
+    }
+
+    /// A health source that answers nothing, so every read of a pass is unread.
+    struct Silent;
+
+    impl vestigium_collect::HealthSource for Silent {
+        fn disk(&mut self, _: u32, _: &str, _: i64) -> Option<vestigium_core::health::DiskHealth> {
+            None
+        }
+        fn bus(&mut self, _: u32) -> vestigium_core::hwtest::Bus {
+            vestigium_core::hwtest::Bus::Other
+        }
+        fn volumes(&mut self) -> Vec<vestigium_core::health::VolumeSpace> {
+            Vec::new()
+        }
+        fn system_drive(&mut self) -> Option<u32> {
+            None
+        }
+        fn page_files(&mut self) -> Option<Vec<vestigium_core::health::PageFile>> {
+            None
+        }
+        fn antivirus(&mut self) -> Option<Vec<vestigium_core::health::SecurityProduct>> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_stored_pass_publishes_its_times_and_the_kinds_it_could_not_read() {
+        let rig = Rig::new();
+        let mut reader = crate::health::HealthReader::new(Silent);
+        let readings = reader.read(&crate::health::PassRequest {
+            ts_ms: 5_000,
+            machine: MachineInfo {
+                logical_cpus: 4,
+                mem_total_bytes: 0,
+                disks: Vec::new(),
+            },
+            busy_disks: Default::default(),
+            commit_limit_bytes: 0,
+        });
+
+        rig.send(Job::Health(Box::new(readings)));
+        assert!(rig.service.flush(PATIENCE));
+
+        let monitor = lock(&rig.links.status).monitor.clone();
+        assert_eq!(monitor.health_attempt_ms, Some(5_000));
+        assert_eq!(monitor.health_ok_ms, Some(5_000));
+        assert!(
+            monitor
+                .health_unread
+                .contains(&vestigium_core::health::FindingKind::TwoAntivirus)
+        );
+        assert!(
+            monitor
+                .health_unread
+                .contains(&vestigium_core::health::FindingKind::PageFile)
+        );
     }
 
     #[test]

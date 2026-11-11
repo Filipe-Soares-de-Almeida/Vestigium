@@ -1055,12 +1055,18 @@ impl Sampler {
             match event {
                 PowerNotice::Suspend(done) => {
                     self.leave(GapReason::Suspended);
+                    lock(&self.status).suspended = true;
                     let _ = done.send(());
                 }
                 PowerNotice::Resume => {
                     // Probe ticks and rates measured across the suspension are dropped.
                     self.probe_rx.try_iter().for_each(drop);
                     self.come_back(wall_ms());
+                    {
+                        let mut status = lock(&self.status);
+                        status.suspended = false;
+                        status.monitor.resumed_ms = Some(wall_ms());
+                    }
                     self.clock.rebase(wall_ms(), unbiased_ms());
                     sources.reset();
                     sources.prime();
@@ -1091,6 +1097,7 @@ impl Sampler {
                 {
                     status.paused = false;
                     status.paused_until_ms = None;
+                    status.monitor.resumed_ms = Some(wall_ms());
                     gate.set(GateState::Running);
                     drop(status);
                     shutdown::wake();
@@ -1280,6 +1287,9 @@ impl Sampler {
     ) -> Result<T, CollectError> {
         if let Some(text) = self.source_health.record(source, wall_ms(), &result) {
             self.report(&text);
+        }
+        if self.source_health.take_changed() {
+            lock(&self.status).monitor.failing = self.source_health.failing();
         }
         result
     }
@@ -1841,6 +1851,9 @@ mod tests {
         let stored = history(dir.path()).samples(i64::MIN, i64::MAX).unwrap();
         assert!(stored.iter().all(|s| s.perf_limit_pct.is_none()));
         assert!(lock(&running.status).last_error.is_some());
+        let failing = lock(&running.status).monitor.failing.clone();
+        assert_eq!(failing.len(), 1, "{failing:?}");
+        assert_eq!(failing[0].source, vestigium_ipc::MonitorSource::Counters);
     }
 
     #[test]
@@ -2134,6 +2147,7 @@ mod tests {
         running.power_tx.send(PowerNotice::Suspend(done)).unwrap();
         running.wake.set();
         assert!(answered.recv_timeout(PATIENCE).is_ok());
+        assert!(lock(&running.status).suspended, "the status says suspended");
         let suspended_at = wall_ms();
         thread::sleep(Duration::from_millis(1_500));
         running.power_tx.send(PowerNotice::Resume).unwrap();
@@ -2144,6 +2158,13 @@ mod tests {
                 .last_sample_ms
                 .is_some_and(|ms| ms >= resumed_at)
         }));
+        assert!(!lock(&running.status).suspended);
+        assert!(
+            lock(&running.status)
+                .monitor
+                .resumed_ms
+                .is_some_and(|ms| ms >= suspended_at)
+        );
         stop(&running);
 
         let gaps = history(dir.path()).gaps(i64::MIN, i64::MAX).unwrap();

@@ -1,3 +1,4 @@
+use std::mem;
 use std::time::Duration;
 
 use vestigium_collect::{
@@ -5,6 +6,7 @@ use vestigium_collect::{
     ProcessSnapshotter, Waited, Wake, memory_info,
 };
 use vestigium_core::ProcessCounters;
+use vestigium_ipc::{MonitorSource, SourceFailure};
 
 const SNAPSHOT_BUFFER: usize = 512 * 1024;
 
@@ -149,9 +151,33 @@ pub enum SourceHealth {
     },
 }
 
+impl Source {
+    const ALL: [Source; SOURCES] = [
+        Source::Memory,
+        Source::Cpu,
+        Source::Pdh,
+        Source::Processes,
+        Source::Timer,
+    ];
+
+    fn monitored(self) -> MonitorSource {
+        match self {
+            Source::Memory => MonitorSource::Memory,
+            Source::Cpu => MonitorSource::Cpu,
+            Source::Pdh => MonitorSource::Counters,
+            Source::Processes => MonitorSource::Processes,
+            Source::Timer => MonitorSource::Timer,
+        }
+    }
+}
+
 /// The health of every source, updated where each one is read.
 #[derive(Debug, Default)]
-pub struct SourceHealths([SourceHealth; SOURCES]);
+pub struct SourceHealths {
+    sources: [SourceHealth; SOURCES],
+    /// Set when a source started or stopped failing, or changed its error, until taken.
+    changed: bool,
+}
 
 impl SourceHealths {
     /// Notes how a read went; returns the error text when it is new for this source.
@@ -161,8 +187,9 @@ impl SourceHealths {
         now_ms: i64,
         result: &Result<T, CollectError>,
     ) -> Option<String> {
-        let health = &mut self.0[source as usize];
+        let health = &mut self.sources[source as usize];
         let Err(err) = result else {
+            self.changed |= *health != SourceHealth::Working;
             *health = SourceHealth::Working;
             return None;
         };
@@ -178,8 +205,10 @@ impl SourceHealths {
                     return None;
                 }
                 last_error.clone_from(&text);
+                self.changed = true;
             }
             SourceHealth::Working => {
+                self.changed = true;
                 *health = SourceHealth::Failing {
                     since_ms: now_ms,
                     last_error: text.clone(),
@@ -190,9 +219,33 @@ impl SourceHealths {
         Some(text)
     }
 
+    /// True once after a source started failing, recovered or changed its error.
+    pub fn take_changed(&mut self) -> bool {
+        mem::take(&mut self.changed)
+    }
+
+    /// The sources failing now, with since when and why.
+    pub fn failing(&self) -> Vec<SourceFailure> {
+        Source::ALL
+            .into_iter()
+            .filter_map(|source| match &self.sources[source as usize] {
+                SourceHealth::Failing {
+                    since_ms,
+                    last_error,
+                    ..
+                } => Some(SourceFailure {
+                    source: source.monitored(),
+                    since_ms: *since_ms,
+                    error: last_error.clone(),
+                }),
+                SourceHealth::Working => None,
+            })
+            .collect()
+    }
+
     #[cfg(test)]
     pub fn of(&self, source: Source) -> &SourceHealth {
-        &self.0[source as usize]
+        &self.sources[source as usize]
     }
 }
 
@@ -245,6 +298,32 @@ mod tests {
         let announced = healths.record(Source::Pdh, 3_000, &Ok(7));
         assert_eq!(announced, None);
         assert_eq!(healths.of(Source::Pdh), &SourceHealth::Working);
+    }
+
+    #[test]
+    fn the_failing_sources_are_listed_and_a_change_is_flagged_once() {
+        let mut healths = SourceHealths::default();
+        assert!(!healths.take_changed());
+
+        healths.record::<()>(Source::Pdh, 1_000, &Err(broken()));
+        assert!(healths.take_changed());
+        assert!(!healths.take_changed(), "taking clears the flag");
+        healths.record::<()>(Source::Pdh, 2_000, &Err(broken()));
+        assert!(!healths.take_changed(), "the same error changes nothing");
+
+        let failing = healths.failing();
+        assert_eq!(failing.len(), 1);
+        assert_eq!(failing[0].source, MonitorSource::Counters);
+        assert_eq!(failing[0].since_ms, 1_000);
+
+        healths.record(Source::Memory, 3_000, &Ok(1));
+        assert!(
+            !healths.take_changed(),
+            "a source that always read is not news"
+        );
+        healths.record(Source::Pdh, 3_000, &Ok(1));
+        assert!(healths.take_changed());
+        assert!(healths.failing().is_empty());
     }
 
     #[test]

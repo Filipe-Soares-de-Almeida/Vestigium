@@ -9,6 +9,7 @@ mod health;
 mod icon;
 mod import;
 mod instance;
+mod monitor;
 mod orphan;
 mod paths;
 mod power;
