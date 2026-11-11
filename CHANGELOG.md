@@ -84,6 +84,9 @@ How to use this file:
 
 ### Changed
 
+- The four cards at the top of the home screen keep the same height. A longer line, such as several
+  alerts or a health check that has not run, widens its card and moves the cards beside it instead
+  of making the card taller.
 - The volume check now says what it leaves behind. When it finds problems, chkdsk marks the volume
   for repair and Windows repairs it at the next restart, which can remove files it cannot recover.
   The card of the volume then shows a panel with an attention mark that says so and reminds you to

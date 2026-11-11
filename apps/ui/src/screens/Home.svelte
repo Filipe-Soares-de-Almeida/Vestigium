@@ -194,10 +194,17 @@
   }
   .quick {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
+    min-width: 0;
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  .quick li {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
   }
   .card,
   .tile {
@@ -224,9 +231,10 @@
   }
   .card {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2px;
     align-content: start;
-    width: 204px;
+    min-width: 204px;
     padding: 12px;
   }
   .settings {
@@ -286,6 +294,13 @@
     color: var(--ink2);
     font-size: 12.5px;
     line-height: 1.4;
+  }
+  /* One line each, so a longer text widens its card instead of making it taller. */
+  .card b,
+  .card small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .find {
     position: relative;
@@ -361,7 +376,7 @@
       padding-right: 32px;
     }
     .card {
-      width: 192px;
+      min-width: 192px;
     }
   }
 </style>
