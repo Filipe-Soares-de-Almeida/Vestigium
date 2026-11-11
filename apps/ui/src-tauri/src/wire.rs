@@ -1359,6 +1359,7 @@ fn tests_dto(full: bool) -> TestsDto {
         }),
         bench_file_bytes: 1_000_000_000,
         bench_needed_bytes: 2_000_000_000,
+        boot_ms: 1_789_990_000_000,
     }
 }
 

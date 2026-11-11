@@ -1276,6 +1276,8 @@ export interface TestsDto {
   bench_file_bytes: number;
   /** Free bytes a volume needs before the speed test starts. */
   bench_needed_bytes: number;
+  /** When this Windows session began (wall clock); a repair queued by a check runs at the next boot. */
+  boot_ms: number;
 }
 
 /** SMART or NVMe detail read on request: reading an idle HDD spins it up. */

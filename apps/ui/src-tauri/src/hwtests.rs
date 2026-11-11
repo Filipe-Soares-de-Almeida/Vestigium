@@ -97,6 +97,9 @@ pub struct TestsDto {
     pub bench_file_bytes: u64,
     /// Free space a volume needs before the speed test may start: the file and a margin.
     pub bench_needed_bytes: u64,
+    /// When this Windows session began, as wall-clock milliseconds: a repair a check queued runs
+    /// at the next boot, so a check older than this no longer leaves a volume marked.
+    pub boot_ms: i64,
 }
 
 /// SMART or NVMe detail of one disk, read when asked: reading an idle HDD spins it up.

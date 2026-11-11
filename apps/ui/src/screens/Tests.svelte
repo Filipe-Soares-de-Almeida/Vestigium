@@ -54,6 +54,7 @@
     outcomeMark,
     quickCovered,
     quickOf,
+    repairMark,
     runningDevice,
     shareOf,
     span,
@@ -558,6 +559,7 @@
       {#each volumesOf(d) as v (v.root)}
         {@const check = lastCheck(dto!, v.root)}
         {@const c = check ? checkOf(check) : null}
+        {@const mark = repairMark(dto!, v.root)}
         <div class="vol">
           {#if v.file_system !== "NTFS"}
             <p class="p">{t("ui.tests.check.not_ntfs", { fs: v.file_system ?? "?" })}</p>
@@ -571,7 +573,15 @@
               <div><dt>{t("ui.tests.fs.volume")}</dt><dd>{vol(v.root)}</dd></div>
               <div><dt>{t("ui.tests.fs.last")}</dt><dd>{check ? at(check.ended_ms) : t("ui.tests.check.never")}</dd></div>
             </dl>
-            {#if c?.result === "ProblemsFound"}<p class="note">{t("ui.tests.check.repair", { volume: v.root.slice(0, 2) })}</p>{/if}
+            {#if mark}
+              <div class="panel" role="status">
+                <span class="pi"><StatusMark kind="attention" word="" /></span>
+                <div>
+                  <h3>{t(`ui.tests.check.panel.${mark}`, { volume: vol(v.root) })}</h3>
+                  <p>{t("ui.tests.check.panel.body")}</p>
+                </div>
+              </div>
+            {/if}
             {#if level === "Technical" && c?.output}<pre class="out">{c.output}</pre>{/if}
             <div class="acts">
               <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="fsck" />{t("ui.tests.check.start")}</button>
@@ -960,6 +970,34 @@
   }
   .acts.end {
     justify-content: flex-end;
+  }
+  .panel {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    max-width: 72ch;
+    margin: 14px 0 0;
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, var(--busy) 40%, var(--stroke));
+    border-radius: 12px;
+    background: var(--row);
+  }
+  .panel .pi {
+    display: flex;
+    margin-top: 2px;
+  }
+  .panel .pi :global(.word) {
+    display: none;
+  }
+  .panel h3 {
+    margin: 0 0 4px;
+    font: 600 15px/1.4 var(--f);
+  }
+  .panel p {
+    margin: 0;
+    color: var(--ink2);
+    font-size: 15px;
+    line-height: 1.5;
   }
   @media (forced-colors: active) {
     .pbar i,

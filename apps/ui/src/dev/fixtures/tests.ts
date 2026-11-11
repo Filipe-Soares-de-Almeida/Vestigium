@@ -200,6 +200,7 @@ function dto(): TestsDto {
         : null,
     bench_file_bytes: GIB,
     bench_needed_bytes: GIB + GIB / 2,
+    boot_ms: now - 7 * DAY,
   };
 }
 

@@ -530,6 +530,7 @@ pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
             scan: tests_dir().and_then(|dir| scan_under_way(&dir, now)),
             bench_file_bytes: BENCH_FILE_BYTES,
             bench_needed_bytes: BENCH_FILE_BYTES + BENCH_FREE_MARGIN_BYTES,
+            boot_ms: now - vestigium_collect::interrupt_ms(),
         })
     })
     .await

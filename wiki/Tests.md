@@ -19,7 +19,7 @@ Each disk has four tests.
 |---|---|---|
 | **SMART** | Reads the disk's own health counters, or the NVMe health log of an NVMe SSD. Reading an idle HDD spins it up for a few seconds, so it runs only when asked. | **Read the SMART** |
 | **Surface scan** | Reads the whole disk without writing, finds unreadable sectors and can show each region's response time. It runs at low priority, can take a few hours, and goes on with the window closed. Asks for administrator rights. | **Scan the whole disk** |
-| **File system** | Checks each NTFS volume with `chkdsk /scan`, in a few minutes. It only checks: Windows does the repair, at the next restart or from the drive's **Properties › Tools › Check**. Asks for administrator rights. | **Check now** |
+| **File system** | Checks each NTFS volume with `chkdsk /scan`, in a few minutes. When it finds problems it marks the volume, and Windows repairs it at the next restart; a repair can remove files it cannot recover, so back up what matters first. The card says while a volume is marked. Asks for administrator rights. | **Check now** |
 | **Speed test** | Measures read and write speed with a temporary file of about 1 GB, deleted at the end, in about 40 seconds. Another program using the disk lowers the values, and the result says so. | **Measure** |
 
 A stopped surface scan can resume with **Continue from …** or begin again with **Start over**. A disk's earlier scans open from **History**, each with its map of the disk; **Show the response time** colours each region by how fast it read.

@@ -52,8 +52,9 @@ on.
 - **The driver behind the lag.** A capture measures every driver's DPC/ISR latency and the frame
   times of the apps on screen, and names the driver or app behind the stutters.
 - **Health checks, tests and reversible fixes.** It flags failing disks, hardware errors and a nearly
-  full system drive, tests memory and disks without changing them, and suggests Windows settings to
-  change, each undone in one click. Security features stay as they are.
+  full system drive, tests memory and disks, and suggests Windows settings to change, each undone in
+  one click. A file system check that finds problems marks the volume, and Windows repairs it at the
+  next restart. Security features stay as they are.
 - **Light, local, no account.** The agent runs as your user and the window exits when it closes.
   Tasks that need administrator rights ask one at a time. No telemetry: besides the update check,
   which the window asks about first, the app makes no request. The installer downloads the WebView2

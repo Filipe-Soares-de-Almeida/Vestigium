@@ -33,7 +33,7 @@ How to use this file:
 - A deep capture, a volume check, a dump read and a full scan can now be cancelled from their own
   card. Cancelling a capture or a volume check asks first and says what happens: the helper is
   asked to stop and the window stops waiting for it, the time captured so far is not saved, and a
-  check only reads, so nothing is repaired. The dump read and the full scan, which take seconds,
+  check looks for problems without repairing anything now. The dump read and the full scan, which take seconds,
   cancel at once. A cancelled capture keeps nothing, and the card keeps a line saying what was
   cancelled and what is still valid.
 - When the helper does not finish in time, a dialog on the job's own screen now says so once and
@@ -84,6 +84,14 @@ How to use this file:
 
 ### Changed
 
+- The volume check now says what it leaves behind. When it finds problems, chkdsk marks the volume
+  for repair and Windows repairs it at the next restart, which can remove files it cannot recover.
+  The card of the volume then shows a panel with an attention mark that says so and reminds you to
+  back up what matters. The panel says whether the check marked the volume, found it already marked
+  or left it marked from before, and it stays until Windows has restarted after the check. A check
+  with no problems leaves the card as it was, and the running check says it looks for problems and
+  repairs nothing now. The README, the wiki, the Health explanation of file system errors, the
+  stop-the-check dialog and the suggested repair step no longer say that the check changes nothing.
 - The Captures screen keeps its form while a capture runs, with Start unavailable and a line saying
   it is available when the capture finishes. The clock, the bar, the cancel button and the notice
   that a capture finished moved from that card to the strip above the screen, which a capture of any
