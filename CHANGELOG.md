@@ -284,6 +284,11 @@ How to use this file:
 - Today, Events and a program's page no longer fail to open when two overload periods start in the
   same moment, such as two disks at full activity together or the processor and the memory filling at
   once. Before, the Moments list and the Events table showed an error for the rest of the day.
+- A stop is no longer reported as a fall of the PC when Windows cannot say when the PC fell. Without
+  the unexpected-shutdown record that dates the fall, the report is now written only when the power
+  event came within five minutes of the last second the watcher saw; if the watcher was killed and
+  the PC fell much later, the time away stays a plain stop instead of a fall dated at the last second
+  seen.
 - The report of a PC that fell now includes the disk and display events Windows logged in the two
   minutes before the last second the watcher saw. Before, they arrived after the report was written, so
   a freeze caused by the disk or the graphics driver was reported as a power cut of low confidence;

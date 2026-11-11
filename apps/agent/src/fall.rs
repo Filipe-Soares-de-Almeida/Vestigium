@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use vestigium_collect::RingContents;
 use vestigium_core::{
-    CrashKind, EventMeaning, MachineInfo, Occurrence, POSTMORTEM_BEFORE_MS, WinEvent, Window,
-    postmortem, power_loss_detail, unexpected_shutdown_ms,
+    CrashKind, EventMeaning, MachineInfo, Occurrence, POSTMORTEM_BEFORE_MS, POSTMORTEM_REACH_MS,
+    WinEvent, Window, postmortem, power_loss_detail, unexpected_shutdown_ms,
 };
 use vestigium_store::{Store, StoreError};
 
@@ -11,6 +11,9 @@ use vestigium_store::{Store, StoreError};
 pub const WAIT_FOR_FALL_MS: i64 = 5 * 60_000;
 /// After the Kernel-Power 41, how long to wait for the EventLog 6008 that dates the fall.
 const WAIT_FOR_DATE_MS: i64 = 30_000;
+/// How long after the last second watched the Kernel-Power 41 may be stamped when no EventLog 6008
+/// dates the fall: the post-mortem reach plus the time a boot takes to log it.
+const UNDATED_REACH_MS: i64 = POSTMORTEM_REACH_MS + 2 * 60_000;
 /// What the next boot logs about a fall, kept with it.
 const NEXT_BOOT: [EventMeaning; 5] = [
     EventMeaning::PowerLoss,
@@ -35,12 +38,20 @@ pub struct Fall {
     /// The last second watched, from the ring or the history, whichever is newer.
     last_ms: i64,
     deadline_ms: i64,
-    /// What the Kernel-Power 41 said, and when it arrived.
-    loss: Option<(i64, CrashKind)>,
+    /// What the Kernel-Power 41 said, when it arrived and the time it is stamped with.
+    loss: Option<Loss>,
     down_ms: Option<i64>,
     next_boot: Vec<WinEvent>,
     /// Events logged shortly before the last second watched, delivered again by the old bookmark.
     before: Vec<WinEvent>,
+}
+
+/// The Kernel-Power 41 of a fall.
+#[derive(Debug)]
+struct Loss {
+    seen_ms: i64,
+    stamp_ms: i64,
+    kind: CrashKind,
 }
 
 impl Fall {
@@ -83,7 +94,11 @@ impl Fall {
         }
         match event.meaning {
             EventMeaning::PowerLoss if self.loss.is_none() => {
-                self.loss = power_loss_detail(&event.data_xml).map(|d| (now_ms, d.crash_kind()));
+                self.loss = power_loss_detail(&event.data_xml).map(|d| Loss {
+                    seen_ms: now_ms,
+                    stamp_ms: event.ts_ms,
+                    kind: d.crash_kind(),
+                });
             }
             EventMeaning::UnexpectedShutdown if self.down_ms.is_none() => {
                 self.down_ms = unexpected_shutdown_ms(&event.data_xml);
@@ -96,16 +111,20 @@ impl Fall {
     /// Waiting is over: the fall is dated, its date did not come, or Windows logged no fall at all.
     pub fn settled(&self, now_ms: i64) -> bool {
         now_ms >= self.deadline_ms
-            || self.loss.is_some_and(|(seen, _)| {
-                self.down_ms.is_some() || now_ms - seen >= WAIT_FOR_DATE_MS
+            || self.loss.as_ref().is_some_and(|loss| {
+                self.down_ms.is_some() || now_ms - loss.seen_ms >= WAIT_FOR_DATE_MS
             })
     }
 
     /// The post-mortem, from the history and the ring; `None` when the PC did not fall while watched.
     pub fn occurrence(self, store: &Store) -> Result<Option<Occurrence>, StoreError> {
-        let Some((_, kind)) = self.loss else {
+        let Some(Loss { stamp_ms, kind, .. }) = self.loss else {
             return Ok(None);
         };
+        // Without a 6008 only the 41's own stamp can show the fall came right after the last second.
+        if self.down_ms.is_none() && stamp_ms - self.last_ms > UNDATED_REACH_MS {
+            return Ok(None);
+        }
         let from = self.last_ms - POSTMORTEM_BEFORE_MS;
         let to = self.last_ms;
         // The history wins where both hold a second: it keeps every core and disk.
@@ -373,5 +392,48 @@ mod tests {
         let fall = Fall::after(unclean(), Some(100_000), 200_000).unwrap();
         assert!(!fall.settled(200_000 + WAIT_FOR_FALL_MS - 1));
         assert!(fall.settled(200_000 + WAIT_FOR_FALL_MS));
+    }
+
+    fn dateless_occurrence(stamp_after_last_ms: i64) -> Option<Occurrence> {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        fall.offer(
+            &event(
+                last + stamp_after_last_ms,
+                EventMeaning::PowerLoss,
+                BLUE_SCREEN,
+            ),
+            2_000_000,
+        );
+        assert!(fall.settled(2_000_000 + WAIT_FOR_DATE_MS));
+        fall.occurrence(&store).unwrap()
+    }
+
+    #[test]
+    fn a_fall_without_a_date_is_a_stop_when_the_41_comes_long_after_the_last_second() {
+        assert!(dateless_occurrence(45 * 60_000).is_none());
+        assert!(dateless_occurrence(UNDATED_REACH_MS + 1).is_none());
+    }
+
+    #[test]
+    fn a_fall_without_a_date_is_kept_when_the_41_comes_soon() {
+        assert!(dateless_occurrence(2 * 60_000).is_some());
+        assert!(dateless_occurrence(UNDATED_REACH_MS).is_some());
+    }
+
+    #[test]
+    fn a_fall_with_a_date_ignores_how_late_the_41_came() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        fall.offer(
+            &event(last + 45 * 60_000, EventMeaning::PowerLoss, BLUE_SCREEN),
+            2_000_000,
+        );
+        fall.down_ms = Some(last + 1_000);
+        assert!(fall.occurrence(&store).unwrap().is_some());
     }
 }
