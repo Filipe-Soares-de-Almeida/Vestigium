@@ -204,7 +204,7 @@ fn capture(length: Duration) -> DeepCapture {
     for hitch in &mut hitches {
         hitch.ts_ms = clock.corrected(hitch.ts_ms);
     }
-    DeepCapture {
+    let mut capture = DeepCapture {
         start_ms: clock.wall0,
         end_ms: wall_ms(),
         kernel,
@@ -215,7 +215,9 @@ fn capture(length: Duration) -> DeepCapture {
         apps,
         hitches,
         hiccups: vec![],
-    }
+    };
+    capture.fit_to_ceiling();
+    capture
 }
 
 fn frames(length: Duration, clock: Clock) -> (CaptureSource, Vec<AppFrames>, Vec<FrameHitch>) {

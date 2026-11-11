@@ -24,6 +24,8 @@ pub const MINUTE_ROUTINES_KEPT: usize = 3;
 pub const MINUTE_HITCHES_KEPT: usize = 3;
 /// The longest deep capture anyone can ask for, in minutes: a whole day.
 pub const CAPTURE_MINUTES_MAX: u64 = 24 * 60;
+/// The most a capture takes once stored, however long it ran.
+pub const CAPTURE_BYTES_MAX: usize = 8 << 20;
 /// A frame over this many times the app's median...
 pub const HITCH_FACTOR: f32 = 2.5;
 /// ...and at least this long, in milliseconds, is a hitch.
@@ -176,6 +178,60 @@ pub struct DeepCapture {
     pub apps: Vec<AppFrames>,
     pub hitches: Vec<FrameHitch>,
     pub hiccups: Vec<ProbeHiccup>,
+}
+
+impl DeepCapture {
+    /// An upper bound of the capture's size once stored, in bytes.
+    pub fn size_estimate(&self) -> usize {
+        let sources = |s: &CaptureSource| match s {
+            CaptureSource::Ok => 1,
+            CaptureSource::Unavailable(why) => 3 + why.len(),
+            CaptureSource::Partial { reason, .. } => 14 + reason.len(),
+        };
+        let routine = |l: &LongRoutine| 21 + l.module.len();
+        let hitch = |h: &FrameHitch| 25 + h.app.len();
+        let driver = |d: &DriverLatency| 182 + d.module.len();
+        let app = |a: &AppFrames| 40 + a.name.len();
+        sources(&self.kernel)
+            + sources(&self.frames)
+            + 40
+            + self.drivers.iter().map(driver).sum::<usize>()
+            + self.longest.iter().map(routine).sum::<usize>()
+            + self.apps.iter().map(app).sum::<usize>()
+            + self.hitches.iter().map(hitch).sum::<usize>()
+            + self.hiccups.len() * 14
+    }
+
+    /// Drops the shortest entries of whichever of routines, hitches and hiccups takes most room,
+    /// a tenth at a time, until the capture fits `CAPTURE_BYTES_MAX`; one within it is left as it is.
+    pub fn fit_to_ceiling(&mut self) {
+        while self.size_estimate() > CAPTURE_BYTES_MAX {
+            let routines: usize = self.longest.iter().map(|l| 21 + l.module.len()).sum();
+            let hitches: usize = self.hitches.iter().map(|h| 25 + h.app.len()).sum();
+            let hiccups = self.hiccups.len() * 14;
+            if routines == 0 && hitches == 0 && hiccups == 0 {
+                break;
+            }
+            if routines >= hitches && routines >= hiccups {
+                self.longest
+                    .sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
+                self.longest.truncate(self.longest.len() * 9 / 10);
+            } else if hitches >= hiccups {
+                self.hitches.sort_by(|a, b| {
+                    b.frame_ms
+                        .total_cmp(&a.frame_ms)
+                        .then(a.ts_ms.cmp(&b.ts_ms))
+                });
+                self.hitches.truncate(self.hitches.len() * 9 / 10);
+                self.hitches.sort_by_key(|h| h.ts_ms);
+            } else {
+                self.hiccups
+                    .sort_by(|a, b| b.lag_ms.total_cmp(&a.lag_ms).then(a.ts_ms.cmp(&b.ts_ms)));
+                self.hiccups.truncate(self.hiccups.len() * 9 / 10);
+                self.hiccups.sort_by_key(|h| h.ts_ms);
+            }
+        }
+    }
 }
 
 /// Loaded kernel images, from the session's image events.
@@ -1774,5 +1830,90 @@ mod tests {
         assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
         c.hiccups[0].ts_ms = at + 110 + NEAR_MS + 1 + 110;
         assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+    }
+
+    /// A day with 30 modules long in every minute and 5 apps stalling in most of them.
+    fn busy_day() -> DeepCapture {
+        let mut map = ModuleMap::new();
+        for m in 0..30u64 {
+            map.insert(0x10_0000 * (m + 1), 0x1000, &format!("driver{m:02}.sys"));
+        }
+        let mut routines = RoutineAggregator::new();
+        let mut frames = FrameAggregator::new();
+        for minute in 0..CAPTURE_MINUTES_MAX as i64 {
+            let at = START + minute * MINUTE_MS;
+            for m in 0..30u64 {
+                for i in 0..10u32 {
+                    let us = 1_000 + i * 45;
+                    routines.add(
+                        &map,
+                        0x10_0000 * (m + 1),
+                        RoutineKind::Dpc,
+                        us,
+                        0,
+                        at + i64::from(i),
+                    );
+                }
+            }
+            for a in 0..5 {
+                for f in 0..60 {
+                    frames.add(&format!("app{a}.exe"), a, at + f * 900, 10.0);
+                }
+                frames.add(&format!("app{a}.exe"), a, at + 55_000, 300.0);
+            }
+        }
+        let (drivers, longest) = routines.finish();
+        let (apps, hitches) = frames.finish();
+        let mut c = capture();
+        c.end_ms = START + CAPTURE_MINUTES_MAX as i64 * MINUTE_MS;
+        c.drivers = drivers;
+        c.longest = longest;
+        c.apps = apps;
+        c.hitches = hitches;
+        c.hiccups = (0..CAPTURE_MINUTES_MAX as i64 * 3)
+            .map(|i| ProbeHiccup {
+                ts_ms: START + i * 20_000,
+                lag_ms: 9.0 + (i % 7) as f32,
+            })
+            .collect();
+        c
+    }
+
+    #[test]
+    fn a_busy_day_stays_under_the_ceiling_untouched() {
+        let c = busy_day();
+        let stored = postcard::to_allocvec(&c).unwrap().len();
+        assert!(stored < CAPTURE_BYTES_MAX, "{stored} bytes");
+        assert!(
+            c.size_estimate() >= stored,
+            "the estimate is an upper bound"
+        );
+        assert!(c.size_estimate() < CAPTURE_BYTES_MAX);
+        let mut fitted = c.clone();
+        fitted.fit_to_ceiling();
+        assert_eq!(fitted, c);
+    }
+
+    #[test]
+    fn a_capture_over_the_ceiling_loses_its_shortest_entries_first() {
+        let mut c = capture();
+        c.longest = (0..600_000u32)
+            .map(|i| {
+                long(
+                    START + i64::from(i),
+                    &format!("driver{}.sys", i % 400),
+                    1_000 + i,
+                )
+            })
+            .collect();
+        c.hitches = (0..2_000).map(|i| hitch(START + i, "app.exe")).collect();
+        let longest_us = 1_000 + 599_999;
+        assert!(c.size_estimate() > CAPTURE_BYTES_MAX);
+        c.fit_to_ceiling();
+        assert!(c.size_estimate() <= CAPTURE_BYTES_MAX);
+        assert!(postcard::to_allocvec(&c).unwrap().len() <= CAPTURE_BYTES_MAX);
+        assert_eq!(c.longest.iter().map(|l| l.us).max(), Some(longest_us));
+        assert!(c.longest.iter().all(|l| l.us > 1_000 + 100_000));
+        assert_eq!(c.hitches.len(), 2_000, "what was small enough stays");
     }
 }

@@ -35,7 +35,7 @@ pub use blackbox::{
     REPORTED_MERGE_MS, RING_MS, RecentState, Timing,
 };
 pub use capture::{
-    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_MINUTES_MAX, CAPTURE_VERSION,
+    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_BYTES_MAX, CAPTURE_MINUTES_MAX, CAPTURE_VERSION,
     CAPTURE_VERSION_MIN, CaptureSource, DeepCapture, DriverLatency, FrameAggregator, FrameHitch,
     HITCH_FACTOR, HITCH_MIN_MS, HITCHES_KEPT, LONGEST_KEPT, LongRoutine, ModuleMap,
     ON_DEMAND_SHARE, ProbeHiccup, RoutineAggregator, RoutineKind, RoutineStats, capture_findings,

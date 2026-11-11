@@ -26,6 +26,7 @@ pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -
                 .filter(|h| (capture.start_ms..=capture.end_ms).contains(&h.ts_ms))
                 .copied(),
         );
+        capture.fit_to_ceiling();
         let Ok(id) = store.insert_capture(&capture) else {
             continue;
         };
@@ -462,6 +463,31 @@ mod tests {
         let stored = store.capture(ids[0]).unwrap().unwrap();
         let times: Vec<i64> = stored.hiccups.iter().map(|h| h.ts_ms).collect();
         assert_eq!(times, [1_000, 1_500, 2_000]);
+    }
+
+    #[test]
+    fn import_keeps_a_stored_capture_within_the_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        fs::create_dir(&captures).unwrap();
+        let mut big = capture(1_000, 2_000);
+        big.longest = (0..700_000u32)
+            .map(|i| vestigium_core::LongRoutine {
+                ts_ms: 1_000 + i64::from(i % 1_000),
+                core: 0,
+                module: "busy.sys".into(),
+                kind: vestigium_core::RoutineKind::Dpc,
+                us: 1_000 + i,
+            })
+            .collect();
+        write_capture(&captures, "1.capture", &big);
+        let mut store = store(dir.path());
+
+        let ids = import_captures(&captures, &[], &mut store);
+
+        let stored = store.capture(ids[0]).unwrap().unwrap();
+        assert!(stored.size_estimate() <= vestigium_core::CAPTURE_BYTES_MAX);
+        assert_eq!(stored.longest[0].us, 1_000 + 699_999);
     }
 
     #[test]
