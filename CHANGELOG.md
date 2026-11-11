@@ -80,6 +80,10 @@ How to use this file:
 
 ### Fixed
 
+- A report whose window holds no readings no longer says that no resource was overloaded: it says
+  that Vestigium has no measurements for that moment. When readings exist but nothing crossed a
+  limit, it says that none of the limits Vestigium uses was crossed, and lists the GPU and the disk
+  activity when they were high. The window and the watcher must be updated together for this.
 - An NVMe disk that only reported a temperature outside its safe range is no longer shown as a
   critical alert that tells you to back up and replace the disk. It now raises an attention alert,
   "Disk ran hot", that says the disk is not failing and points to the vents and fans, and it closes

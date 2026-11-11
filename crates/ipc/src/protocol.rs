@@ -7,7 +7,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// How long the watcher may take to answer a request that only reads memory or flips a flag.
 pub const ANSWER_SHORT: Duration = Duration::from_secs(3);

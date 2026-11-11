@@ -122,6 +122,8 @@ pub enum Cause {
     },
     /// Windows logged a fatal hardware error before the fall.
     HardwareFault,
+    /// The window holds no readings, so nothing could be weighed.
+    NotMeasured,
 }
 
 /// A value from the window that backs a suspect; the words come from the UI.
@@ -723,8 +725,16 @@ fn crash(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
     found
 }
 
-/// The ordinary signals, to show that nothing crossed.
+/// The ordinary signals, to show that nothing crossed; the GPU and disk activity when they were high.
 fn unclear(window: &Window) -> Suspect {
+    if window.samples.is_empty() {
+        return Suspect {
+            cause: Cause::NotMeasured,
+            confidence: Confidence::Low,
+            evidence: Vec::new(),
+            next_steps: vec![NextStep::EnableSensitiveMode, NextStep::DeepCapture],
+        };
+    }
     let peak = |value: fn(&Sample) -> f32| {
         window
             .samples
@@ -747,6 +757,20 @@ fn unclear(window: &Window) -> Suspect {
     }
     if let Some((ts_ms, disk, value)) = worst_disk(&window.samples, |d| d.latency_ms) {
         evidence.push(metric(ts_ms, Metric::DiskLatencyMs, value, Some(&disk)));
+    }
+    let gpu = window
+        .samples
+        .iter()
+        .filter_map(|s| s.gpu_pct.map(|v| (s.ts_ms, v)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(_, v)| *v >= threshold(Metric::GpuPct));
+    if let Some((ts_ms, value)) = gpu {
+        evidence.push(metric(ts_ms, Metric::GpuPct, value, None));
+    }
+    let busy_disk = worst_disk(&window.samples, |d| d.active_pct)
+        .filter(|(_, _, v)| *v >= threshold(Metric::DiskActivePct));
+    if let Some((ts_ms, disk, value)) = busy_disk {
+        evidence.push(metric(ts_ms, Metric::DiskActivePct, value, Some(&disk)));
     }
     Suspect {
         cause: Cause::Unclear,

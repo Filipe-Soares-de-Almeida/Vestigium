@@ -543,6 +543,11 @@ function mediumFrames(): OccurrenceDto {
   ]);
 }
 
+/** A freeze whose window holds no readings at all. */
+function notMeasured(): OccurrenceDto {
+  return calmFreeze(12, at(13, 2, 30), [suspect("NotMeasured", "Low", [], ["EnableSensitiveMode", "DeepCapture"])], false);
+}
+
 /** Seven stutters in sensitive mode while a video conversion held every core. */
 function stutters(): OccurrenceDto {
   const start = at(12, 40, 10);
@@ -647,6 +652,7 @@ const FIXTURES = new Map(
     lowDriver(),
     lowThrottling(),
     mediumFrames(),
+    notMeasured(),
   ].map((o) => [o.id, o]),
 );
 

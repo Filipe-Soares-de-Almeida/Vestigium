@@ -517,6 +517,50 @@ fn unclear_when_nothing_matches_suggests_sensitive_mode() {
 }
 
 #[test]
+fn an_empty_window_is_not_measured() {
+    let window = Window {
+        samples: vec![],
+        ..quiet_window()
+    };
+    let found = suspects(&[freeze(2)], &window);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cause, Cause::NotMeasured);
+    assert!(found[0].next_steps.contains(&NextStep::EnableSensitiveMode));
+}
+
+#[test]
+fn high_gpu_and_disk_activity_are_listed_when_nothing_matches() {
+    let mut window = quiet_window();
+    tweak(&mut window, -5, 5, |s| {
+        s.gpu_pct = Some(100.0);
+        s.disks[0].active_pct = 100.0;
+    });
+    let found = suspects(&[freeze(2)], &window);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cause, Cause::Unclear);
+    let listed = |wanted: Metric| {
+        found[0]
+            .evidence
+            .iter()
+            .any(|e| matches!(e, Evidence::Metric { metric, .. } if *metric == wanted))
+    };
+    assert!(listed(Metric::GpuPct));
+    assert!(listed(Metric::DiskActivePct));
+}
+
+#[test]
+fn ordinary_gpu_and_disk_activity_stay_unlisted() {
+    let found = run(&quiet_case());
+    assert!(found[0].evidence.iter().all(|e| !matches!(
+        e,
+        Evidence::Metric {
+            metric: Metric::GpuPct | Metric::DiskActivePct,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn every_suspect_carries_evidence() {
     let cases = [
         storage_case(),

@@ -167,7 +167,8 @@ export type Cause =
   | "Unresponsive"
   | "SleepTransition"
   | { PowerCut: { no_dump: boolean } }
-  | "HardwareFault";
+  | "HardwareFault"
+  | "NotMeasured";
 
 /** How the PC went down, from what Windows logged on the next boot. */
 export type CrashKind =

@@ -10,8 +10,9 @@ use crate::codes::{
 };
 use crate::{Store, StoreError, decode, encode};
 
-/// Layout of the `Occurrence` and `Episode` BLOBs written today.
-const RECORD_VERSION: i64 = 1;
+/// Layout of the `Occurrence` and `Episode` BLOBs written today, and the oldest one still read.
+const RECORD_VERSION: i64 = 2;
+const RECORD_VERSION_MIN: i64 = 1;
 
 fn episode_code(kind: &EpisodeKind) -> i64 {
     match kind {
@@ -378,7 +379,7 @@ fn event_row(row: &Row<'_>) -> rusqlite::Result<EventRow> {
 
 /// Decodes a record BLOB of the given layout version.
 fn one<T: serde::de::DeserializeOwned>(version: i64, data: &[u8]) -> Result<T, StoreError> {
-    if version != RECORD_VERSION {
+    if !(RECORD_VERSION_MIN..=RECORD_VERSION).contains(&version) {
         return Err(StoreError::UnknownCode {
             what: "record version",
             code: version,

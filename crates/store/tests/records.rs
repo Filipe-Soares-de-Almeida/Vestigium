@@ -3,8 +3,8 @@ use std::path::Path;
 
 use vestigium_core::{
     CURATED, Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
-    EventMeaning, Gap, GapReason, LanguagePref, MachineInfo, Occurrence, OccurrenceKind, Retention,
-    Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
+    EventMeaning, Gap, GapReason, LanguagePref, MachineInfo, NextStep, Occurrence, OccurrenceKind,
+    Retention, Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
 };
 use vestigium_store::{Batch, SCHEMA_VERSION, Segment, Series, Store, StoreError, encode};
 
@@ -262,6 +262,45 @@ fn occurrence_roundtrip() {
         store.episodes(0, 20_000).unwrap(),
         vec![episode(5_000, 70_000)]
     );
+}
+
+#[test]
+fn a_not_measured_occurrence_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = open(dir.path());
+    let mut stored = occurrence(10_000, 12_500);
+    stored.window.samples.clear();
+    stored.suspects = vec![Suspect {
+        cause: Cause::NotMeasured,
+        confidence: Confidence::Low,
+        evidence: Vec::new(),
+        next_steps: vec![NextStep::EnableSensitiveMode],
+    }];
+
+    let id = store.insert_occurrence(&stored).unwrap();
+
+    assert_eq!(store.occurrence(id).unwrap(), Some(stored));
+    assert_eq!(
+        store.occurrences(0, 20_000).unwrap()[0].cause,
+        Cause::NotMeasured
+    );
+}
+
+#[test]
+fn a_version_1_occurrence_row_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let stored = occurrence(10_000, 12_500);
+    let id = open(dir.path()).insert_occurrence(&stored).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE occurrence SET version = 1", [])
+        .unwrap();
+
+    let store = open(dir.path());
+
+    assert_eq!(store.occurrence(id).unwrap(), Some(stored));
+    assert_eq!(store.occurrences(0, 20_000).unwrap().len(), 1);
 }
 
 #[test]

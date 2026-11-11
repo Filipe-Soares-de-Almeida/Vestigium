@@ -47,7 +47,8 @@ export type CauseKind =
   | "Unresponsive"
   | "SleepTransition"
   | "PowerCut"
-  | "HardwareFault";
+  | "HardwareFault"
+  | "NotMeasured";
 
 /** One statement in the forms the detail levels pick from: plain words, the numbers, the counters. */
 export interface Texts {
@@ -131,6 +132,7 @@ const ICON: Record<CauseKind, IconName> = {
   SleepTransition: "power",
   PowerCut: "power",
   HardwareFault: "chip",
+  NotMeasured: "chip",
 };
 
 /** Metrics that cross by falling below their threshold. */

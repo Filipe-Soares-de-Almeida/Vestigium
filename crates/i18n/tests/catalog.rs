@@ -60,7 +60,8 @@ fn every_cause() -> Vec<Cause> {
         Cause::Unresponsive => Some(Cause::SleepTransition),
         Cause::SleepTransition => Some(Cause::PowerCut { no_dump: false }),
         Cause::PowerCut { .. } => Some(Cause::HardwareFault),
-        Cause::HardwareFault => None,
+        Cause::HardwareFault => Some(Cause::NotMeasured),
+        Cause::NotMeasured => None,
     })
 }
 
@@ -230,7 +231,7 @@ fn every_key_family_lists_variants() {
 
 #[test]
 fn a_walk_over_an_enum_with_fields_reaches_every_variant() {
-    assert_eq!(every_cause().len(), 16);
+    assert_eq!(every_cause().len(), 17);
     assert_eq!(every_run_as().len(), 6);
     assert_eq!(every_signature().len(), 4);
     assert_eq!(episodes_with_a_key().len(), 3);

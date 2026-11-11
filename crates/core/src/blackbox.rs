@@ -605,8 +605,10 @@ impl Blackbox {
         ));
         if self.sensitive && occurrence.kind == OccurrenceKind::Stutter {
             if self.stutters == 0 {
-                self.first_stutter_open =
-                    matches!(occurrence.cause(), Cause::Driver { .. } | Cause::Unclear);
+                self.first_stutter_open = matches!(
+                    occurrence.cause(),
+                    Cause::Driver { .. } | Cause::Unclear | Cause::NotMeasured
+                );
             }
             self.stutters += 1;
         }

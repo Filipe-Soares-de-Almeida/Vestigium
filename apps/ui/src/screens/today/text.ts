@@ -39,7 +39,7 @@ export function causeName(cause: Cause): string {
 
 /** "probably because of the C: disk", or `null` when the cause is unclear. */
 export function causeReason(cause: Cause): string | null {
-  if (cause === "Unclear") return null;
+  if (cause === "Unclear" || cause === "NotMeasured") return null;
   if (typeof cause === "string") return t(`${KEY}.because.${cause}`);
   if ("Storage" in cause) {
     const disk = cause.Storage.disk;

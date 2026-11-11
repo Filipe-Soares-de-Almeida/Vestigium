@@ -74,6 +74,7 @@ const RELEVANT: Record<CauseKind, LaneKey[]> = {
   SleepTransition: ["cpu", "disk"],
   PowerCut: ["cpu", "mem", "lag"],
   HardwareFault: ["cpu", "gpu"],
+  NotMeasured: ["cpu", "mem"],
 };
 
 const TONES: LaneTone[] = ["calm", "busy", "press", "freeze"];
