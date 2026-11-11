@@ -553,6 +553,8 @@ export const agentLinkSamples = [
   {"link":"running","paused":true,"paused_until_ms":1790000300000,"sensitive_until_ms":1790000600000,"state":"attention","started_at_ms":1789000000000,"last_sample_ms":1790000000000,"last_error":"pipe closed","suggest_capture":true,"cpu_pct":1.5,"suspended":true,"monitor":{"state":"no_reading","failing":[{"source":"counters","since_ms":1789999900000,"error":"counter query failed"}],"no_reading_since_ms":1790000000000,"resumed_ms":1789999000000,"health_attempt_ms":1790000200000,"health_ok_ms":1790000100000,"health_unread":["TwoAntivirus","DiskSmart"]}},
   {"link":"stopped"},
   {"link":"mismatch"},
+  {"link":"silent","seconds":3},
+  {"link":"busy"},
   {"link":"running","paused":false,"paused_until_ms":null,"sensitive_until_ms":null,"state":"normal","started_at_ms":1789000000000,"last_sample_ms":null,"last_error":null,"suggest_capture":false,"cpu_pct":null,"suspended":false,"monitor":{"state":"watching","failing":[],"no_reading_since_ms":null,"resumed_ms":null,"health_attempt_ms":null,"health_ok_ms":null,"health_unread":[]}},
 ] satisfies AgentLink[];
 

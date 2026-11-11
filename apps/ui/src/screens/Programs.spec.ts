@@ -18,7 +18,7 @@ function program(pid: number, name: string, cpu: number): ProcessSample {
   return { ...processSampleSamples[0], pid, name, cpu_pct: cpu };
 }
 
-const running = agentLinkSamples[3];
+const running = agentLinkSamples.find((link) => link.link === "running" && !link.paused)!;
 const programs = [
   program(10, "browser.exe", 40),
   program(11, "browser_helper.exe", 5),

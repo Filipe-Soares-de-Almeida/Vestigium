@@ -42,6 +42,13 @@ How to use this file:
   the Health screen shows a banner with the time of the last check that finished. The banners are
   neutral in colour, so they do not look like a freeze alert, and at the technical level they add what
   Windows reported for each failing source.
+- The window now tells a monitor that is running but not answering apart from one of another
+  version. When the monitor does not answer a status request within three seconds, a neutral banner
+  says "The monitor is not answering", with the time the window waited, the status line says "The
+  monitor is not answering", and the history on disk keeps showing. The window no longer says the two
+  are different versions, which it did for any answer that failed. It asks again every five seconds
+  and recovers by itself when the monitor answers; a poll that is still waiting is never repeated, so
+  a stuck monitor no longer leaves a blocked thread for every poll.
 
 ### Changed
 

@@ -1,5 +1,5 @@
 // Stand-in for the window's Rust side in a plain browser (npm run dev); ./fixtures/*.ts add `handlers`.
-// URL: ?link=running|stopped|mismatch&monitor=ok|no_reading|degraded|unverified&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
+// URL: ?link=running|stopped|mismatch&monitor=ok|no_reading|degraded|unverified|silent&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AgentLink, MonitorStatus, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
@@ -69,7 +69,9 @@ function needsWatcher(): Promise<never> | null {
 
 const base: Record<string, Handler> = {
   agent_status: () =>
-    state.link === "running"
+    state.link === "running" && monitorMode === "silent"
+      ? { link: "silent", seconds: 3 }
+      : state.link === "running"
       ? {
           link: "running",
           paused: state.paused,

@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use serde::{Serialize, Serializer};
 use vestigium_core::Settings;
 use vestigium_ipc::{
-    AgentStatus, IpcError, PROTOCOL_VERSION, PipeClient, Request, Response, current_user_sid,
-    pipe_name,
+    ANSWER_SHORT, AgentStatus, IpcError, PROTOCOL_VERSION, PipeClient, Request, Response,
+    current_user_sid, pipe_name,
 };
 use vestigium_store::StoreError;
 
@@ -40,6 +40,13 @@ pub enum UiError {
     Declined,
     #[error("a setting now holds a value that Vestigium did not write")]
     ChangedSince,
+}
+
+impl UiError {
+    /// The watcher is there but did not answer in time.
+    fn is_silent(&self) -> bool {
+        matches!(self, UiError::Ipc(IpcError::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut)
+    }
 }
 
 impl From<IpcError> for UiError {
@@ -120,6 +127,12 @@ pub enum AgentLink {
     Stopped,
     /// Something else owns the pipe, or the watcher speaks another protocol.
     Mismatch,
+    /// The watcher owns the pipe but did not answer within `seconds`.
+    Silent {
+        seconds: u64,
+    },
+    /// Another command holds the connection, so nothing is known yet; the window asks again.
+    Busy,
 }
 
 /// Settings as the window shows them; read from the database while the watcher is stopped.
@@ -221,11 +234,17 @@ impl Link {
         }
     }
 
+    /// What the watcher is doing; never waits for a call that is already in flight, so a watcher
+    /// that stops answering holds at most one thread of the window.
     pub fn status(&self) -> AgentLink {
-        match self.call(&Request::Status) {
-            Ok(Response::Status(status)) => AgentLink::Running(Box::new(status)),
-            Err(UiError::AgentStopped) => AgentLink::Stopped,
-            _ => AgentLink::Mismatch,
+        match self.try_call(&Request::Status) {
+            None => AgentLink::Busy,
+            Some(Ok(Response::Status(status))) => AgentLink::Running(Box::new(status)),
+            Some(Err(UiError::AgentStopped)) => AgentLink::Stopped,
+            Some(Err(err)) if err.is_silent() => AgentLink::Silent {
+                seconds: ANSWER_SHORT.as_secs(),
+            },
+            Some(_) => AgentLink::Mismatch,
         }
     }
 
@@ -465,6 +484,46 @@ mod tests {
         ));
         assert!(started.elapsed() < Duration::from_secs(7));
         drop(release);
+    }
+
+    #[test]
+    fn a_silent_agent_is_not_a_version_mismatch() {
+        let (link, release) = mute::link();
+        let started = Instant::now();
+
+        let status = link.status();
+
+        assert_eq!(status, AgentLink::Silent { seconds: 3 });
+        assert!(started.elapsed() < Duration::from_secs(7));
+        drop(release);
+    }
+
+    #[test]
+    fn two_status_calls_to_a_silent_agent_leave_one_blocked_thread() {
+        let (link, release) = mute::link();
+        let link = Arc::new(link);
+        let first = link.clone();
+        let waiting = std::thread::spawn(move || first.status());
+        std::thread::sleep(Duration::from_millis(500));
+        let started = Instant::now();
+
+        let second = link.status();
+
+        assert_eq!(second, AgentLink::Busy);
+        assert!(started.elapsed() < Duration::from_millis(200));
+        assert_eq!(waiting.join().unwrap(), AgentLink::Silent { seconds: 3 });
+        drop(release);
+    }
+
+    #[test]
+    fn the_watcher_is_running_again_once_it_answers() {
+        let name = unique_pipe();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || server.serve(answer));
+        let link = link_to(&name);
+
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+        assert!(matches!(link.status(), AgentLink::Running(_)));
     }
 
     #[test]

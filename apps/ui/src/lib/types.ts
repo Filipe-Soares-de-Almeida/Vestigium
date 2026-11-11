@@ -430,7 +430,11 @@ export interface MonitorStatus {
 export type AgentLink =
   | ({ link: "running" } & AgentStatus)
   | { link: "stopped" }
-  | { link: "mismatch" };
+  | { link: "mismatch" }
+  /** The watcher owns the pipe but did not answer within `seconds`. */
+  | { link: "silent"; seconds: number }
+  /** Another command holds the connection, so nothing is known yet. */
+  | { link: "busy" };
 
 export interface Retention {
   samples_hours: number;

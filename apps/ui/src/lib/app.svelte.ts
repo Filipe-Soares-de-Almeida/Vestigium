@@ -23,6 +23,9 @@ class App {
   startError = $state<unknown>(null);
 
   #languageSet = false;
+  /** The refresh under way, so polls and clicks never ask twice at once; `#queued` asks once more after it. */
+  #refreshing: Promise<void> | null = null;
+  #queued = false;
 
   // Flags the screens read; each one changes only when its value does.
   loading = $derived(this.failure === null && (this.link === null || this.history === null));
@@ -33,6 +36,10 @@ class App {
   stopped = $derived(this.link?.link === "stopped");
   /** A watcher answers on the pipe but not as this window expects. */
   unreachable = $derived(this.link?.link === "mismatch");
+  /** The watcher owns the pipe but did not answer in time; the history on disk still reads. */
+  silent = $derived(this.link?.link === "silent");
+  /** How long the window waited, in seconds, while the watcher is silent. */
+  silentSeconds = $derived(this.link?.link === "silent" ? this.link.seconds : 0);
   /** Sensitive mode saw stutters worth a deep capture. */
   suggestCapture = $derived(this.link?.link === "running" && this.link.suggest_capture);
   /** The watcher's account of its own watching; `null` unless it runs. */
@@ -60,8 +67,8 @@ class App {
 
   async load(): Promise<void> {
     this.failure = null;
-    let [link, history] = await Promise.allSettled([agentStatus(), probeHistory()]);
-    if (link.status === "fulfilled") this.link = link.value;
+    let [link, history] = await Promise.allSettled([askStatus(), probeHistory()]);
+    if (link.status === "fulfilled" && link.value !== null) this.link = link.value;
     // A history from an older version is unreadable until the watcher updates it: start the watcher if it
     // is stopped, then ask again for a few seconds while it does.
     let started = false;
@@ -76,6 +83,7 @@ class App {
     }
     try {
       if (link.status === "rejected") throw link.reason;
+      if (link.value === null) throw new Error("the watcher is busy");
       if (history.status === "rejected") throw history.reason;
       this.history = history.value;
       // With no history at all this is the first launch, so monitoring starts without waiting for a click.
@@ -86,14 +94,38 @@ class App {
     }
   }
 
-  /** Asks the watcher again; settings are reloaded when it started, stopped or came back. */
-  async refresh(): Promise<void> {
+  /**
+   * Asks the watcher again; settings are reloaded when it started, stopped, went silent or came back.
+   * A call while one is under way waits for it and then asks once more, so what it returns is current.
+   */
+  refresh(): Promise<void> {
+    if (this.link === null) return Promise.resolve();
+    if (this.#refreshing) {
+      this.#queued = true;
+      return this.#refreshing;
+    }
+    this.#refreshing = (async () => {
+      try {
+        do {
+          this.#queued = false;
+          await this.#ask();
+        } while (this.#queued);
+      } finally {
+        this.#refreshing = null;
+      }
+    })();
+    return this.#refreshing;
+  }
+
+  async #ask(): Promise<void> {
     if (this.link === null) return;
     try {
       const before = this.link.link;
-      this.link = await agentStatus();
+      const next = await askStatus();
+      if (next === null) return;
+      this.link = next;
       if (this.history === "empty") this.history = await probeHistory();
-      if (this.link.link !== before) await this.loadSettings();
+      if (next.link !== before) await this.loadSettings();
     } catch {
       // The next poll asks again; the window keeps what it last knew.
     }
@@ -134,13 +166,22 @@ class App {
     try {
       this.settings = await settings();
     } catch (error) {
-      if (this.link?.link !== "mismatch") throw error;
+      if (this.link?.link !== "mismatch" && this.link?.link !== "silent") throw error;
       this.settings = null;
       return;
     }
     applySettings(this.settings.settings, { language: !this.#languageSet });
     this.#languageSet = true;
   }
+}
+
+/** The watcher's state; one more try when another command held the connection, `null` if it still does. */
+async function askStatus(): Promise<AgentLink | null> {
+  const first = await agentStatus();
+  if (first.link !== "busy") return first;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const second = await agentStatus();
+  return second.link === "busy" ? null : second;
 }
 
 /** Whether the store holds any history at all, read from a one-point timeline. */

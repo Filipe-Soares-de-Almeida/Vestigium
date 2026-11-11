@@ -9,6 +9,7 @@ export type ShellTone = "ok" | "paused" | "off" | "no_reading" | "partial" | "si
 export function shellStatus(): { tone: ShellTone; text: string } {
   const link = app.link;
   if (link === null) return { tone: "off", text: t("ui.shell.status.connecting") };
+  if (app.silent) return { tone: "silent", text: t("ui.shell.status.silent") };
   if (app.paused) {
     const until = app.pausedUntil;
     return {

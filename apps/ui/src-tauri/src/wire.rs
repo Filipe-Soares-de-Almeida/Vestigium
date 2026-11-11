@@ -1760,6 +1760,8 @@ fn render() -> String {
             Running => AgentLink::Running(Box::new(agent_status(true))),
             Stopped => AgentLink::Stopped,
             Mismatch => AgentLink::Mismatch,
+            Silent => AgentLink::Silent { seconds: 3 },
+            Busy => AgentLink::Busy,
         )
         .into_iter()
         .chain([AgentLink::Running(Box::new(agent_status(false)))])
