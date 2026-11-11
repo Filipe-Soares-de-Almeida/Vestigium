@@ -259,6 +259,10 @@ How to use this file:
 - A report that left out repeats of the same Windows event now says how many, in a line such as
   "1,200 more repeats of the same event were not kept", in English and Portuguese. The window and
   the watcher must be updated together, because the stored report and the pipe protocol changed.
+- A storm of repeated Windows events no longer crowds the other events out of a report's timeline
+  or grows the history without limit. A report's timeline keeps at most 16 events of each provider
+  and event number per two minutes, and the history stores at most 64 of each per five-minute
+  batch, which is still far above the counts the health checks look for.
 - A program that stopped responding is now blamed with high confidence only when its own processor
   or disk use shows during the freeze, or when nothing else in the system explains the stall.
   Before, any hung window put its program first, ahead of a measured memory or disk cause, so a

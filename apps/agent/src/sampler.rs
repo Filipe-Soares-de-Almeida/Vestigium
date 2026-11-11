@@ -15,9 +15,9 @@ use vestigium_collect::{
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
     HICCUP_MS, HungWindow, MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan,
-    ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop, ProgramRing, RING_MS, Reading,
-    RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest, last_seen,
-    process_rates, programs,
+    ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop, ProgramRing, REPORTED_EXEMPLARS, RING_MS,
+    Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest,
+    last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store, StoreError};
@@ -66,6 +66,18 @@ const BATCHES_KEPT: usize = 3;
 const SUBSCRIBE_RETRY_MS: i64 = 60_000;
 /// Occurrences and episodes kept for another try after a failed write; each one is large.
 const OUTPUTS_KEPT: usize = 5;
+/// Events of one provider and id stored per batch: above what the black box keeps for one report
+/// and far above the counts the health checks need.
+const BATCH_EVENT_EXEMPLARS: usize = 4 * REPORTED_EXEMPLARS;
+
+/// Whether the batch holds fewer than the cap of events with the provider and id of `event`.
+fn batch_has_room(batch: &[WinEvent], event: &WinEvent) -> bool {
+    batch
+        .iter()
+        .filter(|kept| kept.provider == event.provider && kept.id == event.id)
+        .count()
+        < BATCH_EVENT_EXEMPLARS
+}
 
 /// Lets the owner wait for the sampler to write its last batch and stop.
 #[derive(Debug)]
@@ -778,7 +790,9 @@ impl Sampler {
                 fall.offer(event, now);
             }
             self.blackbox.push_event(delivered.event.clone());
-            self.events.push(delivered.event);
+            if batch_has_room(&self.events, &delivered.event) {
+                self.events.push(delivered.event);
+            }
             if delivered.bookmark_xml.is_some() {
                 self.bookmark_xml = delivered.bookmark_xml;
             }
@@ -2632,6 +2646,73 @@ mod tests {
             attempts.load(Ordering::Acquire),
             3,
             "a live subscription is never started twice"
+        );
+    }
+
+    #[test]
+    fn a_storm_stores_a_capped_batch_and_still_moves_the_bookmark() {
+        let dir = tempfile::tempdir().unwrap();
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let mut sampler = Sampler::new(store, wiring);
+        for round in 0..4 {
+            for n in 0..60 {
+                let ts = 1_000 + round * 60 + n;
+                let mut storm = delivered(ts, "disk", 153, EventMeaning::DiskRetry, String::new());
+                storm.bookmark_xml = Some(format!("<Bookmark at=\"{ts}\"/>"));
+                ties.events_tx.send(storm).unwrap();
+            }
+            sampler.take_events();
+        }
+        ties.events_tx
+            .send(delivered(
+                9_000,
+                "Display",
+                4101,
+                EventMeaning::DisplayReset,
+                String::new(),
+            ))
+            .unwrap();
+        sampler.take_events();
+
+        let stored = |provider: &str| {
+            sampler
+                .events
+                .iter()
+                .filter(|e| e.provider == provider)
+                .count()
+        };
+        assert_eq!(stored("disk"), BATCH_EVENT_EXEMPLARS);
+        assert_eq!(stored("Display"), 1, "another event is not crowded out");
+        assert_eq!(sampler.bookmark_xml.as_deref(), Some("<BookmarkList/>"));
+    }
+
+    #[test]
+    fn the_bookmark_follows_the_last_dropped_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let mut sampler = Sampler::new(store, wiring);
+        for round in 0..2 {
+            for n in 0..BATCH_EVENT_EXEMPLARS as i64 {
+                let at = round * 100 + n;
+                let mut storm = delivered(
+                    1_000 + at,
+                    "disk",
+                    153,
+                    EventMeaning::DiskRetry,
+                    String::new(),
+                );
+                storm.bookmark_xml = Some(format!("at {at}"));
+                ties.events_tx.send(storm).unwrap();
+            }
+            sampler.take_events();
+        }
+
+        assert_eq!(sampler.events.len(), BATCH_EVENT_EXEMPLARS);
+        assert_eq!(
+            sampler.bookmark_xml,
+            Some(format!("at {}", 100 + BATCH_EVENT_EXEMPLARS - 1))
         );
     }
 

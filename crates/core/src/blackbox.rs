@@ -241,7 +241,8 @@ impl Blackbox {
         self.tops.push(top);
     }
 
-    /// Keeps the event; a storage reset, a display reset or a hardware error is an occurrence by itself.
+    /// Keeps the event, up to a cap per provider and id; a storage reset, a display reset or a hardware
+    /// error is an occurrence by itself.
     pub fn push_event(&mut self, event: WinEvent) {
         let watched_since = self.samples.iter().next().map(|s| s.ts_ms);
         let reported = matches!(
@@ -258,7 +259,20 @@ impl Blackbox {
                 event: event.clone(),
             });
         }
-        self.events.push(event);
+        if self.repeats_in_ring(&event) < REPORTED_EXEMPLARS {
+            self.events.push(event);
+        }
+    }
+
+    /// How many events of the same provider and id the ring holds from the span just before `event`.
+    fn repeats_in_ring(&self, event: &WinEvent) -> usize {
+        let from_ms = event.ts_ms - REPORTED_MERGE_MS;
+        self.events
+            .iter()
+            .rev()
+            .take_while(|kept| kept.ts_ms >= from_ms)
+            .filter(|kept| kept.provider == event.provider && kept.id == event.id)
+            .count()
     }
 
     /// Feeds one not-responding check; `running` holds every live pid.

@@ -395,6 +395,36 @@ fn a_storm_says_how_many_repeats_were_not_kept() {
 }
 
 #[test]
+fn a_storm_does_not_push_the_start_of_the_window_out() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 120);
+    bb.push_event(event(
+        T - 30_000,
+        "Microsoft-Windows-Kernel-Power",
+        41,
+        EventMeaning::PowerLoss,
+    ));
+    for i in 0..2_000 {
+        bb.push_event(event(T + i * 30, "disk", 153, EventMeaning::DiskRetry));
+    }
+
+    let found = occurrences(bb.poll(T + 400_000));
+    assert_eq!(found.len(), 1);
+    let events = &found[0].window.events;
+    assert!(
+        events.iter().any(|e| e.id == 41),
+        "the earlier event is still in the window"
+    );
+    let storm: Vec<i64> = events
+        .iter()
+        .filter(|e| e.id == 153)
+        .map(|e| e.ts_ms)
+        .collect();
+    assert_eq!(storm.len(), REPORTED_EXEMPLARS);
+    assert_eq!(storm[0], T, "the first exemplar is the first event");
+}
+
+#[test]
 fn a_few_repeats_drop_nothing() {
     let mut bb = blackbox();
     feed(&mut bb, -60, 200);
