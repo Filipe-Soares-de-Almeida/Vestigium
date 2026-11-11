@@ -78,7 +78,7 @@ lists_every_variant!(
 lists_every_variant!(
     pc_state_lists_every_variant,
     PcState::ALL,
-    PcState: Calm, Busy, Pressure, Suspended
+    PcState: Calm, Busy, Pressure, Suspended, NoReading
 );
 lists_every_variant!(
     language_pref_lists_every_variant,

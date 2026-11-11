@@ -107,6 +107,13 @@ How to use this file:
   whether the PC is asleep, when watching last resumed, and when the last health check ran and which
   checks it could not read. The window and the watcher must be updated together, because the pipe
   protocol changed.
+- The PC states timeline on Today now tells a stretch with no reading from a suspended one. A
+  stretch where nothing was read and the monitor recorded no pause, sleep, stop or crash is drawn in a
+  fifth row, "No reading", as hollow dashed bars, and counted in the legend and the totals; before, it
+  was drawn as "Suspended", as if the PC had been asleep. Time before the first reading ever stored, and
+  stretches inside a recorded pause, sleep, stop or crash, stay suspended. The newest six minutes are
+  left empty when nothing was read in them, because the monitor writes what explains a pause up to five
+  minutes later, and a paused or stopped monitor shows its open stretch as suspended.
 
 ### Fixed
 

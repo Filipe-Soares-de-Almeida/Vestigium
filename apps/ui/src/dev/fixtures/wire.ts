@@ -9,6 +9,7 @@ export const pcStateSamples = [
   "busy",
   "pressure",
   "suspended",
+  "no_reading",
 ] satisfies PcState[];
 
 export const historyStateSamples = [

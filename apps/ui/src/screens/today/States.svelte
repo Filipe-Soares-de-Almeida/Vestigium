@@ -90,7 +90,8 @@
     return minutes === 0 ? "0 min" : formatDuration(minutes * MINUTE_MS);
   }
 
-  const stateName = (state: PcState) => t(`ui.common.state.${state}`);
+  // The catalog names the states by their variant in lower case: no_reading is `noreading`.
+  const stateName = (state: PcState) => t(`ui.common.state.${state.replace("_", "")}`);
   const stateLower = (state: PcState) => stateName(state).toLocaleLowerCase(lang());
 
   const summary = $derived(
@@ -99,6 +100,7 @@
       busy: total(day.totals.busy),
       pressure: total(day.totals.pressure),
       suspended: total(day.totals.suspended),
+      no_reading: total(day.totals.no_reading),
     }) +
       " " +
       (day.occurrences.length
@@ -276,7 +278,7 @@
             : t("ui.today.states.only", { state: stateLower(state) })}
           onclick={() => setFilter(state)}
         >
-          <span class="state-dot" style="background: var(--{STATE_TOKEN[state]})"></span>
+          <span class="state-dot" class:dash={state === "no_reading"} style:background={state === "no_reading" ? null : `var(--${STATE_TOKEN[state]})`}></span>
           <span>{stateName(state)}</span>
           <b>{total(day.totals[state])}</b>
         </button>
@@ -362,7 +364,7 @@
           {:else}
             {@const run = detail.run}
             <div class="th">
-              <span class="state-dot" style="background: var(--{STATE_TOKEN[run.state]})"></span>
+              <span class="state-dot" class:dash={run.state === "no_reading"} style:background={run.state === "no_reading" ? null : `var(--${STATE_TOKEN[run.state]})`}></span>
               <b>{stateName(run.state)}</b>
               <span class="muted">
                 {t("ui.today.states.span", {
@@ -374,6 +376,8 @@
             </div>
             {#if run.state === "suspended"}
               <div class="values">{why(detail.at)}</div>
+            {:else if run.state === "no_reading"}
+              <div class="values">{t("ui.today.states.no_reading.hint")}</div>
             {:else}
               <div class="values">
                 <span class="muted">{t("ui.today.states.at", { time: formatTime(detail.at) })}</span>
@@ -396,7 +400,7 @@
   </div>
   {#if filtered}
     <p class="filterline">
-      <span class="state-dot" style="background: var(--{STATE_TOKEN[filtered.state]})"></span>
+      <span class="state-dot" class:dash={filtered.state === "no_reading"} style:background={filtered.state === "no_reading" ? null : `var(--${STATE_TOKEN[filtered.state]})`}></span>
       <b>{stateName(filtered.state)}</b>:
       {filtered.longest
         ? t("ui.today.states.filter", {
@@ -427,7 +431,7 @@
   }
   .labels {
     display: grid;
-    grid-template-rows: repeat(4, var(--row));
+    grid-template-rows: repeat(5, var(--row));
     align-content: start;
     padding-top: 24px;
   }
@@ -504,6 +508,16 @@
   }
   .run.s-suspended {
     fill: var(--susp);
+  }
+  .run.s-no_reading {
+    fill: color-mix(in srgb, var(--ink) 6%, transparent);
+    stroke: var(--ink2);
+    stroke-width: 1.4;
+    stroke-dasharray: 4 3;
+  }
+  .state-dot.dash {
+    background: none;
+    box-shadow: inset 0 0 0 1.5px var(--ink2);
   }
   .run.dim {
     opacity: 0.14;
@@ -624,6 +638,10 @@
     .run.s-calm,
     .run.s-suspended {
       fill: CanvasText;
+    }
+    .run.s-no_reading {
+      fill: none;
+      stroke: CanvasText;
     }
     .run.on {
       stroke: Highlight;

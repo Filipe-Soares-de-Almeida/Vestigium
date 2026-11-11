@@ -174,7 +174,7 @@ fn peak_keeps_the_higher_value_of_each() {
 
 #[test]
 fn minute_state_follows_the_load_rule() {
-    let state = |r: Reading| pc_state(Some(&r), false);
+    let state = |r: Reading| pc_state(Some(&r), false, false);
 
     assert_eq!(state(reading(BUSY_ABOVE, 30.0, 5.0, 0.0)), PcState::Calm);
     assert_eq!(state(reading(39.0, 30.0, 5.0, 0.0)), PcState::Busy);
@@ -187,7 +187,7 @@ fn minute_state_follows_the_load_rule() {
 
 #[test]
 fn full_load_without_an_episode_is_busy() {
-    let state = |r: Reading| pc_state(Some(&r), false);
+    let state = |r: Reading| pc_state(Some(&r), false, false);
 
     assert_eq!(state(reading(100.0, 30.0, 5.0, 0.0)), PcState::Busy);
     assert_eq!(state(reading(5.0, 30.0, 100.0, 0.0)), PcState::Busy);
@@ -198,13 +198,26 @@ fn full_load_without_an_episode_is_busy() {
 fn episode_minutes_are_under_pressure() {
     let calm = reading(5.0, 30.0, 5.0, 0.0);
 
-    assert_eq!(pc_state(Some(&calm), true), PcState::Pressure);
+    assert_eq!(pc_state(Some(&calm), true, false), PcState::Pressure);
 }
 
 #[test]
-fn a_span_without_readings_is_suspended() {
-    assert_eq!(pc_state(None, false), PcState::Suspended);
-    assert_eq!(pc_state(None, true), PcState::Suspended);
+fn a_span_without_readings_inside_a_recorded_absence_is_suspended() {
+    assert_eq!(pc_state(None, false, true), PcState::Suspended);
+    assert_eq!(pc_state(None, true, true), PcState::Suspended);
+}
+
+#[test]
+fn a_span_without_readings_and_without_a_recorded_absence_is_no_reading() {
+    assert_eq!(pc_state(None, false, false), PcState::NoReading);
+    assert_eq!(pc_state(None, true, false), PcState::NoReading);
+}
+
+#[test]
+fn a_reading_is_never_no_reading_whatever_the_absence() {
+    let calm = reading(5.0, 30.0, 5.0, 0.0);
+
+    assert_eq!(pc_state(Some(&calm), false, true), PcState::Calm);
 }
 
 #[test]

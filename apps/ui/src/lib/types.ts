@@ -1,7 +1,7 @@
 // What the window's Rust side sends, in the shapes serde writes: unit variants as strings,
 // variants with fields as `{ Variant: { ... } }`, a missing value as `null`.
 
-export type PcState = "calm" | "busy" | "pressure" | "suspended";
+export type PcState = "calm" | "busy" | "pressure" | "suspended" | "no_reading";
 export type HistoryState = "ready" | "empty";
 export type Resolution = "seconds" | "minutes";
 

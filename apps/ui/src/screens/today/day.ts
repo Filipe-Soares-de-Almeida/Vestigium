@@ -14,15 +14,22 @@ export const HOUR_MS = 3_600_000;
 const DAYS_SHOWN = 14;
 
 /** Rows of the Estados do PC card, top to bottom. */
-export const STATES: readonly PcState[] = ["pressure", "busy", "calm", "suspended"];
+export const STATES: readonly PcState[] = ["pressure", "busy", "calm", "suspended", "no_reading"];
 
-/** The token each state is drawn in. */
+/** The token each state is drawn in; no reading is drawn hollow, in the ink of the text. */
 export const STATE_TOKEN: Record<PcState, string> = {
   pressure: "press",
   busy: "busy",
   calm: "calm",
   suspended: "susp",
+  no_reading: "ink2",
 };
+
+/**
+ * The newest minutes of a day, whose recorded absence the watcher may not have written yet (it
+ * writes in batches of up to five minutes): a stretch without a reading there is left empty.
+ */
+export const OPEN_TAIL_MS = 6 * 60_000;
 
 /** Consecutive points in one state, `[from, to)` in Unix milliseconds. */
 export interface Run {
@@ -86,8 +93,32 @@ export function runsOf(timeline: TimelineDto, start: number, end: number): Run[]
   return runs;
 }
 
+/**
+ * Settles the stretches without a reading that touch the open tail of the day: when the watcher is
+ * away (paused or stopped) the one that reaches `end` is an absence, so it is suspended; the others
+ * leave the newest minutes empty until the watcher writes what explains them.
+ */
+export function settleTail(runs: Run[], end: number, away: boolean, realNow = Date.now()): Run[] {
+  const tail = realNow - OPEN_TAIL_MS;
+  const settled: Run[] = [];
+  for (const run of runs) {
+    if (run.state !== "no_reading" || run.to <= tail) {
+      settled.push(run);
+      continue;
+    }
+    if (away && run.to >= end) {
+      const before = settled.at(-1);
+      if (before && before.state === "suspended" && before.to === run.from) before.to = run.to;
+      else settled.push({ ...run, state: "suspended" });
+    } else if (run.from < tail) {
+      settled.push({ ...run, to: tail });
+    }
+  }
+  return settled;
+}
+
 export function totalsOf(runs: Run[]): Record<PcState, number> {
-  const totals: Record<PcState, number> = { pressure: 0, busy: 0, calm: 0, suspended: 0 };
+  const totals: Record<PcState, number> = { pressure: 0, busy: 0, calm: 0, suspended: 0, no_reading: 0 };
   for (const run of runs) totals[run.state] += run.to - run.from;
   return totals;
 }
@@ -123,7 +154,7 @@ export function isPressure(episode: Episode): boolean {
 }
 
 /** The state the PC spent most of its watched time in, or `null` when nothing was watched. */
-export function mostlyOf(totals: Record<PcState, number>): Exclude<PcState, "suspended"> | null {
+export function mostlyOf(totals: Record<PcState, number>): Exclude<PcState, "suspended" | "no_reading"> | null {
   const watched = (["calm", "busy", "pressure"] as const).filter((s) => totals[s] > 0);
   if (watched.length === 0) return null;
   return watched.reduce((a, b) => (totals[b] > totals[a] ? b : a));
@@ -173,10 +204,10 @@ export function itemsOf(start: number, now: number, marks: MarksDto): { occurren
   return { occurrences, episodes, items };
 }
 
-/** Assembles the day from the timeline of today and the marks of the last 14 days. */
-export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto): Day {
+/** Assembles the day from the timeline of today and the marks of the last 14 days; `away` is a watcher that is paused or stopped. */
+export function buildDay(now: number, timeline: TimelineDto, marks: MarksDto, away = false): Day {
   const start = dayStart(now);
-  const runs = runsOf(timeline, start, now);
+  const runs = settleTail(runsOf(timeline, start, now), now, away);
   const { occurrences, episodes, items } = itemsOf(start, now, marks);
   const days: DayCount[] = Array.from({ length: DAYS_SHOWN }, (_, i) => {
     const from = dayStart(now, i + 1 - DAYS_SHOWN);

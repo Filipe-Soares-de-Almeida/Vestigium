@@ -59,7 +59,7 @@
         marks(rangeStart(now), now),
       ]);
       empty = line.history === "empty";
-      day = buildDay(now, line, found);
+      day = buildDay(now, line, found, app.paused || app.stopped);
       error = null;
     } catch (err) {
       if (day === null) error = err;

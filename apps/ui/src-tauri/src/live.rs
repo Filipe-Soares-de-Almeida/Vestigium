@@ -76,10 +76,10 @@ impl LivePoint {
             ..reading
         };
         let open = |kind: fn(&EpisodeKind) -> bool| pressure.iter().any(kind);
-        let alone = |only: Reading, open: bool| pc_state(Some(&only), open);
+        let alone = |only: Reading, open: bool| pc_state(Some(&only), open, false);
         LivePoint {
             reading,
-            state: pc_state(Some(&reading), !pressure.is_empty()),
+            state: pc_state(Some(&reading), !pressure.is_empty(), false),
             lanes: Lanes {
                 cpu: alone(
                     Reading {

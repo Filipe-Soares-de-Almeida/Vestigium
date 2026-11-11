@@ -488,9 +488,10 @@ impl History {
                 .filter(|e| !e.kind.is_hint())
                 .map(|e| (e.start_ms, e.end_ms))
                 .collect();
-            Ok((readings, pressure))
+            let away = Away::read(store, start_ms, last_ms)?;
+            Ok((readings, pressure, away))
         })?;
-        let Some((mut readings, mut pressure)) = found else {
+        let Some((mut readings, mut pressure, away)) = found else {
             return Ok(TimelineDto {
                 history: HistoryState::Empty,
                 resolution,
@@ -504,7 +505,7 @@ impl History {
             history: HistoryState::Ready,
             resolution,
             step_ms,
-            columns: columns(&buckets, start_ms, step_ms, &pressure),
+            columns: columns(&buckets, start_ms, step_ms, &pressure, &away),
         })
     }
 
@@ -563,7 +564,7 @@ impl History {
             let buckets = bucket(&readings, start_ms, window.to_ms + 1, SECOND_MS);
             OccurrenceDto {
                 id,
-                chart: columns(&buckets, start_ms, SECOND_MS, &[]),
+                chart: columns(&buckets, start_ms, SECOND_MS, &[], &Away::default()),
                 occurrence,
                 capture,
                 tests,
@@ -616,9 +617,10 @@ impl History {
                 .collect();
             let tops = store.tops(episode.start_ms, episode.end_ms)?;
             let occurrences = store.occurrences(episode.start_ms, episode.end_ms)?;
-            Ok((resolution, readings, pressure, tops, occurrences))
+            let away = Away::read(store, from_ms, last_ms)?;
+            Ok((resolution, readings, pressure, tops, occurrences, away))
         })?;
-        let Some((resolution, mut readings, mut pressure, tops, occurrences)) = found else {
+        let Some((resolution, mut readings, mut pressure, tops, occurrences, away)) = found else {
             return Ok(EpisodeDetailDto {
                 history: HistoryState::Empty,
                 resolution: Resolution::Seconds,
@@ -644,7 +646,7 @@ impl History {
             step_ms,
             from_ms,
             to_ms,
-            chart: columns(&buckets, start_ms, step_ms, &pressure),
+            chart: columns(&buckets, start_ms, step_ms, &pressure, &away),
             programs: heaviest(usage(&tops), EPISODE_PROGRAMS),
             occurrences,
         })
@@ -876,12 +878,40 @@ fn bucket(readings: &[Reading], start_ms: i64, end_ms: i64, step_ms: i64) -> Vec
     buckets
 }
 
-/// Columns for `buckets`; a bucket overlapping a span in `pressure` is under pressure.
+/// When the monitor was known to be away: the recorded absences, and the time before it began.
+#[derive(Default)]
+struct Away {
+    /// Where the oldest history stored begins; nothing before it was ever watched.
+    history_from_ms: Option<i64>,
+    gaps: Vec<Gap>,
+}
+
+impl Away {
+    fn read(store: &Store, from_ms: i64, to_ms: i64) -> Result<Away, StoreError> {
+        Ok(Away {
+            history_from_ms: store.first_segment_ms()?,
+            gaps: store.gaps(from_ms, to_ms)?,
+        })
+    }
+
+    /// Whether `[from_ms, to_ms)` lies before the history or touches a recorded absence.
+    fn overlaps(&self, from_ms: i64, to_ms: i64) -> bool {
+        self.history_from_ms.is_some_and(|first| to_ms <= first)
+            || self
+                .gaps
+                .iter()
+                .any(|gap| gap.start_ms < to_ms && gap.end_ms > from_ms)
+    }
+}
+
+/// Columns for `buckets`; a bucket overlapping a span in `pressure` is under pressure, and one
+/// with no reading is suspended when `away` explains it.
 fn columns(
     buckets: &[Option<Reading>],
     start_ms: i64,
     step_ms: i64,
     pressure: &[(i64, i64)],
+    away: &Away,
 ) -> Columns {
     let mut columns = Columns::default();
     for (at, reading) in buckets.iter().enumerate() {
@@ -901,7 +931,10 @@ fn columns(
             .push(reading.map(|r| r.disk_latency_ms));
         columns.gpu.push(reading.and_then(|r| r.gpu_pct));
         columns.probe_lag.push(reading.map(|r| r.probe_lag_ms));
-        columns.state.push(pc_state(reading.as_ref(), in_episode));
+        let explained = reading.is_none() && away.overlaps(from_ms, to_ms);
+        columns
+            .state
+            .push(pc_state(reading.as_ref(), in_episode, explained));
     }
     columns
 }
@@ -911,10 +944,10 @@ mod tests {
     use std::path::Path;
 
     use vestigium_core::{
-        Cause, Confidence, CoreLoad, DiskLoad, Evidence, MachineInfo, Metric, MinuteSample,
-        OccurrenceKind, ProcessTop, Sample, Severity, Suspect, Trigger, Window,
+        Cause, Confidence, CoreLoad, DiskLoad, Evidence, GapReason, MachineInfo, Metric,
+        MinuteSample, OccurrenceKind, ProcessTop, Sample, Severity, Suspect, Trigger, Window,
     };
-    use vestigium_store::{Segment, Series, encode};
+    use vestigium_store::{Batch, Segment, Series, encode};
 
     use super::*;
 
@@ -1038,9 +1071,68 @@ mod tests {
                 .iter()
                 .all(Option::is_none)
         );
-        assert_eq!(timeline.columns.state[90], PcState::Suspended);
+        assert_eq!(timeline.columns.state[90], PcState::NoReading);
         assert_eq!(cpu[120], Some(10.0));
         assert_eq!(timeline.columns.state[120], PcState::Calm);
+    }
+
+    #[test]
+    fn no_reading_without_a_gap_is_not_suspended() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let samples: Vec<Sample> = (0..60)
+            .chain(120..180)
+            .chain(240..300)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &samples);
+        // The hole from second 120 back to 60 is a recorded pause; the one after 180 is not.
+        store
+            .append_batch(&Batch {
+                gaps: vec![Gap {
+                    start_ms: DAY_START_MS + 60_000,
+                    end_ms: DAY_START_MS + 120_000,
+                    reason: GapReason::Paused,
+                }],
+                ..Batch::default()
+            })
+            .unwrap();
+
+        let timeline = history
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 300_000,
+                1_000,
+                &Recent::default(),
+            )
+            .unwrap();
+
+        let state = &timeline.columns.state;
+        assert_eq!(state[90], PcState::Suspended, "a recorded pause");
+        assert_eq!(state[210], PcState::NoReading, "a hole nobody explained");
+        assert_eq!(state[30], PcState::Calm);
+    }
+
+    #[test]
+    fn the_time_before_the_history_began_was_never_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let samples: Vec<Sample> = (60..120)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &samples);
+
+        let timeline = history
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 120_000,
+                1_000,
+                &Recent::default(),
+            )
+            .unwrap();
+
+        assert_eq!(timeline.columns.state[10], PcState::Suspended);
+        assert_eq!(timeline.columns.state[90], PcState::Calm);
     }
 
     #[test]
