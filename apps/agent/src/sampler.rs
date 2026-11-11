@@ -2,15 +2,15 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::mem;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use vestigium_collect::{
-    BlackboxRing, CollectError, Delivered, EventSubscription, PdhReading, Waited, Wake,
-    WindowsHealth, disk_media, hung_pids, interrupt_ms, logical_cpus, memory_info, physical_drive,
+    BlackboxRing, CollectError, Delivered, EventSubscription, HealthSource, PdhReading, Waited,
+    Wake, disk_media, hung_pids, interrupt_ms, logical_cpus, memory_info, physical_drive,
     unbiased_ms, wall_ms,
 };
 use vestigium_core::{
@@ -29,7 +29,7 @@ use vestigium_core::health::Concern;
 use crate::app::lock;
 use crate::clock::ClockWatch;
 use crate::fall::{Fall, RingSync, Strain};
-use crate::health::{HealthPass, PassNow};
+use crate::health::{AnySource, HealthReader, HealthThread, PassRequest};
 use crate::power::PowerNotice;
 use crate::readings::{Backoff, Readings, Source, SourceHealths, SourceSet, Waiter};
 use crate::sensitive::SensitiveMode;
@@ -138,6 +138,8 @@ pub struct Wiring {
     pub ring_path: Option<PathBuf>,
     /// What each tick reads from Windows, and how the counters and the timer are opened.
     pub source_set: SourceSet,
+    /// What the health pass reads, on a thread of its own.
+    pub health: Box<dyn HealthSource + Send>,
 }
 
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
@@ -169,12 +171,15 @@ struct Storage {
     dropped: Receiver<Output>,
     /// The history file, which the sampler reads through connections of its own.
     db: Option<PathBuf>,
+    /// Critical health findings open now, kept by the storage thread.
+    critical: Arc<AtomicU32>,
 }
 
 /// Hands the history to a storage thread.
 fn start_storage(store: Store, wiring: &Wiring) -> io::Result<Storage> {
     let db = store.path();
     let (dropped_tx, dropped) = mpsc::channel();
+    let critical = Arc::new(AtomicU32::new(0));
     let service = Service::start(
         store,
         Links {
@@ -182,6 +187,7 @@ fn start_storage(store: Store, wiring: &Wiring) -> io::Result<Storage> {
             epoch: wiring.epoch.clone(),
             health_due: wiring.health_due.clone(),
             now: wiring.now.clone(),
+            critical: critical.clone(),
             dropped: dropped_tx,
         },
     )?;
@@ -189,6 +195,7 @@ fn start_storage(store: Store, wiring: &Wiring) -> io::Result<Storage> {
         service,
         dropped,
         db,
+        critical,
     })
 }
 
@@ -208,7 +215,6 @@ struct Sampler {
     epoch: Arc<Epoch>,
     /// The epoch of the history this sampler holds in memory.
     seen_epoch: u64,
-    store: Store,
     batcher: Batcher,
     blackbox: Blackbox,
     probe_rx: Receiver<ProbeTick>,
@@ -244,14 +250,15 @@ struct Sampler {
     logical_cpus: u32,
     /// The agent's own CPU time, for the share the status reports.
     own_cpu: CpuWindow,
-    health: HealthPass<WindowsHealth>,
+    /// Reads the health sources; `None` when its thread could not start.
+    health: Option<HealthThread>,
     /// When the first health pass is due; afterwards a pass runs with every hourly prune.
     first_health_ms: Option<i64>,
     /// When each disk last had I/O.
     disk_active_ms: HashMap<String, i64>,
     commit_limit_bytes: u64,
-    /// Critical health findings open now, for the tray.
-    critical_findings: u32,
+    /// Critical health findings open now, for the tray; the storage thread keeps it.
+    critical_findings: Arc<AtomicU32>,
     ring: Option<BlackboxRing>,
     ring_sync: RingSync,
     /// Tells a step of the wall clock apart from the unbiased clock.
@@ -316,11 +323,13 @@ impl Sampler {
             service,
             dropped,
             db,
+            critical,
         } = storage;
-        let store = db
-            .as_deref()
-            .and_then(|path| Store::open(path).ok())
-            .expect("the history opens a second time");
+        let health = HealthThread::start(
+            HealthReader::new(AnySource(wiring.health)),
+            service.clone(),
+            wiring.status.clone(),
+        );
         let history = db.as_deref().map(Store::open_read_only);
         let now = wall_ms();
         let opened = wiring.ring_path.as_deref().map(BlackboxRing::open);
@@ -370,11 +379,11 @@ impl Sampler {
             gpu_by_pid: HashMap::new(),
             logical_cpus: logical_cpus(),
             own_cpu: CpuWindow::new(OWN_CPU_SPAN_MS),
-            health: HealthPass::new(WindowsHealth),
+            health: None,
             first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
             disk_active_ms: HashMap::new(),
             commit_limit_bytes: 0,
-            critical_findings: 0,
+            critical_findings: critical,
             ring: None,
             ring_sync: RingSync::new(now),
             clock: ClockWatch::new(now, unbiased_ms()),
@@ -385,8 +394,11 @@ impl Sampler {
             dumps_due: false,
             source_set: Some(wiring.source_set),
             source_health: SourceHealths::default(),
-            store,
         };
+        match health {
+            Ok(thread) => sampler.health = Some(thread),
+            Err(err) => sampler.report(&err),
+        }
         let history = history.and_then(Result::ok);
         if let Some(history) = &history {
             sampler.recall_last_day(history, now);
@@ -423,10 +435,11 @@ impl Sampler {
     /// Counts what the history already holds for the last 24 h, so the tray survives a restart.
     fn recall_last_day(&mut self, history: &Store, now: i64) {
         if let Ok(open) = history.open_findings() {
-            self.critical_findings = open
+            let critical = open
                 .iter()
                 .filter(|f| f.finding.concern == Concern::Critical)
                 .count() as u32;
+            self.critical_findings.store(critical, Ordering::Release);
         }
         if let Ok(occurrences) = history.occurrences(now - DAY_MS, now) {
             lock(&self.now).latest = occurrences.last().cloned();
@@ -775,7 +788,8 @@ impl Sampler {
         });
     }
 
-    /// Runs a health pass and lists the dumps: a minute after start, then every full hour.
+    /// Lists the dumps and asks for a health pass: a minute after start, then every full hour. The
+    /// pass reads on its own thread, so a source that blocks holds up nothing here.
     fn check_health(&mut self, ts_ms: i64) {
         self.check_dumps(ts_ms);
         let busy_disks = self
@@ -784,22 +798,14 @@ impl Sampler {
             .filter(|(_, at)| ts_ms - **at <= DISK_BUSY_MS)
             .map(|(name, _)| name.clone())
             .collect();
-        let machine = self.blackbox.machine().clone();
-        let now = PassNow {
+        let request = PassRequest {
             ts_ms,
-            machine: &machine,
-            busy_disks: &busy_disks,
+            machine: self.blackbox.machine().clone(),
+            busy_disks,
             commit_limit_bytes: self.commit_limit_bytes,
         };
-        match self.health.run(&mut self.store, &now) {
-            Ok(outcome) => {
-                self.critical_findings = outcome.critical;
-                self.publish_recent(ts_ms);
-                if outcome.asked_security_center {
-                    release_idle_pages();
-                }
-            }
-            Err(err) => self.report(&err),
+        if let Some(health) = &self.health {
+            health.request(self.seen_epoch, request);
         }
     }
 
@@ -979,7 +985,6 @@ impl Sampler {
             ring.clear();
             ring.release_held();
         }
-        self.health.forget();
         lock(&self.readings).clear();
         lock(&self.pressure).clear();
         lock(&self.hiccups).clear();
@@ -1001,7 +1006,7 @@ impl Sampler {
     /// Hands the tray the counts of the last 24 h, and wakes it when they changed.
     fn publish_recent(&self, now: i64) {
         let recent = RecentState {
-            critical_findings: self.critical_findings,
+            critical_findings: self.critical_findings.load(Ordering::Acquire),
             ..self.blackbox.recent(now)
         };
         let mut shown = lock(&self.recent);
@@ -1332,7 +1337,7 @@ fn used_pct(total_bytes: u64, avail_bytes: u64) -> f32 {
 }
 
 /// Hands back the pages only startup touched (PDH name tables, DLL setup); the rest fault back in.
-fn release_idle_pages() {
+pub(crate) fn release_idle_pages() {
     // SAFETY: (usize::MAX, usize::MAX) asks Windows to trim this process's working set.
     let _ = unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
 }
@@ -1386,6 +1391,83 @@ mod tests {
         merge_ms: 1_000,
         max_ms: 60_000,
     };
+
+    /// A machine whose health sources read nothing, so no test depends on this PC's disks.
+    struct NoHealth;
+
+    impl HealthSource for NoHealth {
+        fn disk(&mut self, _: u32, _: &str, _: i64) -> Option<vestigium_core::health::DiskHealth> {
+            None
+        }
+
+        fn bus(&mut self, _: u32) -> vestigium_core::hwtest::Bus {
+            vestigium_core::hwtest::Bus::Other
+        }
+
+        fn volumes(&mut self) -> Vec<vestigium_core::health::VolumeSpace> {
+            Vec::new()
+        }
+
+        fn system_drive(&mut self) -> Option<u32> {
+            None
+        }
+
+        fn page_files(&mut self) -> Option<Vec<vestigium_core::health::PageFile>> {
+            None
+        }
+
+        fn antivirus(&mut self) -> Option<Vec<vestigium_core::health::SecurityProduct>> {
+            None
+        }
+    }
+
+    /// A disk that answers after seconds, as a failing one can.
+    struct Sleepy {
+        asked: Arc<AtomicBool>,
+        release: Arc<AtomicBool>,
+    }
+
+    impl HealthSource for Sleepy {
+        fn disk(
+            &mut self,
+            _: u32,
+            name: &str,
+            now_ms: i64,
+        ) -> Option<vestigium_core::health::DiskHealth> {
+            self.asked.store(true, Ordering::Release);
+            let until = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < until && !self.release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Some(vestigium_core::health::DiskHealth {
+                name: name.to_string(),
+                read_ms: now_ms,
+                predict_failure: false,
+                attributes: Vec::new(),
+                nvme: None,
+            })
+        }
+
+        fn bus(&mut self, _: u32) -> vestigium_core::hwtest::Bus {
+            vestigium_core::hwtest::Bus::Other
+        }
+
+        fn volumes(&mut self) -> Vec<vestigium_core::health::VolumeSpace> {
+            Vec::new()
+        }
+
+        fn system_drive(&mut self) -> Option<u32> {
+            None
+        }
+
+        fn page_files(&mut self) -> Option<Vec<vestigium_core::health::PageFile>> {
+            None
+        }
+
+        fn antivirus(&mut self) -> Option<Vec<vestigium_core::health::SecurityProduct>> {
+            None
+        }
+    }
 
     /// A sampler on the quiet machine, so no test depends on what this PC reads.
     fn start(dir: &std::path::Path, flush: Duration) -> Running {
@@ -1444,6 +1526,7 @@ mod tests {
             health_due: Arc::new(AtomicBool::new(false)),
             ring_path: Some(dir.join("blackbox.ring")),
             source_set,
+            health: Box::new(NoHealth),
         };
         let ties = Ties {
             epoch,
@@ -2616,6 +2699,67 @@ mod tests {
     }
 
     #[test]
+    fn a_disk_that_answers_after_seconds_holds_up_neither_samples_nor_batches() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script::default()));
+        let (mut wiring, ties) = wire(dir.path(), Duration::from_secs(1), scripted(&script));
+        let (asked, release) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        wiring.health = Box::new(Sleepy {
+            asked: asked.clone(),
+            release: release.clone(),
+        });
+        let due = wiring.health_due.clone();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let handle = run_sampler(store, wiring).unwrap();
+        assert!(
+            wait_until(PATIENCE, || {
+                lock(&ties.now)
+                    .sample
+                    .as_ref()
+                    .is_some_and(|sample| !sample.disks.is_empty())
+            }),
+            "no sample with a disk"
+        );
+
+        due.store(true, Ordering::Release);
+        assert!(wait_until(PATIENCE, || asked.load(Ordering::Acquire)));
+        let began = Instant::now();
+        let mut seen = lock(&ties.status).last_sample_ms;
+        let mut moved = Instant::now();
+        let mut longest = Duration::ZERO;
+        let mut worst_lag = 0.0f32;
+        while began.elapsed() < Duration::from_secs(4) {
+            thread::sleep(Duration::from_millis(20));
+            let latest = lock(&ties.status).last_sample_ms;
+            if latest != seen {
+                longest = longest.max(moved.elapsed());
+                seen = latest;
+                moved = Instant::now();
+            }
+            if let Some(sample) = lock(&ties.now).sample.as_ref() {
+                worst_lag = worst_lag.max(sample.sampler_lag_ms);
+            }
+        }
+        let stored_meanwhile = samples(dir.path()).0;
+        release.store(true, Ordering::Release);
+        ties.gate.set(GateState::Stopping);
+        assert!(handle.wait(Duration::from_secs(5)), "sampler did not stop");
+
+        assert!(
+            longest < Duration::from_millis(1_800),
+            "the samples stalled for {longest:?} behind the disk"
+        );
+        assert!(worst_lag < 500.0, "the tick woke {worst_lag} ms late");
+        assert!(
+            stored_meanwhile >= 1,
+            "no batch was stored while the disk read was stuck"
+        );
+    }
+
+    #[test]
     fn a_write_stuck_on_the_database_does_not_delay_the_samples() {
         let dir = tempfile::tempdir().unwrap();
         let running = start(dir.path(), Duration::from_secs(1));
@@ -3254,6 +3398,7 @@ mod tests {
             health_due: shared.health_due.clone(),
             ring_path: Some(dir.path().join("blackbox.ring")),
             source_set: quiet_set(),
+            health: Box::new(NoHealth),
         };
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let sampler = run_sampler(store, wiring).unwrap();

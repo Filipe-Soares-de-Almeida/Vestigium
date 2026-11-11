@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::mem;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -16,6 +16,7 @@ use vestigium_store::{Batch, Store, StoreError};
 
 use crate::app::{lock, panic_text};
 use crate::dumps::{DumpPlaces, take_inventory};
+use crate::health::{HealthKeeper, HealthReadings};
 
 /// Jobs the queue holds before a sender has to keep its work to itself.
 pub const QUEUE_BOUND: usize = 32;
@@ -75,6 +76,9 @@ pub enum Job {
         places: Option<DumpPlaces>,
         now_ms: i64,
     },
+    /// What the health sources said; evaluated against the history here, where the findings are
+    /// stored.
+    Health(Box<HealthReadings>),
     /// Tries again what failed to write: batches, occurrences and episodes.
     Retry,
     /// Answers once every job before it has run.
@@ -93,6 +97,7 @@ pub struct Queued {
 }
 
 /// What the storage thread shares with the rest of the agent.
+#[derive(Clone)]
 pub struct Links {
     /// Receives the text of an error.
     pub status: Arc<Mutex<AgentStatus>>,
@@ -101,8 +106,25 @@ pub struct Links {
     pub health_due: Arc<AtomicBool>,
     /// The live frame, which names the newest occurrence stored.
     pub now: Arc<Mutex<NowFrame>>,
+    /// Critical health findings open now, for the tray.
+    pub critical: Arc<AtomicU32>,
     /// Receives the occurrences and episodes given up after too many failed writes.
     pub dropped: Sender<Output>,
+}
+
+#[cfg(test)]
+impl Links {
+    /// Links to nothing else, for a test that starts a storage thread by itself.
+    pub(crate) fn detached() -> Links {
+        Links {
+            status: Arc::new(Mutex::new(AgentStatus::default())),
+            epoch: Arc::new(Epoch::default()),
+            health_due: Arc::new(AtomicBool::new(false)),
+            now: Arc::new(Mutex::new(NowFrame::default())),
+            critical: Arc::new(AtomicU32::new(0)),
+            dropped: mpsc::channel().0,
+        }
+    }
 }
 
 /// The handle to the storage thread, which owns the history's write connection.
@@ -135,6 +157,7 @@ impl Service {
             holding,
             waiting: VecDeque::new(),
             unstored: VecDeque::new(),
+            health: HealthKeeper::default(),
             event_pass_pending: true,
             seen_epoch: 0,
         };
@@ -151,6 +174,12 @@ impl Service {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(back) | TrySendError::Disconnected(back)) => Err(back),
         }
+    }
+
+    /// Puts a job in the queue, waiting for room; false once the thread has ended. For a thread of
+    /// its own that has nothing else to do, never for the tick.
+    pub fn deliver(&self, queued: Queued) -> bool {
+        self.queue.send(queued).is_ok()
     }
 
     /// Whether batches that failed to write wait on the thread for another try.
@@ -210,6 +239,7 @@ struct Worker {
     waiting: VecDeque<Batch>,
     /// Occurrences and episodes whose write failed, oldest first.
     unstored: VecDeque<Output>,
+    health: HealthKeeper,
     /// Set until the first stored batch with events has asked for a health pass.
     event_pass_pending: bool,
     /// The newest epoch a job has come from.
@@ -280,6 +310,7 @@ impl Worker {
                     }
                 }
             }
+            Job::Health(readings) => self.keep_health(epoch, &readings),
             #[cfg(test)]
             Job::Run(run) => run(&mut self.store),
             Job::Flush(_) | Job::Stop(_) => {}
@@ -308,6 +339,7 @@ impl Worker {
             .store(!self.waiting.is_empty(), Ordering::Release);
         self.unstored.clear();
         self.holding.store(false, Ordering::Release);
+        self.health.forget();
     }
 
     /// Stores a batch made in `epoch`; `false` when a clear came after it, in which case only its
@@ -400,6 +432,25 @@ impl Worker {
         }
     }
 
+    /// Evaluates a pass and stores the findings, unless a clear came after its readings were asked
+    /// for; a finding made from readings of the history that is gone would be wrong.
+    fn keep_health(&mut self, epoch: u64, readings: &HealthReadings) {
+        let kept = {
+            let _held = self.links.epoch.hold();
+            if epoch < self.links.epoch.current() {
+                return;
+            }
+            self.health.store(&mut self.store, readings)
+        };
+        match kept {
+            Ok(outcome) => self
+                .links
+                .critical
+                .store(outcome.critical, Ordering::Release),
+            Err(err) => self.report(&err),
+        }
+    }
+
     /// The first stored batch that holds events asks for a health pass, which reads stored events.
     fn ask_pass_after_events(&mut self, batch: &Batch) {
         if self.event_pass_pending && !batch.events.is_empty() {
@@ -483,16 +534,6 @@ mod tests {
 
     const PATIENCE: Duration = Duration::from_secs(15);
 
-    fn links() -> Links {
-        Links {
-            status: Arc::new(Mutex::new(AgentStatus::default())),
-            epoch: Arc::new(Epoch::default()),
-            health_due: Arc::new(AtomicBool::new(false)),
-            now: Arc::new(Mutex::new(NowFrame::default())),
-            dropped: mpsc::channel().0,
-        }
-    }
-
     struct Rig {
         dir: tempfile::TempDir,
         service: Service,
@@ -503,18 +544,8 @@ mod tests {
         fn new() -> Rig {
             let dir = tempfile::tempdir().unwrap();
             let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
-            let links = links();
-            let service = Service::start(
-                store,
-                Links {
-                    status: links.status.clone(),
-                    epoch: links.epoch.clone(),
-                    health_due: links.health_due.clone(),
-                    now: links.now.clone(),
-                    dropped: links.dropped.clone(),
-                },
-            )
-            .unwrap();
+            let links = Links::detached();
+            let service = Service::start(store, links.clone()).unwrap();
             Rig {
                 dir,
                 service,

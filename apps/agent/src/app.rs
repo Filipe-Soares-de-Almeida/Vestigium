@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{
-    EventSubscription, KnownJournal, ProbeConfig, Wake, WindowsSettings, interrupt_ms, spawn_probe,
-    wall_ms,
+    EventSubscription, KnownJournal, ProbeConfig, Wake, WindowsHealth, WindowsSettings,
+    interrupt_ms, spawn_probe, wall_ms,
 };
 use vestigium_core::{
     Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
@@ -553,6 +553,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 health_due: shared.health_due.clone(),
                 ring_path: Some(data_dir.join("blackbox.ring")),
                 source_set: windows_source_set(),
+                health: Box::new(WindowsHealth),
             },
         )
         .map_err(failed)?,

@@ -97,6 +97,12 @@ How to use this file:
 - The hourly clean-up of history past its retention and the listing of crash dumps now run on the
   storage thread too, so neither can hold up a sample while it works through a large history or a
   slow folder.
+- A disk that takes seconds to answer the health check no longer leaves a hole in the samples. The
+  disk reads of the health pass now run on a thread of their own, and the findings they lead to are
+  stored by the storage thread, so a busy or failing disk delays only the health pass itself. A
+  second request for a pass while one is still reading replaces the one waiting. The monitor
+  samples through the very moments the disk is slow, which is when a report of a freeze needs that
+  evidence.
 - Once the crash dump of a blue screen is read, the report page and the copied report use the
   dump's own next steps instead of the generic driver update. When the dump blames a Windows
   component that serves other drivers, such as storport.sys, the Dumps screen no longer says to

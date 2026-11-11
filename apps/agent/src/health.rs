@@ -1,28 +1,59 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::io;
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::thread;
 
 use vestigium_collect::{HealthSource, physical_drive};
 use vestigium_core::health::{
-    Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, SecurityProduct, Subject,
-    evaluate, reconcile, unread_kinds,
+    Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, PageFile, SecurityProduct,
+    Subject, VolumeSpace, evaluate, reconcile, unread_kinds,
 };
 use vestigium_core::hwtest::{Bus, TEST_REACH_DAYS};
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
+use vestigium_ipc::AgentStatus;
 use vestigium_store::{Store, StoreError};
+
+use crate::app::{lock, panic_text};
+use crate::sampler::release_idle_pages;
+use crate::service::{Job, Queued, Service};
 
 const DAY_MS: i64 = 24 * 60 * 60_000;
 /// Event history one pass reads: the 30-day counts and the four weeks a trend compares against.
 const EVENT_DAYS: i64 = 35;
 /// How often the Security Center is asked; its COM libraries stay loaded after a call.
 const ANTIVIRUS_EVERY_MS: i64 = DAY_MS;
+/// Stack of the reader thread: it calls into Windows and holds no deep call chain.
+const STACK_BYTES: usize = 512 << 10;
 
-/// What the sampler knows at the moment of a pass.
-#[derive(Clone, Copy, Debug)]
-pub struct PassNow<'a> {
+/// What the sampler knows at the moment of a pass, owned so it can go to the reader thread.
+#[derive(Clone, Debug)]
+pub struct PassRequest {
     pub ts_ms: i64,
-    pub machine: &'a MachineInfo,
+    pub machine: MachineInfo,
     /// Disks with I/O in the last minute; an idle HDD is not asked, so it never spins up for us.
-    pub busy_disks: &'a HashSet<String>,
+    pub busy_disks: HashSet<String>,
     pub commit_limit_bytes: u64,
+}
+
+/// What the sources said in one pass, to be evaluated and stored on the storage thread.
+#[derive(Clone, Debug)]
+pub struct HealthReadings {
+    ts_ms: i64,
+    machine: MachineInfo,
+    commit_limit_bytes: u64,
+    /// The disks read in this pass.
+    fresh: Vec<DiskHealth>,
+    /// The latest reading of every disk: this pass's, and the kept one of a disk left alone.
+    disks: Vec<DiskHealth>,
+    /// Disks this pass did not read.
+    unread: HashSet<String>,
+    system_disk: Option<String>,
+    volumes: Vec<VolumeSpace>,
+    page_files: Option<Vec<PageFile>>,
+    antivirus: Option<Vec<SecurityProduct>>,
+    /// The Security Center was asked, so the pages it touched can be handed back.
+    asked_security_center: bool,
 }
 
 /// What one pass did.
@@ -31,27 +62,22 @@ pub struct PassOutcome {
     pub changes: usize,
     /// Findings rated critical after this pass.
     pub critical: u32,
-    /// The Security Center was asked, so the pages it touched can be handed back.
-    pub asked_security_center: bool,
 }
 
-/// Reads the health sources, evaluates the findings and stores what changed.
-pub struct HealthPass<S> {
+/// Reads the health sources. Any of them may block for seconds, so this runs on its own thread.
+pub struct HealthReader<S> {
     source: S,
     /// Last reading of each disk, kept while an HDD sleeps.
     disks: BTreeMap<String, DiskHealth>,
-    /// The UTC day of each disk's last stored SMART reading.
-    smart_day: BTreeMap<String, i64>,
     antivirus: Option<Vec<SecurityProduct>>,
     antivirus_read_ms: Option<i64>,
 }
 
-impl<S: HealthSource> HealthPass<S> {
-    pub fn new(source: S) -> HealthPass<S> {
-        HealthPass {
+impl<S: HealthSource> HealthReader<S> {
+    pub fn new(source: S) -> HealthReader<S> {
+        HealthReader {
             source,
             disks: BTreeMap::new(),
-            smart_day: BTreeMap::new(),
             antivirus: None,
             antivirus_read_ms: None,
         }
@@ -67,74 +93,112 @@ impl<S: HealthSource> HealthPass<S> {
             }
     }
 
-    /// Forgets the days of the stored SMART readings, which a cleared history no longer holds.
-    pub fn forget(&mut self) {
-        self.smart_day.clear();
-    }
-
-    pub fn run(&mut self, store: &mut Store, now: &PassNow) -> Result<PassOutcome, StoreError> {
+    /// Asks every source what it knows; nothing here touches the history.
+    pub fn read(&mut self, request: &PassRequest) -> HealthReadings {
         // A failed read is asked again on the next pass; only an answer is kept for a day.
         let asked_security_center = self.antivirus.is_none()
             || self
                 .antivirus_read_ms
-                .is_none_or(|at| now.ts_ms - at >= ANTIVIRUS_EVERY_MS);
+                .is_none_or(|at| request.ts_ms - at >= ANTIVIRUS_EVERY_MS);
         if asked_security_center {
             self.antivirus = self.source.antivirus();
-            self.antivirus_read_ms = self.antivirus.is_some().then_some(now.ts_ms);
+            self.antivirus_read_ms = self.antivirus.is_some().then_some(request.ts_ms);
         }
-        let mut unread: HashSet<&str> = HashSet::new();
-        for disk in &now.machine.disks {
+        let mut unread: HashSet<String> = HashSet::new();
+        let mut fresh = Vec::new();
+        for disk in &request.machine.disks {
             let Some(index) = physical_drive(&disk.name) else {
                 continue;
             };
-            if self.skips_idle(index, disk.media, now.busy_disks.contains(&disk.name)) {
-                unread.insert(&disk.name);
+            if self.skips_idle(index, disk.media, request.busy_disks.contains(&disk.name)) {
+                unread.insert(disk.name.clone());
                 continue;
             }
-            let Some(health) = self.source.disk(index, &disk.name, now.ts_ms) else {
-                unread.insert(&disk.name);
+            let Some(health) = self.source.disk(index, &disk.name, request.ts_ms) else {
+                unread.insert(disk.name.clone());
                 continue;
             };
-            let day = health.read_ms.div_euclid(DAY_MS);
-            if !health.attributes.is_empty() && self.smart_day.get(&disk.name) != Some(&day) {
-                store.record_smart(&health)?;
-                self.smart_day.insert(disk.name.clone(), day);
-            }
+            fresh.push(health.clone());
             self.disks.insert(disk.name.clone(), health);
         }
-        let in_machine = |name: &String| now.machine.disks.iter().any(|d| &d.name == name);
+        let in_machine = |name: &String| request.machine.disks.iter().any(|d| &d.name == name);
         self.disks.retain(|name, _| in_machine(name));
-        self.smart_day.retain(|name, _| in_machine(name));
         let system_disk = self.source.system_drive().and_then(|number| {
-            now.machine
+            request
+                .machine
                 .disks
                 .iter()
                 .find(|d| physical_drive(&d.name) == Some(number))
                 .map(|d| d.name.clone())
         });
-
-        let week_ago = now.ts_ms - 7 * DAY_MS;
-        let open = store.open_findings()?;
-        let commit_peak_pct_7d = (now.commit_limit_bytes > 0)
-            .then(|| store.minutes(week_ago, now.ts_ms))
-            .transpose()?
-            .and_then(|minutes| minutes.iter().map(|m| m.commit_max).max())
-            .map(|peak| peak as f32 * 100.0 / now.commit_limit_bytes as f32);
-        let inputs = HealthInputs {
-            now_ms: now.ts_ms,
-            history_from_ms: store.first_segment_ms()?.unwrap_or(now.ts_ms),
-            machine: now.machine.clone(),
-            system_disk,
+        HealthReadings {
+            ts_ms: request.ts_ms,
+            machine: request.machine.clone(),
+            commit_limit_bytes: request.commit_limit_bytes,
+            fresh,
             disks: self.disks.values().cloned().collect(),
+            unread,
+            system_disk,
             volumes: self.source.volumes(),
             page_files: self.source.page_files(),
-            commit_peak_pct_7d,
-            memory_high_days_7d: memory_high_days(store, week_ago, now.ts_ms)?,
-            events: store.events(now.ts_ms - EVENT_DAYS * DAY_MS, now.ts_ms)?,
             antivirus: self.antivirus.clone(),
+            asked_security_center,
+        }
+    }
+}
+
+/// Evaluates the readings of a pass against the history and stores what changed.
+#[derive(Default)]
+pub struct HealthKeeper {
+    /// The UTC day of each disk's last stored SMART reading.
+    smart_day: BTreeMap<String, i64>,
+}
+
+impl HealthKeeper {
+    /// Forgets the days of the stored SMART readings, which a cleared history no longer holds.
+    pub fn forget(&mut self) {
+        self.smart_day.clear();
+    }
+
+    pub fn store(
+        &mut self,
+        store: &mut Store,
+        readings: &HealthReadings,
+    ) -> Result<PassOutcome, StoreError> {
+        for health in &readings.fresh {
+            let day = health.read_ms.div_euclid(DAY_MS);
+            if !health.attributes.is_empty() && self.smart_day.get(&health.name) != Some(&day) {
+                store.record_smart(health)?;
+                self.smart_day.insert(health.name.clone(), day);
+            }
+        }
+        let machine = &readings.machine;
+        let now_ms = readings.ts_ms;
+        self.smart_day
+            .retain(|name, _| machine.disks.iter().any(|d| &d.name == name));
+
+        let week_ago = now_ms - 7 * DAY_MS;
+        let open = store.open_findings()?;
+        let commit_peak_pct_7d = (readings.commit_limit_bytes > 0)
+            .then(|| store.minutes(week_ago, now_ms))
+            .transpose()?
+            .and_then(|minutes| minutes.iter().map(|m| m.commit_max).max())
+            .map(|peak| peak as f32 * 100.0 / readings.commit_limit_bytes as f32);
+        let inputs = HealthInputs {
+            now_ms,
+            history_from_ms: store.first_segment_ms()?.unwrap_or(now_ms),
+            machine: machine.clone(),
+            system_disk: readings.system_disk.clone(),
+            disks: readings.disks.clone(),
+            volumes: readings.volumes.clone(),
+            page_files: readings.page_files.clone(),
+            commit_peak_pct_7d,
+            memory_high_days_7d: memory_high_days(store, week_ago, now_ms)?,
+            events: store.events(now_ms - EVENT_DAYS * DAY_MS, now_ms)?,
+            antivirus: readings.antivirus.clone(),
             boot: store.last_scan()?.and_then(|scan| scan.boot),
             tests: store
-                .test_runs(now.ts_ms - TEST_REACH_DAYS * DAY_MS, now.ts_ms)?
+                .test_runs(now_ms - TEST_REACH_DAYS * DAY_MS, now_ms)?
                 .into_iter()
                 .map(|row| row.run)
                 .collect(),
@@ -150,19 +214,141 @@ impl<S: HealthSource> HealthPass<S> {
             FindingChange::Close { id } => !open.iter().any(|s| {
                 s.id == *id
                     && s.finding.kind == FindingKind::DiskSmart
-                    && matches!(&s.finding.subject, Subject::Disk(name) if unread.contains(name.as_str()))
+                    && matches!(&s.finding.subject, Subject::Disk(name) if readings.unread.contains(name.as_str()))
             }),
             _ => true,
         });
-        store.apply_findings(&changes, now.ts_ms)?;
+        store.apply_findings(&changes, now_ms)?;
         Ok(PassOutcome {
             changes: changes.len(),
             critical: fresh
                 .iter()
                 .filter(|f| f.concern == Concern::Critical)
                 .count() as u32,
-            asked_security_center,
         })
+    }
+}
+
+/// A health source of any kind, so the sampler can be wired to this PC or to a stand-in for it.
+pub struct AnySource(pub Box<dyn HealthSource + Send>);
+
+impl HealthSource for AnySource {
+    fn disk(&mut self, index: u32, name: &str, now_ms: i64) -> Option<DiskHealth> {
+        self.0.disk(index, name, now_ms)
+    }
+
+    fn bus(&mut self, index: u32) -> Bus {
+        self.0.bus(index)
+    }
+
+    fn volumes(&mut self) -> Vec<VolumeSpace> {
+        self.0.volumes()
+    }
+
+    fn system_drive(&mut self) -> Option<u32> {
+        self.0.system_drive()
+    }
+
+    fn page_files(&mut self) -> Option<Vec<PageFile>> {
+        self.0.page_files()
+    }
+
+    fn antivirus(&mut self) -> Option<Vec<SecurityProduct>> {
+        self.0.antivirus()
+    }
+}
+
+/// The thread that reads the health sources and hands the readings to the storage thread. It
+/// holds at most one request: while it is stuck in a call, a newer one replaces the one waiting.
+pub struct HealthThread {
+    slot: Arc<Slot>,
+}
+
+struct Slot {
+    state: Mutex<SlotState>,
+    wake: Condvar,
+}
+
+#[derive(Default)]
+struct SlotState {
+    /// The epoch the request was made in, and the request.
+    pending: Option<(u64, PassRequest)>,
+    closed: bool,
+}
+
+impl HealthThread {
+    /// Starts the thread; it ends once this handle is dropped and its current call returns.
+    pub fn start<S>(
+        mut reader: HealthReader<S>,
+        service: Service,
+        status: Arc<Mutex<AgentStatus>>,
+    ) -> io::Result<HealthThread>
+    where
+        S: HealthSource + Send + 'static,
+    {
+        let slot = Arc::new(Slot {
+            state: Mutex::new(SlotState::default()),
+            wake: Condvar::new(),
+        });
+        let mine = slot.clone();
+        thread::Builder::new()
+            .name("health".to_string())
+            .stack_size(STACK_BYTES)
+            .spawn(move || {
+                while let Some((epoch, request)) = mine.next() {
+                    let read = panic::catch_unwind(AssertUnwindSafe(|| reader.read(&request)));
+                    match read {
+                        Ok(readings) => {
+                            if readings.asked_security_center {
+                                release_idle_pages();
+                            }
+                            let job = Job::Health(Box::new(readings));
+                            if !service.deliver(Queued { epoch, job }) {
+                                return;
+                            }
+                        }
+                        Err(payload) => {
+                            lock(&status).last_error = Some(format!(
+                                "a health read stopped: {}",
+                                panic_text(payload.as_ref())
+                            ));
+                        }
+                    }
+                }
+            })?;
+        Ok(HealthThread { slot })
+    }
+
+    /// Asks for a pass; a request still waiting is replaced, because the newer one is fresher.
+    pub fn request(&self, epoch: u64, request: PassRequest) {
+        lock(&self.slot.state).pending = Some((epoch, request));
+        self.slot.wake.notify_one();
+    }
+}
+
+impl Drop for HealthThread {
+    fn drop(&mut self) {
+        lock(&self.slot.state).closed = true;
+        self.slot.wake.notify_one();
+    }
+}
+
+impl Slot {
+    /// Blocks until a request comes, or `None` once the handle is gone.
+    fn next(&self) -> Option<(u64, PassRequest)> {
+        let mut state = lock(&self.state);
+        loop {
+            if state.closed {
+                return None;
+            }
+            if let Some(request) = state.pending.take() {
+                return Some(request);
+            }
+            state = self
+                .wake
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
     }
 }
 
@@ -186,11 +372,15 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use vestigium_core::health::{PageFile, VolumeSpace};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
     use vestigium_core::{Channel, DiskInfo, Episode, EventMeaning, WinEvent};
     use vestigium_store::Batch;
 
     use super::*;
+    use crate::service::Links;
+    use crate::testing::wait_until;
     use vestigium_core::health::SmartAttribute;
 
     const GB: u64 = 1 << 30;
@@ -294,12 +484,52 @@ mod tests {
         Store::open(&dir.path().join("vestigium.db")).unwrap()
     }
 
-    fn run(
-        pass: &mut HealthPass<FakeHealth>,
-        store: &mut Store,
-        at: i64,
-        busy: &[&str],
-    ) -> PassOutcome {
+    /// A reader and a keeper run one after the other, as the two threads do.
+    struct HealthPass<S> {
+        reader: HealthReader<S>,
+        keeper: HealthKeeper,
+    }
+
+    /// What one pass did, with what its readings said about the Security Center.
+    struct Ran {
+        changes: usize,
+        critical: u32,
+        asked_security_center: bool,
+    }
+
+    impl<S: HealthSource> HealthPass<S> {
+        fn new(source: S) -> HealthPass<S> {
+            HealthPass {
+                reader: HealthReader::new(source),
+                keeper: HealthKeeper::default(),
+            }
+        }
+
+        fn forget(&mut self) {
+            self.keeper.forget();
+        }
+
+        fn run(&mut self, store: &mut Store, request: &PassRequest) -> Result<Ran, StoreError> {
+            let readings = self.reader.read(request);
+            let outcome = self.keeper.store(store, &readings)?;
+            Ok(Ran {
+                changes: outcome.changes,
+                critical: outcome.critical,
+                asked_security_center: readings.asked_security_center,
+            })
+        }
+    }
+
+    fn request(machine: &MachineInfo, at: i64, busy: &[&str]) -> PassRequest {
+        PassRequest {
+            ts_ms: at,
+            machine: machine.clone(),
+            busy_disks: busy.iter().map(|s| s.to_string()).collect(),
+            commit_limit_bytes: 40 * GB,
+        }
+    }
+
+    fn run(pass: &mut HealthPass<FakeHealth>, store: &mut Store, at: i64, busy: &[&str]) -> Ran {
         run_on(pass, store, &machine(), at, busy)
     }
 
@@ -309,15 +539,8 @@ mod tests {
         machine: &MachineInfo,
         at: i64,
         busy: &[&str],
-    ) -> PassOutcome {
-        let busy: HashSet<String> = busy.iter().map(|s| s.to_string()).collect();
-        let now = PassNow {
-            ts_ms: at,
-            machine,
-            busy_disks: &busy,
-            commit_limit_bytes: 40 * GB,
-        };
-        pass.run(store, &now).unwrap()
+    ) -> Ran {
+        pass.run(store, &request(machine, at, busy)).unwrap()
     }
 
     #[test]
@@ -338,7 +561,7 @@ mod tests {
             FindingKind::LowSpace
         );
 
-        pass.source.free_gb = 50;
+        pass.reader.source.free_gb = 50;
         let second = run(&mut pass, &mut store, NOW + DAY_MS / 24, &[]);
         assert_eq!(second.changes, 1);
         assert_eq!(second.critical, 0);
@@ -723,18 +946,11 @@ mod tests {
             [NOW - DAY_MS],
         )
         .unwrap();
-        pass.source.free_gb = 50;
-        let machine = machine();
-        let busy = HashSet::new();
-        let now = PassNow {
-            ts_ms: NOW + DAY_MS / 24,
-            machine: &machine,
-            busy_disks: &busy,
-            commit_limit_bytes: 40 * GB,
-        };
+        pass.reader.source.free_gb = 50;
+        let asked = request(&machine(), NOW + DAY_MS / 24, &[]);
 
         assert!(matches!(
-            pass.run(&mut store, &now),
+            pass.run(&mut store, &asked),
             Err(StoreError::UnknownCode {
                 what: "channel",
                 code: 99
@@ -747,5 +963,193 @@ mod tests {
             .map(|f| f.finding.kind)
             .collect();
         assert_eq!(kinds, [FindingKind::LowSpace]);
+    }
+
+    /// A source whose disk read blocks until released, noting the time of each pass it is asked for.
+    struct Stuck {
+        asked: Arc<Mutex<Vec<i64>>>,
+        release: Arc<AtomicBool>,
+        _alive: Arc<()>,
+    }
+
+    impl HealthSource for Stuck {
+        fn disk(&mut self, _index: u32, name: &str, now_ms: i64) -> Option<DiskHealth> {
+            lock(&self.asked).push(now_ms);
+            while !self.release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Some(DiskHealth {
+                name: name.to_string(),
+                read_ms: now_ms,
+                predict_failure: false,
+                attributes: Vec::new(),
+                nvme: None,
+            })
+        }
+
+        fn bus(&mut self, _index: u32) -> Bus {
+            Bus::Other
+        }
+
+        fn volumes(&mut self) -> Vec<VolumeSpace> {
+            vec![VolumeSpace {
+                root: r"C:\".into(),
+                free_bytes: 4 * GB,
+                total_bytes: 100 * GB,
+                system: true,
+            }]
+        }
+
+        fn system_drive(&mut self) -> Option<u32> {
+            None
+        }
+
+        fn page_files(&mut self) -> Option<Vec<PageFile>> {
+            None
+        }
+
+        fn antivirus(&mut self) -> Option<Vec<SecurityProduct>> {
+            None
+        }
+    }
+
+    struct Reading {
+        dir: tempfile::TempDir,
+        service: Service,
+        links: Links,
+        thread: HealthThread,
+        asked: Arc<Mutex<Vec<i64>>>,
+        release: Arc<AtomicBool>,
+        alive: Arc<()>,
+    }
+
+    fn reading(released: bool) -> Reading {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let links = Links::detached();
+        let service = Service::start(store, links.clone()).unwrap();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new(AtomicBool::new(released));
+        let alive = Arc::new(());
+        let source = Stuck {
+            asked: asked.clone(),
+            release: release.clone(),
+            _alive: alive.clone(),
+        };
+        let thread = HealthThread::start(
+            HealthReader::new(source),
+            service.clone(),
+            links.status.clone(),
+        )
+        .unwrap();
+        Reading {
+            dir,
+            service,
+            links,
+            thread,
+            asked,
+            release,
+            alive,
+        }
+    }
+
+    impl Reading {
+        fn asked(&self) -> Vec<i64> {
+            lock(&self.asked).clone()
+        }
+
+        fn findings(&self) -> usize {
+            Store::open(&self.dir.path().join("vestigium.db"))
+                .unwrap()
+                .open_findings()
+                .unwrap()
+                .len()
+        }
+    }
+
+    const PATIENCE: Duration = Duration::from_secs(15);
+
+    #[test]
+    fn a_request_made_while_the_reader_is_stuck_replaces_the_one_waiting() {
+        let rig = reading(false);
+        rig.thread.request(0, request(&machine(), 1, &[]));
+        assert!(wait_until(PATIENCE, || rig.asked() == [1]));
+
+        rig.thread.request(0, request(&machine(), 2, &[]));
+        rig.thread.request(0, request(&machine(), 3, &[]));
+        rig.release.store(true, Ordering::Release);
+
+        assert!(wait_until(PATIENCE, || rig.asked() == [1, 3]));
+        assert!(
+            wait_until(PATIENCE, || rig.findings() == 1),
+            "the newest pass reached the history"
+        );
+        assert_eq!(rig.asked(), [1, 3], "the replaced request was never read");
+    }
+
+    #[test]
+    fn a_source_that_blocks_does_not_delay_the_storage_thread() {
+        let rig = reading(false);
+        rig.thread.request(0, request(&machine(), 1, &[]));
+        assert!(wait_until(PATIENCE, || rig.asked() == [1]));
+
+        let began = std::time::Instant::now();
+        rig.service
+            .submit(Queued {
+                epoch: 0,
+                job: Job::Batch(vestigium_store::Batch {
+                    bookmark_xml: Some("kept".to_string()),
+                    ..Default::default()
+                }),
+            })
+            .ok()
+            .unwrap();
+        assert!(rig.service.flush(Duration::from_secs(2)));
+
+        assert!(
+            began.elapsed() < Duration::from_millis(500),
+            "a write waited {:?} behind a source that blocks",
+            began.elapsed()
+        );
+        let store = Store::open(&rig.dir.path().join("vestigium.db")).unwrap();
+        assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("kept"));
+        rig.release.store(true, Ordering::Release);
+    }
+
+    #[test]
+    fn readings_asked_for_before_a_clear_are_dropped() {
+        let rig = reading(true);
+        let mut pipe = Store::open(&rig.dir.path().join("vestigium.db")).unwrap();
+        rig.links.epoch.clear(|| pipe.clear_history()).unwrap();
+
+        rig.thread.request(0, request(&machine(), 1, &[]));
+        assert!(wait_until(PATIENCE, || rig.asked() == [1]));
+        thread::sleep(Duration::from_millis(300));
+        assert!(rig.service.flush(PATIENCE));
+        assert_eq!(rig.findings(), 0, "a pass from before the clear is dropped");
+
+        rig.thread.request(1, request(&machine(), 2, &[]));
+        assert!(wait_until(PATIENCE, || rig.findings() == 1));
+    }
+
+    #[test]
+    fn the_critical_findings_come_back_through_the_shared_count() {
+        let rig = reading(true);
+
+        rig.thread.request(0, request(&machine(), 1, &[]));
+
+        assert!(wait_until(PATIENCE, || {
+            rig.links.critical.load(Ordering::Acquire) == 1
+        }));
+    }
+
+    #[test]
+    fn the_reader_thread_ends_with_its_handle() {
+        let Reading { thread, alive, .. } = reading(true);
+        assert_eq!(Arc::strong_count(&alive), 2);
+
+        drop(thread);
+
+        assert!(wait_until(PATIENCE, || Arc::strong_count(&alive) == 1));
     }
 }
