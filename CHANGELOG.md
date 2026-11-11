@@ -85,6 +85,8 @@ How to use this file:
 
 ### Fixed
 
+- In Portuguese, a tweak that changed nothing, or only some of its settings, now says "alterado"
+  instead of "gravado", the word the app keeps for recording.
 - The monitor no longer leaves a hole in its samples while the history database is busy: the
   batches are now written by a thread of their own, so a write that waits for the database no
   longer delays the next second's reading. Clearing the history also discards what was still waiting
