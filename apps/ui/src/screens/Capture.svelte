@@ -105,7 +105,7 @@
     <div class="fact">
       <span class="fact-l">{t("ui.captures.fact.result")}</span>
       <span class="fact-v">
-        <StatusMark kind={view.none ? "ok" : "critical"} word={t(view.none ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} />
+        <StatusMark kind={view.result.kind} word={view.result.word} />
       </span>
     </div>
     <div class="fact">
@@ -140,19 +140,21 @@
             <li>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</li>
           {/each}
         </ul>
-      {:else}
-        <p class="cz-n">{t("ui.captures.none.head")}</p>
-        <p class="cz-m">{view.measured}</p>
-        <p class="p">{t("ui.captures.none.body")}</p>
-        <p class="note">{t("ui.captures.none.hint")}</p>
-        <div class="acts">
-          {#if canStart && view.minutes < 10}
-            <button type="button" class="btn accent" onclick={again}>
-              <Icon name="start" />{t("ui.captures.none.ten")}
-            </button>
-          {/if}
-          <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
-        </div>
+      {:else if view.otherwise}
+        <p class="cz-n">{view.otherwise.head}</p>
+        <p class="cz-m">{view.otherwise.sub}</p>
+        <p class="p">{view.otherwise.body}</p>
+        {#if view.otherwise.hint}<p class="note">{view.otherwise.hint}</p>{/if}
+        {#if view.otherwise.offer}
+          <div class="acts">
+            {#if canStart && view.minutes < 10}
+              <button type="button" class="btn accent" onclick={again}>
+                <Icon name="start" />{t("ui.captures.none.ten")}
+              </button>
+            {/if}
+            <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
+          </div>
+        {/if}
       {/if}
     </Block>
 

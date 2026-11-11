@@ -602,6 +602,14 @@ How to use this file:
   notes for frames and drivers that were not measured are replaced by that block, and what to do
   about them moved to the steps of the page. Frames measured for only part of the capture no longer
   hide the apps list.
+- A deep capture that could not measure everything no longer says there were no stutters. With no
+  culprit found, its title now says "We cannot tell whether there were stutters" when drivers or
+  frames were not measured, or only partly, and offers a capture for 10 minutes; "No culprit
+  identified" when stalls were measured or an app had many late frames; and keeps "No stutters
+  during the capture" only for a capture that measured everything and saw nothing. A capture that
+  names a culprit keeps naming it, with its Coverage mark beside it. The Result mark has a state for
+  each, "Undetermined", "No culprit" or "Suspect app" among them, the same words head the history
+  rows, and what to do about a source that fell short is listed in the steps.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the

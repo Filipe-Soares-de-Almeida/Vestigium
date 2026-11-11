@@ -242,6 +242,20 @@ export function coverageOf(dto: CaptureDto): Coverage[] {
 /** Sources that measured less than the whole capture. */
 export const shortfalls = (dto: CaptureDto): Coverage[] => coverageOf(dto).filter((c) => c.state !== "full");
 
+/**
+ * What the capture can say: it names a culprit, it could not measure everything and so cannot say,
+ * it measured everything and saw stalls or an app with many late frames but no culprit, or it saw
+ * nothing at all.
+ */
+export type Verdict = "found" | "incomplete" | "nocul" | "clean";
+
+export function verdictOf(dto: CaptureDto): Verdict {
+  if (conclusionOf(dto, driverRows(dto)).kind !== "none") return "found";
+  if (shortfalls(dto).length > 0) return "incomplete";
+  if (dto.hiccups.length > 0 || dto.apps.some(hitchesOften)) return "nocul";
+  return "clean";
+}
+
 /** Why a source could not be measured, as the helper worded it. */
 export const reasonOf = (source: CaptureDto["frames"]): string => {
   if (source === "Ok") return "";

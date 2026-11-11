@@ -32,7 +32,7 @@
         >
           {#snippet right()}
             {#if fresh === row.id}<span class="new">{t("ui.captures.history.new")}</span>{/if}
-            <StatusMark kind={row.quiet ? "ok" : "critical"} word={t(row.quiet ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} reveal />
+            <StatusMark kind={row.result.kind} word={row.result.word} reveal />
             <StatusMark kind={row.cover.kind} word={row.cover.word} reveal />
           {/snippet}
         </RowCard>

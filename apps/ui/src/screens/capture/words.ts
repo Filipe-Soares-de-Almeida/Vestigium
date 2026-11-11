@@ -29,6 +29,8 @@ import {
   nearCallsOf,
   type Part,
   shortfalls,
+  type Verdict,
+  verdictOf,
 } from "./model";
 
 // The words of a deep capture, at the reader's detail level. "PresentMon" and "probe" stay out of Simple.
@@ -137,12 +139,30 @@ export interface CoverView {
   mark: { kind: StatusKind; word: string };
 }
 
+/** The capture's answer on a page of its own or a history row: the mark and its word. */
+export interface ResultMark {
+  kind: StatusKind;
+  word: string;
+}
+
+/** The conclusion of a capture that names no culprit: what it measured and what it can and cannot say. */
+export interface Otherwise {
+  head: string;
+  sub: string;
+  body: string;
+  hint: string | null;
+  /** Whether a longer capture is offered. */
+  offer: boolean;
+}
+
 export interface ResultView {
   crumb: string;
   title: string;
   meta: string;
   minutes: number;
-  none: boolean;
+  verdict: Verdict;
+  result: ResultMark;
+  otherwise: Otherwise | null;
   main: {
     icon: IconName;
     name: string;
@@ -158,8 +178,6 @@ export interface ResultView {
   hasMarks: boolean;
   alignSummary: string;
   apps: { rows: AppLine[]; quiet: string | null; often: string[] } | null;
-  /** What the capture measured when nothing stood out. */
-  measured: string;
 }
 
 export interface AppLine {
@@ -208,7 +226,8 @@ function titleOf(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): string
     if (level === "Detailed") return count("title.app.d", top.app.hitches, { name, worst: frameText(top.app.worst_ms) });
     return k(app, { name });
   }
-  return k("title.none");
+  const verdict = verdictOf(dto);
+  return k(verdict === "incomplete" ? "title.undetermined" : verdict === "nocul" ? "title.nocul" : "title.none");
 }
 
 function whenOf(dto: CaptureDto): string {
@@ -340,6 +359,85 @@ function whyText(c: Coverage, level: DetailLevel): string | null {
   return k(`cover.why.frames.${c.state === "partial" ? "partial" : "none"}${d}`);
 }
 
+/** The first app with many late frames, or null. */
+const hitchyApp = (dto: CaptureDto): AppFrames | null => lateApps(dto).find(hitchesOften) ?? null;
+
+/** The mark and word that sum up what the capture found. */
+export function resultMark(dto: CaptureDto, verdict: Verdict): ResultMark {
+  if (verdict === "found") {
+    const top = conclusionOf(dto, driverRows(dto));
+    return { kind: "critical", word: k(top.kind === "app" ? "mark.found.app" : "mark.found") };
+  }
+  if (verdict === "incomplete") return { kind: "info", word: k("mark.undetermined") };
+  if (verdict === "nocul") return { kind: "info", word: k("mark.nocul") };
+  return { kind: "ok", word: k("mark.quiet") };
+}
+
+const stallRange = (dto: CaptureDto): string => {
+  const lags = dto.hiccups.map((h) => h.lag_ms);
+  return rangeText(Math.min(...lags), Math.max(...lags));
+};
+
+/** What was measured, as a sentence: the sources that measured something and how much of it. */
+function measuredText(dto: CaptureDto, all: DriverRow[]): string {
+  const minutes = minutesOf(dto);
+  const parts: string[] = [];
+  for (const c of coverageOf(dto)) {
+    if (c.state === "none" || c.part === "probe") continue;
+    if (c.part === "kernel") {
+      parts.push(count("measured.part.drivers", all.filter((r) => !r.kernel && r.module !== "<unknown>").length));
+    } else {
+      const count = formatNumber(dto.apps.reduce((sum, a) => sum + a.frames, 0));
+      const covered = formatNumber(c.covered / 60, Number.isInteger(c.covered / 60) ? 0 : 1);
+      parts.push(c.state === "partial" ? k("measured.part.frames.partial", { count, covered }) : k("measured.part.frames", { count }));
+    }
+  }
+  return parts.length
+    ? k("incomplete.measured", { what: formatList(parts), minutes })
+    : k("incomplete.measured.nothing", { minutes });
+}
+
+/** The conclusion block of a capture that names no one. */
+function otherwiseOf(dto: CaptureDto, all: DriverRow[], verdict: Exclude<Verdict, "found">): Otherwise {
+  const minutes = minutesOf(dto);
+  const stalls = dto.hiccups.length;
+  const hot = hitchyApp(dto);
+  if (verdict === "clean") {
+    const frames = dto.apps.reduce((sum, a) => sum + a.frames, 0);
+    const drivers = formatNumber(all.filter((r) => !r.kernel && r.module !== "<unknown>").length);
+    return {
+      head: k("none.head"),
+      sub: k(frames > 0 ? "measured.frames" : "measured", { drivers, frames: formatNumber(frames), minutes }),
+      body: k("none.body"),
+      hint: k("none.hint"),
+      offer: true,
+    };
+  }
+  if (verdict === "nocul") {
+    const parts = [stalls > 0 ? count("nocul.body.stalls", stalls, { range: stallRange(dto) }) : k("nocul.body.quiet")];
+    if (hot) parts.push(k("nocul.body.many", { app: appName(hot.name), pct: shareNumber(hot) }));
+    parts.push(k("nocul.hint"));
+    return { head: k("title.nocul"), sub: measuredText(dto, all), body: parts.join(" "), hint: null, offer: false };
+  }
+  const short = shortfalls(dto);
+  const first = short[0];
+  const body =
+    short.every((c) => c.state === "partial")
+      ? k("incomplete.body.partial", {
+          covered: formatNumber(first.covered / 60, Number.isInteger(first.covered / 60) ? 0 : 1),
+          minutes,
+          rest: formatNumber(minutes - first.covered / 60, Number.isInteger(first.covered / 60) ? 0 : 1),
+        })
+      : k("incomplete.body", { sources: formatList(short.map((c) => k(`cover.src.${c.part}`))) });
+  return {
+    head: k("incomplete.head"),
+    sub: measuredText(dto, all),
+    body: stalls > 0 ? `${body} ${count("incomplete.stalls", stalls, { range: stallRange(dto) })}` : body,
+    hint: null,
+    offer: true,
+  };
+}
+
 /** Per source, how much of the capture it measured and what it kept, and the mark that sums it up. */
 export function coverView(dto: CaptureDto, level: DetailLevel): CoverView {
   const minutes = minutesOf(dto);
@@ -382,7 +480,10 @@ export function stepsFor(dto: CaptureDto, level: DetailLevel): Step[] {
   if (level === "Technical" && steps.some((s) => s.key.startsWith("UpdateDriver"))) {
     steps.push({ key: "overclock", text: k("step.overclock") });
   }
-  if (top.kind === "none") steps.push({ key: "again.none", text: k("step.none") });
+  const verdict = verdictOf(dto);
+  if (verdict === "nocul" || verdict === "clean") steps.push({ key: "again.none", text: k("step.none") });
+  const hot = hitchyApp(dto);
+  if (verdict === "nocul" && hot) steps.push({ key: `hitchy:${hot.name}`, text: k("step.hitchy", { app: appName(hot.name) }) });
   return steps;
 }
 
@@ -542,14 +643,15 @@ export function buildResult(dto: CaptureDto, level: DetailLevel): ResultView {
       : top.kind === "app"
         ? [top.app?.name ?? null, confidenceOf(top.finding)]
         : [];
-  const measuredDrivers = all.filter((r) => !r.kernel && r.module !== "<unknown>").length;
-  const frames = dto.apps.reduce((sum, a) => sum + a.frames, 0);
+  const verdict = verdictOf(dto);
   return {
     crumb: sameDay(dto.start_ms, Date.now()) ? formatTime(dto.start_ms) : `${formatDayShort(dto.start_ms)}, ${formatTime(dto.start_ms)}`,
     title: titleOf(dto, level, all),
     meta: k("meta", { when: whenOf(dto), minutes }),
     minutes,
-    none: top.kind === "none",
+    verdict,
+    result: resultMark(dto, verdict),
+    otherwise: verdict === "found" ? null : otherwiseOf(dto, all, verdict),
     main:
       top.kind === "none"
         ? null
@@ -568,7 +670,6 @@ export function buildResult(dto: CaptureDto, level: DetailLevel): ResultView {
     hasMarks: al.marks.length > 0 || dto.hiccups.length > 0,
     alignSummary: alignSummary(dto, level, all),
     apps: framesGone(dto) ? null : appLines(dto, level),
-    measured: k(frames > 0 ? "measured.frames" : "measured", { drivers: formatNumber(measuredDrivers), frames: formatNumber(frames), minutes }),
   };
 }
 
@@ -602,8 +703,8 @@ export interface RowView {
   icon: IconName;
   /** How much of the capture its sources measured. */
   cover: CoverView["mark"];
-  /** Nothing stood out in this capture. */
-  quiet: boolean;
+  /** What the capture found. */
+  result: ResultMark;
   title: string;
   sub: string;
   day: string;
@@ -616,7 +717,8 @@ export function rowOf(entry: Entry): RowView {
   const d = digestOf(dto);
   const minutes = minutesOf(dto);
   const parts: string[] = [];
-  let title = k("row.none.title");
+  const verdict = verdictOf(dto);
+  let title = k(verdict === "incomplete" ? "title.undetermined" : verdict === "nocul" ? "title.nocul" : "row.none.title");
   let icon: IconName = "wave";
   if (d.kind === "driver") {
     title = driverName(d.subject);
@@ -626,8 +728,12 @@ export function rowOf(entry: Entry): RowView {
     title = appName(d.subject);
     icon = "app";
     parts.push(count("row.app", d.count, { worst: frameText(d.peak) }));
-  } else {
+  } else if (verdict === "clean") {
     parts.push(k("row.none"));
+  } else {
+    if (dto.hiccups.length > 0) parts.push(count("row.stalls", dto.hiccups.length));
+    const hot = hitchyApp(dto);
+    if (hot && verdict === "nocul") parts.push(k("row.many", { app: appName(hot.name), pct: shareNumber(hot) }));
   }
   parts.push(k("row.minutes", { minutes }));
   if (dto.lost_events > 0) parts.push(k("row.lost"));
@@ -640,7 +746,7 @@ export function rowOf(entry: Entry): RowView {
     id: summary.id,
     icon,
     cover: cover.mark,
-    quiet: d.kind === "none",
+    result: resultMark(dto, verdict),
     title,
     sub: parts.join(" · "),
     day: sameDay(summary.start_ms, Date.now()) ? k("today") : formatDayShort(summary.start_ms),
