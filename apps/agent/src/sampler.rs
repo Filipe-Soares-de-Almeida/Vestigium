@@ -1262,7 +1262,7 @@ mod tests {
 
     use super::*;
     use crate::readings::{Waiter, windows_source_set};
-    use vestigium_collect::{CpuReading, MemoryInfo};
+    use vestigium_collect::{CpuReading, HighResTimer, MemoryInfo};
     use vestigium_core::DiskLoad;
 
     struct Running {
@@ -1295,8 +1295,9 @@ mod tests {
         max_ms: 60_000,
     };
 
+    /// A sampler on the quiet machine, so no test depends on what this PC reads.
     fn start(dir: &std::path::Path, flush: Duration) -> Running {
-        start_with(dir, flush, windows_source_set())
+        start_with(dir, flush, quiet_set())
     }
 
     fn start_with(dir: &std::path::Path, flush: Duration, source_set: SourceSet) -> Running {
@@ -1458,6 +1459,41 @@ mod tests {
 
         fn open_timer(&mut self) -> Result<Box<dyn Waiter>, CollectError> {
             Ok(Box::new(Sleeper))
+        }
+    }
+
+    fn quiet_set() -> SourceSet {
+        Box::new(|| Box::new(Quiet))
+    }
+
+    /// The quiet machine with the real timer, for the test of the wake event.
+    struct QuietOnTheTimer(Quiet);
+
+    impl Readings for QuietOnTheTimer {
+        fn memory(&mut self) -> Result<MemoryInfo, CollectError> {
+            self.0.memory()
+        }
+
+        fn cpu(&mut self) -> Result<Option<CpuReading>, CollectError> {
+            self.0.cpu()
+        }
+
+        fn pdh(&mut self) -> Result<Option<PdhReading>, CollectError> {
+            self.0.pdh()
+        }
+
+        fn processes(&mut self) -> Result<Vec<ProcessCounters>, CollectError> {
+            self.0.processes()
+        }
+
+        fn reset(&mut self) {}
+
+        fn open_pdh(&mut self) -> Result<(), CollectError> {
+            Ok(())
+        }
+
+        fn open_timer(&mut self) -> Result<Box<dyn Waiter>, CollectError> {
+            Ok(Box::new(HighResTimer::new()?))
         }
     }
 
@@ -1789,7 +1825,7 @@ mod tests {
     #[test]
     fn a_sampler_runs_on_a_replaced_source_set() {
         let dir = tempfile::tempdir().unwrap();
-        let running = start_with(dir.path(), NEVER_DUE, Box::new(|| Box::new(Quiet)));
+        let running = start_with(dir.path(), NEVER_DUE, quiet_set());
 
         let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
         stop(&running);
@@ -1841,7 +1877,7 @@ mod tests {
     #[test]
     fn sampler_ranks_programs_for_the_live_screen() {
         let dir = tempfile::tempdir().unwrap();
-        let running = start(dir.path(), NEVER_DUE);
+        let running = start_with(dir.path(), NEVER_DUE, windows_source_set());
 
         let ranked = wait_until(PATIENCE, || lock(&running.now).top.is_some());
         let (top, programs) = {
@@ -1984,7 +2020,11 @@ mod tests {
     #[test]
     fn a_suspend_notice_wakes_the_sampler_at_once() {
         let dir = tempfile::tempdir().unwrap();
-        let running = start(dir.path(), NEVER_DUE);
+        let running = start_with(
+            dir.path(),
+            NEVER_DUE,
+            Box::new(|| Box::new(QuietOnTheTimer(Quiet))),
+        );
         assert!(
             wait_until(PATIENCE, || sampled(&running.status)),
             "no sample taken"
@@ -2404,7 +2444,7 @@ mod tests {
     /// A sampler driven by hand over a history file in `dir`.
     fn manual_sampler(dir: &std::path::Path) -> Sampler {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
-        let (wiring, _) = wire(dir, Duration::from_secs(300), windows_source_set());
+        let (wiring, _) = wire(dir, Duration::from_secs(300), quiet_set());
         Sampler::new(store, wiring)
     }
 
@@ -2412,7 +2452,7 @@ mod tests {
     fn the_first_stored_event_batch_requests_a_health_pass() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
-        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let due = wiring.health_due.clone();
         let mut sampler = Sampler::new(store, wiring);
 
@@ -2707,7 +2747,7 @@ mod tests {
     #[test]
     fn a_storm_stores_a_capped_batch_and_still_moves_the_bookmark() {
         let dir = tempfile::tempdir().unwrap();
-        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let mut sampler = Sampler::new(store, wiring);
         for round in 0..4 {
@@ -2745,7 +2785,7 @@ mod tests {
     #[test]
     fn the_bookmark_follows_the_last_dropped_event() {
         let dir = tempfile::tempdir().unwrap();
-        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let mut sampler = Sampler::new(store, wiring);
         for round in 0..2 {
@@ -2774,7 +2814,7 @@ mod tests {
     #[test]
     fn an_event_without_a_bookmark_keeps_the_pending_one() {
         let dir = tempfile::tempdir().unwrap();
-        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), windows_source_set());
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let mut sampler = Sampler::new(store, wiring);
         sampler.bookmark_xml = Some("held".to_string());
@@ -3034,7 +3074,7 @@ mod tests {
             cleared: shared.cleared.clone(),
             health_due: shared.health_due.clone(),
             ring_path: Some(dir.path().join("blackbox.ring")),
-            source_set: Box::new(|| Box::new(Quiet)),
+            source_set: quiet_set(),
         };
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let sampler = run_sampler(store, wiring).unwrap();
@@ -3093,15 +3133,24 @@ mod tests {
             });
         };
         late_tick();
-        thread::sleep(Duration::from_millis(1_200));
-        let before = (count(&pipe_turns), count(&tray_turns));
-        let sampled_before = sampled.load(Ordering::Acquire);
+        assert!(
+            wait_until(PATIENCE, || sampled.load(Ordering::Acquire) > 0),
+            "the sampler never took a sample"
+        );
+        let before = (
+            count(&pipe_turns),
+            count(&tray_turns),
+            sampled.load(Ordering::Acquire),
+        );
         late_tick();
-        thread::sleep(Duration::from_millis(1_200));
         late_tick();
-        thread::sleep(Duration::from_millis(1_100));
+        // Each loop must advance past where it was, however long a loaded machine takes.
+        let progressed = wait_until(PATIENCE, || {
+            count(&pipe_turns) > before.0
+                && count(&tray_turns) > before.1
+                && sampled.load(Ordering::Acquire) > before.2
+        });
         let after = (count(&pipe_turns), count(&tray_turns));
-        let sampled_after = sampled.load(Ordering::Acquire);
 
         stop.store(true, Ordering::Release);
         shared.gate.set(GateState::Stopping);
@@ -3125,9 +3174,6 @@ mod tests {
         );
         assert!(after.0 > before.0, "the pipe stopped answering");
         assert!(after.1 > before.1, "the tray stopped reading");
-        assert!(
-            sampled_before > 0 && sampled_after > sampled_before,
-            "the sampler stopped taking samples"
-        );
+        assert!(progressed, "the sampler stopped taking samples");
     }
 }
