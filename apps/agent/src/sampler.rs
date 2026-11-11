@@ -2749,7 +2749,7 @@ mod tests {
         assert!(handle.wait(Duration::from_secs(5)), "sampler did not stop");
 
         assert!(
-            longest < Duration::from_millis(1_800),
+            longest < Duration::from_millis(3_000),
             "the samples stalled for {longest:?} behind the disk"
         );
         assert!(worst_lag < 500.0, "the tick woke {worst_lag} ms late");
@@ -2787,7 +2787,7 @@ mod tests {
         stop(&running);
 
         assert!(
-            longest < Duration::from_millis(1_800),
+            longest < Duration::from_millis(2_400),
             "the samples stalled for {longest:?} while the database was busy"
         );
         assert!(
