@@ -1,6 +1,6 @@
 use vestigium_core::{
-    Applier, Hive, RestorePoint, Retention, Setting, SettingChange, SettingResult, TWEAKS,
-    TweakChange, TweakId, Value, undo,
+    Applier, Hive, MachineInfo, RestorePoint, Retention, Setting, SettingChange, SettingResult,
+    Settings, TWEAKS, ThemePref, TweakChange, TweakId, Value, undo,
 };
 use vestigium_store::{SCHEMA_VERSION, Store};
 
@@ -371,4 +371,133 @@ fn every_tweak_is_stored_under_its_own_code() {
 
     assert_eq!(found, TWEAKS);
     assert_eq!(codes, (0..13).collect::<Vec<i64>>());
+}
+
+fn aside_pair(dir: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    (dir.path().join("old.db"), dir.path().join("vestigium.db"))
+}
+
+/// A history with one tweak still in place, a theme and a machine, closed cleanly.
+fn history_with_tweak(path: &std::path::Path) -> i64 {
+    let mut old = Store::open(path).unwrap();
+    let applied = change(
+        TweakId::Mpo,
+        mpo_change(Value::Absent, Value::Dword(5)),
+        None,
+    );
+    let id = old
+        .record_tweak_change(&applied, DAY, Applier::Elevated)
+        .unwrap();
+    old.set_settings(&Settings {
+        theme: ThemePref::Dark,
+        ..Settings::default()
+    })
+    .unwrap();
+    old.set_machine(&MachineInfo {
+        logical_cpus: 6,
+        mem_total_bytes: 8 << 30,
+        disks: Vec::new(),
+    })
+    .unwrap();
+    id
+}
+
+#[test]
+fn a_new_database_takes_over_tweaks_settings_and_machine() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = aside_pair(&dir);
+    let id = history_with_tweak(&old);
+    let before = std::fs::read(&old).unwrap();
+    let mut store = Store::open(&new).unwrap();
+
+    store.carry_over_from(&old);
+
+    let kept = store.tweaks_in_place().unwrap();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].id, id);
+    assert_eq!(store.settings().unwrap().theme, ThemePref::Dark);
+    assert_eq!(store.machine().unwrap().unwrap().logical_cpus, 6);
+    assert_eq!(std::fs::read(&old).unwrap(), before);
+}
+
+#[test]
+fn what_the_new_database_already_holds_is_not_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = aside_pair(&dir);
+    history_with_tweak(&old);
+    let mut store = Store::open(&new).unwrap();
+    store
+        .set_settings(&Settings {
+            theme: ThemePref::Light,
+            ..Settings::default()
+        })
+        .unwrap();
+
+    store.carry_over_from(&old);
+    store.carry_over_from(&old);
+
+    assert_eq!(store.settings().unwrap().theme, ThemePref::Light);
+    assert_eq!(store.tweaks_in_place().unwrap().len(), 1);
+}
+
+#[test]
+fn a_table_the_old_file_cannot_give_does_not_stop_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = aside_pair(&dir);
+    {
+        let raw = rusqlite::Connection::open(&old).unwrap();
+        raw.execute_batch(
+            "CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO setting VALUES ('theme', '\"Dark\"');",
+        )
+        .unwrap();
+    }
+    let mut store = Store::open(&new).unwrap();
+
+    store.carry_over_from(&old);
+
+    assert_eq!(store.settings().unwrap().theme, ThemePref::Dark);
+    assert!(store.tweaks_in_place().unwrap().is_empty());
+}
+
+#[test]
+fn an_unreadable_old_file_gives_nothing_and_stays_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = aside_pair(&dir);
+    let bytes: Vec<u8> = (0..4096u32).map(|n| (n * 7 + 3) as u8).collect();
+    std::fs::write(&old, &bytes).unwrap();
+    let wal = dir.path().join("old.db-wal");
+    std::fs::write(&wal, b"wal bytes").unwrap();
+    let mut store = Store::open(&new).unwrap();
+
+    store.carry_over_from(&old);
+
+    assert!(store.tweaks_in_place().unwrap().is_empty());
+    assert!(store.machine().unwrap().is_none());
+    assert_eq!(std::fs::read(&old).unwrap(), bytes);
+    assert_eq!(std::fs::read(&wal).unwrap(), b"wal bytes");
+}
+
+#[test]
+fn a_missing_old_file_is_not_created() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = aside_pair(&dir);
+    let mut store = Store::open(&new).unwrap();
+
+    store.carry_over_from(&old);
+
+    assert!(!old.exists());
+}
+
+#[test]
+fn a_path_with_special_characters_is_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let odd = dir.path().join("a b#c%d.db");
+    let new = dir.path().join("vestigium.db");
+    let id = history_with_tweak(&odd);
+    let mut store = Store::open(&new).unwrap();
+
+    store.carry_over_from(&odd);
+
+    assert_eq!(store.tweaks_in_place().unwrap()[0].id, id);
 }

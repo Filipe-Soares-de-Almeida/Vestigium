@@ -186,6 +186,16 @@ const MIGRATIONS: &[&str] = &[
     "SELECT 1;",
 ];
 
+/// What a new database takes over from a file set aside; each statement is its own table.
+const CARRY_OVER: [&str; 3] = [
+    "INSERT OR IGNORE INTO main.tweak_change
+         (id, version, tweak, subject, applied_ms, undone_ms, undo_of, elevated, data)
+     SELECT id, version, tweak, subject, applied_ms, undone_ms, undo_of, elevated, data
+     FROM old.tweak_change ORDER BY id",
+    "INSERT OR IGNORE INTO main.setting (key, value) SELECT key, value FROM old.setting",
+    "INSERT OR IGNORE INTO main.machine (id, data) SELECT id, data FROM old.machine",
+];
+
 /// What the agent writes in one transaction, every batch.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Batch {
@@ -251,17 +261,51 @@ impl Store {
         if has_foreign_header(path)
             && let Some(aside) = set_aside(path)
         {
-            return Ok((Store::open(path)?, Some(aside)));
+            return Ok((Store::open_after(path, &aside)?, Some(aside)));
         }
         match Store::open(path) {
             Err(StoreError::Sqlite(err)) if is_damage(&err) => {
                 let Some(aside) = set_aside(path) else {
                     return Err(StoreError::Sqlite(err));
                 };
-                Ok((Store::open(path)?, Some(aside)))
+                Ok((Store::open_after(path, &aside)?, Some(aside)))
             }
             opened => opened.map(|store| (store, None)),
         }
+    }
+
+    /// Opens a new database at `path` that takes over what `aside` still holds.
+    fn open_after(path: &Path, aside: &Path) -> Result<Store, StoreError> {
+        let mut store = Store::open(path)?;
+        store.carry_over_from(aside);
+        Ok(store)
+    }
+
+    /// Copies the tweak changes, settings and machine facts a file set aside still holds into this
+    /// database, table by table; a table that cannot be read is skipped, a file without a database
+    /// header is not opened, and the file is opened read-only.
+    pub fn carry_over_from(&mut self, from: &Path) {
+        if !from.is_file() || has_foreign_header(from) {
+            return;
+        }
+        let uri = format!("{}?mode=ro", file_uri(from));
+        if self
+            .conn
+            .execute("ATTACH DATABASE ?1 AS old", params![uri])
+            .is_err()
+        {
+            return;
+        }
+        for copy in CARRY_OVER {
+            let _ = self.copy_rows(copy);
+        }
+        let _ = self.conn.execute_batch("DETACH DATABASE old");
+    }
+
+    fn copy_rows(&mut self, sql: &str) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(sql, [])?;
+        Ok(tx.commit()?)
     }
 
     /// Opens an existing database without writing to it, as the UI does while the agent runs.
@@ -396,6 +440,24 @@ fn require_wal(mode: &str) -> Result<(), StoreError> {
             found: mode.to_string(),
         })
     }
+}
+
+/// A `file:` URI for a path, with every byte outside the unreserved set percent-encoded.
+fn file_uri(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let mut uri = String::from(if text.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    });
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~/:".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
 }
 
 /// True when the file exists, holds bytes and does not begin with the SQLite header.
