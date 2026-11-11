@@ -51,6 +51,10 @@ pub enum FactKind {
     WentDown {
         kind: CrashKind,
     },
+    /// Reported events of one provider and id that the occurrence did not keep past its cap.
+    EventsDropped {
+        count: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

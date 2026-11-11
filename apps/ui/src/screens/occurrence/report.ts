@@ -584,6 +584,7 @@ function factTexts(kind: FactKind): Texts {
           : k("fact.WentDown.tech", { kind: crash }),
     };
   }
+  if ("EventsDropped" in kind) return plain(k("fact.EventsDropped", { count: formatNumber(kind.EventsDropped.count) }));
   return plain(k(`fact.gap.${kind.Gap.reason}`));
 }
 

@@ -292,7 +292,8 @@ export type FactKind =
   | { Busiest: { metric: Metric; name: string; value: number } }
   | { Gap: { reason: GapReason } }
   | "LastWatched"
-  | { WentDown: { kind: CrashKind } };
+  | { WentDown: { kind: CrashKind } }
+  | { EventsDropped: { count: number } };
 
 export interface Fact {
   at_ms: number;

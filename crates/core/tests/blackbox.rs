@@ -4,9 +4,9 @@ use std::collections::HashSet;
 
 use common::{GIB, T, calm, event, machine, process};
 use vestigium_core::{
-    Blackbox, Cause, EpisodeKind, EventMeaning, GAP_MARGIN_MS, Gap, GapReason, HungWindow,
-    Occurrence, OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop, REPORTED_EXEMPLARS,
-    RING_MS, Severity, Timing, Trigger,
+    Blackbox, Cause, EpisodeKind, EventMeaning, FactKind, GAP_MARGIN_MS, Gap, GapReason,
+    HungWindow, Occurrence, OccurrenceKind, Output, PressureSpan, ProbeTick, ProcessTop,
+    REPORTED_EXEMPLARS, RING_MS, Severity, Timing, Trigger,
 };
 
 fn blackbox() -> Blackbox {
@@ -371,6 +371,43 @@ fn a_storm_of_one_event_keeps_few_triggers() {
         found[0].end_ms,
         T + 8_999 * 33,
         "the storm still sets the span"
+    );
+}
+
+#[test]
+fn a_storm_says_how_many_repeats_were_not_kept() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 330);
+    for i in 0..9_000 {
+        bb.push_event(event(T + i * 33, "disk", 153, EventMeaning::DiskRetry));
+    }
+
+    let found = occurrences(bb.poll(T + 600_000));
+    let dropped: Vec<u32> = found[0]
+        .facts
+        .iter()
+        .filter_map(|f| match f.kind {
+            FactKind::EventsDropped { count } => Some(count),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dropped, vec![9_000 - REPORTED_EXEMPLARS as u32]);
+}
+
+#[test]
+fn a_few_repeats_drop_nothing() {
+    let mut bb = blackbox();
+    feed(&mut bb, -60, 200);
+    for i in 0..REPORTED_EXEMPLARS as i64 {
+        bb.push_event(event(T + i * 1_000, "disk", 153, EventMeaning::DiskRetry));
+    }
+
+    let found = occurrences(bb.poll(T + 600_000));
+    assert!(
+        found[0]
+            .facts
+            .iter()
+            .all(|f| !matches!(f.kind, FactKind::EventsDropped { .. }))
     );
 }
 

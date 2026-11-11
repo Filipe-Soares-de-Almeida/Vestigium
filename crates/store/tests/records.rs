@@ -3,8 +3,8 @@ use std::path::Path;
 
 use vestigium_core::{
     CURATED, Cause, Channel, ColorTheme, Confidence, CoreLoad, DetailLevel, Episode, EpisodeKind,
-    EventMeaning, Gap, GapReason, LanguagePref, MachineInfo, NextStep, Occurrence, OccurrenceKind,
-    Retention, Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
+    EventMeaning, Fact, FactKind, Gap, GapReason, LanguagePref, MachineInfo, NextStep, Occurrence,
+    OccurrenceKind, Retention, Sample, Settings, Severity, Suspect, Trigger, WinEvent, Window,
 };
 use vestigium_store::{Batch, SCHEMA_VERSION, Segment, Series, Store, StoreError, encode};
 
@@ -287,20 +287,37 @@ fn a_not_measured_occurrence_round_trips() {
 }
 
 #[test]
-fn a_version_1_occurrence_row_still_loads() {
+fn an_occurrence_that_dropped_repeats_round_trips() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("vestigium.db");
-    let stored = occurrence(10_000, 12_500);
-    let id = open(dir.path()).insert_occurrence(&stored).unwrap();
-    rusqlite::Connection::open(&path)
-        .unwrap()
-        .execute("UPDATE occurrence SET version = 1", [])
-        .unwrap();
+    let mut store = open(dir.path());
+    let mut stored = occurrence(10_000, 12_500);
+    stored.facts = vec![Fact {
+        at_ms: 12_500,
+        kind: FactKind::EventsDropped { count: 8_984 },
+    }];
 
-    let store = open(dir.path());
+    let id = store.insert_occurrence(&stored).unwrap();
 
     assert_eq!(store.occurrence(id).unwrap(), Some(stored));
-    assert_eq!(store.occurrences(0, 20_000).unwrap().len(), 1);
+}
+
+#[test]
+fn an_occurrence_row_of_an_older_version_still_loads() {
+    for version in 1..=2 {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vestigium.db");
+        let stored = occurrence(10_000, 12_500);
+        let id = open(dir.path()).insert_occurrence(&stored).unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE occurrence SET version = ?1", [version])
+            .unwrap();
+
+        let store = open(dir.path());
+
+        assert_eq!(store.occurrence(id).unwrap(), Some(stored), "v{version}");
+        assert_eq!(store.occurrences(0, 20_000).unwrap().len(), 1);
+    }
 }
 
 #[test]

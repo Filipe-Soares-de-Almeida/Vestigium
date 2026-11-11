@@ -1,10 +1,10 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::{
-    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, GapReason, HUNG_AFTER_MS,
-    HangSpan, HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan,
-    ProbeTick, ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger, WinEvent, Window,
-    classify, facts, freeze, severity, suspects,
+    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Fact, FactKind, Gap, GapReason,
+    HUNG_AFTER_MS, HangSpan, HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind,
+    PressureSpan, ProbeTick, ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger,
+    WinEvent, Window, classify, facts, freeze, severity, suspects,
 };
 
 /// How much the rings keep.
@@ -77,6 +77,8 @@ struct Pending {
     start_ms: i64,
     end_ms: i64,
     triggers: Vec<Trigger>,
+    /// Reported events left out of `triggers` because their provider and id were over the cap.
+    dropped: u32,
     sensitive: bool,
 }
 
@@ -135,10 +137,12 @@ impl Pending {
             .any(|t| self.accepts(t, other.start_ms, other.end_ms, timing))
     }
 
-    /// Adds the trigger unless this already holds enough reported events like it.
+    /// Adds the trigger unless this already holds enough reported events like it, and counts it out.
     fn keep(&mut self, trigger: Trigger) {
         if self.repeats(&trigger) < REPORTED_EXEMPLARS {
             self.triggers.push(trigger);
+        } else {
+            self.dropped += 1;
         }
     }
 }
@@ -492,6 +496,7 @@ impl Blackbox {
                 start_ms: start,
                 end_ms: end,
                 triggers: vec![trigger],
+                dropped: 0,
                 sensitive: self.sensitive,
             });
             return;
@@ -521,6 +526,7 @@ impl Blackbox {
             merged.start_ms = merged.start_ms.min(absorbed.start_ms);
             merged.end_ms = merged.end_ms.max(absorbed.end_ms);
             merged.sensitive |= absorbed.sensitive;
+            merged.dropped += absorbed.dropped;
             for trigger in absorbed.triggers {
                 merged.keep(trigger);
             }
@@ -532,6 +538,7 @@ impl Blackbox {
             start_ms,
             end_ms,
             mut triggers,
+            dropped,
             sensitive,
         } = pending;
         triggers.sort_by_key(Trigger::start_ms);
@@ -585,13 +592,21 @@ impl Blackbox {
             .map(|t| severity(stall_ms(t)))
             .max()
             .unwrap_or(Severity::Light);
+        let mut facts = facts(&triggers, &window);
+        if dropped > 0 {
+            facts.push(Fact {
+                at_ms: end_ms,
+                kind: FactKind::EventsDropped { count: dropped },
+            });
+            facts.sort_by_key(|f| f.at_ms);
+        }
         let occurrence = Occurrence {
             kind,
             start_ms,
             end_ms,
             severity,
             suspects: suspects(&triggers, &window),
-            facts: facts(&triggers, &window),
+            facts,
             triggers,
             window,
             sensitive,

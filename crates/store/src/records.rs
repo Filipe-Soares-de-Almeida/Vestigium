@@ -11,7 +11,7 @@ use crate::codes::{
 use crate::{Store, StoreError, decode, encode};
 
 /// Layout of the `Occurrence` and `Episode` BLOBs written today, and the oldest one still read.
-const RECORD_VERSION: i64 = 2;
+const RECORD_VERSION: i64 = 3;
 const RECORD_VERSION_MIN: i64 = 1;
 
 fn episode_code(kind: &EpisodeKind) -> i64 {

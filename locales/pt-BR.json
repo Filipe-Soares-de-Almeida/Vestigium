@@ -462,6 +462,7 @@
   "ui.occurrence.fact.AppHung.tech": "{exe}: janela marcada como Não respondendo pelo Windows",
   "ui.occurrence.fact.AppRecovered": "{app} voltou a responder.",
   "ui.occurrence.fact.AppClosedWhileHung": "{app} foi fechado sem voltar a responder.",
+  "ui.occurrence.fact.EventsDropped": "Mais {count} repetições do mesmo evento não foram guardadas.",
   "ui.occurrence.fact.Event": "{event}.",
   "ui.occurrence.fact.Event.tech": "Evento {id} de {provider}",
   "ui.occurrence.fact.crossed.CpuPct": "A CPU chegou ao limite.",

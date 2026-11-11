@@ -256,6 +256,9 @@ How to use this file:
   every few minutes. A report now keeps the first 16 events of each provider and event number, and
   events of one provider within two minutes of each other join one report. A report with such an event
   now appears about two minutes after the event instead of half a minute, because it waits for more.
+- A report that left out repeats of the same Windows event now says how many, in a line such as
+  "1,200 more repeats of the same event were not kept", in English and Portuguese. The window and
+  the watcher must be updated together, because the stored report and the pipe protocol changed.
 - A program that stopped responding is now blamed with high confidence only when its own processor
   or disk use shows during the freeze, or when nothing else in the system explains the stall.
   Before, any hung window put its program first, ahead of a measured memory or disk cause, so a

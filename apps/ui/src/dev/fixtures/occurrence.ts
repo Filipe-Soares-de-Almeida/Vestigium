@@ -290,6 +290,7 @@ function storageFreeze(): OccurrenceDto {
       [1000, { Event: { meaning: "StorageReset", provider: "storahci", id: 129 } }],
       [2000, { Event: { meaning: "DiskRetry", provider: "disk", id: 153 } }],
       [6800, "FreezeEnded"],
+      [6800, { EventsDropped: { count: 1184 } }],
       [8000, { AppHung: { name: "Chatter.exe" } }],
       [11_000, { AppRecovered: { name: "Chatter.exe" } }],
     ],
