@@ -519,6 +519,16 @@ How to use this file:
 - The administrator helper now reads a tweak plan or a dump deletion list through one open handle that
   no one else can write to, and removes the surface scan's progress file through the handle that
   created it, so a folder swapped for a link while a job runs cannot redirect those steps.
+- Tweaks made with administrator rights are now also recorded in a journal that only administrators
+  can write, a folder under ProgramData that the helper makes and checks before every use. The
+  history of a tweak lives in your own data folder, which any program running as you can write, so a
+  forged entry used to show an Undo that made the helper write a value nobody had chosen. Now the
+  monitor keeps a change in the history only when the journal describes it, the window refuses an
+  Undo the journal does not hold before asking for permission, and the helper runs only the Undo of
+  a change it recorded, with the values it recorded. A tweak made before this version has no journal
+  entry and can still be undone once, with the checks every undo already has: the value must be one
+  the setting accepts and Windows must still hold what was written. The window, the monitor and the
+  helper must be updated together.
 
 ## [0.1.0] - 2026-11-09
 

@@ -698,6 +698,7 @@ fn item(
         tweak,
         subject: None,
         undo_of,
+        undo_journal: None,
         changes: changes
             .into_iter()
             .map(|(setting, to)| SettingChange {
@@ -962,6 +963,7 @@ fn a_write_that_may_have_landed_stays_in_the_undo() {
         undo_of: None,
         results: vec![result(error)],
         restore_point: None,
+        journal: None,
     };
     assert_eq!(change(None).written().len(), 1);
     assert_eq!(
@@ -978,6 +980,7 @@ fn undo_item(setting: Setting, from: Value, to: Value) -> vestigium_core::PlanIt
         tweak: TweakId::CrashDump,
         subject: None,
         undo_of: Some(1),
+        undo_journal: None,
         changes: vec![SettingChange { setting, from, to }],
     }
 }
@@ -989,6 +992,7 @@ fn a_forged_undo_cannot_write_an_absurd_value() {
         tweak: TweakId::AppDumps,
         subject: None,
         undo_of: Some(1),
+        undo_journal: None,
         changes: vec![SettingChange {
             setting: count.clone(),
             from: Value::Dword(10),
@@ -1193,6 +1197,7 @@ fn an_intent_survives_the_file_it_is_written_to() {
             tweak: TweakId::AppDumps,
             subject: Some("a".into()),
             undo_of: Some(3),
+            journal: Some(9),
             settings: vec![vestigium_core::IntentSetting {
                 setting: first,
                 before: None,

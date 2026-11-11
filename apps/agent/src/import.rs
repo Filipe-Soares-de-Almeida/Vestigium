@@ -7,7 +7,8 @@ use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, TestRunV2, di
 use vestigium_core::{
     Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
     DeepCapture, DumpDeletion, DumpScan, ProbeHiccup, SettingStore, TWEAK_INTENT_VERSION,
-    TWEAK_PLAN_VERSION, TweakIntent, TweakResults, settle_interrupted,
+    TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakJournal, TweakResults, backed_by_journal,
+    settle_interrupted,
 };
 use vestigium_store::Store;
 
@@ -120,19 +121,40 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> DumpImport {
 /// longer than the few seconds the writes after it take.
 const INTERRUPTED_AFTER: Duration = Duration::from_secs(10 * 60);
 
-/// Stores the tweak results of `dir` in the history and deletes them with their plans and intents,
-/// then settles each old intent that has no result against what Windows holds now; returns the
-/// ids of the changes in the order stored.
-pub fn import_tweaks(dir: &Path, store: &mut Store, settings: &mut impl SettingStore) -> Vec<i64> {
+/// The changes of `results` the journal backs, since any process of the user can write a result
+/// file; `Err` when the journal cannot be read now.
+fn backed<'a>(
+    results: &'a TweakResults,
+    journal: &impl TweakJournal,
+) -> Result<Vec<&'a TweakChange>, String> {
+    let mut kept = Vec::new();
+    for change in &results.changes {
+        if backed_by_journal(change, journal)? {
+            kept.push(change);
+        }
+    }
+    Ok(kept)
+}
+
+/// Stores the journaled changes of the tweak results of `dir` and deletes the files, then settles
+/// each old intent with no result against Windows; returns the ids stored, in order.
+pub fn import_tweaks(
+    dir: &Path,
+    store: &mut Store,
+    settings: &mut impl SettingStore,
+    journal: &impl TweakJournal,
+) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "tweaked") {
         let Some(results) = read_versioned::<TweakResults>(&path, TWEAK_PLAN_VERSION) else {
             discard_if_stale(&path);
             continue;
         };
-        let stored: Result<Vec<i64>, _> = results
-            .changes
-            .iter()
+        let Ok(kept) = backed(&results, journal) else {
+            continue;
+        };
+        let stored: Result<Vec<i64>, _> = kept
+            .into_iter()
             .map(|change| store.record_tweak_change(change, results.ts_ms, Applier::Elevated))
             .collect();
         let Ok(stored) = stored else {
@@ -143,13 +165,18 @@ pub fn import_tweaks(dir: &Path, store: &mut Store, settings: &mut impl SettingS
         let _ = fs::remove_file(path.with_extension("plan"));
         let _ = fs::remove_file(&path);
     }
-    ids.extend(settle_intents(dir, store, settings));
+    ids.extend(settle_intents(dir, store, settings, journal));
     ids
 }
 
 /// Records what became of each intent whose helper left no result: the file is old, no `.tweaked`
 /// of the same number exists, and the settings are read as Windows holds them now.
-fn settle_intents(dir: &Path, store: &mut Store, settings: &mut impl SettingStore) -> Vec<i64> {
+fn settle_intents(
+    dir: &Path,
+    store: &mut Store,
+    settings: &mut impl SettingStore,
+    journal: &impl TweakJournal,
+) -> Vec<i64> {
     let now = SystemTime::now();
     let mut ids = Vec::new();
     for path in numbered_files(dir, "intent") {
@@ -167,9 +194,11 @@ fn settle_intents(dir: &Path, store: &mut Store, settings: &mut impl SettingStor
             continue;
         };
         let results = settle_interrupted(&intent, settings);
-        let stored: Result<Vec<i64>, _> = results
-            .changes
-            .iter()
+        let Ok(kept) = backed(&results, journal) else {
+            continue;
+        };
+        let stored: Result<Vec<i64>, _> = kept
+            .into_iter()
             .map(|change| store.record_tweak_change(change, results.ts_ms, Applier::Elevated))
             .collect();
         let Ok(stored) = stored else {
@@ -372,6 +401,46 @@ mod tests {
             _: &vestigium_core::Value,
         ) -> Result<(), u32> {
             panic!("the importer only reads Windows settings");
+        }
+    }
+
+    /// A journal held in memory; ids count from 1, and `unreadable` makes every lookup fail.
+    #[derive(Default)]
+    struct Journal {
+        entries: Vec<vestigium_core::JournalEntry>,
+        unreadable: bool,
+    }
+
+    impl TweakJournal for Journal {
+        fn entry(&self, id: u64) -> Result<Option<vestigium_core::JournalEntry>, String> {
+            if self.unreadable {
+                return Err("denied".into());
+            }
+            let at = usize::try_from(id).ok().and_then(|id| id.checked_sub(1));
+            Ok(at.and_then(|at| self.entries.get(at)).cloned())
+        }
+
+        fn record(&mut self, _: &vestigium_core::JournalEntry) -> Result<u64, String> {
+            panic!("the importer only reads the journal");
+        }
+    }
+
+    /// A journal whose entry 1 is the Mpo tweak taking its setting from absent to 5.
+    fn journal_of_mpo() -> Journal {
+        use vestigium_core::{IntentSetting, JournalEntry, TweakId, Value};
+        Journal {
+            entries: vec![JournalEntry {
+                ts_ms: 1,
+                tweak: TweakId::Mpo,
+                subject: None,
+                undoes: None,
+                settings: vec![IntentSetting {
+                    setting: TweakId::Mpo.settings()[0].clone(),
+                    before: Some(Value::Absent),
+                    to: Value::Dword(5),
+                }],
+            }],
+            unreadable: false,
         }
     }
 
@@ -628,6 +697,7 @@ mod tests {
                 error: None,
             }],
             restore_point: Some(vestigium_core::RestorePoint::Created),
+            journal: Some(1),
         };
         fs::write(tweaks.join("30.plan"), [TWEAK_PLAN_VERSION]).unwrap();
         write_versioned(
@@ -640,10 +710,12 @@ mod tests {
         );
 
         assert_eq!(
-            import_tweaks(&tweaks, &mut store, &mut Held::default()),
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
             vec![1]
         );
-        assert!(import_tweaks(&tweaks, &mut store, &mut Held::default()).is_empty());
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
         assert!(!tweaks.join("30.plan").exists() && !tweaks.join("30.tweaked").exists());
         let rows = store.tweaks_in_place().unwrap();
         assert_eq!(rows[0].change, change);
@@ -671,8 +743,16 @@ mod tests {
                 tweak: mpo,
                 subject: None,
                 undo_of: None,
-                results: Vec::new(),
+                results: vec![vestigium_core::SettingResult {
+                    change: vestigium_core::SettingChange {
+                        setting: mpo.settings()[0].clone(),
+                        from: vestigium_core::Value::Absent,
+                        to: vestigium_core::Value::Dword(5),
+                    },
+                    error: Some(5),
+                }],
                 restore_point: None,
+                journal: None,
             }],
         };
         let write_all = || {
@@ -685,13 +765,13 @@ mod tests {
         let first = (
             import_captures(&captures, &[], &mut store),
             import_scans(&scans, &mut store),
-            import_tweaks(&tweaks, &mut store, &mut Held::default()),
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
         );
         write_all();
         let second = (
             import_captures(&captures, &[], &mut store),
             import_scans(&scans, &mut store),
-            import_tweaks(&tweaks, &mut store, &mut Held::default()),
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
         );
 
         assert_eq!(second, first, "the stored rows answer for the copies");
@@ -714,6 +794,7 @@ mod tests {
                 tweak: TweakId::Mpo,
                 subject: None,
                 undo_of: None,
+                journal: Some(1),
                 settings: vec![IntentSetting {
                     setting: TweakId::Mpo.settings()[0].clone(),
                     before: Some(Value::Absent),
@@ -756,7 +837,12 @@ mod tests {
             fs::create_dir(&tweaks).unwrap();
             left_behind(&tweaks, "50", 5_000);
 
-            let ids = import_tweaks(&tweaks, &mut store, &mut mpo_now(now.clone()));
+            let ids = import_tweaks(
+                &tweaks,
+                &mut store,
+                &mut mpo_now(now.clone()),
+                &journal_of_mpo(),
+            );
 
             assert_eq!(ids.len(), 1, "{now:?}");
             let rows = store.tweak_changes(i64::MIN, i64::MAX).unwrap();
@@ -769,7 +855,9 @@ mod tests {
                 Some(vestigium_core::RestorePoint::Unconfirmed)
             );
             assert!(!tweaks.join("50.intent").exists() && !tweaks.join("50.plan").exists());
-            assert!(import_tweaks(&tweaks, &mut store, &mut mpo_now(now)).is_empty());
+            assert!(
+                import_tweaks(&tweaks, &mut store, &mut mpo_now(now), &journal_of_mpo()).is_empty()
+            );
         }
     }
 
@@ -786,6 +874,7 @@ mod tests {
             &tweaks,
             &mut store,
             &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
         );
 
         assert!(ids.is_empty());
@@ -806,6 +895,7 @@ mod tests {
             &tweaks,
             &mut store,
             &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
         );
 
         assert!(
@@ -831,7 +921,7 @@ mod tests {
             },
         );
 
-        import_tweaks(&tweaks, &mut store, &mut Held::default());
+        import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
 
         assert!(!tweaks.join("50.tweaked").exists());
         assert!(!tweaks.join("50.intent").exists() && !tweaks.join("50.plan").exists());
@@ -851,7 +941,7 @@ mod tests {
             &intent_of_mpo(1),
         );
 
-        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default());
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
 
         assert!(ids.is_empty());
         assert!(tweaks.join("50.intent").exists());
@@ -876,7 +966,9 @@ mod tests {
             LEFTOVER_AFTER + Duration::from_secs(60),
         );
 
-        assert!(import_tweaks(&tweaks, &mut store, &mut Held::default()).is_empty());
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
 
         assert!(!tweaks.join("30.tweaked").exists(), "old and empty goes");
         assert!(
@@ -902,7 +994,9 @@ mod tests {
             LEFTOVER_AFTER + Duration::from_secs(60),
         );
 
-        assert!(import_tweaks(&tweaks, &mut store, &mut Held::default()).is_empty());
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
 
         assert!(!tweaks.join("40.tweaked.tmp").exists());
         assert!(tweaks.join("41.tweaked.tmp").exists());
@@ -1076,5 +1170,186 @@ mod tests {
         fs::write(tests.join("50.test"), bytes).unwrap();
         assert!(import_tests(&tests, &mut store).is_empty());
         assert!(tests.join("50.test").exists());
+    }
+
+    /// A change of the AppDumps tweak as a process of the user could forge it, with no journal entry.
+    fn forged_app_dumps_change(journal: Option<u64>) -> vestigium_core::TweakChange {
+        use vestigium_core::{SettingChange, SettingResult, TweakId, Value};
+        let count = TweakId::AppDumps.settings()[2].clone();
+        vestigium_core::TweakChange {
+            tweak: TweakId::AppDumps,
+            subject: None,
+            undo_of: None,
+            results: vec![SettingResult {
+                change: SettingChange {
+                    setting: count,
+                    from: Value::Dword(u32::MAX),
+                    to: Value::Dword(25),
+                },
+                error: None,
+            }],
+            restore_point: Some(vestigium_core::RestorePoint::Created),
+            journal,
+        }
+    }
+
+    fn drop_results(tweaks: &Path, name: &str, changes: Vec<vestigium_core::TweakChange>) {
+        write_versioned(
+            &tweaks.join(format!("{name}.tweaked")),
+            TWEAK_PLAN_VERSION,
+            &TweakResults { ts_ms: 30, changes },
+        );
+    }
+
+    #[test]
+    fn a_forged_result_is_not_imported_as_elevated_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        drop_results(&tweaks, "1", vec![forged_app_dumps_change(None)]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(ids.is_empty());
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
+        assert!(store.tweaks_in_place().unwrap().is_empty());
+        assert!(
+            !tweaks.join("1.tweaked").exists(),
+            "the forged file is removed"
+        );
+    }
+
+    #[test]
+    fn a_result_naming_an_entry_the_journal_does_not_hold_is_not_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mut elsewhere = forged_app_dumps_change(Some(1));
+        drop_results(&tweaks, "1", vec![elsewhere.clone()]);
+        elsewhere.journal = Some(77);
+        drop_results(&tweaks, "2", vec![elsewhere]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(
+            ids.is_empty(),
+            "entry 1 is another tweak's, entry 77 is not there"
+        );
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_result_that_wrote_other_values_than_its_entry_is_not_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mpo = vestigium_core::TweakId::Mpo;
+        let mut change = vestigium_core::TweakChange {
+            tweak: mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![vestigium_core::SettingResult {
+                change: vestigium_core::SettingChange {
+                    setting: mpo.settings()[0].clone(),
+                    from: vestigium_core::Value::Absent,
+                    to: vestigium_core::Value::Dword(200),
+                },
+                error: None,
+            }],
+            restore_point: None,
+            journal: Some(1),
+        };
+        drop_results(&tweaks, "1", vec![change.clone()]);
+        change.results[0].change.to = vestigium_core::Value::Dword(5);
+        drop_results(&tweaks, "2", vec![change]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert_eq!(ids.len(), 1, "only the change the entry describes is kept");
+    }
+
+    #[test]
+    fn a_refused_change_needs_no_entry_but_a_forged_success_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mut refused = forged_app_dumps_change(None);
+        refused.results[0].error = Some(5);
+        let mut undoing = forged_app_dumps_change(None);
+        undoing.undo_of = Some(1);
+        undoing.results.clear();
+        drop_results(&tweaks, "1", vec![refused, undoing]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert_eq!(
+            ids.len(),
+            1,
+            "a refusal writes nothing; an empty undo would hide a row"
+        );
+    }
+
+    #[test]
+    fn a_journal_that_cannot_be_read_leaves_the_result_for_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mpo = vestigium_core::TweakId::Mpo;
+        let change = vestigium_core::TweakChange {
+            tweak: mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![vestigium_core::SettingResult {
+                change: vestigium_core::SettingChange {
+                    setting: mpo.settings()[0].clone(),
+                    from: vestigium_core::Value::Absent,
+                    to: vestigium_core::Value::Dword(5),
+                },
+                error: None,
+            }],
+            restore_point: None,
+            journal: Some(1),
+        };
+        drop_results(&tweaks, "1", vec![change]);
+        let mut shut = journal_of_mpo();
+        shut.unreadable = true;
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &shut);
+        assert!(ids.is_empty());
+        assert!(tweaks.join("1.tweaked").exists(), "kept to try again");
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+        assert_eq!(ids.len(), 1);
+        assert!(!tweaks.join("1.tweaked").exists());
+    }
+
+    #[test]
+    fn a_forged_intent_is_not_settled_into_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        left_behind(&tweaks, "50", 5_000);
+        let mut forged = intent_of_mpo(5_000);
+        forged.items[0].journal = None;
+        let path = tweaks.join("50.intent");
+        fs::remove_file(&path).unwrap();
+        write_versioned(&path, TWEAK_INTENT_VERSION, &forged);
+        age(&path, Duration::from_secs(3600));
+
+        let ids = import_tweaks(
+            &tweaks,
+            &mut store,
+            &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
+        );
+
+        assert!(ids.is_empty());
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
     }
 }

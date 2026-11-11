@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{
-    EventSubscription, ProbeConfig, Wake, WindowsSettings, interrupt_ms, spawn_probe, wall_ms,
+    EventSubscription, KnownJournal, ProbeConfig, Wake, WindowsSettings, interrupt_ms, spawn_probe,
+    wall_ms,
 };
 use vestigium_core::{
     Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
@@ -284,7 +285,12 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
                 shared.health_due.store(true, Ordering::Release);
             }
             let dumps = import_dumps(&shared.dumps_dir, store);
-            let tweaks = import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
+            let tweaks = import_tweaks(
+                &shared.tweaks_dir,
+                store,
+                &mut WindowsSettings,
+                &KnownJournal::new(),
+            );
             let tests = import_tests(&shared.tests_dir, store);
             if !tests.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
@@ -364,7 +370,12 @@ impl SecondConnection {
             import_captures(&shared.captures_dir, &[], store);
             import_scans(&shared.scans_dir, store);
             import_dumps(&shared.dumps_dir, store);
-            import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
+            import_tweaks(
+                &shared.tweaks_dir,
+                store,
+                &mut WindowsSettings,
+                &KnownJournal::new(),
+            );
             import_tests(&shared.tests_dir, store);
         }
         Some(store)
@@ -719,6 +730,7 @@ pub(crate) mod tests {
             tweak: TweakId::GameDvr,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: dvr
                 .iter()
                 .map(|s| SettingChange {

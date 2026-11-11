@@ -879,6 +879,7 @@ pub async fn undo_tweak(
         crate::tweaks::undo_change(
             &history,
             &link,
+            &vestigium_collect::KnownJournal::new(),
             id,
             without_restore_point,
             now_ms(),

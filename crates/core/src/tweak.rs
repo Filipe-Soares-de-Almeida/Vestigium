@@ -7,8 +7,9 @@ use crate::{
     WinEvent, power_loss_detail,
 };
 
-/// Layout of the `TweakChange` BLOB written today; version 1 had no scheme in `Setting::PowerAc`.
-pub const TWEAK_CHANGE_VERSION: u8 = 2;
+/// Layout of the `TweakChange` BLOB written today; version 1 had no scheme in `Setting::PowerAc`
+/// and version 2 no journal entry.
+pub const TWEAK_CHANGE_VERSION: u8 = 3;
 /// A hibernation file this big is worth giving back when the system drive runs short.
 pub const BIG_HIBERFILE: u64 = 1 << 30;
 
@@ -1133,6 +1134,9 @@ pub struct TweakChange {
     pub undo_of: Option<i64>,
     pub results: Vec<SettingResult>,
     pub restore_point: Option<RestorePoint>,
+    /// The journal entry the helper recorded for this change before it wrote anything; `None` for
+    /// a change of the user's own, one refused before any write, and one made before the journal.
+    pub journal: Option<u64>,
 }
 
 impl TweakChange {
@@ -1160,7 +1164,7 @@ impl TweakChange {
 }
 
 /// Layout of the `TweakPlan` the window writes and the `TweakResults` the helper writes today.
-pub const TWEAK_PLAN_VERSION: u8 = 1;
+pub const TWEAK_PLAN_VERSION: u8 = 2;
 /// Most settings one item may change.
 const MOST_CHANGES: usize = 8;
 /// Win32 errors a change records when it is not written.
@@ -1175,7 +1179,7 @@ pub const ERROR_INTERRUPTED_UNCHANGED: u32 = 0x2000_0003;
 /// The helper stopped before it reported, and Windows holds neither value, or it cannot be read.
 pub const ERROR_INTERRUPTED_UNKNOWN: u32 = 0x2000_0004;
 /// Layout of the `TweakIntent` the helper writes before its first change.
-pub const TWEAK_INTENT_VERSION: u8 = 1;
+pub const TWEAK_INTENT_VERSION: u8 = 2;
 
 /// One tweak to apply or undo, as the window asks for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1184,6 +1188,9 @@ pub struct PlanItem {
     pub subject: Option<String>,
     /// The history row this item undoes; its changes then carry the values to put back.
     pub undo_of: Option<i64>,
+    /// The journal entry of the change this item undoes; `None` for an undo of a change made
+    /// before the journal existed.
+    pub undo_journal: Option<u64>,
     pub changes: Vec<SettingChange>,
 }
 
@@ -1259,7 +1266,7 @@ pub fn changed_outside(written: &[SettingChange], store: &mut impl SettingStore)
 
 /// Whether two readings of a setting are the same state; a service's running flag is left out,
 /// since it is still moving right after a start or a stop.
-fn same_state(a: &Value, b: &Value) -> bool {
+pub(crate) fn same_state(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (
             Value::Service { start, delayed, .. },
@@ -1309,6 +1316,8 @@ pub struct IntentItem {
     pub tweak: TweakId,
     pub subject: Option<String>,
     pub undo_of: Option<i64>,
+    /// The journal entry recorded for this item before the intent.
+    pub journal: Option<u64>,
     pub settings: Vec<IntentSetting>,
 }
 
@@ -1329,6 +1338,7 @@ pub fn intent_of(items: &[&PlanItem], store: &mut impl SettingStore, ts_ms: i64)
             tweak: item.tweak,
             subject: item.subject.clone(),
             undo_of: item.undo_of,
+            journal: None,
             settings: item
                 .changes
                 .iter()
@@ -1356,6 +1366,7 @@ pub fn settle_interrupted(intent: &TweakIntent, store: &mut impl SettingStore) -
             tweak: item.tweak,
             subject: item.subject.clone(),
             undo_of: item.undo_of,
+            journal: item.journal,
             results: item
                 .settings
                 .iter()
@@ -1443,5 +1454,6 @@ pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange 
         undo_of: item.undo_of,
         results,
         restore_point: None,
+        journal: None,
     }
 }

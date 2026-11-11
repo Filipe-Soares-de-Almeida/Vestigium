@@ -1073,6 +1073,7 @@ fn tweak_changes() -> Vec<TweakChange> {
                     error: (index % 2 == 0).then_some(5),
                 })
                 .collect(),
+            journal: restore_point.as_ref().map(|_| 12),
             restore_point,
         })
         .collect();
@@ -1082,6 +1083,7 @@ fn tweak_changes() -> Vec<TweakChange> {
         undo_of: None,
         results: Vec::new(),
         restore_point: None,
+        journal: None,
     });
     all
 }

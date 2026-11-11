@@ -95,6 +95,7 @@ impl From<TweakChangeV1> for TweakChange {
                 })
                 .collect(),
             restore_point: old.restore_point,
+            journal: None,
         }
     }
 }

@@ -26,7 +26,9 @@ mod shutdown;
 mod stutter;
 mod trigger;
 mod tweak;
+mod tweak_journal;
 mod tweak_v1;
+mod tweak_v2;
 mod window;
 mod xml;
 
@@ -94,5 +96,9 @@ pub use tweak::{
     carry_out, changed_outside, check_item, disabled_approval, helped, intent_of,
     settle_interrupted, undo,
 };
+pub use tweak_journal::{
+    JournalEntry, NoJournal, TWEAK_JOURNAL_VERSION, TweakJournal, backed_by_journal, check_undo,
+};
 pub use tweak_v1::{SettingChangeV1, SettingResultV1, SettingV1, TweakChangeV1};
+pub use tweak_v2::TweakChangeV2;
 pub use window::{Gap, GapReason, HangSpan, Window};

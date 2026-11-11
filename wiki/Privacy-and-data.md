@@ -27,6 +27,7 @@ Only the requests listed below. There is no account and no telemetry.
 | `%LOCALAPPDATA%\Vestigium\data\vestigium.db` | The history and the settings. Two companion files, ending in `-wal` and `-shm`, sit beside it while Vestigium runs. |
 | `%LOCALAPPDATA%\Vestigium\data\blackbox.ring` | The last few minutes of readings, kept on disk so a report after an unexpected shutdown can show what came before it. |
 | The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of tests, captures, scans and administrator tasks, waiting to be read into the history. Each file is removed once read; a file that cannot be read stays for 30 days without change and is then deleted. |
+| `%ProgramData%\Vestigium\tweaks` | A journal of the tweaks that needed administrator rights, written by the helper: one small file per change, with the settings it changed and their values before and after. Only an administrator can write in it. Vestigium reads it to tell a real change from a forged one when you select **Undo**. It holds no personal data, **Delete the history** does not remove it and uninstalling leaves it; an administrator can delete the folder, after which those changes can no longer be undone from Vestigium. |
 | `%LOCALAPPDATA%\app.vestigium\updates.json` | Whether to check for updates, when it last checked, and the last version whose notes you saw. |
 | `%LOCALAPPDATA%\app.vestigium\EBWebView` | The window's own browser files. |
 

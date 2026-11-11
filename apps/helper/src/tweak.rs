@@ -8,9 +8,9 @@ use vestigium_collect::{
     RESTORE_CREATED, RESTORE_SKIPPED, WindowsSettings, restore_events, sha256_hex, wall_ms,
 };
 use vestigium_core::{
-    Applier, PlanItem, RestorePoint, SettingResult, SettingStore, TWEAK_INTENT_VERSION,
-    TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakPlan, TweakResults, carry_out, check_item,
-    intent_of,
+    Applier, JournalEntry, PlanItem, RestorePoint, SettingResult, SettingStore,
+    TWEAK_INTENT_VERSION, TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakJournal, TweakPlan,
+    TweakResults, carry_out, check_item, check_undo, intent_of,
 };
 use windows::Win32::Foundation::{E_FAIL, ERROR_SERVICE_DISABLED};
 use windows::Win32::System::Com::{
@@ -28,7 +28,7 @@ use windows::Win32::System::Wmi::{
 };
 use windows::core::{BSTR, PCWSTR, w};
 
-use crate::{job, output};
+use crate::{job, journal, output};
 
 /// Most items one plan may hold.
 const MOST_ITEMS: usize = 32;
@@ -55,14 +55,21 @@ pub fn run(plan_path: &Path, sha256: &str) -> ExitCode {
     let Some(plan) = read_plan(&bytes) else {
         return ExitCode::from(job::REFUSED);
     };
+    let Ok(mut journal) = journal::open() else {
+        return ExitCode::from(job::REFUSED);
+    };
     let Ok(mut file) = output::create(&plan_path.with_extension("tweaked"), "tweaks", "tweaked")
     else {
         return ExitCode::from(job::REFUSED);
     };
     let intent_path = plan_path.with_extension("intent");
-    let Ok(results) = apply(&plan, &mut WindowsSettings, ask_restore_point, |intent| {
-        write_intent(&intent_path, intent)
-    }) else {
+    let Ok(results) = apply(
+        &plan,
+        &mut WindowsSettings,
+        &mut journal,
+        ask_restore_point,
+        |intent| write_intent(&intent_path, intent),
+    ) else {
         return ExitCode::from(job::REFUSED);
     };
     let mut bytes = vec![TWEAK_PLAN_VERSION];
@@ -100,20 +107,23 @@ pub fn read_plan(bytes: &[u8]) -> Option<TweakPlan> {
     (plan.items.len() <= MOST_ITEMS).then_some(plan)
 }
 
-/// Checks every item, asks for one restore point when something will be written, records the
-/// intent, then carries out the items that passed in order. Without a point, nothing is written
-/// unless the plan says so; when the intent cannot be recorded, nothing is written at all.
+/// Checks each item, asks for one restore point, records each item in the journal and the intent,
+/// then carries them out. Without a point, or when the journal or intent fails, nothing is written.
 pub fn apply(
     plan: &TweakPlan,
     store: &mut impl SettingStore,
+    journal: &mut impl TweakJournal,
     restore_point: impl FnOnce() -> RestorePoint,
     record_intent: impl FnOnce(&TweakIntent) -> Result<(), String>,
 ) -> Result<TweakResults, String> {
     let checked: Vec<bool> = plan
         .items
         .iter()
-        .map(|item| check_item(item, Applier::Elevated).is_ok())
+        .map(|item| {
+            check_item(item, Applier::Elevated).is_ok() && check_undo(item, journal).is_ok()
+        })
         .collect();
+    let mut entries: Vec<Option<u64>> = vec![None; plan.items.len()];
     let point = checked.contains(&true).then(restore_point);
     let blocked = matches!(
         point,
@@ -126,16 +136,30 @@ pub fn apply(
             .zip(&checked)
             .filter_map(|(item, &ok)| ok.then_some(item))
             .collect();
-        record_intent(&intent_of(&writing, store, wall_ms()))?;
+        let mut intent = intent_of(&writing, store, wall_ms());
+        let ts_ms = intent.ts_ms;
+        let ids = checked
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &ok)| ok.then_some(index));
+        for ((index, held), item) in ids.zip(&mut intent.items).zip(&writing) {
+            let undoes = item.undo_journal.filter(|_| item.undo_of.is_some());
+            let id = journal.record(&JournalEntry::of(held, ts_ms, undoes))?;
+            held.journal = Some(id);
+            entries[index] = Some(id);
+        }
+        record_intent(&intent)?;
     }
     let changes = plan
         .items
         .iter()
         .zip(&checked)
-        .map(|(item, &ok)| {
+        .zip(&entries)
+        .map(|((item, &ok), &entry_id)| {
             if ok && !blocked {
                 TweakChange {
                     restore_point: point,
+                    journal: entry_id,
                     ..carry_out(item, store)
                 }
             } else {
@@ -164,6 +188,7 @@ fn refused(item: &PlanItem, point: Option<RestorePoint>) -> TweakChange {
             })
             .collect(),
         restore_point: point,
+        journal: None,
     }
 }
 
@@ -369,7 +394,7 @@ mod tests {
     use std::process::Command;
     use std::rc::Rc;
 
-    use vestigium_core::{Hive, Setting, SettingChange, TweakId, Value};
+    use vestigium_core::{Hive, JournalEntry, Setting, SettingChange, TweakId, Value};
 
     use super::*;
 
@@ -400,6 +425,7 @@ mod tests {
             tweak: TweakId::Mpo,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: vec![SettingChange {
                 setting: setting.clone(),
                 from: Value::Absent,
@@ -414,6 +440,7 @@ mod tests {
             tweak: TweakId::GameDvr,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: vec![SettingChange {
                 setting: TweakId::GameDvr.settings()[0].clone(),
                 from: Value::Dword(1),
@@ -439,7 +466,14 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Created, |_| Ok(())).unwrap();
+        let results = apply(
+            &plan,
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
         let errors: Vec<_> = results.changes.iter().map(|c| c.results[0].error).collect();
         assert_eq!(errors, [Some(ERROR_REFUSED), Some(ERROR_REFUSED), None]);
         assert_eq!(store.writes, 1);
@@ -460,11 +494,25 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Off, |_| Ok(())).unwrap();
+        let results = apply(
+            &plan,
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Off,
+            |_| Ok(()),
+        )
+        .unwrap();
         assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
         assert_eq!(store.writes, 0);
         plan.without_restore_point = true;
-        let results = apply(&plan, &mut store, || RestorePoint::Off, |_| Ok(())).unwrap();
+        let results = apply(
+            &plan,
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Off,
+            |_| Ok(()),
+        )
+        .unwrap();
         assert_eq!(results.changes[0].results[0].error, None);
         assert_eq!(store.writes, 1);
     }
@@ -514,7 +562,14 @@ mod tests {
             values: vec![(setting, Value::Absent)],
             writes: 0,
         };
-        let results = apply(&plan, &mut store, || RestorePoint::Unconfirmed, |_| Ok(())).unwrap();
+        let results = apply(
+            &plan,
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Unconfirmed,
+            |_| Ok(()),
+        )
+        .unwrap();
         assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
         assert_eq!(
             results.changes[0].restore_point,
@@ -522,7 +577,14 @@ mod tests {
         );
         assert_eq!(store.writes, 0);
         plan.without_restore_point = true;
-        apply(&plan, &mut store, || RestorePoint::Unconfirmed, |_| Ok(())).unwrap();
+        apply(
+            &plan,
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Unconfirmed,
+            |_| Ok(()),
+        )
+        .unwrap();
         assert_eq!(store.writes, 1);
     }
 
@@ -538,7 +600,14 @@ mod tests {
                 values: vec![(setting.clone(), Value::Absent)],
                 writes: 0,
             };
-            apply(&plan, &mut store, || point, |_| Ok(())).unwrap();
+            apply(
+                &plan,
+                &mut store,
+                &mut MemoryJournal::default(),
+                || point,
+                |_| Ok(()),
+            )
+            .unwrap();
             assert_eq!(store.writes, 1, "{point:?}");
         }
     }
@@ -556,6 +625,7 @@ mod tests {
         let results = apply(
             &plan,
             &mut store,
+            &mut MemoryJournal::default(),
             || panic!("no point for refused items"),
             |_| panic!("no intent for refused items"),
         )
@@ -624,6 +694,7 @@ mod tests {
         let results = apply(
             &plan,
             &mut store,
+            &mut MemoryJournal::default(),
             || RestorePoint::Created,
             |intent| {
                 log.borrow_mut().push("intent");
@@ -657,6 +728,7 @@ mod tests {
         let result = apply(
             &plan,
             &mut store,
+            &mut MemoryJournal::default(),
             || RestorePoint::Created,
             |_| Err("disk full".into()),
         );
@@ -680,6 +752,7 @@ mod tests {
         let results = apply(
             &plan,
             &mut store,
+            &mut MemoryJournal::default(),
             || RestorePoint::Off,
             |_| panic!("the restore point blocks the write"),
         )
@@ -736,5 +809,272 @@ mod tests {
         assert!(made.status.success(), "could not make a junction");
         let through = data.join("tweaks").join("1.plan");
         assert!(output::check_existing(&through, "tweaks", "plan").is_err());
+    }
+
+    /// A journal held in memory; ids count from 1.
+    #[derive(Default)]
+    struct MemoryJournal {
+        entries: Vec<JournalEntry>,
+        full: bool,
+        log: Option<Rc<RefCell<Vec<&'static str>>>>,
+    }
+
+    impl TweakJournal for MemoryJournal {
+        fn entry(&self, id: u64) -> Result<Option<JournalEntry>, String> {
+            Ok(usize::try_from(id)
+                .ok()
+                .and_then(|at| self.entries.get(at.checked_sub(1)?))
+                .cloned())
+        }
+
+        fn record(&mut self, entry: &JournalEntry) -> Result<u64, String> {
+            if self.full {
+                return Err("journal full".into());
+            }
+            if let Some(log) = &self.log {
+                log.borrow_mut().push("journal");
+            }
+            self.entries.push(entry.clone());
+            Ok(self.entries.len() as u64)
+        }
+    }
+
+    /// The undo of `item` as the window builds it: the written values swapped back.
+    fn undo_of_item(item: &PlanItem, row: i64, journal: Option<u64>) -> PlanItem {
+        PlanItem {
+            tweak: item.tweak,
+            subject: item.subject.clone(),
+            undo_of: Some(row),
+            undo_journal: journal,
+            changes: vestigium_core::undo(&item.changes),
+        }
+    }
+
+    fn one_item(item: PlanItem) -> TweakPlan {
+        TweakPlan {
+            items: vec![item],
+            without_restore_point: false,
+        }
+    }
+
+    fn mpo_store() -> Fake {
+        Fake {
+            values: vec![(mpo().0, Value::Absent)],
+            writes: 0,
+        }
+    }
+
+    /// Applies `item` for real against `store` and `journal`, so entry 1 exists.
+    fn apply_to(item: &PlanItem, store: &mut Fake, journal: &mut MemoryJournal) {
+        apply(
+            &one_item(item.clone()),
+            store,
+            journal,
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
+    }
+
+    /// Runs `item` expecting it to be refused before any restore point, intent or write.
+    fn refused_run(item: PlanItem, store: &mut Fake, journal: &mut MemoryJournal) {
+        let results = apply(
+            &one_item(item),
+            store,
+            journal,
+            || panic!("no restore point for a refused item"),
+            |_| panic!("no intent for a refused item"),
+        )
+        .unwrap();
+        assert_eq!(results.changes[0].results[0].error, Some(ERROR_REFUSED));
+        assert_eq!(results.changes[0].journal, None);
+    }
+
+    #[test]
+    fn a_change_is_journaled_before_it_is_written_and_named_in_the_result() {
+        let (_, item) = mpo();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let mut store = Logged {
+            inner: mpo_store(),
+            log: log.clone(),
+        };
+        let mut journal = MemoryJournal {
+            log: Some(log.clone()),
+            ..MemoryJournal::default()
+        };
+
+        let results = apply(
+            &one_item(item),
+            &mut store,
+            &mut journal,
+            || RestorePoint::Created,
+            |intent| {
+                log.borrow_mut().push("intent");
+                assert_eq!(intent.items[0].journal, Some(1));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*log.borrow(), ["journal", "intent", "write"]);
+        assert_eq!(results.changes[0].journal, Some(1));
+        let entry = journal.entry(1).unwrap().unwrap();
+        assert_eq!(entry.tweak, TweakId::Mpo);
+        assert_eq!(entry.undoes, None);
+        assert_eq!(entry.settings[0].before, Some(Value::Absent));
+        assert_eq!(entry.settings[0].to, Value::Dword(5));
+    }
+
+    #[test]
+    fn nothing_is_written_when_the_journal_cannot_record() {
+        let (_, item) = mpo();
+        let mut store = mpo_store();
+        let mut journal = MemoryJournal {
+            full: true,
+            ..MemoryJournal::default()
+        };
+
+        let result = apply(
+            &one_item(item),
+            &mut store,
+            &mut journal,
+            || RestorePoint::Created,
+            |_| panic!("no intent without a journal entry"),
+        );
+
+        assert_eq!(result, Err("journal full".to_string()));
+        assert_eq!(store.writes, 0);
+    }
+
+    #[test]
+    fn a_refused_item_has_no_journal_entry() {
+        let mut store = Fake {
+            values: Vec::new(),
+            writes: 0,
+        };
+        let mut journal = MemoryJournal::default();
+        let results = apply(
+            &one_item(game_dvr()),
+            &mut store,
+            &mut journal,
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(results.changes[0].journal, None);
+        assert!(journal.entries.is_empty());
+    }
+
+    #[test]
+    fn an_undo_of_a_change_the_journal_holds_runs_and_is_journaled_too() {
+        let (setting, item) = mpo();
+        let mut store = mpo_store();
+        let mut journal = MemoryJournal::default();
+        apply_to(&item, &mut store, &mut journal);
+        assert_eq!(store.read(&setting), Some(Value::Dword(5)));
+
+        let results = apply(
+            &one_item(undo_of_item(&item, 7, Some(1))),
+            &mut store,
+            &mut journal,
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(results.changes[0].results[0].error, None);
+        assert_eq!(store.read(&setting), Some(Value::Absent));
+        assert_eq!(results.changes[0].journal, Some(2));
+        assert_eq!(journal.entry(2).unwrap().unwrap().undoes, Some(1));
+    }
+
+    #[test]
+    fn an_undo_the_journal_does_not_hold_is_refused() {
+        let (setting, item) = mpo();
+        let mut store = Fake {
+            values: vec![(setting, Value::Dword(5))],
+            writes: 0,
+        };
+        refused_run(
+            undo_of_item(&item, 7, Some(99)),
+            &mut store,
+            &mut MemoryJournal::default(),
+        );
+        assert_eq!(store.writes, 0);
+    }
+
+    #[test]
+    fn an_undo_that_names_other_values_than_the_entry_is_refused() {
+        let (setting, item) = mpo();
+        let mut store = mpo_store();
+        let mut journal = MemoryJournal::default();
+        apply_to(&item, &mut store, &mut journal);
+        let writes = store.writes;
+
+        let mut forged = undo_of_item(&item, 7, Some(1));
+        forged.changes[0].to = Value::Dword(200);
+        refused_run(forged, &mut store, &mut journal);
+
+        assert_eq!(store.writes, writes);
+        assert_eq!(store.read(&setting), Some(Value::Dword(5)));
+    }
+
+    #[test]
+    fn an_undo_of_another_tweaks_entry_or_of_an_undo_is_refused() {
+        let (_, item) = mpo();
+        let mut store = mpo_store();
+        let mut journal = MemoryJournal::default();
+        apply_to(&item, &mut store, &mut journal);
+        let undo = undo_of_item(&item, 7, Some(1));
+        apply_to(&undo, &mut store, &mut journal);
+        let writes = store.writes;
+
+        // Entry 2 is itself an undo, so it cannot be undone in turn.
+        refused_run(undo_of_item(&undo, 8, Some(2)), &mut store, &mut journal);
+
+        let mut other = undo_of_item(&item, 7, Some(1));
+        other.tweak = TweakId::GameDvr;
+        refused_run(other, &mut store, &mut journal);
+
+        assert_eq!(store.writes, writes);
+    }
+
+    #[test]
+    fn an_undo_of_a_change_made_before_the_journal_still_gets_the_old_checks() {
+        let (setting, item) = mpo();
+        let old = undo_of_item(&item, 7, None);
+        let mut store = Fake {
+            values: vec![(setting.clone(), Value::Dword(5))],
+            writes: 0,
+        };
+
+        let results = apply(
+            &one_item(old.clone()),
+            &mut store,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(results.changes[0].results[0].error, None);
+        assert_eq!(store.read(&setting), Some(Value::Absent));
+
+        let mut changed = Fake {
+            values: vec![(setting, Value::Dword(9))],
+            writes: 0,
+        };
+        let results = apply(
+            &one_item(old),
+            &mut changed,
+            &mut MemoryJournal::default(),
+            || RestorePoint::Created,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            results.changes[0].results[0].error,
+            Some(vestigium_core::ERROR_CHANGED_SINCE)
+        );
+        assert_eq!(changed.writes, 0, "a value changed outside is left alone");
     }
 }

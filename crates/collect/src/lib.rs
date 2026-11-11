@@ -12,6 +12,7 @@ mod hash;
 mod health;
 mod hung;
 mod hwtest;
+mod journal;
 mod memory;
 mod pdh;
 mod presentmon;
@@ -45,6 +46,10 @@ pub use hung::hung_pids;
 pub use hwtest::{
     BenchTarget, LockedRegion, MemoryProgress, PatternRun, Words, benchmark,
     benchmark_with_timeout, disk_io_bytes, memory_diagnostic_events, memory_test, run_patterns,
+};
+pub use journal::{
+    Ace, AclReport, DiskFolder, FolderJournal, FolderProtection, JournalError, JournalFolder,
+    KnownJournal, WindowsProtection, journal_dir, judge, open_journal, report_of,
 };
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};

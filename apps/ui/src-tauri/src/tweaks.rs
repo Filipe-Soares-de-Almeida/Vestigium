@@ -11,7 +11,7 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Advice, Applier, Helped, PlanItem, Status, TWEAK_PLAN_VERSION, TWEAKS, TweakChange, TweakId,
-    TweakInputs, TweakPlan, advise, changed_outside, helped, undo,
+    TweakInputs, TweakJournal, TweakPlan, advise, changed_outside, check_undo, helped, undo,
 };
 use vestigium_ipc::{Request, Response};
 use vestigium_store::TweakChangeRow;
@@ -174,6 +174,7 @@ pub fn apply(
                     tweak: a.tweak,
                     subject: a.subject.clone(),
                     undo_of: None,
+                    undo_journal: None,
                     changes: a.changes.clone(),
                 };
                 (item, a.applier)
@@ -183,10 +184,12 @@ pub fn apply(
     carry(history, link, items, without_restore_point, now_ms, launch)
 }
 
-/// Puts back what one change wrote, by the same way it was written.
+/// Puts back what one change wrote, by the way it was written; an elevated change the journal
+/// does not hold is refused, unless it predates the journal.
 pub fn undo_change(
     history: &Mutex<History>,
     link: &Link,
+    journal: &impl TweakJournal,
     id: i64,
     without_restore_point: bool,
     now_ms: i64,
@@ -199,6 +202,19 @@ pub fn undo_change(
         return Err(UiError::Failed(format!("change {id} cannot be undone")));
     }
     let written = row.change.written();
+    let item = PlanItem {
+        tweak: row.change.tweak,
+        subject: row.change.subject.clone(),
+        undo_of: Some(id),
+        undo_journal: row
+            .change
+            .journal
+            .filter(|_| row.applier == Applier::Elevated),
+        changes: undo(&written),
+    };
+    if row.applier == Applier::Elevated {
+        check_undo(&item, journal).map_err(UiError::Failed)?;
+    }
     if changed_outside(&written, &mut WindowsSettings) {
         return Err(UiError::ChangedSince);
     }
@@ -208,12 +224,6 @@ pub fn undo_change(
             exit_code: None,
         });
     }
-    let item = PlanItem {
-        tweak: row.change.tweak,
-        subject: row.change.subject.clone(),
-        undo_of: Some(id),
-        changes: undo(&written),
-    };
     carry(
         history,
         link,
@@ -311,7 +321,7 @@ fn write_plan(path: &Path, plan: &TweakPlan) -> Result<HeldPlan, UiError> {
 
 #[cfg(test)]
 mod tests {
-    use vestigium_core::{SettingChange, Value};
+    use vestigium_core::{IntentSetting, JournalEntry, SettingChange, SettingResult, Value};
 
     use super::*;
 
@@ -325,6 +335,7 @@ mod tests {
             tweak: TweakId::GameDvr,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: vec![SettingChange {
                 setting,
                 from: Value::Dword(1),
@@ -371,5 +382,121 @@ mod tests {
         );
         drop(held);
         assert!(std::fs::write(&path, b"changed").is_ok());
+    }
+
+    /// A journal held in memory; ids count from 1.
+    struct Journal(Vec<JournalEntry>);
+
+    impl TweakJournal for Journal {
+        fn entry(&self, id: u64) -> Result<Option<JournalEntry>, String> {
+            let at = usize::try_from(id).ok().and_then(|id| id.checked_sub(1));
+            Ok(at.and_then(|at| self.0.get(at)).cloned())
+        }
+
+        fn record(&mut self, _: &JournalEntry) -> Result<u64, String> {
+            panic!("the window only reads the journal");
+        }
+    }
+
+    /// The Mpo tweak taking its setting from absent to 5, as a row of the history and a journal entry.
+    fn mpo_row(journal: Option<u64>) -> (TweakChange, Journal) {
+        let setting = TweakId::Mpo.settings().remove(0);
+        let change = TweakChange {
+            tweak: TweakId::Mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![SettingResult {
+                change: SettingChange {
+                    setting: setting.clone(),
+                    from: Value::Absent,
+                    to: Value::Dword(5),
+                },
+                error: None,
+            }],
+            restore_point: None,
+            journal,
+        };
+        let entry = JournalEntry {
+            ts_ms: 1,
+            tweak: TweakId::Mpo,
+            subject: None,
+            undoes: None,
+            settings: vec![IntentSetting {
+                setting,
+                before: Some(Value::Absent),
+                to: Value::Dword(5),
+            }],
+        };
+        (change, Journal(vec![entry]))
+    }
+
+    /// Records `change` as an elevated row and tries to undo it; the plan the helper was launched
+    /// with, when it was.
+    fn try_undo(
+        change: &TweakChange,
+        journal: &Journal,
+    ) -> (Result<TweaksApplied, UiError>, Option<TweakPlan>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vestigium.db");
+        let id = vestigium_store::Store::open(&path)
+            .unwrap()
+            .record_tweak_change(change, 10, Applier::Elevated)
+            .unwrap();
+        let history = Mutex::new(History::new(Some(path)));
+        let mut launched = None;
+        let undone = undo_change(&history, &Link::new(None), journal, id, false, 20, |args| {
+            let path = args.split('"').nth(1).unwrap();
+            let bytes = std::fs::read(path).unwrap();
+            launched = postcard::from_bytes::<TweakPlan>(&bytes[1..]).ok();
+            Ok(Some(0))
+        });
+        (undone, launched)
+    }
+
+    #[test]
+    fn an_undo_the_journal_does_not_hold_never_reaches_the_helper() {
+        let (change, journal) = mpo_row(Some(9));
+
+        let (undone, launched) = try_undo(&change, &journal);
+
+        assert!(matches!(undone, Err(UiError::Failed(_))), "{undone:?}");
+        assert!(
+            launched.is_none(),
+            "no permission prompt for a change nobody recorded"
+        );
+    }
+
+    #[test]
+    fn an_undo_of_another_tweaks_entry_never_reaches_the_helper() {
+        let (mut change, mut journal) = mpo_row(Some(1));
+        journal.0[0].tweak = TweakId::GameDvr;
+        change.results[0].change.to = Value::Dword(5);
+
+        let (undone, launched) = try_undo(&change, &journal);
+
+        assert!(matches!(undone, Err(UiError::Failed(_))), "{undone:?}");
+        assert!(launched.is_none());
+    }
+
+    #[test]
+    fn an_undo_of_a_journaled_change_names_its_entry_in_the_plan() {
+        let (change, journal) = mpo_row(Some(1));
+
+        let (undone, launched) = try_undo(&change, &journal);
+
+        assert!(undone.is_ok(), "{undone:?}");
+        let item = &launched.unwrap().items[0];
+        assert_eq!(item.undo_journal, Some(1));
+        assert_eq!(item.undo_of, Some(1));
+    }
+
+    #[test]
+    fn an_undo_of_a_change_made_before_the_journal_still_reaches_the_helper() {
+        let (change, journal) = mpo_row(None);
+
+        let (undone, launched) = try_undo(&change, &journal);
+
+        assert!(undone.is_ok(), "{undone:?}");
+        assert_eq!(launched.unwrap().items[0].undo_journal, None);
     }
 }

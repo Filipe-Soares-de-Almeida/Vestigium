@@ -164,6 +164,7 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
         undo_of: null,
         results: a.changes.map((c) => ({ change: c, error: null })),
         restore_point: a.applier === "Elevated" ? { Reused: { at_ms: now - (days + 1) * DAY } } : null,
+        journal: a.applier === "Elevated" ? id : null,
       },
       helped: { days: Math.min(days, 7), before: 9, after: 2 },
       outside: false,
@@ -200,6 +201,7 @@ function record(a: Advice, without: boolean, undoOf: number | null = null): Twea
     undo_of: undoOf,
     results: (blocked ? a.changes.slice(0, 1) : a.changes).map((c) => ({ change: c, error: blocked ? 5 : null })),
     restore_point: p,
+    journal: a.applier === "Elevated" ? nextId : null,
   };
   return { id: nextId++, applied_ms: Date.now(), undone_ms: null, applier: a.applier, change, helped: null, outside: false };
 }

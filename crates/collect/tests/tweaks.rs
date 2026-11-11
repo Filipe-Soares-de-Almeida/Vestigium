@@ -169,6 +169,7 @@ fn power_undo_goes_to_the_scheme_changed() {
         tweak: TweakId::PcieAspm,
         subject: None,
         undo_of,
+        undo_journal: None,
         changes: vec![SettingChange {
             setting,
             from: Value::Absent,
@@ -180,6 +181,7 @@ fn power_undo_goes_to_the_scheme_changed() {
             tweak: TweakId::PowerPlan,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: vec![SettingChange {
                 setting: Setting::ActiveScheme,
                 from: Value::Absent,

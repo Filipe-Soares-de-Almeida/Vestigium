@@ -37,6 +37,7 @@ fn change(tweak: TweakId, changes: Vec<SettingChange>, undo_of: Option<i64>) -> 
         restore_point: Some(RestorePoint::Reused {
             at_ms: Some(DAY / 2),
         }),
+        journal: None,
     }
 }
 
@@ -154,6 +155,7 @@ fn an_absent_value_survives_the_round_trip() {
             error: Some(5),
         }],
         restore_point: None,
+        journal: None,
     };
     store
         .record_tweak_change(&applied, DAY, Applier::Elevated)
@@ -500,4 +502,66 @@ fn a_path_with_special_characters_is_read() {
     store.carry_over_from(&odd);
 
     assert_eq!(store.tweaks_in_place().unwrap()[0].id, id);
+}
+
+#[test]
+fn the_journal_entry_of_a_change_survives_the_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let mut mpo = change(
+        TweakId::Mpo,
+        mpo_change(Value::Absent, Value::Dword(5)),
+        None,
+    );
+    mpo.journal = Some(41);
+    let id = store
+        .record_tweak_change(&mpo, DAY, Applier::Elevated)
+        .unwrap();
+
+    assert_eq!(
+        store.tweak_change(id).unwrap().unwrap().change.journal,
+        Some(41)
+    );
+}
+
+#[test]
+fn a_change_stored_before_the_journal_existed_still_reads_without_an_entry() {
+    use vestigium_core::TweakChangeV2;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let old = TweakChangeV2 {
+        tweak: TweakId::Mpo,
+        subject: None,
+        undo_of: None,
+        results: change(
+            TweakId::Mpo,
+            mpo_change(Value::Absent, Value::Dword(5)),
+            None,
+        )
+        .results,
+        restore_point: None,
+    };
+    let mut blob = vec![1u8];
+    blob.extend(postcard::to_stdvec(&vec![old]).unwrap());
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO tweak_change (version, tweak, subject, applied_ms, undone_ms, undo_of,
+                 elevated, data) VALUES (2, ?1, NULL, ?2, NULL, NULL, 1, ?3)",
+            rusqlite::params![
+                TWEAKS.iter().position(|t| *t == TweakId::Mpo).unwrap() as i64,
+                DAY,
+                blob
+            ],
+        )
+        .unwrap();
+
+    let rows = Store::open(&path).unwrap().tweaks_in_place().unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].change.journal, None);
+    assert_eq!(rows[0].change.results[0].change.to, Value::Dword(5));
+    assert_eq!(rows[0].applier, Applier::Elevated);
 }

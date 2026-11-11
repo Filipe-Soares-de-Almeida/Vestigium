@@ -8,6 +8,7 @@ fn aspm_item() -> PlanItem {
         tweak: TweakId::PcieAspm,
         subject: None,
         undo_of: None,
+        undo_journal: None,
         changes: vec![SettingChange {
             setting: Setting::PowerAc {
                 subgroup: SUB_PCIEXPRESS,
@@ -146,6 +147,7 @@ fn every_response_roundtrips_as_json() {
                     })
                     .collect(),
                 restore_point: None,
+                journal: None,
             },
         },
         Response::Done,

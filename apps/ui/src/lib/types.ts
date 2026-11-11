@@ -893,6 +893,8 @@ export interface TweakChange {
   undo_of: number | null;
   results: SettingResult[];
   restore_point: RestorePoint | null;
+  /** The helper's journal entry for this change; null for the user's own and for older changes. */
+  journal: number | null;
 }
 
 /** The same signal counted in equal spans before and after a change. */
