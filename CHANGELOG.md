@@ -74,6 +74,9 @@ How to use this file:
 
 ### Fixed
 
+- A result file the monitor cannot read, such as one a newer helper wrote in a layout it does not
+  know, is now deleted from the data folder once it has stayed unchanged for 30 days instead of
+  staying there forever, and the privacy page says so.
 - While the watcher is stuck or busy, the timing measurements and Windows events waiting for it are
   now capped instead of growing in memory without limit. A Windows event that did not fit is
   reported and read again at the next start.

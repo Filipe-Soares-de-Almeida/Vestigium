@@ -26,7 +26,7 @@ Only the requests listed below. There is no account and no telemetry.
 |---|---|
 | `%LOCALAPPDATA%\Vestigium\data\vestigium.db` | The history and the settings. Two companion files, ending in `-wal` and `-shm`, sit beside it while Vestigium runs. |
 | `%LOCALAPPDATA%\Vestigium\data\blackbox.ring` | The last few minutes of readings, kept on disk so a report after an unexpected shutdown can show what came before it. |
-| The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of tests, captures, scans and administrator tasks, waiting to be read into the history. Each file is removed once read; a file that cannot be read stays. |
+| The other folders in `%LOCALAPPDATA%\Vestigium\data` | Results of tests, captures, scans and administrator tasks, waiting to be read into the history. Each file is removed once read; a file that cannot be read stays for 30 days without change and is then deleted. |
 | `%LOCALAPPDATA%\app.vestigium\updates.json` | Whether to check for updates, when it last checked, and the last version whose notes you saw. |
 | `%LOCALAPPDATA%\app.vestigium\EBWebView` | The window's own browser files. |
 

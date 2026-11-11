@@ -12,11 +12,12 @@ use vestigium_core::{
 use vestigium_store::Store;
 
 /// Stores the finished capture files of `dir` and deletes them; returns the ids in name order.
-/// A file that does not decode is kept, since the helper writes it only when its capture ends.
+/// A file that does not decode is kept until it has sat unchanged for 30 days.
 pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "capture") {
         let Some(mut capture) = read_capture(&path) else {
+            discard_if_stale(&path);
             continue;
         };
         capture.hiccups.extend(
@@ -39,6 +40,7 @@ pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "scan") {
         let Some(scan) = read_scan(&path) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(id) = store.insert_scan(&scan) else {
@@ -56,6 +58,7 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "dumps") {
         let Some(scan) = read_versioned::<DumpScan>(&path, DUMP_SCAN_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(stored) = store.upsert_dumps(&scan.dumps, scan.ts_ms) else {
@@ -67,6 +70,7 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
     let mut deleted = 0;
     for path in numbered_files(dir, "deleted") {
         let Some(done) = read_versioned::<DumpDeletion>(&path, DUMP_DELETION_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(present) = store.present_dumps() else {
@@ -102,6 +106,7 @@ pub fn import_tweaks(dir: &Path, store: &mut Store, settings: &mut impl SettingS
     let mut ids = Vec::new();
     for path in numbered_files(dir, "tweaked") {
         let Some(results) = read_versioned::<TweakResults>(&path, TWEAK_PLAN_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let stored: Result<Vec<i64>, _> = results
@@ -137,6 +142,7 @@ fn settle_intents(dir: &Path, store: &mut Store, settings: &mut impl SettingStor
             continue;
         }
         let Some(intent) = read_versioned::<TweakIntent>(&path, TWEAK_INTENT_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let results = settle_interrupted(&intent, settings);
@@ -173,9 +179,11 @@ pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
     for extension in TEST_FILES {
         for path in numbered_files(dir, extension) {
             if fs::metadata(&path).map_or(true, |m| m.len() > MAX_TEST_FILE) {
+                discard_if_stale(&path);
                 continue;
             }
             let Some(mut run) = read_test_run(&path) else {
+                discard_if_stale(&path);
                 continue;
             };
             if let Subject::Disk(name) = &run.subject
@@ -234,12 +242,27 @@ fn is_left_over(entry: &fs::DirEntry, now: SystemTime, only_empty: bool) -> bool
     let Ok(meta) = entry.metadata() else {
         return false;
     };
-    (!only_empty || meta.len() == 0)
-        && meta
-            .modified()
-            .ok()
-            .and_then(|at| now.duration_since(at).ok())
-            .is_some_and(|age| age >= LEFTOVER_AFTER)
+    (!only_empty || meta.len() == 0) && unchanged_for(&meta, now, LEFTOVER_AFTER)
+}
+
+/// Whether the file's last change is at least `span` before `now`.
+fn unchanged_for(meta: &fs::Metadata, now: SystemTime, span: Duration) -> bool {
+    meta.modified()
+        .ok()
+        .and_then(|at| now.duration_since(at).ok())
+        .is_some_and(|age| age >= span)
+}
+
+/// How long a result file the monitor cannot read may sit unchanged before it is deleted.
+const UNREADABLE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Deletes a result file that could not be read once it has not changed for `UNREADABLE_AFTER`.
+fn discard_if_stale(path: &Path) {
+    let stale = fs::metadata(path)
+        .is_ok_and(|meta| unchanged_for(&meta, SystemTime::now(), UNREADABLE_AFTER));
+    if stale {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn is_numbered(path: &Path, extension: &str) -> bool {
@@ -942,6 +965,50 @@ mod tests {
         assert_eq!(import_tests(&tests, &mut store).len(), 1);
         assert!(!tests.join("61.surface").exists());
         assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_unreadable_result_file_is_deleted_after_thirty_days() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let captures = dir.path().join("captures");
+        let scans = dir.path().join("scans");
+        let tests = dir.path().join("tests");
+        for folder in [&captures, &scans, &tests] {
+            fs::create_dir(folder).unwrap();
+        }
+        let bad = [0xffu8, 0xff, 0xff];
+        let day = Duration::from_secs(24 * 60 * 60);
+        for (folder, name) in [
+            (&captures, "1.capture"),
+            (&captures, "2.capture"),
+            (&scans, "3.scan"),
+            (&tests, "4.test"),
+        ] {
+            fs::write(folder.join(name), bad).unwrap();
+        }
+        let mut big = vec![TEST_RUN_VERSION];
+        big.resize(MAX_TEST_FILE as usize + 1, 0);
+        fs::write(tests.join("5.test"), big).unwrap();
+        for (folder, name, days) in [
+            (&captures, "1.capture", 31),
+            (&captures, "2.capture", 29),
+            (&scans, "3.scan", 31),
+            (&tests, "4.test", 29),
+            (&tests, "5.test", 31),
+        ] {
+            age(&folder.join(name), day * days);
+        }
+
+        import_captures(&captures, &[], &mut store);
+        import_scans(&scans, &mut store);
+        import_tests(&tests, &mut store);
+
+        assert!(!captures.join("1.capture").exists(), "31 days old goes");
+        assert!(captures.join("2.capture").exists(), "29 days old stays");
+        assert!(!scans.join("3.scan").exists());
+        assert!(tests.join("4.test").exists());
+        assert!(!tests.join("5.test").exists(), "too large and old goes");
     }
 
     #[test]
