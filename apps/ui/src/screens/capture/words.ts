@@ -1,4 +1,5 @@
 import type { IconName } from "../../components/Icon.svelte";
+import type { StatusKind } from "../../components/StatusMark.svelte";
 import type { Entry } from "../../lib/capture.svelte";
 import { formatDuration, formatNumber, formatTime } from "../../lib/format";
 import { t } from "../../lib/i18n.svelte";
@@ -8,23 +9,26 @@ import { evidenceLines, isHedged, type Line, lineFor, stepsOf, type Step, type T
 import {
   alignment,
   conclusionOf,
+  type Coverage,
+  coverageOf,
   countIn,
   DPC_LIMIT_US,
   type Digest,
   digestOf,
   type DriverRow,
   driverRows,
-  framesFailed,
+  framesGone,
   hitchesOften,
   hitchesWithCall,
   ISR_LIMIT_US,
-  kernelFailed,
+  kernelGone,
   lateApps,
   lateShare,
   OFTEN_PCT,
   minutesOf,
   nearCallsOf,
-  reasonOf,
+  type Part,
+  shortfalls,
 } from "./model";
 
 // The words of a deep capture, at the reader's detail level. "PresentMon" and "probe" stay out of Simple.
@@ -110,6 +114,29 @@ export interface DriverTable {
   more: string | null;
 }
 
+/** One source of the capture: how much of it measured and what it kept. */
+export interface CoverLine {
+  part: Part;
+  name: string;
+  /** The tool behind the source; absent in Simple, which names none. */
+  tool: string | null;
+  state: Coverage["state"];
+  /** "3 of 5 min", or that it was not measured. */
+  minutes: string;
+  /** What fraction of the capture it measured, 0 to 1. */
+  fraction: number;
+  /** Why it fell short; null when it did not. */
+  why: string | null;
+  /** The source's own raw reason, at the Technical level only. */
+  reason: string | null;
+  kept: string;
+}
+
+export interface CoverView {
+  rows: CoverLine[];
+  mark: { kind: StatusKind; word: string };
+}
+
 export interface ResultView {
   crumb: string;
   title: string;
@@ -125,6 +152,7 @@ export interface ResultView {
     layer: boolean;
   } | null;
   notes: Note[];
+  cover: CoverView;
   steps: Step[];
   drivers: DriverTable | null;
   hasMarks: boolean;
@@ -287,23 +315,56 @@ function notesOf(dto: CaptureDto, level: DetailLevel): Note[] {
       reason: null,
     });
   }
-  if (framesFailed(dto)) {
-    notes.push({
-      icon: "app",
-      head: level === "Simple" ? k("note.frames.head") : k("note.frames.head.d"),
-      body: level === "Simple" ? k("note.frames.body") : k("note.frames.body.d"),
-      reason: level === "Technical" ? reasonOf(dto.frames) : null,
-    });
-  }
-  if (kernelFailed(dto)) {
-    notes.push({
-      icon: "chip",
-      head: k("note.kernel.head"),
-      body: level === "Simple" ? k("note.kernel.body") : k("note.kernel.body.d"),
-      reason: level === "Technical" ? reasonOf(dto.kernel) : null,
-    });
-  }
   return notes;
+}
+
+const minutesText = (covered: number, minutes: number): string =>
+  k("cover.minutes", { covered: formatNumber(covered, Number.isInteger(covered) ? 0 : 1), minutes });
+
+function keptText(dto: CaptureDto, part: Part): string {
+  if (part === "kernel") {
+    return dto.kept.calls > 0 ? count("cover.kept.calls", dto.kept.calls) : k("cover.kept.calls.none");
+  }
+  if (part === "frames") {
+    return dto.kept.hitches > 0 ? count("cover.kept.frames", dto.kept.hitches) : k("cover.kept.frames.none");
+  }
+  if (dto.hiccups.length === 0) return k("cover.kept.stalls.none");
+  const lags = dto.hiccups.map((h) => h.lag_ms);
+  return count("cover.kept.stalls", dto.hiccups.length, { range: rangeText(Math.min(...lags), Math.max(...lags)) });
+}
+
+function whyText(c: Coverage, level: DetailLevel): string | null {
+  if (c.state === "full") return null;
+  const d = level === "Simple" ? "" : ".d";
+  if (c.part === "kernel") return k(`cover.why.kernel${d}`);
+  return k(`cover.why.frames.${c.state === "partial" ? "partial" : "none"}${d}`);
+}
+
+/** Per source, how much of the capture it measured and what it kept, and the mark that sums it up. */
+export function coverView(dto: CaptureDto, level: DetailLevel): CoverView {
+  const minutes = minutesOf(dto);
+  const rows = coverageOf(dto).map((c): CoverLine => {
+    const covered = c.state === "full" ? minutes : (c.covered / c.total) * minutes;
+    return {
+      part: c.part,
+      name: k(`cover.name.${c.part}`),
+      tool: level === "Simple" ? null : k(`cover.tool.${c.part}`),
+      state: c.state,
+      minutes: c.state === "none" ? k("cover.none") : minutesText(covered, minutes),
+      fraction: c.state === "full" ? 1 : c.covered / c.total,
+      why: whyText(c, level),
+      reason: level === "Technical" && c.reason ? c.reason : null,
+      kept: c.state === "none" ? "—" : keptText(dto, c.part),
+    };
+  });
+  const short = shortfalls(dto);
+  const mark: CoverView["mark"] =
+    short.length === 0
+      ? { kind: "ok", word: k("cover.full") }
+      : short.every((c) => c.state === "partial")
+        ? { kind: "attention", word: k("cover.partial") }
+        : { kind: "attention", word: k("cover.missing", { sources: formatList(short.map((c) => k(`cover.src.${c.part}`))) }) };
+  return { rows, mark };
 }
 
 /** What to do after this capture, each step once. */
@@ -317,6 +378,7 @@ export function stepsFor(dto: CaptureDto, level: DetailLevel): Step[] {
     steps.push({ key: `app:${app.cause.Frames.app}`, text: k("step.app", { app: appName(app.cause.Frames.app) }) });
   }
   if (dto.lost_events > 0) steps.push({ key: "lost", text: k("step.lost") });
+  for (const c of shortfalls(dto)) steps.push({ key: `cover:${c.part}`, text: k(`step.${c.part}`) });
   if (level === "Technical" && steps.some((s) => s.key.startsWith("UpdateDriver"))) {
     steps.push({ key: "overclock", text: k("step.overclock") });
   }
@@ -450,7 +512,7 @@ function alignSummary(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): s
   } else if (driver) {
     parts.push(pick(level, { plain: k("align.nocalls"), figures: k("align.nocalls"), tech: k("align.nocalls") }));
   }
-  if (!framesFailed(dto) && al.stallsWithFrame > 0) {
+  if (!framesGone(dto) && al.stallsWithFrame > 0) {
     parts.push(
       pick(level, {
         plain: single ? k("align.frames.single") : count("align.frames", al.stallsWithFrame),
@@ -459,7 +521,7 @@ function alignSummary(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): s
       }),
     );
   }
-  if (framesFailed(dto)) parts.push(k("align.noframes"));
+  if (framesGone(dto)) parts.push(k("align.noframes"));
   return parts.join(" ");
 }
 
@@ -500,11 +562,12 @@ export function buildResult(dto: CaptureDto, level: DetailLevel): ResultView {
             layer: top.kind === "intermediary",
           },
     notes: notesOf(dto, level),
+    cover: coverView(dto, level),
     steps: stepsFor(dto, level),
-    drivers: kernelFailed(dto) ? null : driverTable(dto, level, all),
+    drivers: kernelGone(dto) ? null : driverTable(dto, level, all),
     hasMarks: al.marks.length > 0 || dto.hiccups.length > 0,
     alignSummary: alignSummary(dto, level, all),
-    apps: framesFailed(dto) ? null : appLines(dto, level),
+    apps: framesGone(dto) ? null : appLines(dto, level),
     measured: k(frames > 0 ? "measured.frames" : "measured", { drivers: formatNumber(measuredDrivers), frames: formatNumber(frames), minutes }),
   };
 }
@@ -537,6 +600,8 @@ export function markLine(kind: 0 | 1 | 2, value: number, who: string, level: Det
 export interface RowView {
   id: number;
   icon: IconName;
+  /** How much of the capture its sources measured. */
+  cover: CoverView["mark"];
   /** Nothing stood out in this capture. */
   quiet: boolean;
   title: string;
@@ -566,11 +631,15 @@ export function rowOf(entry: Entry): RowView {
   }
   parts.push(k("row.minutes", { minutes }));
   if (dto.lost_events > 0) parts.push(k("row.lost"));
-  if (framesFailed(dto)) parts.push(k("row.noframes"));
-  if (kernelFailed(dto)) parts.push(k("row.nokernel"));
+  const cover = coverView(dto, "Simple");
+  for (const c of shortfalls(dto)) {
+    const covered = c.state === "partial" ? (c.covered / c.total) * minutes : 0;
+    parts.push(k("row.coverage", { source: k(`cover.src.${c.part}`), covered: formatNumber(covered, Number.isInteger(covered) ? 0 : 1), minutes }));
+  }
   return {
     id: summary.id,
     icon,
+    cover: cover.mark,
     quiet: d.kind === "none",
     title,
     sub: parts.join(" · "),
@@ -617,6 +686,12 @@ export function resultMarkdown(dto: CaptureDto): string {
   const lines: string[] = [`## ${simple.title}${confidence}`, "", `${simple.meta}`, ""];
   if (simple.main) lines.push(simple.main.summary, "");
   for (const note of tech.notes) lines.push(`> ${note.head}. ${note.body}${note.reason ? ` (${note.reason})` : ""}`, "");
+  lines.push(`### ${k("md.cover")}`, "");
+  for (const r of tech.cover.rows) {
+    const why = [r.why, r.reason].filter(Boolean).join(" ");
+    lines.push(`- ${r.name}: ${r.minutes} · ${r.kept}${why ? ` (${why})` : ""}`);
+  }
+  lines.push("");
   if (tech.main) {
     lines.push(`### ${k("md.evidence")}`, "");
     for (const e of tech.main.evidence) lines.push(`- ${e.main}${e.sub ? ` — ${e.sub}` : ""}`);

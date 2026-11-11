@@ -593,6 +593,15 @@ How to use this file:
   page. It stays in the list of apps with its share of late frames and an "Above 5 %" mark, and the
   Technical level adds both to its table. It is still never named as a suspect, because an app that
   draws only on demand looks late when it is idle.
+- The page of a deep capture now says what each source measured and what it kept. A new block,
+  "What was measured", lists the drivers, the frames and the stall probe with a bar from zero to the
+  length of the capture, "3 of 5 min" when the frame recorder stopped partway or "Not measured" when
+  a source failed, and what the capture kept of each: the worst three long driver calls and slow
+  frames per minute, and every stall. The header gains a Coverage mark beside Result, the capture
+  history rows carry it, and a row says how far a source got, such as "frames 3 of 5 min". The old
+  notes for frames and drivers that were not measured are replaced by that block, and what to do
+  about them moved to the steps of the page. Frames measured for only part of the capture no longer
+  hide the apps list.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the

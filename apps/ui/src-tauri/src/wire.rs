@@ -41,7 +41,7 @@ use crate::capture::{
     CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, Ended, ScanFinished,
 };
 use crate::history::{
-    BugCheckDto, CaptureDto, CaptureNote, Columns, CrashControlDto, DumpDto, DumpsDto,
+    BugCheckDto, CaptureDto, CaptureKept, CaptureNote, Columns, CrashControlDto, DumpDto, DumpsDto,
     EpisodeDetailDto, FaultDto, FindingDto, HealthDto, HistoryState, MarksDto, OccurrenceDto,
     ProgramMarksDto, Resolution, SmartPointDto, TestSpan, TimelineDto,
 };
@@ -1913,6 +1913,10 @@ fn render() -> String {
                     ..deep_capture()
                 },
                 findings: small_suspects(),
+                kept: CaptureKept {
+                    calls: 6,
+                    hitches: 4,
+                },
             })
             .collect(),
     );

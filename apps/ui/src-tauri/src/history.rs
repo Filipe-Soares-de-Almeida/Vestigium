@@ -341,6 +341,13 @@ pub struct DumpsDto {
     pub crash: Option<CrashControlDto>,
 }
 
+/// How many long driver calls and late frames the stored capture holds, before the page trims them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureKept {
+    pub calls: usize,
+    pub hitches: usize,
+}
+
 /// A stored deep capture with what it names.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CaptureDto {
@@ -348,6 +355,7 @@ pub struct CaptureDto {
     #[serde(flatten)]
     pub capture: DeepCapture,
     pub findings: Vec<Suspect>,
+    pub kept: CaptureKept,
 }
 
 /// The suspects a deep capture adds to an occurrence it covered.
@@ -685,6 +693,10 @@ impl History {
         Ok(found.flatten().map(|capture| CaptureDto {
             id,
             findings: capture_findings(&capture),
+            kept: CaptureKept {
+                calls: capture.longest.len(),
+                hitches: capture.hitches.len(),
+            },
             capture: capture.page_view(),
         }))
     }
@@ -1536,6 +1548,10 @@ mod tests {
         let dto = history.capture(id).unwrap().unwrap();
 
         assert!(dto.capture.longest.len() <= vestigium_core::PAGE_LONGEST + 15);
+        assert_eq!(
+            dto.kept.calls, 5_000,
+            "the count is of what is stored, not of the page"
+        );
         assert_eq!(dto.capture.longest[0].us, 1_000 + 4_999);
         assert_eq!(store.capture(id).unwrap().unwrap().longest.len(), 5_000);
     }

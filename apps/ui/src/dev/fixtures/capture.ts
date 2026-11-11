@@ -1,5 +1,7 @@
 // Deep captures in the browser: #/capture/1 names a driver and an app, 2 has no frames, 3 lost events,
-// 4 found nothing and 5 has an app with 8 % late frames beside a steady one. `?capture-secs=<n>` makes a started capture last n seconds instead of its minutes,
+// 4 found nothing, 5 has an app with 8 % late frames beside a steady one, 6 lost its frames after 3 of
+// 5 minutes but still names a driver, 7 lost them after 3 minutes and found nothing, 8 measured stalls
+// but no driver went over the limits and 9 could not measure drivers. `?capture-secs=<n>` makes a started capture last n seconds instead of its minutes,
 // `?capture-fail=1` makes it end with the helper failing and `?capture-left=<n>` opens the window with a
 // capture that has n seconds left. `?capture-auto=1` presses the start button once the page is up, and
 // `?capture-ask=<ms>` keeps the permission prompt open that long and `?capture-none=1` starts with no
@@ -103,9 +105,9 @@ function findings(slow: number): Suspect[] {
   ];
 }
 
-export function capture(id: number, start: number, slow = 380): CaptureDto {
+function build(id: number, start: number, slow = 380): Omit<CaptureDto, "kept"> {
   const FINDINGS = findings(slow);
-  const base: CaptureDto = {
+  const base: Omit<CaptureDto, "kept"> = {
     id,
     start_ms: start,
     end_ms: start + LENGTH,
@@ -153,6 +155,25 @@ export function capture(id: number, start: number, slow = 380): CaptureDto {
       findings: [],
     };
   }
+  const partial = { Partial: { covered_secs: 180, reason: "PresentMon exited with code 1 after 180 s" } };
+  if (id === 6) {
+    return { ...base, frames: partial, apps: [{ ...base.apps[0], frames: 10_800 }], hitches: base.hitches.slice(0, 3) };
+  }
+  if (id === 7) {
+    return { ...base, ...quiet(), frames: partial, apps: [{ name: "Editor.exe", pid: 3380, frames: 5_400, median_ms: 16.6, p99_ms: 22, worst_ms: 36, hitches: 0 }] };
+  }
+  if (id === 8) {
+    return { ...base, ...quiet(), apps: [{ name: "Editor.exe", pid: 3380, frames: 9_200, median_ms: 16.6, p99_ms: 24, worst_ms: 38, hitches: 0 }], hiccups: base.hiccups };
+  }
+  if (id === 9) {
+    return {
+      ...base,
+      ...quiet(),
+      kernel: { Unavailable: "ETW session could not start (error 183, name already in use)" },
+      drivers: [],
+      apps: [{ name: "Editor.exe", pid: 3380, frames: 9_200, median_ms: 16.6, p99_ms: 22, worst_ms: 34, hitches: 0 }],
+    };
+  }
   if (id === 2) {
     return {
       ...base,
@@ -176,8 +197,18 @@ export function capture(id: number, start: number, slow = 380): CaptureDto {
   return base;
 }
 
+/** The capture with every list of what stood out emptied, and its drivers inside the limits. */
+function quiet(): Pick<CaptureDto, "drivers" | "longest" | "hitches" | "hiccups" | "findings"> {
+  return { drivers: CALM_DRIVERS, longest: [], hitches: [], hiccups: [], findings: [] };
+}
+
+export function capture(id: number, start: number, slow = 380): CaptureDto {
+  const dto = build(id, start, slow);
+  return { ...dto, kept: { calls: dto.longest.length, hitches: dto.hitches.length } };
+}
+
 const STORED = new Map(
-  (query.get("capture-none") === "1" ? [] : [1, 2, 3, 4, 5]).map((id) => [id, capture(id, START - (id - 1) * 3_600_000, id === 1 ? 12 : 380)]),
+  (query.get("capture-none") === "1" ? [] : [1, 2, 3, 4, 5, 6, 7, 8, 9]).map((id) => [id, capture(id, START - (id - 1) * 3_600_000, id === 1 ? 12 : 380)]),
 );
 const left = Number(query.get("capture-left") ?? 0);
 const elsewhere = Number(query.get("capture-else") ?? 0);

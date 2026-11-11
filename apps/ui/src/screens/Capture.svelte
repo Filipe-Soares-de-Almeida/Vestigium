@@ -22,6 +22,7 @@
   import { copyText } from "./occurrence/browser";
   import Alignment from "./capture/Alignment.svelte";
   import Apps from "./capture/Apps.svelte";
+  import Coverage from "./capture/Coverage.svelte";
   import Drivers from "./capture/Drivers.svelte";
   import { buildResult, resultMarkdown } from "./capture/words";
   import OccurrenceRow from "./today/OccurrenceRow.svelte";
@@ -107,6 +108,10 @@
         <StatusMark kind={view.none ? "ok" : "critical"} word={t(view.none ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} />
       </span>
     </div>
+    <div class="fact">
+      <span class="fact-l">{t("ui.captures.fact.coverage")}</span>
+      <span class="fact-v"><StatusMark kind={view.cover.mark.kind} word={view.cover.mark.word} /></span>
+    </div>
   </div>
 
   {#if view.notes.length}
@@ -119,6 +124,10 @@
       {/each}
     </ul>
   {/if}
+
+  <Block title={t("ui.captures.cover.title")}>
+    <Coverage rows={view.cover.rows} />
+  </Block>
 
   <div class="cols2">
     <Block title={t("ui.captures.conclusion.title")}>

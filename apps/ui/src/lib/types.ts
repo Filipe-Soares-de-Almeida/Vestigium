@@ -601,6 +601,8 @@ export interface CaptureDto {
   hitches: FrameHitch[];
   hiccups: ProbeHiccup[];
   findings: Suspect[];
+  /** What the stored capture holds, before the page trims it. */
+  kept: { calls: number; hitches: number };
 }
 
 /** What a deep capture that covered an occurrence adds to it. */
