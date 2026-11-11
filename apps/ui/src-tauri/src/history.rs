@@ -668,7 +668,7 @@ impl History {
             CaptureDto {
                 id,
                 findings: capture_findings(&capture),
-                capture,
+                capture: capture.page_view(),
             }
         }))
     }
@@ -1359,6 +1359,40 @@ mod tests {
         assert_eq!(detail.chart.state[90], PcState::Pressure);
         assert_eq!(detail.programs[0].name, "download.exe");
         assert_eq!(detail.programs[0].read_bps, 40e6);
+    }
+
+    #[test]
+    fn capture_page_lists_a_bounded_view_of_a_stored_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let mut stored = vestigium_core::DeepCapture {
+            start_ms: DAY_START_MS,
+            end_ms: DAY_START_MS + 24 * HOUR_MS,
+            kernel: vestigium_core::CaptureSource::Ok,
+            frames: vestigium_core::CaptureSource::Ok,
+            lost_events: 0,
+            drivers: Vec::new(),
+            longest: Vec::new(),
+            apps: Vec::new(),
+            hitches: Vec::new(),
+            hiccups: Vec::new(),
+        };
+        stored.longest = (0..5_000u32)
+            .map(|i| vestigium_core::LongRoutine {
+                ts_ms: DAY_START_MS + i64::from(i) * 17_000,
+                core: 0,
+                module: format!("driver{}.sys", i % 3),
+                kind: vestigium_core::RoutineKind::Dpc,
+                us: 1_000 + i,
+            })
+            .collect();
+        let id = store.insert_capture(&stored).unwrap();
+
+        let dto = history.capture(id).unwrap().unwrap();
+
+        assert!(dto.capture.longest.len() <= vestigium_core::PAGE_LONGEST + 15);
+        assert_eq!(dto.capture.longest[0].us, 1_000 + 4_999);
+        assert_eq!(store.capture(id).unwrap().unwrap().longest.len(), 5_000);
     }
 
     #[test]

@@ -21,7 +21,7 @@
   let failure = $state<unknown>(null);
 
   const driver = $derived(dto?.drivers.find((d) => d.module === module) ?? null);
-  /** The capture keeps each driver's five longest calls besides the overall longest. */
+  /** The page lists each driver's five longest kept calls, longest first. */
   const calls = $derived((dto?.longest ?? []).filter((c) => c.module === module).slice(0, 5));
 
   /** Microseconds as the report prints them: "840 µs" or "1.24 ms". */

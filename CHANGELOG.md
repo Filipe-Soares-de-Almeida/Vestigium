@@ -24,6 +24,12 @@ How to use this file:
 
 ### Changed
 
+- A deep capture now keeps what it measured by minute only: for each driver its three longest
+  routines of 1 ms or more, for each app its three worst late frames, and the three worst stalls of the
+  monitor's probe, in every minute. The capture page shows a bounded list taken from them (the 50
+  longest routines, each driver's five longest and the 200 worst late frames), and the lookup around an
+  occurrence reads all of them, so a long capture no longer favours its worst hour. A driver that never
+  ran a routine of 1 ms or more now shows no single call on its page; its totals are unchanged.
 - The report copied as Markdown now opens with the probable cause and its confidence, and keeps
   the caveats the screen shows: a window cut short, gaps while the PC was not responding, a
   Vestigium test running at the time, and a deep capture that covered the minutes. The copied

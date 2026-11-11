@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::mem;
 use std::path::PathBuf;
@@ -15,10 +15,10 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
-    HICCUP_MS, HungWindow, MachineInfo, Media, Notable, OccurrenceSummary, Output, PressureSpan,
-    ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop, ProgramRing, REPORTED_EXEMPLARS, RING_MS,
-    Reading, RecentState, Ring, RunGate, Sample, Settings, Severity, Timing, WinEvent, heaviest,
-    last_seen, process_rates, programs,
+    HICCUP_MS, HungWindow, INTERVAL_KEPT, INTERVAL_MS, MachineInfo, Media, Notable,
+    OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop,
+    ProgramRing, REPORTED_EXEMPLARS, RING_MS, Reading, RecentState, Ring, RunGate, Sample,
+    Settings, Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Batcher, Segment, Store, StoreError};
@@ -60,7 +60,6 @@ const DISK_BUSY_MS: i64 = 60_000;
 const FIRST_HEALTH_AFTER_MS: i64 = 60_000;
 /// How long a late probe wake stays available to a capture that ends later: the longest capture.
 const HICCUPS_KEPT_MS: i64 = CAPTURE_MINUTES_MAX as i64 * 60_000;
-const HICCUPS_KEPT: usize = 10_000;
 /// Batches kept for another try after a failed write; past this the oldest loses its samples.
 const BATCHES_KEPT: usize = 3;
 /// How long a failed Event Log subscription waits before the next attempt.
@@ -1233,24 +1232,42 @@ fn without_unstorable(batch: Batch) -> Option<Batch> {
     (!kept.is_empty()).then_some(kept)
 }
 
-/// Adds the late wakes among `ticks` to `kept`, then drops what is old or beyond the cap.
+/// Adds the late wakes among `ticks` to `kept`, then drops what is old and keeps the worst
+/// `INTERVAL_KEPT` of each interval.
 fn keep_hiccups(kept: &mut VecDeque<ProbeHiccup>, ticks: &[ProbeTick], now_ms: i64) {
-    kept.extend(
-        ticks
+    let added: Vec<ProbeHiccup> = ticks
+        .iter()
+        .filter(|tick| tick.lag_ms >= HICCUP_MS.start)
+        .map(|tick| ProbeHiccup {
+            ts_ms: tick.wall_ms,
+            lag_ms: tick.lag_ms,
+        })
+        .collect();
+    if let Some(first) = added.iter().map(|h| h.ts_ms.div_euclid(INTERVAL_MS)).min() {
+        let from = kept
             .iter()
-            .filter(|tick| tick.lag_ms >= HICCUP_MS.start)
-            .map(|tick| ProbeHiccup {
-                ts_ms: tick.wall_ms,
-                lag_ms: tick.lag_ms,
-            }),
-    );
+            .rposition(|h| h.ts_ms.div_euclid(INTERVAL_MS) < first)
+            .map_or(0, |i| i + 1);
+        let mut touched: BTreeMap<i64, Vec<ProbeHiccup>> = BTreeMap::new();
+        for h in kept.drain(from..).chain(added) {
+            touched
+                .entry(h.ts_ms.div_euclid(INTERVAL_MS))
+                .or_default()
+                .push(h);
+        }
+        for mut own in touched.into_values() {
+            if own.len() > INTERVAL_KEPT {
+                own.sort_by(|a, b| b.lag_ms.total_cmp(&a.lag_ms).then(a.ts_ms.cmp(&b.ts_ms)));
+                own.truncate(INTERVAL_KEPT);
+                own.sort_by_key(|h| h.ts_ms);
+            }
+            kept.extend(own);
+        }
+    }
     while kept
         .front()
         .is_some_and(|h| now_ms - h.ts_ms > HICCUPS_KEPT_MS)
     {
-        kept.pop_front();
-    }
-    while kept.len() > HICCUPS_KEPT {
         kept.pop_front();
     }
 }
@@ -3059,16 +3076,38 @@ mod tests {
     }
 
     #[test]
-    fn hiccups_stop_at_the_cap() {
+    fn hiccups_keep_a_few_per_interval_when_one_interval_bursts() {
         let mut kept = VecDeque::new();
-        let ticks: Vec<ProbeTick> = (0..HICCUPS_KEPT as i64 + 5)
-            .map(|k| tick(k, 20.0))
+        keep_hiccups(&mut kept, &[tick(0, 20.0), tick(1_000, 30.0)], 1_000);
+        let burst: Vec<ProbeTick> = (0..5_000i64)
+            .map(|k| tick(300_000 + k, 8.0 + (k % 50) as f32))
             .collect();
 
-        keep_hiccups(&mut kept, &ticks, 10_000);
+        keep_hiccups(&mut kept, &burst, 310_000);
 
-        assert_eq!(kept.len(), HICCUPS_KEPT);
-        assert_eq!(kept.front().map(|h| h.ts_ms), Some(5));
+        let early: Vec<i64> = kept.iter().take(2).map(|h| h.ts_ms).collect();
+        assert_eq!(early, [0, 1_000], "the earlier minute is not pushed out");
+        assert_eq!(kept.len(), 2 + INTERVAL_KEPT);
+        assert!(
+            kept.iter().skip(2).all(|h| h.lag_ms >= 56.0),
+            "the worst stay"
+        );
+    }
+
+    #[test]
+    fn hiccups_arriving_one_by_one_keep_the_worst_of_their_interval() {
+        let mut kept = VecDeque::new();
+        for k in 0..2_000i64 {
+            let lag = if k == 700 { 90.0 } else { 9.0 + (k % 5) as f32 };
+            keep_hiccups(&mut kept, &[tick(60_000 + k * 20, lag)], 100_000);
+        }
+        for k in 0..10i64 {
+            keep_hiccups(&mut kept, &[tick(120_000 + k, 12.0)], 130_000);
+        }
+
+        assert_eq!(kept.len(), 2 * INTERVAL_KEPT);
+        assert!(kept.iter().any(|h| h.lag_ms == 90.0));
+        assert!(kept.iter().map(|h| h.ts_ms).is_sorted());
     }
 
     #[test]
