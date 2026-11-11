@@ -450,6 +450,9 @@ How to use this file:
   their own sentence, and when the disk readings were normal the sentence says so and that the disk
   may not be the cause, in English and Portuguese. The step to back up the files now names the
   disk instead of showing a bare placeholder.
+- A batch of history that covers more than an hour of the clock, for example after the PC clock
+  jumped forward and back, is now stored in several parts of at most an hour each, so reading the
+  history can always find it.
 
 ### Security
 

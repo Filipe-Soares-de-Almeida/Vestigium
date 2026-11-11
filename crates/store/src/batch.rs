@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use vestigium_core::{MinuteRollup, MinuteSample, ProcessTop, Sample, minute_of};
 
+use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, encode};
 
 /// Most items in one segment: a 16-core sample with six disks is 385 bytes, so a chunk stays
@@ -86,7 +87,7 @@ fn push_segment<T: serde::Serialize>(
     items: &[T],
     ts_ms: impl Fn(&T) -> i64,
 ) {
-    for chunk in items.chunks(SEGMENT_ITEMS) {
+    for chunk in split(items, &ts_ms) {
         let stamps = chunk.iter().map(&ts_ms);
         let (Some(start_ms), Some(end_ms)) = (stamps.clone().min(), stamps.max()) else {
             continue;
@@ -98,4 +99,26 @@ fn push_segment<T: serde::Serialize>(
             data: encode(chunk),
         });
     }
+}
+
+/// Cuts items into runs of at most `SEGMENT_ITEMS` whose stamps stay within one segment span.
+fn split<T>(items: &[T], ts_ms: impl Fn(&T) -> i64) -> Vec<&[T]> {
+    let mut runs = Vec::new();
+    let (mut from, mut low, mut high) = (0, i64::MAX, i64::MIN);
+    for (at, item) in items.iter().enumerate() {
+        let ts = ts_ms(item);
+        let (new_low, new_high) = (low.min(ts), high.max(ts));
+        let full =
+            at - from == SEGMENT_ITEMS || new_high.saturating_sub(new_low) > MAX_SEGMENT_SPAN_MS;
+        if at > from && full {
+            runs.push(&items[from..at]);
+            (from, low, high) = (at, ts, ts);
+        } else {
+            (low, high) = (new_low, new_high);
+        }
+    }
+    if from < items.len() {
+        runs.push(&items[from..]);
+    }
+    runs
 }

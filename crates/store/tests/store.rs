@@ -618,3 +618,49 @@ fn segments_of_stamps_out_of_order_cover_their_range() {
         .unwrap();
     assert_eq!((samples.start_ms, samples.end_ms), (2_000, 9_000));
 }
+
+/// Largest gap between the first and last stamp of every segment of a series.
+fn widest_span(segments: &[Segment], series: Series) -> i64 {
+    segments
+        .iter()
+        .filter(|s| s.series == series)
+        .map(|s| s.end_ms - s.start_ms)
+        .max()
+        .unwrap()
+}
+
+#[test]
+fn a_segment_never_spans_more_than_an_hour() {
+    let hour = 3_600_000;
+    let mut batcher = Batcher::new(Duration::from_secs(3 * 3_600));
+    for n in 0..1_080 {
+        batcher.push_sample(sample(n * 10_000));
+    }
+
+    let segments = batcher.take();
+
+    assert!(widest_span(&segments, Series::Samples) <= hour);
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 1_080);
+}
+
+#[test]
+fn stamps_a_clock_jump_scattered_still_make_segments_within_an_hour() {
+    let hour = 3_600_000;
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    for ts in [0, 1_000, 30 * hour, 30 * hour + 1_000, 2_000, 3_000] {
+        batcher.push_sample(sample(ts));
+    }
+
+    let segments = batcher.take();
+
+    assert!(widest_span(&segments, Series::Samples) <= hour);
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 6);
+}

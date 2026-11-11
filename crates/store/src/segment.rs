@@ -11,6 +11,10 @@ const DEFLATE_LEVEL: u8 = 6;
 /// well above what a record the watcher writes can reach.
 const MAX_INFLATED: usize = 64 << 20;
 
+/// Longest stretch from the first to the last stamp of a stored segment: reads skip rows that
+/// began earlier than this before their range, so a longer segment would be missed.
+pub(crate) const MAX_SEGMENT_SPAN_MS: i64 = 60 * 60_000;
+
 /// Which kind of item a segment holds; an item whose layout changes gets a new code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
