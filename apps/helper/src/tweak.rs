@@ -8,9 +8,9 @@ use vestigium_collect::{
     RESTORE_CREATED, RESTORE_SKIPPED, WindowsSettings, restore_events, sha256_hex, wall_ms,
 };
 use vestigium_core::{
-    Applier, JournalEntry, PlanItem, RestorePoint, SettingResult, SettingStore,
-    TWEAK_INTENT_VERSION, TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakJournal, TweakPlan,
-    TweakResults, carry_out, check_item, check_undo, intent_of,
+    Applier, ERROR_RESTORE_DROPPED, JournalEntry, PlanItem, RestorePoint, SettingResult,
+    SettingStore, TWEAK_INTENT_VERSION, TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakJournal,
+    TweakPlan, TweakResults, carry_out, check_item, check_undo, intent_of,
 };
 use windows::Win32::Foundation::{E_FAIL, ERROR_SERVICE_DISABLED};
 use windows::Win32::System::Com::{
@@ -39,8 +39,6 @@ const RESTORE_LOG_WAIT: Duration = Duration::from_secs(10);
 /// How long after "created" a point is looked for in the list: Windows drops a failed one within ~6 s.
 const RESTORE_SETTLE: Duration = Duration::from_secs(10);
 const DAY_MS: i64 = 24 * 60 * 60_000;
-/// Win32 error recorded for a point Windows logged as created and then dropped (ERROR_NOT_FOUND).
-const ERROR_RESTORE_DROPPED: u32 = 1168;
 
 /// Carries out a `.plan` of elevated tweaks and writes what happened to a `.tweaked` file beside it.
 /// The plan is read once and must hash to `sha256`, which the window computed when it wrote it.

@@ -1,6 +1,6 @@
 import { applyTweaks, tweaks as readTweaks, undoTweak } from "./api";
 import { errorKind } from "./errors";
-import type { TweakPick, TweakRow, TweaksDto } from "./types";
+import type { RestorePoint, TweakPick, TweakRow, TweaksDto } from "./types";
 import { pollWhileShown } from "./visibility";
 
 const REFRESH_MS = 5 * 60_000;
@@ -8,8 +8,8 @@ const REFRESH_MS = 5 * 60_000;
 /** How a request to change Windows ended. */
 export type Outcome =
   | { kind: "done"; rows: TweakRow[] }
-  /** Windows made no restore point; nothing that needed one was written. */
-  | { kind: "no_point"; rows: TweakRow[] }
+  /** Windows made no restore point, as `point` says; nothing that needed one was written. */
+  | { kind: "no_point"; rows: TweakRow[]; point: RestorePoint }
   | { kind: "declined" }
   | { kind: "failed"; error: unknown };
 
@@ -54,23 +54,24 @@ class Tweaks {
       const { ids } = await change();
       await this.load();
       const rows = this.dto?.history.filter((r) => ids.includes(r.id)) ?? [];
-      const blocked = rows.some((r) => {
-        const p = r.change.restore_point;
-        const refused = r.change.results.some((x) => x.error !== null);
-        return (
-          refused &&
-          (p === "Off" ||
-            p === "Unconfirmed" ||
-            (p !== null && typeof p === "object" && "Failed" in p))
-        );
-      });
-      return blocked ? { kind: "no_point", rows } : { kind: "done", rows };
+      const point = blockedPoint(rows);
+      return point ? { kind: "no_point", rows, point } : { kind: "done", rows };
     } catch (error) {
       return errorKind(error) === "declined" ? { kind: "declined" } : { kind: "failed", error };
     } finally {
       this.busy = false;
     }
   }
+}
+
+/** The restore point that kept a refused row from being written, if one did. */
+function blockedPoint(rows: TweakRow[]): RestorePoint | null {
+  for (const r of rows) {
+    const p = r.change.restore_point;
+    const refused = r.change.results.some((x) => x.error !== null);
+    if (refused && p !== null && (p === "Off" || p === "Unconfirmed" || (typeof p === "object" && "Failed" in p))) return p;
+  }
+  return null;
 }
 
 /** One tweak's address: its name, and the startup entry for one of those. */

@@ -1,4 +1,5 @@
 import { formatDuration } from "../../lib/format";
+import type { StatusKind } from "../../components/StatusMark.svelte";
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   Advice,
@@ -62,6 +63,8 @@ export type Shown = "signal" | "quiet" | "applied" | "set" | "unavailable" | "pr
 const ERROR_MAY_HAVE_CHANGED = 0x2000_0001;
 /** The helper stopped before it reported, and Windows holds the value it was to write. */
 const ERROR_INTERRUPTED_WRITTEN = 0x2000_0002;
+/** The helper found a point Windows logged as created missing from the list. */
+const ERROR_RESTORE_DROPPED = 0x2000_0005;
 const wrote = (x: { error: number | null }) =>
   x.error === null || x.error === ERROR_MAY_HAVE_CHANGED || x.error === ERROR_INTERRUPTED_WRITTEN;
 
@@ -267,6 +270,55 @@ export function restorePoint(p: RestorePoint | null): string {
   if (p === "Off") return k("point.off");
   if (p === "Unconfirmed") return k("point.unconfirmed");
   if ("Reused" in p) return p.Reused.at_ms ? k("point.reused", { when: at(p.Reused.at_ms) }) : k("point.reused.unknown");
-  return k("point.failed", { error: p.Failed.error });
+  if (p.Failed.error === ERROR_RESTORE_DROPPED) return k("point.dropped");
+  return k("point.failed", { error: windowsCode(p.Failed.error) });
+}
+
+/** A Windows error as a person looks it up: small codes in decimal, HRESULTs in hex. */
+export function windowsCode(error: number): string {
+  return error > 0xffff ? `0x${error.toString(16).toUpperCase()}` : String(error);
+}
+
+/** Why no restore point stands behind a change. */
+export type PointCase = "off" | "failed" | "dropped" | "unconfirmed";
+
+/** One step on the way to a restore point, with where it stopped. */
+export interface TrailStep {
+  mark: StatusKind;
+  name: string;
+  word: string;
+  /** The step where the path broke. */
+  here: boolean;
+}
+
+export function pointCase(p: RestorePoint): PointCase {
+  if (p === "Off") return "off";
+  if (typeof p === "object" && "Failed" in p) return p.Failed.error === ERROR_RESTORE_DROPPED ? "dropped" : "failed";
+  return "unconfirmed";
+}
+
+/** The dialog's title: a dropped point reads as unconfirmed, since Windows logged it as made. */
+export function noPointTitle(c: PointCase): string {
+  return k(`no_point.title.${c === "dropped" ? "unconfirmed" : c}`);
+}
+
+/** Request to Windows, point made, point listed: what the helper knew of each step. */
+export function pointTrail(p: RestorePoint): TrailStep[] {
+  const c = pointCase(p);
+  const step = (key: string) => k(`no_point.step.${key}`);
+  const code = typeof p === "object" && "Failed" in p ? windowsCode(p.Failed.error) : "";
+  const rows: [StatusKind, string][] = {
+    off: [["attention", step("not_done")], ["info", step("na")], ["info", step("unchecked")]],
+    failed: [["ok", step("done")], ["critical", `${step("failed")} · ${k("no_point.error", { code })}`], ["info", step("unchecked")]],
+    dropped: [["ok", step("done")], ["ok", step("logged")], ["attention", step("missing")]],
+    unconfirmed: [["ok", step("done")], ["attention", step("unconfirmed")], ["info", step("unchecked")]],
+  }[c] as [StatusKind, string][];
+  const broke = { off: 0, failed: 1, dropped: 2, unconfirmed: 1 }[c];
+  return ["ask", "made", "listed"].map((name, i) => ({ mark: rows[i][0], name: step(name), word: rows[i][1], here: i === broke }));
+}
+
+/** The line shown when a new attempt ends the same way. */
+export function againLine(c: PointCase, attempt: number): string {
+  return k(`no_point.again.${c === "dropped" ? "unconfirmed" : c}`, { n: attempt });
 }
 

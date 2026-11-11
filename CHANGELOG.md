@@ -462,6 +462,14 @@ How to use this file:
 - A tweak is no longer written to Windows when the restore point it asked for was not confirmed,
   unless you agreed to go on without one. Before, a point that Windows logged and then dropped, or
   one that Windows never confirmed, let the change through while the history said a point was made.
+- The window no longer says System Restore is off when Windows failed to create the restore point.
+  When a tweak is held back for lack of a point, the dialog now has its own title for System Restore
+  off, a failed point and a point Windows did not confirm, and shows the path of the request: asked
+  Windows, Windows made the point, point in the list. The step where it stopped is marked, with
+  the Windows error number when there is one. Try again asks for the point once more with the dialog
+  still open and says when it ends the same way; Continue without a point is a separate button. A point
+  that Windows logged as created but dropped from the list now reads as not confirmed in the history
+  and in the dialog.
 - A disk surface scan on a disk that disappears halfway, as when a USB cable is pulled or the port
   is suspended, now ends as failed because the disk stopped answering, and a later scan resumes where
   it stopped. Before, every block after that point was recorded as unreadable and the disk was told to

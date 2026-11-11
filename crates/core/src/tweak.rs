@@ -1178,6 +1178,8 @@ pub const ERROR_INTERRUPTED_WRITTEN: u32 = 0x2000_0002;
 pub const ERROR_INTERRUPTED_UNCHANGED: u32 = 0x2000_0003;
 /// The helper stopped before it reported, and Windows holds neither value, or it cannot be read.
 pub const ERROR_INTERRUPTED_UNKNOWN: u32 = 0x2000_0004;
+/// A restore point Windows logged as created and then dropped: it is not in the list.
+pub const ERROR_RESTORE_DROPPED: u32 = 0x2000_0005;
 /// Layout of the `TweakIntent` the helper writes before its first change.
 pub const TWEAK_INTENT_VERSION: u8 = 2;
 

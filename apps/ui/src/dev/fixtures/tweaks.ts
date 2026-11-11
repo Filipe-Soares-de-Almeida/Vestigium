@@ -1,4 +1,4 @@
-// Tweaks page data. URL: ?tweaks=some|none|applied (default some) &restore=off|skipped &tweak-ms=<wait>
+// Tweaks page data. URL: ?tweaks=some|none|applied (default some) &restore=off|failed|dropped|unconfirmed|skipped &restore-after=<attempt that succeeds> &tweak-ms=<wait>
 // Every name, path and value here is invented; nothing was read from a real PC.
 import type {
   Advice,
@@ -185,16 +185,25 @@ function settledBy(a: Advice): Advice {
 let state = initial();
 let nextId = 10;
 
+/** Attempts at a restore point so far; `?restore-after=2` lets the second one succeed. */
+let attempts = 0;
+
 function point(): RestorePoint {
   const restore = query.get("restore");
+  attempts += 1;
+  if (attempts >= Number(query.get("restore-after") ?? Infinity)) return "Created";
   if (restore === "off") return "Off";
+  if (restore === "failed") return { Failed: { error: 1460 } };
+  if (restore === "dropped") return { Failed: { error: 0x2000_0005 } };
+  if (restore === "unconfirmed") return "Unconfirmed";
   if (restore === "skipped") return { Reused: { at_ms: now - 20 * 3_600_000 } };
   return "Created";
 }
 
 function record(a: Advice, without: boolean, undoOf: number | null = null): TweakRow {
   const p = a.applier === "Elevated" ? point() : null;
-  const blocked = p === "Off" && !without;
+  const lacking = p === "Off" || p === "Unconfirmed" || (typeof p === "object" && p !== null && "Failed" in p);
+  const blocked = lacking && !without;
   const change: TweakChange = {
     tweak: a.tweak,
     subject: a.subject,

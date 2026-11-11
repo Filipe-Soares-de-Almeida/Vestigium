@@ -6,6 +6,7 @@
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
+  import RestorePointDialog from "../components/RestorePointDialog.svelte";
   import RowCard from "../components/RowCard.svelte";
   import RowList from "../components/RowList.svelte";
   import StatusMark from "../components/StatusMark.svelte";
@@ -17,10 +18,11 @@
   import { href, type TweakGroup } from "../lib/router.svelte";
   import { toast } from "../lib/toast.svelte";
   import { keyOf, type Outcome, tweaks } from "../lib/tweaks.svelte";
-  import type { Advice, TweakPick, TweakRow } from "../lib/types";
+  import type { Advice, RestorePoint, TweakPick, TweakRow } from "../lib/types";
   import { at } from "./dumps/words";
   import { statusOf } from "./tests/status";
   import {
+    againLine,
     changeOf,
     GROUP,
     helpedVerdict,
@@ -29,6 +31,7 @@
     metric,
     name,
     nowOf,
+    pointCase,
     restorePoint,
     risk,
     rowState,
@@ -43,10 +46,18 @@
   const GROUPS = ["recommended", "quiet", "same", "done"] as const;
 
   let dialog = $state<HTMLDialogElement>();
-  /** What the dialog asks: to apply these, to go on without a restore point, or to undo a row. */
+  /** What the dialog asks: to apply these, to undo a row, or what to do about a missing restore point. */
   let asking = $state<
     | { kind: "apply"; items: Advice[] }
-    | { kind: "no_point"; retry: () => Promise<Outcome>; items: Advice[] }
+    | {
+        kind: "no_point";
+        point: RestorePoint;
+        run: (without: boolean) => Promise<Outcome>;
+        done: string;
+        attempt: number;
+        busy: boolean;
+        note: string;
+      }
     | { kind: "undo"; row: TweakRow; advice: Advice }
     | null
   >(null);
@@ -83,7 +94,7 @@
 
   function ask(next: NonNullable<typeof asking>): void {
     asking = next;
-    if (!dialog?.open) dialog?.showModal();
+    if (next.kind !== "no_point" && !dialog?.open) dialog?.showModal();
   }
 
   function close(): void {
@@ -91,15 +102,47 @@
     asking = null;
   }
 
-  /** Runs a change; without a restore point it asks before trying again. */
-  async function carry(items: Advice[], op: (without: boolean) => Promise<Outcome>, done: string): Promise<void> {
+  /** Runs a change; without a restore point it asks what to do. */
+  async function carry(op: (without: boolean) => Promise<Outcome>, done: string): Promise<void> {
     close();
     const outcome = await op(false);
     if (outcome.kind === "no_point") {
-      ask({ kind: "no_point", retry: () => op(true), items });
+      ask({ kind: "no_point", point: outcome.point, run: op, done, attempt: 1, busy: false, note: "" });
       return;
     }
     report(outcome, done);
+  }
+
+  /** Asks Windows for the point again with the dialog still open; a new failure updates it. */
+  async function tryAgain(): Promise<void> {
+    const now = asking;
+    if (now?.kind !== "no_point" || now.busy) return;
+    now.busy = true;
+    now.note = "";
+    const outcome = await now.run(false);
+    if (asking !== now) return;
+    if (outcome.kind === "no_point") {
+      now.point = outcome.point;
+      now.attempt += 1;
+      now.note = againLine(pointCase(outcome.point), now.attempt);
+      now.busy = false;
+      return;
+    }
+    asking = null;
+    report(outcome, now.done);
+  }
+
+  async function goWithout(): Promise<void> {
+    const now = asking;
+    if (now?.kind !== "no_point" || now.busy) return;
+    asking = null;
+    report(await now.run(true), now.done);
+  }
+
+  function giveUp(): void {
+    if (asking?.kind !== "no_point") return;
+    asking = null;
+    toast.show(t("ui.tweaks.toast.nothing"));
   }
 
   function report(outcome: Outcome, done: string): void {
@@ -118,13 +161,10 @@
   async function confirmed(): Promise<void> {
     const now = asking;
     if (now?.kind === "apply") {
-      await carry(now.items, (without) => tweaks.apply(now.items.map(pickOf), without), applied(now.items));
-    } else if (now?.kind === "no_point") {
-      close();
-      report(await now.retry(), applied(now.items));
+      await carry((without) => tweaks.apply(now.items.map(pickOf), without), applied(now.items));
     } else if (now?.kind === "undo") {
       const back = (changeOf(now.advice, now.row.change.results.map((r) => r.change), "Simple")[0]?.from ?? "").toLocaleLowerCase();
-      await carry([now.advice], (without) => tweaks.undo(now.row.id, without), t("ui.tweaks.toast.undone", { name: name(now.advice, "Simple"), value: back }));
+      await carry((without) => tweaks.undo(now.row.id, without), t("ui.tweaks.toast.undone", { name: name(now.advice, "Simple"), value: back }));
     }
   }
 
@@ -346,7 +386,7 @@
 {/if}
 
 {#if tweaks.dto !== null}
-  <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => (asking = null)}>
+  <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => { if (asking?.kind !== "no_point") asking = null; }}>
     {#if asking?.kind === "apply"}
       {@const admin = asking.items.some((a) => a.applier === "Elevated")}
       <h2 id="ask-title">{tn("ui.tweaks.ask", asking.items.length)}</h2>
@@ -368,13 +408,6 @@
         <button type="button" class="btn" onclick={close}>{t("ui.tweaks.cancel")}</button>
         <button type="button" class="btn accent" onclick={() => void confirmed()}>{t("ui.tweaks.bar.apply")}</button>
       </div>
-    {:else if asking?.kind === "no_point"}
-      <h2 id="ask-title">{t("ui.tweaks.no_point.title")}</h2>
-      <p>{t("ui.tweaks.no_point.body")}</p>
-      <div class="acts end">
-        <button type="button" class="btn" onclick={() => { close(); toast.show(t("ui.tweaks.toast.nothing")); }}>{t("ui.tweaks.cancel")}</button>
-        <button type="button" class="btn accent" onclick={() => void confirmed()}>{t("ui.tweaks.no_point.go")}</button>
-      </div>
     {:else if asking?.kind === "undo"}
       {@const back = (changeOf(asking.advice, asking.row.change.results.map((r) => r.change), "Simple")[0]?.from ?? "").toLocaleLowerCase()}
       <h2 id="ask-title">{t("ui.tweaks.undo.title")}</h2>
@@ -387,6 +420,17 @@
       </div>
     {/if}
   </dialog>
+  {#if asking?.kind === "no_point"}
+    <RestorePointDialog
+      point={asking.point}
+      attempt={asking.attempt}
+      busy={asking.busy}
+      note={asking.note}
+      onretry={() => void tryAgain()}
+      ongo={() => void goWithout()}
+      oncancel={giveUp}
+    />
+  {/if}
 {/if}
 
 <style>
