@@ -464,10 +464,20 @@ function noteOf(suspects: Suspect[]): string | null {
   return k(suspects.some((s) => causeKind(s.cause) === "Driver") ? "note.Driver" : "note.default");
 }
 
-/** Every suspect's next steps, main suspect first, each once; the deep capture is the note instead. */
-export function stepsOf(suspects: Suspect[]): Step[] {
+/**
+ * Every suspect's next steps, main suspect first, each once; the deep capture is the note instead.
+ * A blue screen's own steps give way to `fromDump`, the steps of its dump once that is read.
+ */
+export function stepsOf(suspects: Suspect[], fromDump: Step[] | null = null): Step[] {
   const steps: Step[] = [];
   for (const s of suspects) {
+    if (fromDump && causeKind(s.cause) === "BlueScreen") {
+      for (const step of fromDump) {
+        const key = `dump:${step.key}`;
+        if (!steps.some((known) => known.key === key)) steps.push({ key, text: step.text });
+      }
+      continue;
+    }
     const app = typeof s.cause !== "string" && "App" in s.cause ? s.cause.App.name : null;
     const driver = typeof s.cause !== "string" && "DriverModule" in s.cause ? s.cause.DriverModule.module : null;
     for (const step of s.next_steps) {
@@ -647,7 +657,7 @@ function figureOf(o: Occurrence): { value: string; caption: string } {
   return { value: formatDuration(span.end_ms - span.start_ms), caption: k("figure.duration") };
 }
 
-export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView {
+export function buildReport(dto: OccurrenceDto, level: DetailLevel, fromDump: Step[] | null = null): ReportView {
   const [first, ...rest] = dto.suspects;
   const main = first ?? { cause: "Unclear", confidence: "Low", evidence: [], next_steps: [] };
   const figure = figureOf(dto);
@@ -671,7 +681,7 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
     others: rest.map((s) => suspectView(s, dto, level)),
     summary: summaryOf(main.cause, main.confidence),
     note: noteOf(dto.suspects),
-    steps: stepsOf(dto.suspects),
+    steps: stepsOf(dto.suspects, fromDump),
     facts: dto.facts.map((f) => ({
       time: formatClock(f.at_ms),
       datetime: new Date(f.at_ms).toISOString(),
@@ -682,7 +692,7 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
 }
 
 /** The report as Markdown, plain words with the counters beside them, for a forum or an issue. */
-export function reportMarkdown(dto: OccurrenceDto): string {
+export function reportMarkdown(dto: OccurrenceDto, fromDump: Step[] | null = null): string {
   const lines: string[] = [];
   const figure = figureOf(dto);
   const kind = k(`class.${dto.kind}.${dto.severity}`);
@@ -734,7 +744,7 @@ export function reportMarkdown(dto: OccurrenceDto): string {
   }
 
   lines.push("", `### ${k("md.steps")}`, "");
-  const steps = stepsOf(dto.suspects);
+  const steps = stepsOf(dto.suspects, fromDump);
   if (steps.length) for (const step of steps) lines.push(`- ${step.text}`);
   else lines.push(k("todo.none"));
   lines.push("", `_${k("md.footer")}_`);

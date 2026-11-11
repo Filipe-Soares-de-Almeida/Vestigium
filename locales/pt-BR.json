@@ -1491,6 +1491,7 @@
   "ui.dumps.step.driver_update": "Atualize o driver {module} pelo site do fabricante",
   "ui.dumps.step.undo_recent": "Desfaça instalações ou atualizações feitas pouco antes",
   "ui.dumps.step.chipset": "Atualize os drivers de chipset e de rede",
+  "ui.dumps.step.storage_device": "Atualize o driver da controladora de disco pelo site do fabricante do PC ou da placa-mãe",
   "ui.dumps.lede.all_gone": "Nenhum dump no disco. Os resultados continuam abaixo.",
   "ui.dumps.lede.none": "Nenhum dump. O Windows está configurado para gerar um em caso de tela azul.",
   "ui.dumps.lede.none.off": "Nenhum dump, e o Windows está configurado para não gerar dumps: uma tela azul não deixaria registro.",

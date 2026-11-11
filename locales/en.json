@@ -1491,6 +1491,7 @@
   "ui.dumps.step.driver_update": "Update the driver {module} from its maker's site",
   "ui.dumps.step.undo_recent": "Undo installs or updates made just before",
   "ui.dumps.step.chipset": "Update the chipset and network drivers",
+  "ui.dumps.step.storage_device": "Update the disk controller driver from the PC or motherboard maker's site",
   "ui.dumps.lede.all_gone": "No dumps on disk. The results are kept below.",
   "ui.dumps.lede.none": "No dumps. Windows is set to write one on a blue screen.",
   "ui.dumps.lede.none.off": "No dumps, and Windows is set to write none: a blue screen would leave no record.",

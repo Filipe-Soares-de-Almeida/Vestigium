@@ -659,6 +659,7 @@ const FIXTURES = new Map(
     mediumFrames(),
     notMeasured(),
     blueScreen(13, 0x124, 5, ["CheckHardwareStability", "RunMemoryDiagnostic"]),
+    blueScreen(14, 0xa, 4, ["UpdateDriver"]),
   ].map((o) => [o.id, o]),
 );
 

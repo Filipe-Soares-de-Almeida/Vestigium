@@ -366,6 +366,10 @@ export function steps(d: DumpDto): Step[] {
     const family = familyOf(c.Module.name, d);
     if (family === "video") return [step("video_update"), step("overclock_gpu"), step("video_clean")];
     if (family === "windows" || family === "files") return [step("windows_update"), step("sfc"), step("memtest_again")];
+    // A Windows component that serves other drivers has no update of its own: the device behind it does.
+    if (c.Module.intermediary) {
+      return [step(family === "storage" ? "storage_device" : "chipset"), step("undo_recent"), step("memtest_again")];
+    }
     return [step("driver_update", { module: c.Module.name }), step("undo_recent"), step("memtest_again")];
   }
   return [step("memtest_again"), step("chipset")];

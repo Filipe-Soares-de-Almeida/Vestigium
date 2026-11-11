@@ -84,6 +84,11 @@ How to use this file:
 
 ### Fixed
 
+- Once the crash dump of a blue screen is read, the report page and the copied report use the
+  dump's own next steps instead of the generic driver update. When the dump blames a Windows
+  component that serves other drivers, such as storport.sys, the Dumps screen no longer says to
+  update that component: it points to the disk controller driver for storage and to the chipset
+  and network drivers for the rest.
 - The report of a blue screen no longer tells you to update the graphics and chipset drivers by
   default. A blue screen with a hardware stop code now asks you to undo overclocks, check the
   temperatures and run the memory diagnostic, and any other blue screen asks you to open Dumps to

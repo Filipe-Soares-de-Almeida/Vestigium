@@ -135,12 +135,49 @@ const deleted: DumpDto = {
   deleted_ms: now - 20 * DAY,
 };
 
+/** The falls of occurrences 13 and 14 on the report page: a hardware stop and a storage layer. */
+const hardwareFall = midnight.getTime() + (5 * 60 + 12) * 60_000 + 30_000;
+const hardwareStop: DumpDto = {
+  ...kernelMini,
+  id: 8,
+  path: "C:\\Windows\\Minidump\\110126-11000-01.dmp",
+  crash_ms: hardwareFall,
+  file_ms: hardwareFall + 5 * 60_000,
+  fault: {
+    BugCheck: {
+      code: 0x124,
+      params: ["0x0000000000000000", "0xffffa00012345678", "0x00000000be000000", "0x0000000000000800"],
+    },
+  },
+  fault_module: null,
+  stack_modules: ["ntoskrnl.exe", "hal.dll"],
+  culprit: "Hardware",
+};
+
+const storageFall = midnight.getTime() + (4 * 60 + 12) * 60_000 + 30_000;
+const storageLayer: DumpDto = {
+  ...kernelMini,
+  id: 9,
+  path: "C:\\Windows\\Minidump\\110126-12000-01.dmp",
+  crash_ms: storageFall,
+  file_ms: storageFall + 5 * 60_000,
+  fault: {
+    BugCheck: {
+      code: 0xa,
+      params: ["0xffffc00012340000", "0x0000000000000002", "0x0000000000000000", "0xfffff80123456789"],
+    },
+  },
+  fault_module: "storport.sys",
+  stack_modules: ["storport.sys", "ntoskrnl.exe"],
+  culprit: { Module: { name: "storport.sys", confidence: "Low", intermediary: true } },
+};
+
 let list: DumpDto[] = [];
 
 function initial(): DumpDto[] {
   const level = query.get("dumps") ?? "full";
   if (level === "none") return [];
-  const all = [kernelMemory, kernelMini, liveReport, gameCrash, toolCrash, olderMini, deleted];
+  const all = [kernelMemory, kernelMini, liveReport, gameCrash, toolCrash, olderMini, deleted, hardwareStop, storageLayer];
   if (level === "unread") {
     return all.map((d) => ({
       ...d,
@@ -184,7 +221,7 @@ export const handlers: Record<string, Handler> = {
   start_dump_scan: async () => {
     await wait();
     if (query.get("dump-fail") === "1") return { dumps: [], exit_code: 1 } satisfies DumpScanFinished;
-    const full = [kernelMemory, kernelMini, liveReport, gameCrash, toolCrash, olderMini, deleted];
+    const full = [kernelMemory, kernelMini, liveReport, gameCrash, toolCrash, olderMini, deleted, hardwareStop, storageLayer];
     list = list.map((d) => full.find((f) => f.id === d.id && f.analyzed_ms !== null) ?? d);
     return { dumps: list.map((d) => d.id), exit_code: 0 } satisfies DumpScanFinished;
   },
