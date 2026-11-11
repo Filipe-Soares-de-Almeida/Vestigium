@@ -32,6 +32,10 @@ How to use this file:
   and desktop shortcuts and its entry in the installed apps), keeps its history and points a Start with
   Windows entry at the new monitor. Uninstalling with Delete the application data ticked clears the
   folders of the account that is signed in.
+- The security policy and the Administrator prompts page now say what the administrator helper defends
+  against: a program running as a standard account, when another account's administrator password is
+  typed at the prompt, is covered. They also list what is not: unsigned releases, whose prompt shows
+  an unknown publisher, and the per-user copy of version 0.1.0 that an account keeps until it updates.
 - A deep capture now keeps what it measured by minute only: for each driver its three longest
   routines of 1 ms or more, for each app its three worst late frames, and the three worst stalls of the
   monitor's probe, in every minute. The capture page shows a bounded list taken from them (the 50
