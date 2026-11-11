@@ -196,6 +196,21 @@ const CARRY_OVER: [&str; 3] = [
     "INSERT OR IGNORE INTO main.machine (id, data) SELECT id, data FROM old.machine",
 ];
 
+/// Which tables a new database copied from a file set aside.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CarryOver {
+    pub tweaks: bool,
+    pub settings: bool,
+    pub machine: bool,
+}
+
+/// A damaged history file renamed aside, and what its replacement took over from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetAside {
+    pub path: PathBuf,
+    pub carried: CarryOver,
+}
+
 /// What the agent writes in one transaction, every batch.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Batch {
@@ -253,40 +268,48 @@ impl Store {
     }
 
     /// Like `open`, but a file the database engine rejects as damaged is renamed aside, with its
-    /// `-wal` and `-shm` files, and a new database takes its place; returns the new name of the
-    /// file set aside. A file that cannot be renamed keeps its place and the original error.
-    pub fn open_recovering(path: &Path) -> Result<(Store, Option<PathBuf>), StoreError> {
+    /// `-wal` and `-shm` files, and a new database takes its place; returns where the file went
+    /// and what the new database took over from it. A file that cannot be renamed keeps its place
+    /// and the original error.
+    pub fn open_recovering(path: &Path) -> Result<(Store, Option<SetAside>), StoreError> {
         // A file with no database header is moved before the engine sees it, which would
         // delete the -wal file of a database it cannot read.
         if has_foreign_header(path)
             && let Some(aside) = set_aside(path)
         {
-            return Ok((Store::open_after(path, &aside)?, Some(aside)));
+            return Store::open_after(path, aside);
         }
         match Store::open(path) {
             Err(StoreError::Sqlite(err)) if is_damage(&err) => {
                 let Some(aside) = set_aside(path) else {
                     return Err(StoreError::Sqlite(err));
                 };
-                Ok((Store::open_after(path, &aside)?, Some(aside)))
+                Store::open_after(path, aside)
             }
             opened => opened.map(|store| (store, None)),
         }
     }
 
     /// Opens a new database at `path` that takes over what `aside` still holds.
-    fn open_after(path: &Path, aside: &Path) -> Result<Store, StoreError> {
+    fn open_after(path: &Path, aside: PathBuf) -> Result<(Store, Option<SetAside>), StoreError> {
         let mut store = Store::open(path)?;
-        store.carry_over_from(aside);
-        Ok(store)
+        let carried = store.carry_over_from(&aside);
+        Ok((
+            store,
+            Some(SetAside {
+                path: aside,
+                carried,
+            }),
+        ))
     }
 
     /// Copies the tweak changes, settings and machine facts a file set aside still holds into this
     /// database, table by table; a table that cannot be read is skipped, a file without a database
-    /// header is not opened, and the file is opened read-only.
-    pub fn carry_over_from(&mut self, from: &Path) {
+    /// header is not opened, and the file is opened read-only. Reports which tables were copied.
+    pub fn carry_over_from(&mut self, from: &Path) -> CarryOver {
+        let mut carried = CarryOver::default();
         if !from.is_file() || has_foreign_header(from) {
-            return;
+            return carried;
         }
         let uri = format!("{}?mode=ro", file_uri(from));
         if self
@@ -294,12 +317,16 @@ impl Store {
             .execute("ATTACH DATABASE ?1 AS old", params![uri])
             .is_err()
         {
-            return;
+            return carried;
         }
-        for copy in CARRY_OVER {
-            let _ = self.copy_rows(copy);
-        }
+        let [tweaks, settings, machine] = CARRY_OVER.map(|copy| self.copy_rows(copy).is_ok());
+        carried = CarryOver {
+            tweaks,
+            settings,
+            machine,
+        };
         let _ = self.conn.execute_batch("DETACH DATABASE old");
+        carried
     }
 
     fn copy_rows(&mut self, sql: &str) -> Result<(), StoreError> {

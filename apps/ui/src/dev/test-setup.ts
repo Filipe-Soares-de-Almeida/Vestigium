@@ -22,6 +22,15 @@ globalThis.ResizeObserver ??= class {
   disconnect(): void {}
 };
 
+// jsdom does not implement the modal methods of <dialog>; they set and clear the open attribute.
+const dialog = HTMLDialogElement.prototype;
+dialog.showModal ??= function (this: HTMLDialogElement) {
+  this.setAttribute("open", "");
+};
+dialog.close ??= function (this: HTMLDialogElement) {
+  this.removeAttribute("open");
+};
+
 beforeEach(() => {
   setLang("en");
 });

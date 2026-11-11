@@ -1,8 +1,8 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
     CURATED, Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap,
-    LanguagePref, MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings, ThemePref,
-    WinEvent, classify,
+    HistoryReset, LanguagePref, MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings,
+    ThemePref, WinEvent, classify,
 };
 
 use crate::codes::{
@@ -29,6 +29,7 @@ const SETTING_LANGUAGE: &str = "language";
 const SETTING_THEME: &str = "theme";
 const SETTING_COLOR_THEME: &str = "color_theme";
 const SETTING_DETAIL_LEVEL: &str = "detail_level";
+const SETTING_HISTORY_RESET: &str = "history_reset";
 
 impl Store {
     /// Stores a finished occurrence on its own, right away; returns its id.
@@ -103,6 +104,31 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Remembers a damaged history that was set aside, so a watcher that restarts before anyone
+    /// looked still reports it.
+    pub fn set_history_reset(&mut self, reset: &HistoryReset) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![SETTING_HISTORY_RESET, serde_json::to_string(reset)?],
+        )?;
+        Ok(())
+    }
+
+    /// The history set aside that `set_history_reset` remembered; a value that cannot be read
+    /// counts as none.
+    pub fn history_reset(&self) -> Result<Option<HistoryReset>, StoreError> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM setting WHERE key = ?1",
+                params![SETTING_HISTORY_RESET],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.and_then(|value| serde_json::from_str(&value).ok()))
     }
 
     /// Occurrences that overlap `[from_ms, to_ms]`, oldest first.

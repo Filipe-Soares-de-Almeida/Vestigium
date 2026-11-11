@@ -1,5 +1,5 @@
 // Stand-in for the window's Rust side in a plain browser (npm run dev); ./fixtures/*.ts add `handlers`.
-// URL: ?link=running|stopped|mismatch&monitor=ok|no_reading|degraded|unverified|silent&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
+// URL: ?link=running|stopped|mismatch&monitor=ok|no_reading|degraded|unverified|silent|history_reset|history_lost&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import type { AgentLink, MonitorStatus, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
@@ -42,7 +42,13 @@ function monitorStatus(): MonitorStatus {
     health_attempt_ms: now - 60_000,
     health_ok_ms: now - 60_000,
     health_unread: [],
+    history_reset: null,
   };
+  if (monitorMode === "history_reset" || monitorMode === "history_lost") {
+    const kept = monitorMode === "history_reset";
+    const reset = { file: "vestigium.db.corrupt-1790000000000", at_ms: now - 60_000, tweaks: kept, settings: kept, machine: kept };
+    return { ...watching, history_reset: reset };
+  }
   if (monitorMode === "no_reading") {
     return { ...watching, state: "no_reading", no_reading_since_ms: now - 82 * 60_000 };
   }

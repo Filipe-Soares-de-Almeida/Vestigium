@@ -425,6 +425,20 @@ export interface MonitorStatus {
   health_ok_ms: number | null;
   /** Finding kinds the latest finished pass could not read. */
   health_unread: FindingKind[];
+  /** A damaged history file the watcher set aside, while that file is still in the data folder. */
+  history_reset: HistoryReset | null;
+}
+
+/** What the watcher did when the history file was damaged at start. */
+export interface HistoryReset {
+  /** Name of the file set aside, without its folder. */
+  file: string;
+  /** When the history was replaced, Unix milliseconds. */
+  at_ms: number;
+  /** Whether the tweak changes, the settings and the facts about this PC were copied into the new history. */
+  tweaks: boolean;
+  settings: boolean;
+  machine: boolean;
 }
 
 export type AgentLink =

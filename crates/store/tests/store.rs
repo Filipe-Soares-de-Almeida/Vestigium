@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use vestigium_core::{
-    CoreLoad, DiskLoad, DiskLoadV2, MinuteSample, ProcessSample, ProcessSampleV1, ProcessTop,
-    ProcessTopV1, Sample, SampleV1, SampleV2, summarize_minute,
+    CoreLoad, DiskLoad, DiskLoadV2, HistoryReset, MinuteSample, ProcessSample, ProcessSampleV1,
+    ProcessTop, ProcessTopV1, Sample, SampleV1, SampleV2, summarize_minute,
 };
 use vestigium_store::{
-    Batcher, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
+    Batcher, CarryOver, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
 };
 
 fn sample(ts_ms: i64) -> Sample {
@@ -211,6 +211,8 @@ fn a_file_that_is_not_a_database_is_set_aside_and_replaced() {
     let (store, aside) = Store::open_recovering(&path).unwrap();
 
     let aside = aside.expect("the damaged file is named");
+    assert_eq!(aside.carried, CarryOver::default());
+    let aside = aside.path;
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.journal_mode().unwrap(), "wal");
     assert_eq!(aside.parent(), Some(dir.path()));
@@ -263,7 +265,7 @@ fn a_file_with_a_valid_magic_and_a_broken_header_is_set_aside() {
     let (store, aside) = Store::open_recovering(&path).unwrap();
 
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(std::fs::read(aside.unwrap()).unwrap(), bytes);
+    assert_eq!(std::fs::read(aside.unwrap().path).unwrap(), bytes);
 }
 
 #[test]
@@ -797,4 +799,59 @@ fn stamps_a_clock_jump_scattered_still_make_segments_within_an_hour() {
         total += decode::<Sample>(&segment.data).unwrap().len();
     }
     assert_eq!(total, 6);
+}
+
+fn reset() -> HistoryReset {
+    HistoryReset {
+        file: "vestigium.db.corrupt-1790000000000".to_string(),
+        at_ms: 1_790_000_000_000,
+        tweaks: true,
+        settings: false,
+        machine: true,
+    }
+}
+
+#[test]
+fn a_history_set_aside_is_remembered_for_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    {
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(store.history_reset().unwrap(), None);
+        store.set_history_reset(&reset()).unwrap();
+    }
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.history_reset().unwrap(), Some(reset()));
+}
+
+#[test]
+fn the_note_of_a_set_aside_history_does_not_change_the_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let before = store.settings().unwrap();
+
+    store.set_history_reset(&reset()).unwrap();
+
+    assert_eq!(store.settings().unwrap(), before);
+    assert!(store.settings_notes().unwrap().is_empty());
+}
+
+#[test]
+fn an_unreadable_note_of_a_set_aside_history_reads_as_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO setting (key, value) VALUES ('history_reset', 'not json')",
+            [],
+        )
+        .unwrap();
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.history_reset().unwrap(), None);
 }

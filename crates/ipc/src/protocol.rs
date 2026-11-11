@@ -3,12 +3,12 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use vestigium_core::health::FindingKind;
 use vestigium_core::{
-    EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, ProgramPoint,
-    Reading, Sample, Settings, TweakChange,
+    EpisodeKind, HistoryReset, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop,
+    ProgramPoint, Reading, Sample, Settings, TweakChange,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// How long the watcher may take to answer a request that only reads memory or flips a flag.
 pub const ANSWER_SHORT: Duration = Duration::from_secs(3);
@@ -232,6 +232,9 @@ pub struct MonitorStatus {
     /// Finding kinds the latest finished pass could not read.
     #[serde(default)]
     pub health_unread: Vec<FindingKind>,
+    /// A damaged history file this watcher set aside, while that file is still in the data folder.
+    #[serde(default)]
+    pub history_reset: Option<HistoryReset>,
 }
 
 /// The latest second watched.

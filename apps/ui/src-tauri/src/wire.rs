@@ -21,12 +21,13 @@ use vestigium_core::{
     Advice, AppFrames, Applier, BUCKETS, CaptureSource, Cause, Channel, ColorTheme, Confidence,
     CoreLoad, CrashKind, Culprit, DeepCapture, DetailLevel, DiskInfo, DiskLoad, DriverLatency,
     DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Evidence, Fact, FactKind,
-    FrameHitch, Gap, GapReason, Guid, HangOutcome, HangSpan, Helped, Hive, HungWindow,
-    LanguagePref, LongRoutine, MachineInfo, Media, Metric, NextStep, Occurrence, OccurrenceKind,
-    OccurrenceSummary, PcState, ProbeHiccup, ProcessSample, ProcessTop, ProgramPoint, Reading,
-    RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, Sample, Setting, SettingChange,
-    SettingResult, SettingValue, Settings, Severity, Signal, Signature, StartupList, Status,
-    Suspect, TWEAKS, Takes, ThemePref, Trigger, TweakChange, Value, WinEvent, Window,
+    FrameHitch, Gap, GapReason, Guid, HangOutcome, HangSpan, Helped, HistoryReset, Hive,
+    HungWindow, LanguagePref, LongRoutine, MachineInfo, Media, Metric, NextStep, Occurrence,
+    OccurrenceKind, OccurrenceSummary, PcState, ProbeHiccup, ProcessSample, ProcessTop,
+    ProgramPoint, Reading, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, Sample,
+    Setting, SettingChange, SettingResult, SettingValue, Settings, Severity, Signal, Signature,
+    StartupList, Status, Suspect, TWEAKS, Takes, ThemePref, Trigger, TweakChange, Value, WinEvent,
+    Window,
 };
 use vestigium_ipc::{
     AgentStatus, IpcError, MonitorSource, MonitorState, MonitorStatus, NowFrame, SourceFailure,
@@ -1462,6 +1463,17 @@ fn monitor_status(full: bool) -> MonitorStatus {
         } else {
             Vec::new()
         },
+        history_reset: full.then(history_reset),
+    }
+}
+
+fn history_reset() -> HistoryReset {
+    HistoryReset {
+        file: string("vestigium.db.corrupt-1790000000000"),
+        at_ms: 1_790_000_300_000,
+        tweaks: true,
+        settings: false,
+        machine: true,
     }
 }
 
@@ -1753,6 +1765,7 @@ fn render() -> String {
     wire.add(TYPES, "MonitorState", monitor_states());
     wire.add(TYPES, "MonitorSource", monitor_sources());
     wire.add(TYPES, "SourceFailure", vec![source_failure()]);
+    wire.add(TYPES, "HistoryReset", vec![history_reset()]);
     wire.add(
         TYPES,
         "AgentLink",

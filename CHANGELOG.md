@@ -53,6 +53,14 @@ How to use this file:
   "stopped", and starts again by itself when the monitor answers. The window asks again every five seconds and
   recovers by itself; a poll that is still waiting is never repeated, so a stuck monitor no longer
   leaves a blocked thread for every poll.
+- The window now tells you once when the watcher replaced a damaged history file. The first time the
+  window opens afterwards, a dialog says the file was set aside and under which name, lists whether
+  the applied tweaks, the settings and the facts about the PC were kept in the new history, says that
+  tweaks already applied stay on the PC but can no longer be undone when they were not kept, and
+  offers to open the folder. Got it or Escape closes it, and it appears again only for a later
+  recovery with another file. A watcher that restarts before the window opened still tells it, for as
+  long as the set-aside file is in the data folder. The window and the watcher must be updated
+  together, because the pipe protocol changed.
 
 ### Changed
 

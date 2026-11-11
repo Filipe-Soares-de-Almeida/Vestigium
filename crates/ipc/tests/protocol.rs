@@ -20,6 +20,7 @@ fn aspm_item() -> PlanItem {
         }],
     }
 }
+use vestigium_core::HistoryReset;
 use vestigium_core::health::FindingKind;
 use vestigium_ipc::{
     AgentStatus, ErrorCode, MonitorSource, MonitorState, MonitorStatus, NowFrame, PROTOCOL_VERSION,
@@ -90,6 +91,13 @@ fn every_response_roundtrips_as_json() {
                 health_attempt_ms: Some(1_700_000_200_000),
                 health_ok_ms: Some(1_700_000_000_000),
                 health_unread: vec![FindingKind::TwoAntivirus, FindingKind::DiskSmart],
+                history_reset: Some(HistoryReset {
+                    file: "vestigium.db.corrupt-1700000000000".to_string(),
+                    at_ms: 1_700_000_300_000,
+                    tweaks: true,
+                    settings: false,
+                    machine: true,
+                }),
             },
             ..AgentStatus::default()
         }),
@@ -237,4 +245,13 @@ fn a_status_without_the_monitor_fields_still_reads() {
 
     assert_eq!(status.monitor, MonitorStatus::default());
     assert!(!status.suspended);
+}
+
+#[test]
+fn a_monitor_without_a_set_aside_history_still_reads() {
+    let old = r#"{"state":"watching","failing":[]}"#;
+
+    let monitor: MonitorStatus = serde_json::from_str(old).unwrap();
+
+    assert_eq!(monitor.history_reset, None);
 }

@@ -2,7 +2,7 @@ use vestigium_core::{
     Applier, Hive, MachineInfo, RestorePoint, Retention, Setting, SettingChange, SettingResult,
     Settings, TWEAKS, ThemePref, TweakChange, TweakId, Value, undo,
 };
-use vestigium_store::{SCHEMA_VERSION, Store};
+use vestigium_store::{CarryOver, SCHEMA_VERSION, Store};
 
 const DAY: i64 = 24 * 60 * 60_000;
 
@@ -412,8 +412,16 @@ fn a_new_database_takes_over_tweaks_settings_and_machine() {
     let before = std::fs::read(&old).unwrap();
     let mut store = Store::open(&new).unwrap();
 
-    store.carry_over_from(&old);
+    let carried = store.carry_over_from(&old);
 
+    assert_eq!(
+        carried,
+        CarryOver {
+            tweaks: true,
+            settings: true,
+            machine: true
+        }
+    );
     let kept = store.tweaks_in_place().unwrap();
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].id, id);
@@ -456,8 +464,16 @@ fn a_table_the_old_file_cannot_give_does_not_stop_the_others() {
     }
     let mut store = Store::open(&new).unwrap();
 
-    store.carry_over_from(&old);
+    let carried = store.carry_over_from(&old);
 
+    assert_eq!(
+        carried,
+        CarryOver {
+            tweaks: false,
+            settings: true,
+            machine: false
+        }
+    );
     assert_eq!(store.settings().unwrap().theme, ThemePref::Dark);
     assert!(store.tweaks_in_place().unwrap().is_empty());
 }
@@ -472,8 +488,9 @@ fn an_unreadable_old_file_gives_nothing_and_stays_as_it_is() {
     std::fs::write(&wal, b"wal bytes").unwrap();
     let mut store = Store::open(&new).unwrap();
 
-    store.carry_over_from(&old);
+    let carried = store.carry_over_from(&old);
 
+    assert_eq!(carried, CarryOver::default());
     assert!(store.tweaks_in_place().unwrap().is_empty());
     assert!(store.machine().unwrap().is_none());
     assert_eq!(std::fs::read(&old).unwrap(), bytes);

@@ -15,8 +15,8 @@ use vestigium_collect::{
     interrupt_ms, spawn_probe, wall_ms,
 };
 use vestigium_core::{
-    Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
-    PressureSpan, ProbeHiccup, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate,
+    Applier, DEFAULT_PROBE_PERIOD, GateState, HistoryReset, LanguagePref, PROGRAM_FRAMES_MAX,
+    PlanItem, PressureSpan, ProbeHiccup, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate,
     SENSITIVE_FOR, SettingStore, Settings, Timing, carry_out, check_item,
 };
 use vestigium_i18n::{Catalog, Lang};
@@ -24,7 +24,7 @@ use vestigium_ipc::{
     AgentStatus, ErrorCode, IpcError, NowFrame, PROTOCOL_VERSION, PipeServer, Request, Response,
     current_user_sid, pipe_name, pipe_owner,
 };
-use vestigium_store::Store;
+use vestigium_store::{SetAside, Store};
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
@@ -466,7 +466,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         None => paths::data_dir().ok_or_else(|| failed("the LOCALAPPDATA folder is not set"))?,
     };
     let db = data_dir.join("vestigium.db");
-    let (store, set_aside) = Store::open_recovering(&db).map_err(failed)?;
+    let (mut store, set_aside) = Store::open_recovering(&db).map_err(failed)?;
     let shared = Arc::new(Shared {
         gate: RunGate::new(),
         status: Arc::new(Mutex::new(AgentStatus {
@@ -495,12 +495,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         exe: std::env::current_exe().map_err(failed)?,
     });
 
-    if let Some(name) = set_aside.as_deref().and_then(Path::file_name) {
-        lock(&shared.status).last_error = Some(format!(
-            "the history file was damaged and set aside as {}",
-            name.to_string_lossy()
-        ));
-    }
+    report_history_reset(&mut store, &data_dir, set_aside.as_ref(), &shared.status);
     report_setting_notes(&store, &shared.status);
 
     for dir in [
@@ -678,6 +673,40 @@ fn message_box(catalog: &Catalog, body: &str) {
 
 pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Tells the status about a history file set aside: the one just renamed, or one an earlier start
+/// remembered while it is still in the data folder.
+fn report_history_reset(
+    store: &mut Store,
+    data_dir: &Path,
+    set_aside: Option<&SetAside>,
+    status: &Mutex<AgentStatus>,
+) {
+    let reset = match set_aside {
+        Some(aside) => {
+            let file = aside.path.file_name().map(|name| name.to_string_lossy());
+            let reset = file.map(|file| HistoryReset {
+                file: file.into_owned(),
+                at_ms: wall_ms(),
+                tweaks: aside.carried.tweaks,
+                settings: aside.carried.settings,
+                machine: aside.carried.machine,
+            });
+            if let Some(reset) = &reset {
+                let _ = store.set_history_reset(reset);
+                lock(status).last_error = Some(format!(
+                    "the history file was damaged and set aside as {}",
+                    reset.file
+                ));
+            }
+            reset
+        }
+        None => store.history_reset().ok().flatten().filter(|reset| {
+            !reset.file.contains(['/', '\\']) && data_dir.join(&reset.file).is_file()
+        }),
+    };
+    lock(status).monitor.history_reset = reset;
 }
 
 /// Tells the status what the stored settings had to replace by a default, when anything.
@@ -1177,6 +1206,97 @@ pub(crate) mod tests {
         let last_error = lock(&shared.status).last_error.clone().unwrap();
         assert!(last_error.contains("samples_hours"), "{last_error}");
         assert_eq!(store.settings().unwrap().retention.minutes_days, 60);
+    }
+
+    fn damaged_history(dir: &Path) -> PathBuf {
+        let db = dir.join("vestigium.db");
+        fs::write(&db, vec![0x5A; 4096]).unwrap();
+        db
+    }
+
+    #[test]
+    fn the_status_names_the_file_set_aside_after_a_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = damaged_history(dir.path());
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &shared.status);
+
+        let status = lock(&shared.status).clone();
+        let reset = status
+            .monitor
+            .history_reset
+            .expect("the recovery is reported");
+        assert!(
+            reset.file.starts_with("vestigium.db.corrupt-"),
+            "{}",
+            reset.file
+        );
+        assert!(dir.path().join(&reset.file).is_file());
+        assert!(!reset.tweaks && !reset.settings && !reset.machine);
+        assert!(status.last_error.unwrap().contains(&reset.file));
+    }
+
+    #[test]
+    fn a_healthy_start_reports_no_history_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, aside) = Store::open_recovering(&dir.path().join("vestigium.db")).unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &shared.status);
+
+        assert_eq!(lock(&shared.status).monitor.history_reset, None);
+        assert_eq!(lock(&shared.status).last_error, None);
+    }
+
+    #[test]
+    fn a_restart_reports_the_set_aside_file_while_it_is_still_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = damaged_history(dir.path());
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let first = shared();
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &first.status);
+        let reset = lock(&first.status).monitor.history_reset.clone().unwrap();
+        drop(store);
+
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let second = shared();
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &second.status);
+
+        assert_eq!(aside, None);
+        assert_eq!(
+            lock(&second.status).monitor.history_reset,
+            Some(reset.clone())
+        );
+
+        fs::remove_file(dir.path().join(&reset.file)).unwrap();
+        let third = shared();
+        report_history_reset(&mut store, dir.path(), None, &third.status);
+        assert_eq!(lock(&third.status).monitor.history_reset, None);
+    }
+
+    #[test]
+    fn a_remembered_name_that_points_outside_the_data_folder_is_not_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        fs::create_dir(&data).unwrap();
+        fs::write(dir.path().join("outside.db"), b"x").unwrap();
+        let (mut store, _) = Store::open_recovering(&data.join("vestigium.db")).unwrap();
+        store
+            .set_history_reset(&HistoryReset {
+                file: "..\\outside.db".to_string(),
+                at_ms: 1,
+                tweaks: true,
+                settings: true,
+                machine: true,
+            })
+            .unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, &data, None, &shared.status);
+
+        assert_eq!(lock(&shared.status).monitor.history_reset, None);
     }
 
     #[test]

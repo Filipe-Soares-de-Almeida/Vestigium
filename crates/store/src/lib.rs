@@ -20,7 +20,7 @@ pub use dumps::DumpRow;
 pub use health::FindingRecord;
 pub use hwtests::TestRunRow;
 pub use prune::PruneReport;
-pub use schema::{Batch, SCHEMA_VERSION, Store};
+pub use schema::{Batch, CarryOver, SCHEMA_VERSION, SetAside, Store};
 pub use segment::{Segment, Series, decode, encode};
 pub use smart::SmartReading;
 pub use tweaks::TweakChangeRow;

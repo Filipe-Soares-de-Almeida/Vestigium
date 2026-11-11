@@ -3,6 +3,7 @@
 
   import Banner from "./components/Banner.svelte";
   import ErrorView from "./components/ErrorView.svelte";
+  import HistoryResetDialog from "./components/HistoryResetDialog.svelte";
   import Lazy from "./components/Lazy.svelte";
   import Loading from "./components/Loading.svelte";
   import NavPane from "./components/NavPane.svelte";
@@ -186,6 +187,7 @@
 </div>
 <Toast />
 <UpdateDialog />
+<HistoryResetDialog />
 
 <style>
   .win {
