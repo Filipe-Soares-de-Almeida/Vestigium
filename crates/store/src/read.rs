@@ -1,5 +1,7 @@
 use serde::de::DeserializeOwned;
-use vestigium_core::{MinuteSample, ProcessTop, ProcessTopV1, Sample, SampleV1, minute_of};
+use vestigium_core::{
+    MinuteSample, ProcessTop, ProcessTopV1, Sample, SampleV1, SampleV2, minute_of,
+};
 
 use crate::{Series, Store, StoreError, decode};
 
@@ -7,6 +9,7 @@ impl Store {
     /// Samples taken in `[from_ms, to_ms]`, oldest first, from every stored layout.
     pub fn samples(&self, from_ms: i64, to_ms: i64) -> Result<Vec<Sample>, StoreError> {
         let mut samples = self.items::<SampleV1, Sample>(Series::SamplesV1, from_ms, to_ms)?;
+        samples.extend(self.items::<SampleV2, Sample>(Series::SamplesV2, from_ms, to_ms)?);
         samples.extend(self.items::<Sample, Sample>(Series::Samples, from_ms, to_ms)?);
         samples.retain(|s| (from_ms..=to_ms).contains(&s.ts_ms));
         samples.sort_by_key(|s| s.ts_ms);

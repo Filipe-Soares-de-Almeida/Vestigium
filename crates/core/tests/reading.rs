@@ -8,13 +8,13 @@ fn sample(ts_ms: i64) -> Sample {
         cpu_pct: 20.0,
         dpc_pct: 0.5,
         isr_pct: 0.1,
-        perf_limit_pct: 100.0,
-        proc_perf_pct: 99.0,
+        perf_limit_pct: Some(100.0),
+        proc_perf_pct: Some(99.0),
         mem_total_bytes: 16 << 30,
         mem_avail_bytes: 12 << 30,
         commit_bytes: 6 << 30,
         commit_limit_bytes: 32 << 30,
-        hard_faults_per_s: 0.0,
+        hard_faults_per_s: Some(0.0),
         gpu_pct: Some(10.0),
         probe_max_lag_ms: 1.5,
         sampler_lag_ms: 1.0,
@@ -27,9 +27,9 @@ fn disk(name: &str, active_pct: f32, latency_ms: f32) -> DiskLoad {
     DiskLoad {
         name: name.to_string(),
         active_pct,
-        latency_ms,
-        queue_len: 0.0,
-        bytes_per_s: 0.0,
+        latency_ms: Some(latency_ms),
+        queue_len: Some(0.0),
+        bytes_per_s: Some(0.0),
     }
 }
 
@@ -43,6 +43,17 @@ fn reading(cpu_pct: f32, mem_used_pct: f32, disk_active_pct: f32, gpu_pct: f32) 
         gpu_pct: Some(gpu_pct),
         probe_lag_ms: 1.0,
     }
+}
+
+#[test]
+fn reading_of_a_sample_ignores_a_latency_that_was_not_read() {
+    let mut bare = sample(5_000);
+    bare.disks.iter_mut().for_each(|d| d.latency_ms = None);
+
+    let reading = Reading::of_sample(&bare);
+
+    assert_eq!(reading.disk_active_pct, 70.0);
+    assert_eq!(reading.disk_latency_ms, 0.0);
 }
 
 #[test]

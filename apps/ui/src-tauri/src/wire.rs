@@ -149,13 +149,13 @@ fn sample(full: bool) -> Sample {
         cpu_pct: 12.5,
         dpc_pct: 0.5,
         isr_pct: 0.25,
-        perf_limit_pct: 100.0,
-        proc_perf_pct: 90.0,
+        perf_limit_pct: full.then_some(100.0),
+        proc_perf_pct: full.then_some(90.0),
         mem_total_bytes: 17_179_869_184,
         mem_avail_bytes: 8_589_934_592,
         commit_bytes: 9_000_000_000,
         commit_limit_bytes: 20_000_000_000,
-        hard_faults_per_s: 3.5,
+        hard_faults_per_s: full.then_some(3.5),
         gpu_pct: full.then_some(30.0),
         probe_max_lag_ms: 4.5,
         sampler_lag_ms: 0.5,
@@ -167,9 +167,9 @@ fn sample(full: bool) -> Sample {
         disks: vec![DiskLoad {
             name: string("0 C:"),
             active_pct: 7.5,
-            latency_ms: 1.5,
-            queue_len: 0.5,
-            bytes_per_s: 1024.0,
+            latency_ms: full.then_some(1.5),
+            queue_len: full.then_some(0.5),
+            bytes_per_s: full.then_some(1024.0),
         }],
     }
 }
@@ -1542,13 +1542,16 @@ fn render() -> String {
     wire.add(
         TYPES,
         "DiskLoad",
-        vec![DiskLoad {
-            name: string("0 C:"),
-            active_pct: 7.5,
-            latency_ms: 1.5,
-            queue_len: 0.5,
-            bytes_per_s: 1024.0,
-        }],
+        [true, false]
+            .into_iter()
+            .map(|full| DiskLoad {
+                name: string("0 C:"),
+                active_pct: 7.5,
+                latency_ms: full.then_some(1.5),
+                queue_len: full.then_some(0.5),
+                bytes_per_s: full.then_some(1024.0),
+            })
+            .collect(),
     );
     wire.add(TYPES, "Sample", both(sample));
     wire.add(TYPES, "ProcessSample", vec![process_sample()]);

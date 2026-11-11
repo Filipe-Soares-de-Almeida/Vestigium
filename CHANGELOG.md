@@ -437,6 +437,17 @@ How to use this file:
   freezes and crashes, the pending events and the periodic writes carry on, and the saved list of
   the machine's disks is no longer emptied when the disk counters return nothing. Before, a reading
   that kept failing left freezes it had already seen unfinished and events unsaved.
+- A performance counter that Windows reports as invalid for a second, for example a rate with no
+  data yet, no longer costs the whole second or reads as zero. Only that value is left out: the
+  processor, memory and the other counters are still recorded, and the throttling and disk rules,
+  the minute summaries and the black box skip a value that was not read. A disk whose latency,
+  queue or throughput counter is invalid no longer shows zero for it. The history keeps each second
+  in a new layout, so the window, the monitor and the helper must be updated together; history
+  saved earlier is still read.
+- A second whose performance counters cannot be read at all, because they are missing, damaged or
+  failing, is now still recorded with its processor and memory readings and its counter values left
+  out. Before, such a second had no record, so the day showed no data. A disk counter that gains
+  instances while it is read no longer loses that second's disk readings.
 - An event logged just before a freeze no longer moves the report's attention off the freeze: when an
   occurrence holds a freeze and an earlier event, the causes are judged around the freeze, so a busy
   processor or a slow disk next to the freeze is found instead of reading as unclear.

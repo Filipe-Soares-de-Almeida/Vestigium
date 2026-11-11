@@ -15,8 +15,8 @@ fn crossed(facts: &[Fact], metric: Metric) -> usize {
 #[test]
 fn facts_are_in_time_order() {
     let mut window = quiet_window();
-    tweak(&mut window, -20, 5, |s| s.disks[0].latency_ms = 300.0);
-    tweak(&mut window, -3, -3, |s| s.disks[0].latency_ms = 900.0);
+    tweak(&mut window, -20, 5, |s| s.disks[0].latency_ms = Some(300.0));
+    tweak(&mut window, -3, -3, |s| s.disks[0].latency_ms = Some(900.0));
     window.events.push(event(
         T + 5_000,
         "stornvme",
@@ -82,8 +82,10 @@ fn facts_name_the_busiest_process() {
 #[test]
 fn the_crossing_names_the_disk_of_the_peak() {
     let mut window = quiet_window();
-    tweak(&mut window, -20, -20, |s| s.disks[0].latency_ms = 250.0);
-    tweak(&mut window, -5, -5, |s| s.disks[1].latency_ms = 800.0);
+    tweak(&mut window, -20, -20, |s| {
+        s.disks[0].latency_ms = Some(250.0)
+    });
+    tweak(&mut window, -5, -5, |s| s.disks[1].latency_ms = Some(800.0));
     let found = facts(&[], &window);
     let crossing = found
         .iter()
@@ -109,8 +111,8 @@ fn the_crossing_names_the_disk_of_the_peak() {
 #[test]
 fn the_queue_crossing_names_the_disk_of_the_peak() {
     let mut window = quiet_window();
-    tweak(&mut window, -20, -20, |s| s.disks[0].queue_len = 8.5);
-    tweak(&mut window, -5, -5, |s| s.disks[1].queue_len = 12.0);
+    tweak(&mut window, -20, -20, |s| s.disks[0].queue_len = Some(8.5));
+    tweak(&mut window, -5, -5, |s| s.disks[1].queue_len = Some(12.0));
     let found = facts(&[], &window);
     let crossing = found
         .iter()

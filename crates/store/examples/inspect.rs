@@ -5,9 +5,10 @@ use std::path::PathBuf;
 use vestigium_core::Sample;
 use vestigium_store::{Series, Store};
 
-const SERIES: [(Series, &str); 5] = [
+const SERIES: [(Series, &str); 6] = [
     (Series::SamplesV1, "samples v1"),
     (Series::ProcessesV1, "processes v1"),
+    (Series::SamplesV2, "samples v2"),
     (Series::Samples, "samples"),
     (Series::Processes, "processes"),
     (Series::Minutes, "minutes"),

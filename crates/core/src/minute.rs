@@ -110,7 +110,7 @@ impl MinuteSample {
 pub struct MinuteRollup {
     current: Option<MinuteSample>,
     cpu_sum: f64,
-    /// Sum of bytes/s and sample count, one per entry of `current.disks`.
+    /// Sum of bytes/s and count of samples that read it, one per entry of `current.disks`.
     disk_sums: Vec<(f64, u16)>,
 }
 
@@ -134,9 +134,13 @@ impl MinuteRollup {
         minute.mem_total_bytes = minute.mem_total_bytes.max(sample.mem_total_bytes);
         minute.mem_avail_min = minute.mem_avail_min.min(sample.mem_avail_bytes);
         minute.commit_max = minute.commit_max.max(sample.commit_bytes);
-        minute.hard_faults_max = minute.hard_faults_max.max(sample.hard_faults_per_s);
+        if let Some(faults) = sample.hard_faults_per_s {
+            minute.hard_faults_max = minute.hard_faults_max.max(faults);
+        }
         minute.gpu_max = max_known(minute.gpu_max, sample.gpu_pct);
-        minute.perf_limit_min = minute.perf_limit_min.min(sample.perf_limit_pct);
+        if let Some(limit) = sample.perf_limit_pct {
+            minute.perf_limit_min = minute.perf_limit_min.min(limit);
+        }
         minute.probe_max_lag_ms = minute.probe_max_lag_ms.max(sample.probe_max_lag_ms);
         for disk in &sample.disks {
             let at = match minute.disks.iter().position(|d| d.name == disk.name) {
@@ -154,10 +158,14 @@ impl MinuteRollup {
             };
             let own = &mut minute.disks[at];
             own.active_max = own.active_max.max(disk.active_pct);
-            own.latency_max_ms = own.latency_max_ms.max(disk.latency_ms);
-            let (sum, count) = &mut self.disk_sums[at];
-            *sum += f64::from(disk.bytes_per_s);
-            *count = count.saturating_add(1);
+            if let Some(latency_ms) = disk.latency_ms {
+                own.latency_max_ms = own.latency_max_ms.max(latency_ms);
+            }
+            if let Some(bytes_per_s) = disk.bytes_per_s {
+                let (sum, count) = &mut self.disk_sums[at];
+                *sum += f64::from(bytes_per_s);
+                *count = count.saturating_add(1);
+            }
         }
     }
 

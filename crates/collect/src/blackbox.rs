@@ -266,24 +266,25 @@ fn encode_sample(s: &Sample) -> [u8; RECORD] {
     put_u16(&mut r, 10, hundredths(s.cpu_pct));
     put_u16(&mut r, 12, hundredths(s.dpc_pct));
     put_u16(&mut r, 14, hundredths(s.isr_pct));
-    put_u16(&mut r, 16, tenths(s.perf_limit_pct));
-    put_u16(&mut r, 18, tenths(s.proc_perf_pct));
+    put_u16(&mut r, 16, s.perf_limit_pct.map_or(u16::MAX, tenths));
+    put_u16(&mut r, 18, s.proc_perf_pct.map_or(u16::MAX, tenths));
     put_u16(&mut r, 20, s.gpu_pct.map_or(u16::MAX, hundredths));
     put_u32(&mut r, 24, mib(s.mem_total_bytes));
     put_u32(&mut r, 28, mib(s.mem_avail_bytes));
     put_u32(&mut r, 32, mib(s.commit_bytes));
     put_u32(&mut r, 36, mib(s.commit_limit_bytes));
-    r[40..44].copy_from_slice(&s.hard_faults_per_s.to_le_bytes());
+    r[40..44].copy_from_slice(&s.hard_faults_per_s.unwrap_or(f32::NAN).to_le_bytes());
     r[44..48].copy_from_slice(&s.probe_max_lag_ms.to_le_bytes());
     r[48..52].copy_from_slice(&s.sampler_lag_ms.to_le_bytes());
     let worst = s.disks.iter().max_by(|a, b| {
-        (a.latency_ms, a.active_pct)
-            .partial_cmp(&(b.latency_ms, b.active_pct))
+        let rank = |d: &DiskLoad| (d.latency_ms.unwrap_or(f32::NEG_INFINITY), d.active_pct);
+        rank(a)
+            .partial_cmp(&rank(b))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     if let Some(disk) = worst {
         put_u16(&mut r, 22, hundredths(disk.active_pct));
-        r[52..56].copy_from_slice(&disk.latency_ms.to_le_bytes());
+        r[52..56].copy_from_slice(&disk.latency_ms.unwrap_or(f32::NAN).to_le_bytes());
         put_str(&mut r[56..64], &disk.name);
     }
     r
@@ -292,18 +293,20 @@ fn encode_sample(s: &Sample) -> [u8; RECORD] {
 fn decode_sample(ts_ms: i64, r: &[u8]) -> Sample {
     let name = get_str(&r[56..64]);
     let gpu = get_u16(r, 20);
+    let tenths = |at: usize| Some(get_u16(r, at)).filter(|v| *v != u16::MAX);
+    let known = |at: usize| Some(get_f32(r, at)).filter(|v| !v.is_nan());
     Sample {
         ts_ms,
         cpu_pct: f32::from(get_u16(r, 10)) / 100.0,
         dpc_pct: f32::from(get_u16(r, 12)) / 100.0,
         isr_pct: f32::from(get_u16(r, 14)) / 100.0,
-        perf_limit_pct: f32::from(get_u16(r, 16)) / 10.0,
-        proc_perf_pct: f32::from(get_u16(r, 18)) / 10.0,
+        perf_limit_pct: tenths(16).map(|v| f32::from(v) / 10.0),
+        proc_perf_pct: tenths(18).map(|v| f32::from(v) / 10.0),
         mem_total_bytes: u64::from(get_u32(r, 24)) * MIB,
         mem_avail_bytes: u64::from(get_u32(r, 28)) * MIB,
         commit_bytes: u64::from(get_u32(r, 32)) * MIB,
         commit_limit_bytes: u64::from(get_u32(r, 36)) * MIB,
-        hard_faults_per_s: get_f32(r, 40),
+        hard_faults_per_s: known(40),
         gpu_pct: (gpu != u16::MAX).then(|| f32::from(gpu) / 100.0),
         probe_max_lag_ms: get_f32(r, 44),
         sampler_lag_ms: get_f32(r, 48),
@@ -314,9 +317,9 @@ fn decode_sample(ts_ms: i64, r: &[u8]) -> Sample {
             vec![DiskLoad {
                 name,
                 active_pct: f32::from(get_u16(r, 22)) / 100.0,
-                latency_ms: get_f32(r, 52),
-                queue_len: 0.0,
-                bytes_per_s: 0.0,
+                latency_ms: known(52),
+                queue_len: None,
+                bytes_per_s: None,
             }]
         },
     }
@@ -413,13 +416,13 @@ mod tests {
             cpu_pct: 37.25,
             dpc_pct: 1.5,
             isr_pct: 0.25,
-            perf_limit_pct: 100.0,
-            proc_perf_pct: 112.4,
+            perf_limit_pct: Some(100.0),
+            proc_perf_pct: Some(112.4),
             mem_total_bytes: 32 * 1024 * MIB,
             mem_avail_bytes: 1200 * MIB,
             commit_bytes: 40 * 1024 * MIB,
             commit_limit_bytes: 44 * 1024 * MIB,
-            hard_faults_per_s: 1840.0,
+            hard_faults_per_s: Some(1840.0),
             gpu_pct: Some(88.5),
             probe_max_lag_ms: 212.5,
             sampler_lag_ms: 3.0,
@@ -428,16 +431,16 @@ mod tests {
                 DiskLoad {
                     name: "0 C:".into(),
                     active_pct: 12.0,
-                    latency_ms: 2.0,
-                    queue_len: 0.1,
-                    bytes_per_s: 1e6,
+                    latency_ms: Some(2.0),
+                    queue_len: Some(0.1),
+                    bytes_per_s: Some(1e6),
                 },
                 DiskLoad {
                     name: "1 D:".into(),
                     active_pct: 99.0,
-                    latency_ms: 840.0,
-                    queue_len: 6.0,
-                    bytes_per_s: 4e6,
+                    latency_ms: Some(840.0),
+                    queue_len: Some(6.0),
+                    bytes_per_s: Some(4e6),
                 },
             ],
         }
@@ -459,13 +462,45 @@ mod tests {
     fn a_sample_keeps_its_readings_and_the_slowest_disk() {
         let back = decode_sample(5_000, &encode_sample(&sample(5_000)));
         assert_eq!(back.cpu_pct, 37.25);
-        assert_eq!(back.proc_perf_pct, 112.4);
+        assert_eq!(back.proc_perf_pct, Some(112.4));
         assert_eq!(back.mem_avail_bytes, 1200 * MIB);
         assert_eq!(back.gpu_pct, Some(88.5));
         assert_eq!(back.probe_max_lag_ms, 212.5);
         assert_eq!(back.disks.len(), 1);
         assert_eq!(back.disks[0].name, "1 D:");
-        assert_eq!(back.disks[0].latency_ms, 840.0);
+        assert_eq!(back.disks[0].latency_ms, Some(840.0));
+        assert_eq!(back.disks[0].active_pct, 99.0);
+    }
+
+    #[test]
+    fn a_sample_without_its_counters_decodes_them_as_absent() {
+        let mut bare = sample(7_000);
+        bare.perf_limit_pct = None;
+        bare.proc_perf_pct = None;
+        bare.hard_faults_per_s = None;
+        bare.disks[1].latency_ms = None;
+
+        let back = decode_sample(7_000, &encode_sample(&bare));
+
+        assert_eq!(back.perf_limit_pct, None);
+        assert_eq!(back.proc_perf_pct, None);
+        assert_eq!(back.hard_faults_per_s, None);
+        assert_eq!(back.cpu_pct, 37.25);
+        // The disk that waited longest is the one with a latency; the other has none to rank.
+        assert_eq!(back.disks[0].name, "0 C:");
+        assert_eq!(back.disks[0].latency_ms, Some(2.0));
+    }
+
+    #[test]
+    fn a_disk_without_a_latency_keeps_its_place_with_none() {
+        let mut bare = sample(8_000);
+        bare.disks.remove(0);
+        bare.disks[0].latency_ms = None;
+
+        let back = decode_sample(8_000, &encode_sample(&bare));
+
+        assert_eq!(back.disks[0].name, "1 D:");
+        assert_eq!(back.disks[0].latency_ms, None);
         assert_eq!(back.disks[0].active_pct, 99.0);
     }
 

@@ -64,6 +64,7 @@ impl Store {
         let per_second = [
             Series::SamplesV1,
             Series::ProcessesV1,
+            Series::SamplesV2,
             Series::Samples,
             Series::Processes,
         ];
@@ -158,8 +159,12 @@ impl Store {
     /// When the last stored sample was taken, to record the gap the agent was stopped for.
     pub fn last_sample_end_ms(&self) -> Result<Option<i64>, StoreError> {
         Ok(self.conn.query_row(
-            "SELECT max(end_ms) FROM segment WHERE series IN (?1, ?2)",
-            params![Series::SamplesV1 as u8, Series::Samples as u8],
+            "SELECT max(end_ms) FROM segment WHERE series IN (?1, ?2, ?3)",
+            params![
+                Series::SamplesV1 as u8,
+                Series::SamplesV2 as u8,
+                Series::Samples as u8
+            ],
             |row| row.get(0),
         )?)
     }

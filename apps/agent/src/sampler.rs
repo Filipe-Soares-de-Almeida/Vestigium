@@ -9,8 +9,9 @@ use std::thread;
 use std::time::Duration;
 
 use vestigium_collect::{
-    BlackboxRing, CollectError, Delivered, EventSubscription, Waited, Wake, WindowsHealth,
-    disk_media, hung_pids, logical_cpus, memory_info, physical_drive, unbiased_ms, wall_ms,
+    BlackboxRing, CollectError, Delivered, EventSubscription, PdhReading, Waited, Wake,
+    WindowsHealth, disk_media, hung_pids, logical_cpus, memory_info, physical_drive, unbiased_ms,
+    wall_ms,
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
@@ -532,7 +533,16 @@ impl Sampler {
         } else {
             None
         };
-        if let (Some(memory), Some(cpu), Some(pdh)) = (memory, cpu, pdh) {
+        // Memory and the processor feed every rule, so a second without either has no sample; a
+        // second without the counters has one whose counter fields are absent.
+        if let (Some(memory), Some(cpu)) = (memory, cpu) {
+            let pdh = pdh.unwrap_or(PdhReading {
+                perf_limit_pct: None,
+                proc_perf_pct: None,
+                hard_faults_per_s: None,
+                disks: Vec::new(),
+                gpu: None,
+            });
             let sample = Sample {
                 ts_ms,
                 cpu_pct: cpu.cpu_pct,
@@ -556,7 +566,7 @@ impl Sampler {
             for disk in sample
                 .disks
                 .iter()
-                .filter(|d| d.active_pct > 0.0 || d.bytes_per_s > 0.0)
+                .filter(|d| d.active_pct > 0.0 || d.bytes_per_s.is_some_and(|b| b > 0.0))
             {
                 self.disk_active_ms.insert(disk.name.clone(), ts_ms);
             }
@@ -1252,7 +1262,7 @@ mod tests {
 
     use super::*;
     use crate::readings::{Waiter, windows_source_set};
-    use vestigium_collect::{CpuReading, MemoryInfo, PdhReading};
+    use vestigium_collect::{CpuReading, MemoryInfo};
     use vestigium_core::DiskLoad;
 
     struct Running {
@@ -1428,9 +1438,9 @@ mod tests {
 
         fn pdh(&mut self) -> Result<Option<PdhReading>, CollectError> {
             Ok(Some(PdhReading {
-                perf_limit_pct: 100.0,
-                proc_perf_pct: 100.0,
-                hard_faults_per_s: 0.0,
+                perf_limit_pct: Some(100.0),
+                proc_perf_pct: Some(100.0),
+                hard_faults_per_s: Some(0.0),
                 disks: Vec::new(),
                 gpu: None,
             }))
@@ -1526,9 +1536,9 @@ mod tests {
                 reading.disks.push(DiskLoad {
                     name: "9 Z:".to_string(),
                     active_pct: 1.0,
-                    latency_ms: 1.0,
-                    queue_len: 0.0,
-                    bytes_per_s: 0.0,
+                    latency_ms: Some(1.0),
+                    queue_len: Some(0.0),
+                    bytes_per_s: Some(0.0),
                 });
             }
             Ok(reading)
@@ -1573,16 +1583,62 @@ mod tests {
         }));
         let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
 
-        thread::sleep(Duration::from_millis(500));
-        assert!(
-            !sampled(&running.status),
-            "sampled before the counters opened"
-        );
-        let sampled_later = wait_until(PATIENCE, || sampled(&running.status));
+        let opened = wait_until(PATIENCE, || {
+            lock(&script).pdh_open_attempts >= 3
+                && lock(&running.now)
+                    .sample
+                    .as_ref()
+                    .is_some_and(|s| s.perf_limit_pct.is_some())
+        });
         stop(&running);
 
-        assert!(sampled_later, "the counters opened but nothing was sampled");
+        assert!(opened, "the counters opened but no sample carried them");
         assert_eq!(lock(&script).pdh_open_attempts, 3);
+        assert!(lock(&running.status).last_error.is_some());
+        let stored = history(dir.path()).samples(i64::MIN, i64::MAX).unwrap();
+        assert_eq!(stored.first().map(|s| s.perf_limit_pct), Some(None));
+        assert!(stored.last().is_some_and(|s| s.perf_limit_pct.is_some()));
+    }
+
+    #[test]
+    fn counters_that_never_open_leave_samples_with_those_fields_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            pdh_open_failures: u32::MAX,
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+
+        let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_once, "no sample while the counters were down");
+        let stored = history(dir.path()).samples(i64::MIN, i64::MAX).unwrap();
+        assert!(!stored.is_empty());
+        for sample in &stored {
+            assert_eq!(sample.perf_limit_pct, None);
+            assert_eq!(sample.proc_perf_pct, None);
+            assert_eq!(sample.hard_faults_per_s, None);
+            assert!(sample.disks.is_empty());
+            assert_eq!(sample.cpu_pct, 10.0);
+        }
+    }
+
+    #[test]
+    fn a_counter_read_that_fails_leaves_the_sample_without_its_counters() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Arc::new(Mutex::new(Script {
+            failing: vec![Source::Pdh],
+            ..Script::default()
+        }));
+        let running = start_with(dir.path(), NEVER_DUE, scripted(&script));
+
+        let sampled_once = wait_until(PATIENCE, || sampled(&running.status));
+        stop(&running);
+
+        assert!(sampled_once, "no sample while the counter reads failed");
+        let stored = history(dir.path()).samples(i64::MIN, i64::MAX).unwrap();
+        assert!(stored.iter().all(|s| s.perf_limit_pct.is_none()));
         assert!(lock(&running.status).last_error.is_some());
     }
 
@@ -1622,7 +1678,6 @@ mod tests {
             found,
             "the fall left no post-mortem while the counters were down"
         );
-        assert_eq!(lock(&running.status).last_sample_ms, None);
         assert!(lock(&script).pdh_open_attempts > 1, "no second attempt");
     }
 
@@ -2120,13 +2175,13 @@ mod tests {
             cpu_pct: 20.0,
             dpc_pct: 0.0,
             isr_pct: 0.0,
-            perf_limit_pct: 100.0,
-            proc_perf_pct: 100.0,
+            perf_limit_pct: Some(100.0),
+            proc_perf_pct: Some(100.0),
             mem_total_bytes: 16 << 30,
             mem_avail_bytes: 1 << 30,
             commit_bytes: 20 << 30,
             commit_limit_bytes: 24 << 30,
-            hard_faults_per_s: 0.0,
+            hard_faults_per_s: Some(0.0),
             gpu_pct: None,
             probe_max_lag_ms: 1.0,
             sampler_lag_ms: 0.0,

@@ -161,7 +161,7 @@ function columns(samples: Sample[], fromMs: number, toMs: number): Columns {
     out.cpu.push(found?.cpu_pct ?? null);
     out.mem_used_pct.push(mem);
     out.disk_active_max.push(active);
-    out.disk_latency_max.push(found ? Math.max(...found.disks.map((d) => d.latency_ms)) : null);
+    out.disk_latency_max.push(found ? Math.max(...found.disks.map((d) => d.latency_ms ?? 0)) : null);
     out.gpu.push(found?.gpu_pct ?? null);
     out.probe_lag.push(found?.probe_max_lag_ms ?? null);
     const load = found ? Math.max(found.cpu_pct, active ?? 0, (found.gpu_pct ?? 0) * 0.55, (mem ?? 0) - 35) : 0;

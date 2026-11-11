@@ -21,17 +21,21 @@ fn pdh_english_paths_open_and_read() {
         .unwrap()
         .expect("second collection has rates");
 
+    // A counter may have no value this second; one that has must be in range.
+    if let Some(limit) = reading.perf_limit_pct {
+        assert!((0.0..=100.0).contains(&limit), "{reading:?}");
+    }
     assert!(
-        (0.0..=100.0).contains(&reading.perf_limit_pct),
+        reading.proc_perf_pct.is_none_or(|v| v >= 0.0),
         "{reading:?}"
     );
-    assert!(reading.proc_perf_pct >= 0.0, "{reading:?}");
-    assert!(reading.hard_faults_per_s >= 0.0);
+    assert!(reading.hard_faults_per_s.is_none_or(|v| v >= 0.0));
     assert!(!reading.disks.is_empty());
     for disk in &reading.disks {
         assert_ne!(disk.name, "_Total");
         assert!((0.0..=100.0).contains(&disk.active_pct), "{disk:?}");
-        assert!(disk.latency_ms >= 0.0 && disk.queue_len >= 0.0);
+        assert!(disk.latency_ms.is_none_or(|v| v >= 0.0));
+        assert!(disk.queue_len.is_none_or(|v| v >= 0.0));
     }
 }
 

@@ -18,13 +18,13 @@ fn sample(ts_ms: i64) -> Sample {
         cpu_pct: 10.0,
         dpc_pct: 0.2,
         isr_pct: 0.1,
-        perf_limit_pct: 0.0,
-        proc_perf_pct: 99.0,
+        perf_limit_pct: Some(0.0),
+        proc_perf_pct: Some(99.0),
         mem_total_bytes: 16 << 30,
         mem_avail_bytes: 8 << 30,
         commit_bytes: 8 << 30,
         commit_limit_bytes: 24 << 30,
-        hard_faults_per_s: 1.0,
+        hard_faults_per_s: Some(1.0),
         gpu_pct: None,
         probe_max_lag_ms: 0.4,
         sampler_lag_ms: 0.8,
@@ -170,8 +170,8 @@ fn migration_from_v1_keeps_segments() {
         )
         .unwrap();
         raw.execute(
-            "INSERT INTO segment (series, start_ms, end_ms, data) VALUES (3, 1000, 2000, ?1)",
-            [encode(&[sample(1_000)])],
+            "INSERT INTO segment (series, start_ms, end_ms, data) VALUES (?1, 1000, 2000, ?2)",
+            rusqlite::params![Series::Samples as u8, encode(&[sample(1_000)])],
         )
         .unwrap();
     }

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use vestigium_core::{
-    CoreLoad, DiskLoad, MinuteSample, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1,
-    Sample, SampleV1, summarize_minute,
+    CoreLoad, DiskLoad, DiskLoadV2, MinuteSample, ProcessSample, ProcessSampleV1, ProcessTop,
+    ProcessTopV1, Sample, SampleV1, SampleV2, summarize_minute,
 };
 use vestigium_store::{
     Batcher, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
@@ -14,13 +14,13 @@ fn sample(ts_ms: i64) -> Sample {
         cpu_pct: 12.5,
         dpc_pct: 0.4,
         isr_pct: 0.1,
-        perf_limit_pct: 0.0,
-        proc_perf_pct: 98.0,
+        perf_limit_pct: Some(0.0),
+        proc_perf_pct: Some(98.0),
         mem_total_bytes: 32 << 30,
         mem_avail_bytes: 8 << 30,
         commit_bytes: 12 << 30,
         commit_limit_bytes: 40 << 30,
-        hard_faults_per_s: 3.0,
+        hard_faults_per_s: Some(3.0),
         gpu_pct: Some(7.0),
         probe_max_lag_ms: 0.7,
         sampler_lag_ms: 1.2,
@@ -35,9 +35,9 @@ fn sample(ts_ms: i64) -> Sample {
         disks: vec![DiskLoad {
             name: "0 C:".to_string(),
             active_pct: 3.0,
-            latency_ms: 0.8,
-            queue_len: 0.0,
-            bytes_per_s: 120_000.0,
+            latency_ms: Some(0.8),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(120_000.0),
         }],
     }
 }
@@ -57,6 +57,19 @@ fn top(ts_ms: i64) -> ProcessTop {
     }
 }
 
+fn old_disks(disks: &[DiskLoad]) -> Vec<DiskLoadV2> {
+    disks
+        .iter()
+        .map(|d| DiskLoadV2 {
+            name: d.name.clone(),
+            active_pct: d.active_pct,
+            latency_ms: d.latency_ms.unwrap(),
+            queue_len: d.queue_len.unwrap(),
+            bytes_per_s: d.bytes_per_s.unwrap(),
+        })
+        .collect()
+}
+
 fn sample_v1(ts_ms: i64) -> SampleV1 {
     let current = sample(ts_ms);
     SampleV1 {
@@ -64,16 +77,38 @@ fn sample_v1(ts_ms: i64) -> SampleV1 {
         cpu_pct: current.cpu_pct,
         dpc_pct: current.dpc_pct,
         isr_pct: current.isr_pct,
-        perf_limit_pct: current.perf_limit_pct,
-        proc_perf_pct: current.proc_perf_pct,
+        perf_limit_pct: current.perf_limit_pct.unwrap(),
+        proc_perf_pct: current.proc_perf_pct.unwrap(),
         mem_avail_bytes: current.mem_avail_bytes,
         commit_bytes: current.commit_bytes,
         commit_limit_bytes: current.commit_limit_bytes,
-        hard_faults_per_s: current.hard_faults_per_s,
+        hard_faults_per_s: current.hard_faults_per_s.unwrap(),
         probe_max_lag_ms: current.probe_max_lag_ms,
         sampler_lag_ms: current.sampler_lag_ms,
         cores: current.cores,
-        disks: current.disks,
+        disks: old_disks(&current.disks),
+    }
+}
+
+fn sample_v2(ts_ms: i64) -> SampleV2 {
+    let current = sample(ts_ms);
+    SampleV2 {
+        ts_ms,
+        cpu_pct: current.cpu_pct,
+        dpc_pct: current.dpc_pct,
+        isr_pct: current.isr_pct,
+        perf_limit_pct: current.perf_limit_pct.unwrap(),
+        proc_perf_pct: current.proc_perf_pct.unwrap(),
+        mem_total_bytes: current.mem_total_bytes,
+        mem_avail_bytes: current.mem_avail_bytes,
+        commit_bytes: current.commit_bytes,
+        commit_limit_bytes: current.commit_limit_bytes,
+        hard_faults_per_s: current.hard_faults_per_s.unwrap(),
+        gpu_pct: current.gpu_pct,
+        probe_max_lag_ms: current.probe_max_lag_ms,
+        sampler_lag_ms: current.sampler_lag_ms,
+        cores: current.cores,
+        disks: old_disks(&current.disks),
     }
 }
 
@@ -554,6 +589,47 @@ fn v1_segments_read_as_current_types() {
     assert_eq!(tops.len(), 1);
     assert_eq!(tops[0].entries[0].name, "example.exe");
     assert_eq!(tops[0].entries[0].gpu_pct, 0.0);
+}
+
+#[test]
+fn a_version_2_segment_reads_with_every_counter_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    store
+        .append(&[Segment {
+            series: Series::SamplesV2,
+            start_ms: 1_000,
+            end_ms: 2_000,
+            data: encode(&[sample_v2(1_000), sample_v2(2_000)]),
+        }])
+        .unwrap();
+
+    let samples = store.samples(0, 10_000).unwrap();
+
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0], sample(1_000));
+    assert_eq!(samples[1].disks[0].latency_ms, Some(0.8));
+    assert_eq!(samples[1].gpu_pct, Some(7.0));
+}
+
+#[test]
+fn samples_with_absent_counters_round_trip_through_a_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let mut bare = sample(5_000);
+    bare.perf_limit_pct = None;
+    bare.proc_perf_pct = None;
+    bare.hard_faults_per_s = None;
+    bare.disks[0].latency_ms = None;
+    bare.disks[0].queue_len = None;
+    bare.disks[0].bytes_per_s = None;
+    let mut batcher = Batcher::new(Duration::from_secs(3600));
+    batcher.push_sample(bare.clone());
+    store.append(&batcher.take_final()).unwrap();
+
+    let samples = store.samples(0, 10_000).unwrap();
+
+    assert_eq!(samples, vec![bare]);
 }
 
 #[test]

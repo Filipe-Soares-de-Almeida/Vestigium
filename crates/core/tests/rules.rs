@@ -28,14 +28,14 @@ fn storage_case() -> Case {
         129,
         EventMeaning::StorageReset,
     ));
-    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = 400.0);
+    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = Some(400.0));
     (vec![freeze(2)], window)
 }
 
 fn disk_case() -> Case {
     let mut window = quiet_window();
     tweak(&mut window, -5, -1, |s| {
-        s.disks[1].latency_ms = 450.0;
+        s.disks[1].latency_ms = Some(450.0);
         s.disks[1].active_pct = 99.0;
     });
     (vec![freeze(2)], window)
@@ -80,7 +80,7 @@ fn gpu_case() -> Case {
 
 fn throttling_case() -> Case {
     let mut window = quiet_window();
-    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 20.0);
+    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = Some(20.0));
     (vec![freeze(2)], window)
 }
 
@@ -152,7 +152,7 @@ fn disk_latency_matches() {
 #[test]
 fn disk_latency_stays_quiet() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -5, -1, |s| s.disks[1].latency_ms = 150.0);
+    tweak(&mut window, -5, -1, |s| s.disks[1].latency_ms = Some(150.0));
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| matches!(c, Cause::DiskIo { .. })).is_none());
 }
@@ -230,7 +230,9 @@ fn memory_stays_quiet() {
 #[test]
 fn hard_faults_with_memory_to_spare_are_not_memory() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    tweak(&mut window, -10, -10, |s| {
+        s.hard_faults_per_s = Some(5_000.0)
+    });
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| matches!(c, Cause::Memory { .. })).is_none());
 }
@@ -240,7 +242,9 @@ fn hard_faults_with_memory_high_are_memory() {
     let (triggers, mut window) = quiet_case();
     let total = window.machine.mem_total_bytes;
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = total / 10);
-    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    tweak(&mut window, -10, -10, |s| {
+        s.hard_faults_per_s = Some(5_000.0)
+    });
     let found = suspects(&triggers, &window);
     let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
     assert!(memory.evidence.iter().any(|e| matches!(
@@ -373,9 +377,35 @@ fn throttling_matches() {
 }
 
 #[test]
+fn a_sample_without_throttling_counters_never_suspects_throttling() {
+    let (triggers, mut window) = throttling_case();
+    tweak(&mut window, -10, -5, |s| {
+        s.perf_limit_pct = None;
+        s.proc_perf_pct = None;
+    });
+
+    let found = suspects(&triggers, &window);
+
+    assert!(find(&found, |c| *c == Cause::Throttling).is_none());
+}
+
+#[test]
+fn a_disk_without_a_latency_reading_is_never_the_slow_one() {
+    let (triggers, mut window) = disk_case();
+    tweak(&mut window, -5, -1, |s| {
+        s.disks[1].latency_ms = None;
+        s.disks[1].queue_len = None;
+    });
+
+    let found = suspects(&triggers, &window);
+
+    assert!(find(&found, |c| matches!(c, Cause::DiskIo { .. })).is_none());
+}
+
+#[test]
 fn throttling_stays_quiet() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 97.0);
+    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = Some(97.0));
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| *c == Cause::Throttling).is_none());
 }
@@ -692,7 +722,9 @@ fn slow_reads_outside_the_span_do_not_raise_a_disk_event() {
         129,
         EventMeaning::StorageReset,
     ));
-    tweak(&mut window, -40, -40, |s| s.disks[0].latency_ms = 400.0);
+    tweak(&mut window, -40, -40, |s| {
+        s.disks[0].latency_ms = Some(400.0)
+    });
     let found = suspects(&triggers, &window);
     let storage = storage_of(&found).expect("storage");
     assert_eq!(storage.confidence, Confidence::Medium);
@@ -708,7 +740,7 @@ fn storage_steps(events: &[(i64, u16, EventMeaning)]) -> Vec<NextStep> {
         };
         window.events.push(event(*ts, provider, *id, *meaning));
     }
-    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = 400.0);
+    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = Some(400.0));
     let found = suspects(&triggers, &window);
     storage_of(&found).expect("storage").next_steps.clone()
 }
@@ -774,7 +806,7 @@ fn a_reported_event_alone_keeps_its_cause() {
     };
     let mut window = quiet_window();
     window.events.push(reset);
-    tweak(&mut window, -2, 2, |s| s.disks[0].latency_ms = 400.0);
+    tweak(&mut window, -2, 2, |s| s.disks[0].latency_ms = Some(400.0));
     let found = suspects(&[reported], &window);
     let storage = storage_of(&found).expect("storage");
     assert_eq!(storage.confidence, Confidence::High);

@@ -73,7 +73,7 @@ pub use ring::Ring;
 pub use rules::{
     Cause, Confidence, Evidence, Metric, NextStep, Suspect, crosses_down, suspects, threshold,
 };
-pub use sample::{CoreLoad, DiskLoad, Sample, SampleV1};
+pub use sample::{CoreLoad, DiskLoad, DiskLoadV2, Sample, SampleV1, SampleV2};
 pub use settings::{
     ColorTheme, DetailLevel, LanguagePref, Retention, SettingError, Settings, ThemePref,
 };

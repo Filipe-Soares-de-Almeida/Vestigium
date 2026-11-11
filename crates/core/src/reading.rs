@@ -55,7 +55,7 @@ impl Reading {
             cpu_pct: sample.cpu_pct,
             mem_used_pct: used_pct(sample.mem_total_bytes, sample.mem_avail_bytes),
             disk_active_pct: disks.clone().map(|d| d.active_pct).fold(0.0, f32::max),
-            disk_latency_ms: disks.map(|d| d.latency_ms).fold(0.0, f32::max),
+            disk_latency_ms: disks.filter_map(|d| d.latency_ms).fold(0.0, f32::max),
             gpu_pct: sample.gpu_pct,
             probe_lag_ms: sample.probe_max_lag_ms,
         }
@@ -80,7 +80,7 @@ impl Reading {
         let found = sample.disks.iter().find(|d| d.name == disk);
         Reading {
             disk_active_pct: found.map_or(0.0, |d| d.active_pct),
-            disk_latency_ms: found.map_or(0.0, |d| d.latency_ms),
+            disk_latency_ms: found.and_then(|d| d.latency_ms).unwrap_or(0.0),
             ..Reading::of_sample(sample)
         }
     }

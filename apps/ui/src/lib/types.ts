@@ -42,9 +42,9 @@ export interface CoreLoad {
 export interface DiskLoad {
   name: string;
   active_pct: number;
-  latency_ms: number;
-  queue_len: number;
-  bytes_per_s: number;
+  latency_ms: number | null;
+  queue_len: number | null;
+  bytes_per_s: number | null;
 }
 
 export interface Sample {
@@ -52,13 +52,13 @@ export interface Sample {
   cpu_pct: number;
   dpc_pct: number;
   isr_pct: number;
-  perf_limit_pct: number;
-  proc_perf_pct: number;
+  perf_limit_pct: number | null;
+  proc_perf_pct: number | null;
   mem_total_bytes: number;
   mem_avail_bytes: number;
   commit_bytes: number;
   commit_limit_bytes: number;
-  hard_faults_per_s: number;
+  hard_faults_per_s: number | null;
   gpu_pct: number | null;
   probe_max_lag_ms: number;
   sampler_lag_ms: number;

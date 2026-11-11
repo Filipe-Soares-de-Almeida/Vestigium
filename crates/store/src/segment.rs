@@ -23,9 +23,11 @@ pub enum Series {
     SamplesV1 = 1,
     /// `ProcessTopV1`, from before per-process GPU was recorded.
     ProcessesV1 = 2,
-    Samples = 3,
+    /// `SampleV2`, from before a performance counter could be absent.
+    SamplesV2 = 3,
     Processes = 4,
     Minutes = 5,
+    Samples = 6,
 }
 
 /// One batch of items of one series, stored as one row.

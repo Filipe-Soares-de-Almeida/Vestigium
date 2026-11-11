@@ -192,7 +192,7 @@ fn reading(sample: &Sample, metric: Metric, mem_total: u64) -> Option<(f32, Opti
     match metric {
         Metric::CpuPct => Some((sample.cpu_pct, None)),
         Metric::MemAvailPct => avail_pct(sample, mem_total).map(|v| (v, None)),
-        Metric::HardFaultsPerS => Some((sample.hard_faults_per_s, None)),
+        Metric::HardFaultsPerS => sample.hard_faults_per_s.map(|v| (v, None)),
         Metric::DiskLatencyMs => {
             worst_disk([sample], |d| d.latency_ms).map(|(_, disk, v)| (v, Some(disk)))
         }
@@ -206,7 +206,7 @@ fn reading(sample: &Sample, metric: Metric, mem_total: u64) -> Option<(f32, Opti
             .map(|(core, c)| (c.dpc_pct + c.isr_pct, Some(core.to_string())))
             .max_by(|a, b| a.0.total_cmp(&b.0)),
         Metric::GpuPct => sample.gpu_pct.map(|v| (v, None)),
-        Metric::PerfLimitPct => Some((sample.perf_limit_pct, None)),
+        Metric::PerfLimitPct => sample.perf_limit_pct.map(|v| (v, None)),
         _ => None,
     }
 }

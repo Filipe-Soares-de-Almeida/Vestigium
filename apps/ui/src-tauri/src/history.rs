@@ -928,13 +928,13 @@ mod tests {
             cpu_pct,
             dpc_pct: 0.2,
             isr_pct: 0.1,
-            perf_limit_pct: 100.0,
-            proc_perf_pct: 100.0,
+            perf_limit_pct: Some(100.0),
+            proc_perf_pct: Some(100.0),
             mem_total_bytes: 16 << 30,
             mem_avail_bytes: 8 << 30,
             commit_bytes: 8 << 30,
             commit_limit_bytes: 32 << 30,
-            hard_faults_per_s: 0.0,
+            hard_faults_per_s: Some(0.0),
             gpu_pct: Some(2.0),
             probe_max_lag_ms: 1.0,
             sampler_lag_ms: 1.0,
@@ -949,9 +949,9 @@ mod tests {
             disks: vec![DiskLoad {
                 name: "0 C:".to_string(),
                 active_pct: 4.0,
-                latency_ms: 1.0,
-                queue_len: 0.0,
-                bytes_per_s: 0.0,
+                latency_ms: Some(1.0),
+                queue_len: Some(0.0),
+                bytes_per_s: Some(0.0),
             }],
         }
     }
@@ -1245,9 +1245,9 @@ mod tests {
         let disk = |name: &str, active_pct: f32, latency_ms: f32| DiskLoad {
             name: name.to_string(),
             active_pct,
-            latency_ms,
-            queue_len: 0.0,
-            bytes_per_s: 0.0,
+            latency_ms: Some(latency_ms),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(0.0),
         };
         Sample {
             disks: vec![disk("0 C:", c_active, 2.0), disk("1 D:", d_active, 9.0)],

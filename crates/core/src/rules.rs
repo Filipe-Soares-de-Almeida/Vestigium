@@ -439,7 +439,7 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
     let faults = samples
         .iter()
         .filter(|s| avail_pct(s, total).is_some_and(|pct| pct < 100.0 - MEMORY_HIGH_PCT))
-        .map(|s| (s.ts_ms, s.hard_faults_per_s))
+        .filter_map(|s| s.hard_faults_per_s.map(|v| (s.ts_ms, v)))
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, v)| *v >= threshold(Metric::HardFaultsPerS));
     if avail.is_none() && faults.is_none() {
@@ -594,7 +594,7 @@ fn gpu_driver(focus: Focus, window: &Window) -> Option<Suspect> {
 fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     let limit = between(&window.samples, focus.start - 30_000, focus.start)
         .iter()
-        .map(|s| (s.ts_ms, s.perf_limit_pct))
+        .filter_map(|s| s.perf_limit_pct.map(|v| (s.ts_ms, v)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, v)| *v < threshold(Metric::PerfLimitPct));
     let mut evidence = events_meaning(window, &[EventMeaning::CpuFirmwareLimit]);
@@ -798,7 +798,7 @@ fn unclear(window: &Window) -> Suspect {
     if let Some((ts_ms, value)) = gpu {
         evidence.push(metric(ts_ms, Metric::GpuPct, value, None));
     }
-    let busy_disk = worst_disk(&window.samples, |d| d.active_pct)
+    let busy_disk = worst_disk(&window.samples, |d| Some(d.active_pct))
         .filter(|(_, _, v)| *v >= threshold(Metric::DiskActivePct));
     if let Some((ts_ms, disk, value)) = busy_disk {
         evidence.push(metric(ts_ms, Metric::DiskActivePct, value, Some(&disk)));
@@ -862,16 +862,18 @@ fn between(samples: &[Sample], from_ms: i64, to_ms: i64) -> Vec<&Sample> {
         .collect()
 }
 
-/// The highest disk value across the samples, with when and on which disk.
+/// The highest disk value across the samples, with when and on which disk; a disk whose counter
+/// could not be read is left out.
 pub(crate) fn worst_disk<'a>(
     samples: impl IntoIterator<Item = &'a Sample>,
-    value: fn(&DiskLoad) -> f32,
+    value: fn(&DiskLoad) -> Option<f32>,
 ) -> Option<(i64, String, f32)> {
     samples
         .into_iter()
         .flat_map(|s| s.disks.iter().map(move |d| (s.ts_ms, d)))
-        .max_by(|a, b| value(a.1).total_cmp(&value(b.1)))
-        .map(|(ts_ms, d)| (ts_ms, d.name.clone(), value(d)))
+        .filter_map(|(ts_ms, d)| value(d).map(|v| (ts_ms, d, v)))
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(ts_ms, d, v)| (ts_ms, d.name.clone(), v))
 }
 
 pub(crate) fn avail_pct(sample: &Sample, machine_total: u64) -> Option<f32> {
