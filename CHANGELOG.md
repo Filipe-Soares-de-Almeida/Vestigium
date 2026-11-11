@@ -24,6 +24,12 @@ How to use this file:
 
 ### Added
 
+- A deep capture that is already running is now shown, whoever started it. A neutral strip above the
+  screen, on every screen, says "Capture in progress" with the clock and a bar when this window
+  started it, and, for one started before the window was reopened, by another window or by another
+  Windows account, since when it runs when that is known and that its end is not. The Captures side
+  item and its tile on the home screen carry an information mark meanwhile. When a capture started
+  elsewhere ends, the strip offers its result.
 - A deep capture, a volume check, a dump read and a full scan can now be cancelled from their own
   card. Cancelling a capture or a volume check asks first and says what happens: the helper is
   asked to stop and the window stops waiting for it, the time captured so far is not saved, and a
@@ -78,6 +84,10 @@ How to use this file:
 
 ### Changed
 
+- The Captures screen keeps its form while a capture runs, with Start unavailable and a line saying
+  it is available when the capture finishes. The clock, the bar, the cancel button and the notice
+  that a capture finished moved from that card to the strip above the screen, which a capture of any
+  origin now uses.
 - Vestigium now installs for every account on the PC, in C:\Program Files\Vestigium, instead of for
   one user. Installing, updating and uninstalling ask Windows for an administrator's permission; on an
   account that is not an administrator, Windows asks for an administrator's password. The monitor and
@@ -150,6 +160,10 @@ How to use this file:
 
 ### Fixed
 
+- A second deep capture can no longer be started while one runs. The window now says so before it
+  asks Windows for permission, and when another window starts one in the same moment the strip says
+  that a second capture was not started, instead of reporting a failed
+  helper.
 - The window no longer waits forever for the elevated helper. A deep capture that is still running
   two minutes past its length, a full scan or a dump read past 30 minutes and a batch of tweaks past
   10 minutes are given up on, and the card is free for another try instead of staying on

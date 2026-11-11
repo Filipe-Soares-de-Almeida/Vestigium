@@ -16,9 +16,9 @@ use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
     CAPTURE_GRACE, CAPTURE_MARGIN, CAPTURE_MINUTES, CancelClock, CaptureFinished, CaptureRun,
     CaptureStop, DeleteFinished, DumpScanFinished, Ended, HELPER_UNAVAILABLE, SCAN_CEILING,
-    ScanFinished, TEST_GRACE, Waited, capture_end, capture_file, delete_dumps_args, dump_scan_args,
-    dumps_file, helper_args, launch_elevated, scan_args, scan_file, sibling_helper, test_end,
-    wait_result,
+    ScanFinished, TEST_GRACE, Waited, capture_elsewhere, capture_end, capture_file,
+    delete_dumps_args, dump_scan_args, dumps_file, helper_args, launch_elevated, scan_args,
+    scan_file, sibling_helper, test_end, wait_result,
 };
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
@@ -255,11 +255,11 @@ pub async fn start_capture(
     let slot = state.capture_run.clone();
     let stop_slot = state.capture_stop.clone();
     blocking(move || {
-        if lock(&slot).is_some() {
-            return Err(UiError::Failed("a deep capture is already running".into()));
-        }
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
+        if lock(&slot).is_some() || capture_elsewhere(Some(&db), now_ms()).is_some() {
+            return Err(UiError::CaptureRunning);
+        }
         let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
         let started_ms = now_ms();
         let out = capture_file(&db, started_ms)
@@ -272,10 +272,7 @@ pub async fn start_capture(
             Err(err) => return Err(err),
         }
         let process = launch_elevated(&helper, &helper_args(minutes, &out))?;
-        let run = CaptureRun {
-            started_ms,
-            ends_ms: started_ms + minutes as i64 * 60_000,
-        };
+        let run = CaptureRun::started_here(started_ms, minutes);
         *lock(&slot) = Some(run);
         let stop = CaptureStop::new(out.with_extension("stop"));
         *lock(&stop_slot) = Some(stop.clone());
@@ -305,10 +302,21 @@ pub async fn start_capture(
     .await
 }
 
-/// The deep capture this window started, while its helper runs.
+/// The deep capture under way: the one this window started, or one another window or account
+/// started, as far as the helper's lock and its temporary result tell.
 #[tauri::command]
-pub fn capture_run(state: State<'_, AppState>) -> Option<CaptureRun> {
-    *lock(&state.capture_run)
+pub async fn capture_run(state: State<'_, AppState>) -> Result<Option<CaptureRun>, UiError> {
+    let own = *lock(&state.capture_run);
+    if own.is_some() {
+        return Ok(own);
+    }
+    blocking(move || {
+        Ok(capture_elsewhere(
+            History::default_path().as_deref(),
+            now_ms(),
+        ))
+    })
+    .await
 }
 
 /// Tells the helper of the deep capture under way to stop and keep nothing; the window stops

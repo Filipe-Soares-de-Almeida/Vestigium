@@ -647,6 +647,7 @@ export const uiErrorSamples = [
   {"kind":"changed_since","message":"a setting now holds a value that Vestigium did not write"},
   {"kind":"helper_timed_out","message":"the helper did not finish in time"},
   {"kind":"cancelled","message":"the person cancelled"},
+  {"kind":"capture_running","message":"a deep capture is already running"},
 ] satisfies UiError[];
 
 export const uiErrorKindSamples = [
@@ -661,6 +662,7 @@ export const uiErrorKindSamples = [
   "changed_since",
   "helper_timed_out",
   "cancelled",
+  "capture_running",
 ] satisfies UiErrorKind[];
 
 export const routineKindSamples = [
@@ -714,7 +716,9 @@ export const captureNoteSamples = [
 ] satisfies CaptureNote[];
 
 export const captureRunSamples = [
-  {"started_ms":1790000000000,"ends_ms":1790000060000},
+  {"started_ms":1790000000000,"ends_ms":1790000060000,"own":true},
+  {"started_ms":1790000000000,"ends_ms":null,"own":false},
+  {"started_ms":null,"ends_ms":null,"own":false},
 ] satisfies CaptureRun[];
 
 export const captureFinishedSamples = [
@@ -722,12 +726,14 @@ export const captureFinishedSamples = [
   {"ids":[4,5],"exit_code":null,"ended":"Done"},
   {"ids":[4,5],"exit_code":5,"ended":"Cancelled"},
   {"ids":[4,5],"exit_code":null,"ended":"TimedOut"},
+  {"ids":[4,5],"exit_code":4,"ended":"Refused"},
 ] satisfies CaptureFinished[];
 
 export const endedSamples = [
   "Done",
   "Cancelled",
   "TimedOut",
+  "Refused",
 ] satisfies Ended[];
 
 export const concernSamples = [

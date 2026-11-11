@@ -44,6 +44,8 @@ pub enum UiError {
     HelperTimedOut,
     #[error("the person cancelled")]
     Cancelled,
+    #[error("a deep capture is already running")]
+    CaptureRunning,
 }
 
 impl UiError {
@@ -116,6 +118,7 @@ impl Serialize for UiError {
             UiError::ChangedSince => "changed_since",
             UiError::HelperTimedOut => "helper_timed_out",
             UiError::Cancelled => "cancelled",
+            UiError::CaptureRunning => "capture_running",
         };
         Wire {
             kind,

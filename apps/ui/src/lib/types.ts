@@ -522,7 +522,8 @@ export type UiErrorKind =
   | "declined"
   | "changed_since"
   | "helper_timed_out"
-  | "cancelled";
+  | "cancelled"
+  | "capture_running";
 
 /** What a failed command rejects with; the window words it from `kind`. */
 export interface UiError {
@@ -610,14 +611,16 @@ export interface CaptureNote {
   suspects: Suspect[];
 }
 
-/** A deep capture under way. */
+/** A deep capture under way, as far as the window knows: one another window or account started has no known end. */
 export interface CaptureRun {
-  started_ms: number;
-  ends_ms: number;
+  started_ms: number | null;
+  ends_ms: number | null;
+  /** This window started it and can stop it. */
+  own: boolean;
 }
 
-/** How a wait for the helper ended: it finished, the person cancelled, or it was still running at its limit. */
-export type Ended = "Done" | "Cancelled" | "TimedOut";
+/** How a wait for the helper ended: it finished, the person cancelled, it was still running at its limit, or it refused because a capture was running. */
+export type Ended = "Done" | "Cancelled" | "TimedOut" | "Refused";
 
 /** Sent as the `capture-finished` event when the helper exits or the window stops waiting for it. */
 export interface CaptureFinished {

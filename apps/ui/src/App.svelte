@@ -2,6 +2,7 @@
   import { onMount, tick, untrack } from "svelte";
 
   import Banner from "./components/Banner.svelte";
+  import CaptureStrip from "./components/CaptureStrip.svelte";
   import ErrorView from "./components/ErrorView.svelte";
   import HistoryResetDialog from "./components/HistoryResetDialog.svelte";
   import Lazy from "./components/Lazy.svelte";
@@ -137,6 +138,7 @@
                   <Loading />
                 {:else}
                   <Banner />
+                  <CaptureStrip />
                   {#key router.key}
                     <div class="screen">
                       {#if router.current.screen === "occurrence"}

@@ -29,6 +29,8 @@
   const customValid = $derived(custom !== null && custom >= MIN_MINUTES && custom <= MAX_MINUTES);
   const minutes = $derived(choice === "custom" ? custom : choice);
   const ready = $derived(choice !== "custom" || customValid);
+  /** A capture runs, here or elsewhere: the form stays, and Start waits for it to end. */
+  const running = $derived(captures.run !== null);
 
   function pickCustom(): void {
     choice = "custom";
@@ -126,12 +128,19 @@
   </ul>
 
   <div class="acts">
-    <button type="button" class="btn accent" disabled={!app.running || !ready}
-      onclick={() => minutes !== null && captures.begin(minutes)}
+    <button
+      type="button"
+      class="btn accent"
+      disabled={!app.running || !ready}
+      aria-disabled={!app.running || !ready || running}
+      aria-describedby={running ? "start-blocked" : undefined}
+      onclick={() => !running && minutes !== null && captures.begin(minutes)}
     >
       <Icon name="start" />{t("ui.captures.start.button")}
     </button>
-    {#if !app.running}
+    {#if running}
+      <span class="muted" id="start-blocked">{t("ui.captures.start.blocked")}</span>
+    {:else if !app.running}
       <span class="muted">{t("ui.captures.start.needs_watcher")}</span>
     {/if}
   </div>

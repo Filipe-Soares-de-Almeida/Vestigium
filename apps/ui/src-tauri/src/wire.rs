@@ -1535,6 +1535,7 @@ fn ui_errors() -> Vec<UiError> {
         ChangedSince => UiError::ChangedSince,
         HelperTimedOut => UiError::HelperTimedOut,
         Cancelled => UiError::Cancelled,
+        CaptureRunning => UiError::CaptureRunning,
     )
 }
 
@@ -1918,10 +1919,19 @@ fn render() -> String {
     wire.add(
         TYPES,
         "CaptureRun",
-        vec![CaptureRun {
-            started_ms: 1_790_000_000_000,
-            ends_ms: 1_790_000_060_000,
-        }],
+        vec![
+            CaptureRun::started_here(1_790_000_000_000, 1),
+            CaptureRun {
+                started_ms: Some(1_790_000_000_000),
+                ends_ms: None,
+                own: false,
+            },
+            CaptureRun {
+                started_ms: None,
+                ends_ms: None,
+                own: false,
+            },
+        ],
     );
     wire.add(
         TYPES,
@@ -1931,6 +1941,7 @@ fn render() -> String {
             (None, Ended::Done),
             (Some(5), Ended::Cancelled),
             (None, Ended::TimedOut),
+            (Some(4), Ended::Refused),
         ]
         .map(|(exit_code, ended)| CaptureFinished {
             ids: vec![4, 5],
@@ -1946,6 +1957,7 @@ fn render() -> String {
             Done => Ended::Done,
             Cancelled => Ended::Cancelled,
             TimedOut => Ended::TimedOut,
+            Refused => Ended::Refused,
         ),
     );
     wire.add(TYPES, "Concern", concerns());

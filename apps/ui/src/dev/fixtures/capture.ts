@@ -3,7 +3,8 @@
 // `?capture-fail=1` makes it end with the helper failing and `?capture-left=<n>` opens the window with a
 // capture that has n seconds left. `?capture-auto=1` presses the start button once the page is up, and
 // `?capture-ask=<ms>` keeps the permission prompt open that long and `?capture-none=1` starts with no
-// stored capture.
+// stored capture. `?capture-else=<n>` opens the window with a capture another window started that ends
+// in n seconds, with `?capture-else-start=0` when only its existence is known.
 import { emit } from "@tauri-apps/api/event";
 
 import type {
@@ -165,17 +166,33 @@ const STORED = new Map(
   (query.get("capture-none") === "1" ? [] : [1, 2, 3, 4]).map((id) => [id, capture(id, START - (id - 1) * 3_600_000, id === 1 ? 12 : 380)]),
 );
 const left = Number(query.get("capture-left") ?? 0);
-let run: CaptureRun | null = left ? { started_ms: Date.now() - 48_000, ends_ms: Date.now() + left * 1000 } : null;
+const elsewhere = Number(query.get("capture-else") ?? 0);
+let run: CaptureRun | null = left
+  ? { started_ms: Date.now() - 48_000, ends_ms: Date.now() + left * 1000, own: true }
+  : elsewhere
+    ? { started_ms: query.get("capture-else-start") === "0" ? null : Date.now() - 48_000, ends_ms: null, own: false }
+    : null;
+/** What the watcher stored since the window last asked. */
+let stored: number[] = [];
+if (elsewhere) {
+  setTimeout(() => {
+    const id = Math.max(0, ...STORED.keys()) + 1;
+    STORED.set(id, capture(id, Date.now() - elsewhere * 1000, 4));
+    stored = [id];
+    run = null;
+  }, elsewhere * 1000);
+}
 
 let ending: ReturnType<typeof setTimeout> | undefined;
 
 export const handlers: Record<string, Handler> = {
   start_capture: async (args) => {
     const minutes = Number(args.minutes);
+    if (run) throw { kind: "capture_running", message: "a deep capture is already running" };
     await new Promise((resolve) => setTimeout(resolve, Number(query.get("capture-ask") ?? 0)));
     const seconds = Number(query.get("capture-secs") ?? minutes * 60);
     const now = Date.now();
-    run = { started_ms: now, ends_ms: now + seconds * 1000 };
+    run = { started_ms: now, ends_ms: now + seconds * 1000, own: true };
     ending = setTimeout(() => {
       const id = Math.max(0, ...STORED.keys()) + 1;
       run = null;
@@ -201,7 +218,7 @@ export const handlers: Record<string, Handler> = {
     }, 600);
     return null;
   },
-  import_captures: () => [],
+  import_captures: () => stored.splice(0),
   captures: (args) =>
     [...STORED.values()]
       .filter((c) => c.start_ms <= (args.toMs as number) && c.end_ms >= (args.fromMs as number))

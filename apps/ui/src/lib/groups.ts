@@ -2,6 +2,7 @@ import type { IconName } from "../components/Icon.svelte";
 import { type AreaState, areaState, AREAS, statusKindOf } from "../screens/health/areas";
 import { formatBytes } from "../screens/occurrence/format";
 import { app } from "./app.svelte";
+import { captures } from "./capture.svelte";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
 import { helperJobs, type JobKey } from "./helper.svelte";
@@ -44,6 +45,8 @@ export interface NavItem {
   statusWord?: string;
   /** The entry's helper job did not finish in time and nobody was told yet. */
   late?: boolean;
+  /** The entry's job is running now. */
+  live?: boolean;
   /** A short trailing value, such as a size. */
   meta?: string;
   /** True for the routes this entry stands for. */
@@ -102,8 +105,15 @@ const DUMP_ICON: Record<DumpGroup, IconName> = { blue: "pc", live: "chip", app: 
 const lateMark = (job: JobKey): Pick<NavItem, "status" | "statusWord" | "late"> =>
   helperJobs.unseen(job) ? { status: "attention", statusWord: t("ui.helper.timeout.title"), late: true } : {};
 
+/** The information mark the captures entry takes while a deep capture runs, whoever started it. */
+const liveMark = (): Pick<NavItem, "status" | "statusWord" | "live"> =>
+  captures.run !== null ? { status: "info", statusWord: t("ui.captures.nav.running"), live: true } : {};
+
 /** Whether a group holds an entry whose helper job did not finish in time and nobody was told yet. */
 export const hasLate = (group: Group): boolean => group.items.some((item) => item.late);
+
+/** Whether a group holds an entry whose job runs now and has no late mark of its own. */
+export const hasLive = (group: Group): boolean => group.items.some((item) => item.live && !item.late);
 
 /** The dump list a route shows: the one asked for, or the one of the dump it opens; none for the overview. */
 function dumpListOf(r: Route): DumpGroup | null {
@@ -293,7 +303,7 @@ export function buildGroups(): Group[] {
           href: href.captures(),
           label: t("ui.shell.nav.captures"),
           icon: "captures",
-          ...lateMark("capture"),
+          ...(helperJobs.unseen("capture") ? lateMark("capture") : liveMark()),
           match: (r) => r.screen === "captures" || r.screen === "capture",
         },
       ],

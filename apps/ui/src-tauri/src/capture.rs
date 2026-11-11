@@ -5,8 +5,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, HANDLE, WAIT_OBJECT_0};
-use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_CANCELLED, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0,
+};
+use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+use windows::Win32::Security::{EqualSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+use windows::Win32::System::Threading::{
+    CreateMutexW, GetExitCodeProcess, OpenMutexW, SYNCHRONIZATION_ACCESS_RIGHTS,
+    WaitForSingleObject,
+};
 use windows::Win32::UI::Shell::{
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
@@ -19,12 +26,40 @@ use crate::protected::{account_could_change, this_process_is_elevated};
 /// Capture lengths the window accepts, in minutes.
 pub const CAPTURE_MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 
-/// A deep capture under way: when it started and when it should end, Unix epoch milliseconds.
+/// A deep capture under way, as far as the window knows: when it started and when it should end,
+/// Unix epoch milliseconds. A capture another window started has no known end, and maybe no start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureRun {
-    pub started_ms: i64,
-    pub ends_ms: i64,
+    pub started_ms: Option<i64>,
+    pub ends_ms: Option<i64>,
+    /// This window started it and can stop it.
+    pub own: bool,
 }
+
+impl CaptureRun {
+    /// A capture this window started.
+    pub fn started_here(started_ms: i64, minutes: u64) -> CaptureRun {
+        CaptureRun {
+            started_ms: Some(started_ms),
+            ends_ms: Some(started_ms + minutes as i64 * 60_000),
+            own: true,
+        }
+    }
+}
+
+/// What the window found when it looked for the helper's capture lock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockState {
+    /// A mutex of that name exists and a helper owns it.
+    Held,
+    /// No mutex of that name, or one that a user process made.
+    Free,
+    /// The name exists and the window may not read it: it counts as held.
+    Unreadable,
+}
+
+/// The exit code of a deep capture helper that found another capture running.
+pub const CAPTURE_RUNNING: u32 = 4;
 
 /// How a wait for the helper ended, from the window's side.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -36,6 +71,8 @@ pub enum Ended {
     Cancelled,
     /// The helper was still running at its ceiling; the window stopped waiting for it.
     TimedOut,
+    /// The helper refused to start because another capture was running.
+    Refused,
 }
 
 /// What the window hears when the helper exits.
@@ -93,6 +130,7 @@ pub fn wait_result(
 pub fn capture_end(waited: Waited, asked: bool) -> (Option<u32>, Ended) {
     match waited {
         Waited::Exited(Some(0)) => (Some(0), Ended::Done),
+        Waited::Exited(Some(CAPTURE_RUNNING)) => (Some(CAPTURE_RUNNING), Ended::Refused),
         Waited::Exited(code) if asked || code == Some(CAPTURE_CANCELLED) => {
             (code, Ended::Cancelled)
         }
@@ -226,6 +264,152 @@ pub fn capture_file(db: &Path, started_ms: i64) -> Option<PathBuf> {
             .join("captures")
             .join(format!("{started_ms}.capture")),
     )
+}
+
+/// Access to read a kernel object's owner, and to wait on it.
+const READ_CONTROL: u32 = 0x0002_0000;
+const SYNCHRONIZE: u32 = 0x0010_0000;
+
+/// Looks for the mutex `name`; one a process of this account owns is a squatter's, not the
+/// helper's, and an elevated window cannot tell and takes any mutex as held.
+pub fn lock_state(name: &str) -> LockState {
+    let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    // SAFETY: wide is a null-terminated name that outlives the call.
+    let handle = match unsafe {
+        OpenMutexW(
+            SYNCHRONIZATION_ACCESS_RIGHTS(READ_CONTROL | SYNCHRONIZE),
+            false,
+            PCWSTR(wide.as_ptr()),
+        )
+    } {
+        Ok(handle) => handle,
+        Err(err) if err.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+            return LockState::Unreadable;
+        }
+        Err(_) => return LockState::Free,
+    };
+    let same = (!this_process_is_elevated())
+        .then(|| owned_like_a_new_object(handle))
+        .flatten();
+    // SAFETY: the handle was returned by OpenMutexW and is closed once.
+    let _ = unsafe { CloseHandle(handle) };
+    lock_from_owner(same, this_process_is_elevated())
+}
+
+/// The lock a mutex that exists stands for, given whether this account would own it (`None` when
+/// that could not be read) and whether this window is elevated.
+pub fn lock_from_owner(owned_like_this_account: Option<bool>, elevated: bool) -> LockState {
+    match owned_like_this_account {
+        _ if elevated => LockState::Held,
+        Some(true) => LockState::Free,
+        Some(false) => LockState::Held,
+        None => LockState::Unreadable,
+    }
+}
+
+/// Whether `handle`'s object has the owner a mutex this process creates gets; `None` when an
+/// owner could not be read.
+fn owned_like_a_new_object(handle: HANDLE) -> Option<bool> {
+    let own: Vec<u16> = format!(r"Local\Vestigium.Owner.{}", std::process::id())
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    // SAFETY: own is a null-terminated name that outlives the call; the handle is closed below.
+    let mine = unsafe { CreateMutexW(None, false, PCWSTR(own.as_ptr())) }.ok()?;
+    let theirs = owner(handle);
+    let ours = owner(mine);
+    // SAFETY: the handle was returned by CreateMutexW and is closed once.
+    let _ = unsafe { CloseHandle(mine) };
+    let same = match (&theirs, &ours) {
+        // SAFETY: both sids live in descriptors that are freed below.
+        (Some((a, _)), Some((b, _))) => Some(unsafe { EqualSid(*a, *b) }.is_ok()),
+        _ => None,
+    };
+    for (_, descriptor) in theirs.into_iter().chain(ours) {
+        // SAFETY: the descriptor was allocated by GetSecurityInfo for LocalFree.
+        let _ = unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    }
+    same
+}
+
+/// The owner sid of a kernel object and the descriptor that holds it.
+fn owner(handle: HANDLE) -> Option<(PSID, PSECURITY_DESCRIPTOR)> {
+    let mut sid = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: both out pointers are locals; the caller frees the descriptor.
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&mut sid),
+            None,
+            None,
+            None,
+            Some(&mut descriptor),
+        )
+    };
+    (status.is_ok() && !sid.0.is_null()).then_some((sid, descriptor))
+}
+
+/// The names in `<data>\captures`, beside the watcher's database.
+fn capture_names(db: &Path) -> Vec<String> {
+    let Some(folder) = db.parent().map(|data| data.join("captures")) else {
+        return Vec::new();
+    };
+    std::fs::read_dir(folder)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The capture another window, or another account, started and that still runs; `None` when the
+/// helper's lock is free.
+pub fn capture_elsewhere(db: Option<&Path>, now_ms: i64) -> Option<CaptureRun> {
+    let lock = lock_state(vestigium_collect::DEEP_CAPTURE_LOCK);
+    let names = db.map(capture_names).unwrap_or_default();
+    running_elsewhere(
+        lock,
+        started_from_temp(names.iter().map(String::as_str), now_ms),
+    )
+}
+
+/// The start stamp of a result a helper is still writing: `<start ms>.capture.tmp`.
+pub fn temp_stamp(name: &str) -> Option<i64> {
+    let digits = name.strip_suffix(".capture.tmp")?;
+    if digits.is_empty() || digits.len() > 15 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// The newest start stamp among `names` that a capture running now could have: not in the future
+/// and not older than the longest capture plus the wait's margin.
+pub fn started_from_temp<'a>(names: impl IntoIterator<Item = &'a str>, now_ms: i64) -> Option<i64> {
+    let longest =
+        vestigium_core::CAPTURE_MINUTES_MAX as i64 * 60_000 + CAPTURE_MARGIN.as_millis() as i64;
+    names
+        .into_iter()
+        .filter_map(temp_stamp)
+        .filter(|&stamp| stamp <= now_ms + 60_000 && now_ms - stamp <= longest)
+        .max()
+}
+
+/// The capture another window started, from what the lock says and the newest temporary result:
+/// nothing while the lock is free; the start is known only when a temporary result names it.
+pub fn running_elsewhere(lock: LockState, started_ms: Option<i64>) -> Option<CaptureRun> {
+    match lock {
+        LockState::Free => None,
+        LockState::Held | LockState::Unreadable => Some(CaptureRun {
+            started_ms,
+            ends_ms: None,
+            own: false,
+        }),
+    }
 }
 
 /// `<data>\scans\<start ms>.scan`, beside the watcher's database.
@@ -402,6 +586,161 @@ mod tests {
         assert_eq!(
             capture_end(Waited::Abandoned, true),
             (None, Ended::Cancelled)
+        );
+    }
+
+    #[test]
+    fn a_helper_that_found_a_capture_running_ends_as_refused() {
+        assert_eq!(
+            capture_end(Waited::Exited(Some(CAPTURE_RUNNING)), false),
+            (Some(CAPTURE_RUNNING), Ended::Refused)
+        );
+        assert_eq!(
+            capture_end(Waited::Exited(Some(CAPTURE_RUNNING)), true),
+            (Some(CAPTURE_RUNNING), Ended::Refused)
+        );
+    }
+
+    #[test]
+    fn only_a_capture_result_still_being_written_names_a_start() {
+        assert_eq!(
+            temp_stamp("1793580000000.capture.tmp"),
+            Some(1_793_580_000_000)
+        );
+        assert_eq!(temp_stamp("1793580000000.capture"), None);
+        assert_eq!(temp_stamp("1793580000000.scan.tmp"), None);
+        assert_eq!(temp_stamp("x.capture.tmp"), None);
+        assert_eq!(temp_stamp(".capture.tmp"), None);
+        assert_eq!(temp_stamp("-5.capture.tmp"), None);
+        assert_eq!(temp_stamp("12345678901234567890.capture.tmp"), None);
+    }
+
+    #[test]
+    fn the_newest_plausible_temporary_result_gives_the_start() {
+        let now = 1_793_580_000_000;
+        let names = [
+            "1793579000000.capture.tmp",
+            "1793579900000.capture.tmp",
+            "1793579900000.capture",
+            "notes.txt",
+        ];
+        assert_eq!(started_from_temp(names, now), Some(1_793_579_900_000));
+        assert_eq!(started_from_temp(["notes.txt"], now), None);
+    }
+
+    #[test]
+    fn a_temporary_result_from_the_future_or_older_than_any_capture_is_ignored() {
+        let now = 1_793_580_000_000;
+        let day = 24 * 3_600_000;
+        assert_eq!(
+            started_from_temp([format!("{}.capture.tmp", now + 3_600_000).as_str()], now),
+            None
+        );
+        assert_eq!(
+            started_from_temp([format!("{}.capture.tmp", now - 2 * day).as_str()], now),
+            None
+        );
+        assert_eq!(
+            started_from_temp(
+                [format!("{}.capture.tmp", now - day + 60_000).as_str()],
+                now
+            ),
+            Some(now - day + 60_000)
+        );
+    }
+
+    #[test]
+    fn a_free_lock_means_no_capture_whatever_files_are_left() {
+        assert_eq!(running_elsewhere(LockState::Free, Some(5)), None);
+        assert_eq!(running_elsewhere(LockState::Free, None), None);
+    }
+
+    #[test]
+    fn a_held_or_unreadable_lock_means_a_capture_with_an_unknown_end() {
+        for lock in [LockState::Held, LockState::Unreadable] {
+            assert_eq!(
+                running_elsewhere(lock, None),
+                Some(CaptureRun {
+                    started_ms: None,
+                    ends_ms: None,
+                    own: false
+                })
+            );
+            assert_eq!(
+                running_elsewhere(lock, Some(9)),
+                Some(CaptureRun {
+                    started_ms: Some(9),
+                    ends_ms: None,
+                    own: false
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn a_capture_started_here_knows_both_ends() {
+        assert_eq!(
+            CaptureRun::started_here(1_000, 5),
+            CaptureRun {
+                started_ms: Some(1_000),
+                ends_ms: Some(301_000),
+                own: true
+            }
+        );
+    }
+
+    fn lock_name(tag: &str) -> Vec<u16> {
+        format!(r"Local\Vestigium.Test.{}.{tag}", std::process::id())
+            .encode_utf16()
+            .chain([0])
+            .collect()
+    }
+
+    #[test]
+    fn a_name_nobody_holds_is_a_free_lock() {
+        let name = format!(r"Local\Vestigium.Test.{}.absent", std::process::id());
+        assert_eq!(lock_state(&name), LockState::Free);
+    }
+
+    #[test]
+    fn a_mutex_a_user_process_made_is_not_the_helpers_lock() {
+        if this_process_is_elevated() {
+            return;
+        }
+        let wide = lock_name("squat");
+        // SAFETY: wide is a null-terminated name that outlives the call; the handle is closed below.
+        let mutex = unsafe {
+            windows::Win32::System::Threading::CreateMutexW(None, false, PCWSTR(wide.as_ptr()))
+        }
+        .unwrap();
+        let name = String::from_utf16_lossy(&wide[..wide.len() - 1]);
+        assert_eq!(lock_state(&name), LockState::Free);
+        // SAFETY: the handle was returned by CreateMutexW and is closed once.
+        let _ = unsafe { CloseHandle(mutex) };
+    }
+
+    #[test]
+    fn a_mutex_owned_by_someone_else_is_held_and_one_this_account_owns_is_not() {
+        assert_eq!(lock_from_owner(Some(false), false), LockState::Held);
+        assert_eq!(lock_from_owner(Some(true), false), LockState::Free);
+        assert_eq!(lock_from_owner(None, false), LockState::Unreadable);
+    }
+
+    #[test]
+    fn an_elevated_window_takes_any_existing_mutex_as_held() {
+        for owned in [Some(true), Some(false), None] {
+            assert_eq!(lock_from_owner(owned, true), LockState::Held);
+        }
+    }
+
+    /// Start a deep capture helper elevated (the installed one, for a few minutes), then run this
+    /// test unelevated: `cargo test -p vestigium-ui -- --ignored a_running_helper`.
+    #[test]
+    #[ignore = "needs a deep capture helper running elevated while this runs unelevated"]
+    fn a_running_helper_holds_the_lock_the_window_sees() {
+        assert_eq!(
+            lock_state(vestigium_collect::DEEP_CAPTURE_LOCK),
+            LockState::Held
         );
     }
 

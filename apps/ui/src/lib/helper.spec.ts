@@ -4,18 +4,20 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { answer, refusal } from "../dev/test-ipc";
 import { show, until } from "../dev/test-mount";
-import Waiting from "../screens/captures/Waiting.svelte";
+import CaptureStrip from "../components/CaptureStrip.svelte";
 import { captures } from "./capture.svelte";
 import { dumps } from "./dumps.svelte";
 import { buildGroups } from "./groups";
 import { health } from "./health.svelte";
 import { helperJobs } from "./helper.svelte";
 import { t } from "./i18n.svelte";
+import { router } from "./router.svelte";
 import type { CaptureFinished, CaptureRun } from "./types";
 
-const RUN: CaptureRun = { started_ms: Date.now() - 60_000, ends_ms: Date.now() + 240_000 };
+const RUN: CaptureRun = { started_ms: Date.now() - 60_000, ends_ms: Date.now() + 240_000, own: true };
 
 beforeEach(() => {
+  router.commit({ screen: "captures", forOccurrence: null }, null);
   helperJobs.last = {};
   helperJobs.asking = null;
   captures.run = null;
@@ -31,9 +33,9 @@ afterEach(() => {
   captures.cancelling = false;
 });
 
-test("the_capture_card_offers_a_cancel_that_asks_before_it_acts", () => {
+test("the_capture_strip_offers_a_cancel_that_asks_before_it_acts", () => {
   captures.run = RUN;
-  const page = show(Waiting, { run: RUN });
+  const page = show(CaptureStrip);
 
   const cancel = [...page.querySelectorAll("button")].find((b) => b.textContent === t("ui.helper.cancel.capture"));
   expect(cancel).toBeDefined();
@@ -45,7 +47,7 @@ test("the_capture_card_offers_a_cancel_that_asks_before_it_acts", () => {
 test("cancelling_a_capture_tells_the_window_to_ask_the_helper_and_waits_for_its_end", async () => {
   const calls = answer({ cancel_capture: () => null });
   captures.run = RUN;
-  const page = show(Waiting, { run: RUN });
+  const page = show(CaptureStrip);
 
   await captures.cancel();
 
