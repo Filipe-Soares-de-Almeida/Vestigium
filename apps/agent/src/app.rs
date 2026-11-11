@@ -283,7 +283,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             if !scans.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
             }
-            let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
+            let dumps = import_dumps(&shared.dumps_dir, store);
             let tweaks = import_tweaks(&shared.tweaks_dir, store, &mut WindowsSettings);
             let tests = import_tests(&shared.tests_dir, store);
             if !tests.is_empty() {
@@ -292,8 +292,10 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             Response::Imported {
                 captures,
                 scans,
-                dumps,
-                deleted,
+                dumps: dumps.ids,
+                deleted: dumps.deleted,
+                refused: dumps.refused,
+                failed: dumps.failed,
                 tweaks,
                 tests,
             }
@@ -1243,6 +1245,8 @@ pub(crate) mod tests {
                 scans: Vec::new(),
                 dumps: Vec::new(),
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 tweaks: Vec::new(),
                 tests: Vec::new(),
             }
@@ -1263,6 +1267,8 @@ pub(crate) mod tests {
                 scans: vec![1],
                 dumps: Vec::new(),
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 tweaks: Vec::new(),
                 tests: Vec::new(),
             }

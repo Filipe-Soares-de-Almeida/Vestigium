@@ -234,6 +234,12 @@ How to use this file:
   the account to the helper, which finds that account's profile in Windows and refuses anything that
   is not a local folder. The helper also deletes the dumps it scans in a subfolder of the Minidump
   folder, which it used to refuse. The window and the helper ship together.
+- Deleting crash dumps now says why some were not deleted. After a partial delete the message adds
+  how many were refused (not allowed, or no longer there) and how many could not be deleted, in
+  English and Portuguese; before it only said the others no longer existed or were outside the dump
+  folders. Deleting a single dump from its own page that the helper turns down now shows the same
+  message instead of reporting 0 B freed. The window and the watcher must be updated together,
+  because the pipe protocol changed.
 - A health alert about two antivirus products running, or about the page file, now stays open when
   Windows does not answer the check. Before, the alert closed, or never opened, whenever the Security
   Center was not up yet (often just after logon) or the page file could not be read, and a failed

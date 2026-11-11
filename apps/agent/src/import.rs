@@ -53,9 +53,22 @@ pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
     ids
 }
 
+/// What importing the dump results of a folder found.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DumpImport {
+    /// The dumps stored or refreshed.
+    pub ids: Vec<i64>,
+    /// The dumps marked as deleted.
+    pub deleted: u32,
+    /// The paths the helper refused to delete.
+    pub refused: u32,
+    /// The paths the helper allowed but could not delete.
+    pub failed: u32,
+}
+
 /// Stores the dump reads of `dir` and applies its deletion results, deleting both files and the
-/// lists they answer; returns the dumps stored and how many were marked as deleted.
-pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
+/// lists they answer.
+pub fn import_dumps(dir: &Path, store: &mut Store) -> DumpImport {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "dumps") {
         let Some(scan) = read_versioned::<DumpScan>(&path, DUMP_SCAN_VERSION) else {
@@ -68,7 +81,7 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
         ids.extend(stored);
         let _ = fs::remove_file(&path);
     }
-    let mut deleted = 0;
+    let (mut deleted, mut refused, mut failed) = (0, 0, 0);
     for path in numbered_files(dir, "deleted") {
         let Some(done) = read_versioned::<DumpDeletion>(&path, DUMP_DELETION_VERSION) else {
             discard_if_stale(&path);
@@ -90,10 +103,17 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
             continue;
         };
         deleted += marked as u32;
+        refused += done.refused.len() as u32;
+        failed += done.failed.len() as u32;
         let _ = fs::remove_file(path.with_extension("delete"));
         let _ = fs::remove_file(&path);
     }
-    (ids, deleted)
+    DumpImport {
+        ids,
+        deleted,
+        refused,
+        failed,
+    }
 }
 
 /// How long a helper's intent may sit without a result before the helper counts as stopped; far
@@ -553,11 +573,11 @@ mod tests {
         );
         let mut store = store(dir.path());
 
-        let (ids, deleted) = import_dumps(&dumps, &mut store);
-        assert_eq!((ids.len(), deleted), (1, 0));
+        let first = import_dumps(&dumps, &mut store);
+        assert_eq!((first.ids.len(), first.deleted), (1, 0));
         assert_eq!(
             import_dumps(&dumps, &mut store),
-            (Vec::new(), 0),
+            DumpImport::default(),
             "the file is gone"
         );
 
@@ -568,11 +588,19 @@ mod tests {
             &DumpDeletion {
                 ts_ms: 20,
                 deleted: vec![r"c:\windows\minidump\1.DMP".into()],
-                refused: Vec::new(),
-                failed: Vec::new(),
+                refused: vec!["a".into(), "b".into()],
+                failed: vec!["c".into()],
             },
         );
-        assert_eq!(import_dumps(&dumps, &mut store), (Vec::new(), 1));
+        assert_eq!(
+            import_dumps(&dumps, &mut store),
+            DumpImport {
+                ids: Vec::new(),
+                deleted: 1,
+                refused: 2,
+                failed: 1,
+            }
+        );
         assert!(store.present_dumps().unwrap().is_empty());
         assert!(
             !dumps.join("20.delete").exists(),

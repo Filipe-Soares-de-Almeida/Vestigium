@@ -378,6 +378,8 @@ pub async fn delete_dumps(
         if paths.is_empty() {
             return Ok(DeleteFinished {
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 exit_code: None,
             });
         }
@@ -389,11 +391,21 @@ pub async fn delete_dumps(
             &delete_dumps_args(&list, current_user_sid().ok().as_deref()),
         )?
         .wait();
-        let deleted = match link.call(&Request::ImportResults) {
-            Ok(Response::Imported { deleted, .. }) => deleted,
-            _ => 0,
+        let (deleted, refused, failed) = match link.call(&Request::ImportResults) {
+            Ok(Response::Imported {
+                deleted,
+                refused,
+                failed,
+                ..
+            }) => (deleted, refused, failed),
+            _ => (0, 0, 0),
         };
-        Ok(DeleteFinished { deleted, exit_code })
+        Ok(DeleteFinished {
+            deleted,
+            refused,
+            failed,
+            exit_code,
+        })
     })
     .await
 }

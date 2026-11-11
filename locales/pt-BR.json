@@ -1581,6 +1581,7 @@
   "ui.dumps.delete.confirm": "Apagar",
   "ui.dumps.delete.toast": "{size} liberados · resultados mantidos",
   "ui.dumps.delete.toast.partial": "{count} de {asked} apagados, {size} liberados; os demais já não existiam ou estão fora das pastas de dump",
+  "ui.dumps.delete.toast.partial_reasons": "{count} de {asked} apagados, {size} liberados. {refused} não apagados: não permitido; {failed} não puderam ser apagados.",
   "ui.dumps.delete.declined": "Permissão negada; nada foi apagado.",
   "ui.dumps.delete.failed": "Falha ao apagar os dumps.",
 

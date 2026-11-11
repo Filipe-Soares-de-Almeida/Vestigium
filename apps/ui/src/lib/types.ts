@@ -779,6 +779,10 @@ export interface DumpScanFinished {
 /** What deleting dumps returned once the helper exited. */
 export interface DeleteFinished {
   deleted: number;
+  /** Paths the helper refused to delete. */
+  refused: number;
+  /** Paths the helper allowed but could not delete. */
+  failed: number;
   exit_code: number | null;
 }
 

@@ -126,6 +126,8 @@ fn every_response_roundtrips_as_json() {
             scans: vec![5],
             dumps: vec![6],
             deleted: 1,
+            refused: 2,
+            failed: 3,
             tweaks: vec![7],
             tests: vec![9],
         },

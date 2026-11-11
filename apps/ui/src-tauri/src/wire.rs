@@ -1939,6 +1939,8 @@ fn render() -> String {
         [Some(0), None]
             .map(|exit_code| DeleteFinished {
                 deleted: 2,
+                refused: 1,
+                failed: 0,
                 exit_code,
             })
             .to_vec(),

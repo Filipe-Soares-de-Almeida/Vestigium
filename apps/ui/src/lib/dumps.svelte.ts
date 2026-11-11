@@ -10,11 +10,15 @@ const REFRESH_MS = 5 * 60_000;
 /** Where a helper job stands; `running` covers Windows' permission prompt and the helper's run. */
 export type HelperPhase = "idle" | "running" | "declined" | "failed" | "done";
 
-/** What deleting removed: how many dumps and the space they took. */
+/** What deleting removed: how many dumps and the space they took, and what the helper turned down. */
 export interface Freed {
   count: number;
   asked: number;
   bytes: number;
+  /** Paths the helper refused to delete. */
+  refused: number;
+  /** Paths the helper allowed but could not delete. */
+  failed: number;
 }
 
 /** The dumps every screen reads (nav pane, post-mortem report, Dumps), reading them and deleting them. */
@@ -86,7 +90,8 @@ class Dumps {
         return null;
       }
       this.deleting = "done";
-      return { count: gone.length, asked: asked.length, bytes: gone.reduce((sum, d) => sum + d.size_bytes, 0) };
+      const bytes = gone.reduce((sum, d) => sum + d.size_bytes, 0);
+      return { count: gone.length, asked: asked.length, bytes, refused: done.refused, failed: done.failed };
     } catch (error) {
       this.deleting = errorKind(error) === "declined" ? "declined" : "failed";
       return null;

@@ -7,7 +7,7 @@ use vestigium_core::{
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// How long the watcher may take to answer a request that only reads memory or flips a flag.
 pub const ANSWER_SHORT: Duration = Duration::from_secs(3);
@@ -101,12 +101,15 @@ pub enum Response {
         autostart: bool,
     },
     /// The ids of the deep captures, health scans, dumps and tweak changes stored by an import, in
-    /// the order read, and how many dumps it marked as deleted.
+    /// the order read, how many dumps it marked as deleted, and how many deletions the helper
+    /// refused or could not carry out.
     Imported {
         captures: Vec<i64>,
         scans: Vec<i64>,
         dumps: Vec<i64>,
         deleted: u32,
+        refused: u32,
+        failed: u32,
         tweaks: Vec<i64>,
         tests: Vec<i64>,
     },

@@ -917,8 +917,8 @@ export const dumpScanFinishedSamples = [
 ] satisfies DumpScanFinished[];
 
 export const deleteFinishedSamples = [
-  {"deleted":2,"exit_code":0},
-  {"deleted":2,"exit_code":null},
+  {"deleted":2,"refused":1,"failed":0,"exit_code":0},
+  {"deleted":2,"refused":1,"failed":0,"exit_code":null},
 ] satisfies DeleteFinished[];
 
 export const tweakIdSamples = [

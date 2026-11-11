@@ -109,6 +109,9 @@ pub struct DumpScanFinished {
 pub struct DeleteFinished {
     /// How many dumps the watcher marked as deleted.
     pub deleted: u32,
+    /// How many paths the helper refused to delete, and how many it could not delete.
+    pub refused: u32,
+    pub failed: u32,
     pub exit_code: Option<u32>,
 }
 

@@ -1581,6 +1581,7 @@
   "ui.dumps.delete.confirm": "Delete",
   "ui.dumps.delete.toast": "{size} freed · results kept",
   "ui.dumps.delete.toast.partial": "{count} of {asked} deleted, {size} freed; the others no longer existed or are outside the dump folders",
+  "ui.dumps.delete.toast.partial_reasons": "{count} of {asked} deleted, {size} freed. {refused} not deleted: not allowed; {failed} could not be deleted.",
   "ui.dumps.delete.declined": "Permission denied; nothing was deleted.",
   "ui.dumps.delete.failed": "Could not delete the dumps.",
 

@@ -17,7 +17,7 @@
   import { relatedLinks } from "../lib/related.svelte";
   import { keyOf, tweaks } from "../lib/tweaks.svelte";
   import DumpPage from "./dumps/DumpPage.svelte";
-  import { at, type Entry, entries, fileName, type Group, GROUPS, isRead, lastRead, lede, present, setting, space, sub, title, TONE } from "./dumps/words";
+  import { at, type Entry, entries, fileName, type Group, GROUPS, isRead, lastRead, lede, partialDeleteText, present, setting, space, sub, title, TONE } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
 
   let { id, group }: { id: number | null; group: DumpGroup | null } = $props();
@@ -65,7 +65,7 @@
     if (freed === null) {
       toast.show(t(dumps.deleting === "declined" ? "ui.dumps.delete.declined" : "ui.dumps.delete.failed"));
     } else if (freed.count < freed.asked) {
-      toast.show(t("ui.dumps.delete.toast.partial", { count: freed.count, asked: freed.asked, size: formatBytes(freed.bytes) }));
+      toast.show(partialDeleteText(freed));
     } else {
       toast.show(t("ui.dumps.delete.toast", { size: formatBytes(freed.bytes) }));
     }

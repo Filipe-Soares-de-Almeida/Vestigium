@@ -230,6 +230,6 @@ export const handlers: Record<string, Handler> = {
     const ids = args.ids as number[];
     const at = Date.now();
     list = list.map((d) => (ids.includes(d.id) && d.deleted_ms === null ? { ...d, deleted_ms: at } : d));
-    return { deleted: ids.length, exit_code: 0 } satisfies DeleteFinished;
+    return { deleted: ids.length, refused: 0, failed: 0, exit_code: 0 } satisfies DeleteFinished;
   },
 };

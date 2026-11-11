@@ -1,3 +1,4 @@
+import type { Freed } from "../../lib/dumps.svelte";
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   BugCheckDto,
@@ -471,4 +472,11 @@ export function space(list: Entry[]): { group: Group; bytes: number }[] {
 export function lastRead(dto: DumpsDto): number | null {
   const times = dto.dumps.flatMap((d) => (d.analyzed_ms !== null ? [d.analyzed_ms] : []));
   return times.length ? Math.max(...times) : null;
+}
+
+/** What a delete that did not remove every dump asked for says, and why when the helper told. */
+export function partialDeleteText(freed: Freed): string {
+  const args = { count: freed.count, asked: freed.asked, size: formatBytes(freed.bytes) };
+  if (freed.refused + freed.failed === 0) return k("delete.toast.partial", args);
+  return k("delete.toast.partial_reasons", { ...args, refused: freed.refused, failed: freed.failed });
 }
