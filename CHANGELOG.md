@@ -50,6 +50,8 @@ How to use this file:
 - The Health text for an unfinished shutdown no longer states a power loss as fact: it now says the
   PC stopped before it finished shutting down, and lists a power cut, a hang or something holding up
   the shutdown as the possible causes, since the event alone cannot tell them apart.
+- The Portuguese Now line for a disk cause now reads "provavelmente quase todo por" the process,
+  instead of the clumsy "provavelmente principalmente por".
 
 ### Security
 

@@ -584,7 +584,7 @@
   "ui.now.lede.busy.memory": "Uso alto de memória.",
   "ui.now.lede.busy.memory_by": "Uso alto de memória, principalmente por {name}.",
   "ui.now.lede.busy.disk": "Uso alto de disco.",
-  "ui.now.lede.busy.disk_by": "Uso alto de disco, provavelmente principalmente por {name}.",
+  "ui.now.lede.busy.disk_by": "Uso alto de disco, provavelmente quase todo por {name}.",
   "ui.now.lede.busy.gpu": "Uso alto de GPU.",
   "ui.now.lede.busy.gpu_by": "Uso alto de GPU, principalmente por {name}.",
   "ui.now.lede.busy.tail": "O PC responde normalmente.",
