@@ -30,8 +30,9 @@ Only the requests listed below. There is no account and no telemetry.
 | `%ProgramData%\Vestigium\tweaks` | A journal of the tweaks that needed administrator rights, written by the helper: one small file per change, with the settings it changed and their values before and after. Only an administrator can write in it. Vestigium reads it to tell a real change from a forged one when you select **Undo**. It holds no personal data, **Delete the history** does not remove it and uninstalling leaves it; an administrator can delete the folder, after which those changes can no longer be undone from Vestigium. |
 | `%LOCALAPPDATA%\app.vestigium\updates.json` | Whether to check for updates, when it last checked, and the last version whose notes you saw. |
 | `%LOCALAPPDATA%\app.vestigium\EBWebView` | The window's own browser files. |
+| `C:\Program Files\Vestigium` | The program itself, installed for every account and writable only by an administrator. It holds no data of yours. Each account that uses Vestigium has its own history in its own `%LOCALAPPDATA%`. |
 
-**Settings › Privacy and data › Open the data folder** opens the first folder.
+**Settings › Privacy and data › Open the data folder** opens the first folder. Uninstalling with **Delete the application data** ticked removes the folders of the account that runs the uninstaller; other accounts keep theirs.
 
 ## Delete the history
 

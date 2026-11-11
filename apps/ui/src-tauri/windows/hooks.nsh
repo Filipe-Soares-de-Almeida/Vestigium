@@ -1,4 +1,6 @@
-﻿; Installer hooks: the watcher is closed before its files change, and started again after an install.
+﻿; Installer hooks. The install is per machine and runs elevated, so everything that belongs to the signed-in
+; user (the monitor, the autostart entry, the history, an earlier per-user install) is done in that user's
+; own context, never with the installer's token.
 
 Var VestigiumWatcherWasRunning
 
@@ -44,13 +46,53 @@ Var VestigiumWatcherWasRunning
   ${EndIf}
 !macroend
 
-!macro NSIS_HOOK_PREINSTALL
-  !insertmacro VestigiumStopWatcher
+; Runs cmd.exe with a command line as the signed-in user, not with the installer's elevated token.
+; Nothing runs when no one is signed in. The line must stay under 1000 characters once $INSTDIR is expanded.
+!macro VestigiumRunAsUser line
+  nsis_tauri_utils::RunAsUser "$SYSDIR\cmd.exe" '/d /s /c "${line}" >nul 2>&1'
+  Pop $2
 !macroend
 
+!define VESTIGIUM_RUN_KEY 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
+!define VESTIGIUM_OLD_DIR '%LOCALAPPDATA%\Vestigium'
+
+; An earlier version installed per user, in %LOCALAPPDATA%\Vestigium, a folder that user can write. The
+; elevated helper in it could be swapped, so it goes: its programs, its uninstall entry and its shortcuts.
+; The history in data\ stays, and a start-at-logon entry that names the old monitor is pointed at the new one.
+
+; Before the new files go in: ends a window of the old install that is still open, since it locks its files.
+!macro VestigiumEndOldWindow
+  !insertmacro VestigiumRunAsUser 'if exist "${VESTIGIUM_OLD_DIR}\Vestigium.Window.exe" if /i not "${VESTIGIUM_OLD_DIR}"=="$INSTDIR" taskkill /f /im Vestigium.Window.exe'
+!macroend
+
+; After the new files are in: removes the rest of the old install.
+!macro VestigiumRemoveOldInstall
+  !insertmacro VestigiumRunAsUser 'if exist "${VESTIGIUM_OLD_DIR}\Vestigium.Window.exe" if /i not "${VESTIGIUM_OLD_DIR}"=="$INSTDIR" (reg query "${VESTIGIUM_RUN_KEY}" /v Vestigium | find /i "${VESTIGIUM_OLD_DIR}\Vestigium.exe" && reg add "${VESTIGIUM_RUN_KEY}" /v Vestigium /t REG_SZ /d "\"$INSTDIR\Vestigium.exe\"" /f & cd /d "${VESTIGIUM_OLD_DIR}" && del /f /q Vestigium.Window.exe Vestigium.exe Vestigium.Helper.exe PresentMon-*-x64.exe uninstall.exe & cd /d "%LOCALAPPDATA%" & rmdir /s /q Vestigium\licenses & rmdir Vestigium & reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Vestigium" /f & reg delete HKCU\Software\vestigium\Vestigium /f & del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Vestigium.lnk" "%USERPROFILE%\Desktop\Vestigium.lnk")'
+!macroend
+
+; An update installs no shortcuts, so one is made when the all-users Start menu has none yet.
+!macro VestigiumEnsureStartMenuShortcut
+  ${If} $NoShortcutMode <> 1
+  ${AndIfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    StrCpy $R9 $UpdateMode
+    StrCpy $UpdateMode 0
+    Call CreateOrUpdateStartMenuShortcut
+    StrCpy $UpdateMode $R9
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  !insertmacro VestigiumStopWatcher
+  !insertmacro VestigiumEndOldWindow
+!macroend
+
+; The monitor starts again as the signed-in user, only if it was running before the install.
 !macro NSIS_HOOK_POSTINSTALL
+  !insertmacro VestigiumRemoveOldInstall
+  !insertmacro VestigiumEnsureStartMenuShortcut
   ${If} $VestigiumWatcherWasRunning = 1
-    Exec '"$INSTDIR\Vestigium.exe"'
+    nsis_tauri_utils::RunAsUser "$INSTDIR\Vestigium.exe" ""
+    Pop $2
   ${EndIf}
 !macroend
 
@@ -59,17 +101,13 @@ Var VestigiumWatcherWasRunning
 !macroend
 
 ; A plain uninstall removes the start-at-logon entry when it names this install; an update keeps it.
-; The history lives beside the program, so deleting the app data also deletes it.
+; With "delete the application data" ticked, the history and the window's files of the signed-in user go too.
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
-    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Vestigium"
-    ${If} $0 == '"$INSTDIR\Vestigium.exe"'
-      DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Vestigium"
-    ${EndIf}
+    !insertmacro VestigiumRunAsUser 'reg query "${VESTIGIUM_RUN_KEY}" /v Vestigium | find /i "$INSTDIR\Vestigium.exe" && reg delete "${VESTIGIUM_RUN_KEY}" /v Vestigium /f'
   ${EndIf}
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
-    RMDir /r "$LOCALAPPDATA\Vestigium\data"
-    RMDir "$LOCALAPPDATA\Vestigium"
+    !insertmacro VestigiumRunAsUser 'rmdir /s /q "${VESTIGIUM_OLD_DIR}\data" & rmdir "${VESTIGIUM_OLD_DIR}" & rmdir /s /q "%LOCALAPPDATA%\app.vestigium" & rmdir /s /q "%APPDATA%\app.vestigium"'
   ${EndIf}
 !macroend

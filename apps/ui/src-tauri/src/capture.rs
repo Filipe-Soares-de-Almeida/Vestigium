@@ -11,6 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 use windows::core::{PCWSTR, w};
 
 use crate::agent::UiError;
+use crate::protected::{account_could_change, this_process_is_elevated};
 
 /// Capture lengths the window accepts, in minutes.
 pub const CAPTURE_MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
@@ -38,13 +39,35 @@ pub struct ScanFinished {
     pub exit_code: Option<u32>,
 }
 
-/// The helper next to this window: the installed name, then the development build's.
+/// What the window says when it will not start the helper.
+pub const HELPER_UNAVAILABLE: &str =
+    "the helper is missing, or sits where this account could replace it";
+
+const INSTALLED_HELPER: &str = "Vestigium.Helper.exe";
+#[cfg(debug_assertions)]
+const DEVELOPMENT_HELPER: &str = "vestigium-helper.exe";
+
+/// The helper next to this window, when this account cannot replace it.
 pub fn sibling_helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    ["Vestigium.Helper.exe", "vestigium-helper.exe"]
-        .iter()
-        .map(|name| exe.with_file_name(name))
-        .find(|path| path.is_file())
+    helper_in(exe.parent()?, this_process_is_elevated())
+}
+
+/// The installed helper in `dir` unless `could_change` says this account could replace it; a
+/// development build also takes the helper cargo builds. An elevated window has nothing to protect.
+fn helper_in(dir: &Path, elevated: bool) -> Option<PathBuf> {
+    let installed = dir.join(INSTALLED_HELPER);
+    if installed.is_file() && (elevated || !account_could_change(&installed)) {
+        return Some(installed);
+    }
+    #[cfg(debug_assertions)]
+    {
+        let development = dir.join(DEVELOPMENT_HELPER);
+        if development.is_file() {
+            return Some(development);
+        }
+    }
+    None
 }
 
 /// `<data>\captures\<start ms>.capture`, beside the watcher's database.
@@ -197,6 +220,39 @@ pub fn launch_elevated(exe: &Path, args: &str) -> Result<Elevated, UiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn helper_dir(names: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for name in names {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn an_installed_helper_in_a_folder_the_account_can_write_is_refused() {
+        let dir = helper_dir(&[INSTALLED_HELPER]);
+        assert_eq!(helper_in(dir.path(), false), None);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn the_development_helper_still_resolves() {
+        let dir = helper_dir(&[INSTALLED_HELPER, DEVELOPMENT_HELPER]);
+        assert_eq!(
+            helper_in(dir.path(), false),
+            Some(dir.path().join(DEVELOPMENT_HELPER))
+        );
+    }
+
+    #[test]
+    fn an_elevated_window_takes_the_installed_helper_anywhere() {
+        let dir = helper_dir(&[INSTALLED_HELPER]);
+        assert_eq!(
+            helper_in(dir.path(), true),
+            Some(dir.path().join(INSTALLED_HELPER))
+        );
+    }
 
     #[test]
     fn capture_file_sits_beside_the_database() {

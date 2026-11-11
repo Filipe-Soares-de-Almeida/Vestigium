@@ -8,6 +8,7 @@ mod history;
 mod hwtests;
 mod live;
 mod process;
+mod protected;
 mod tweaks;
 mod update;
 #[cfg(test)]

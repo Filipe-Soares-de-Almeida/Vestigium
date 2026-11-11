@@ -65,7 +65,9 @@ on.
 
 Download `Vestigium_<version>_x64-setup.exe` from the
 [latest release](https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest) and run it. It
-installs for your user, with no administrator prompt, and adds Vestigium to the Start menu.
+installs for every account on the PC, in `C:\Program Files\Vestigium`, after Windows asks for an
+administrator's permission, and adds Vestigium to the Start menu. The monitor and the window then run as
+your user.
 [First run](../../wiki/First-run) covers the first minutes: starting the monitor, the tray icon and
 the question about update checks.
 

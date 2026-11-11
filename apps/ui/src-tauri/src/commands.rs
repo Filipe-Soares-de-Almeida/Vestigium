@@ -14,9 +14,9 @@ use vestigium_store::CaptureSummary;
 
 use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
-    CAPTURE_MINUTES, CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, ScanFinished,
-    capture_file, delete_dumps_args, dump_scan_args, dumps_file, helper_args, launch_elevated,
-    scan_args, scan_file, sibling_helper,
+    CAPTURE_MINUTES, CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished,
+    HELPER_UNAVAILABLE, ScanFinished, capture_file, delete_dumps_args, dump_scan_args, dumps_file,
+    helper_args, launch_elevated, scan_args, scan_file, sibling_helper,
 };
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
@@ -249,8 +249,7 @@ pub async fn start_capture(
         }
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-        let helper = sibling_helper()
-            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+        let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
         let started_ms = now_ms();
         let out = capture_file(&db, started_ms)
             .ok_or_else(|| UiError::Failed("no data folder".into()))?;
@@ -312,8 +311,7 @@ pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiEr
     blocking(move || {
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-        let helper = sibling_helper()
-            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+        let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
         let out =
             scan_file(&db, now_ms()).ok_or_else(|| UiError::Failed("no data folder".into()))?;
         if let Some(folder) = out.parent() {
@@ -414,8 +412,7 @@ pub async fn delete_dumps(
 fn helper_and_file(extension: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), UiError> {
     let db = History::default_path()
         .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-    let helper = sibling_helper()
-        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
     let file = dumps_file(&db, now_ms(), extension)
         .ok_or_else(|| UiError::Failed("no data folder".into()))?;
     if let Some(folder) = file.parent() {
@@ -777,8 +774,7 @@ pub async fn start_volume_check(
 fn helper_and_test_file(extension: &str) -> Result<(PathBuf, PathBuf), UiError> {
     let db = History::default_path()
         .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-    let helper = sibling_helper()
-        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
     let file = tests_file(&db, now_ms(), extension)
         .ok_or_else(|| UiError::Failed("no data folder".into()))?;
     if let Some(folder) = file.parent() {

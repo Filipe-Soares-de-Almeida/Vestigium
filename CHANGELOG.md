@@ -24,6 +24,14 @@ How to use this file:
 
 ### Changed
 
+- Vestigium now installs for every account on the PC, in C:\Program Files\Vestigium, instead of for
+  one user. Installing, updating and uninstalling ask Windows for an administrator's permission; on an
+  account that is not an administrator, Windows asks for an administrator's password. The monitor and
+  the window still run as your user, and the history and settings stay in each account's own folder.
+  Installing or updating over version 0.1.0 removes that per-user copy (its programs, its Start menu
+  and desktop shortcuts and its entry in the installed apps), keeps its history and points a Start with
+  Windows entry at the new monitor. Uninstalling with Delete the application data ticked clears the
+  folders of the account that is signed in.
 - A deep capture now keeps what it measured by minute only: for each driver its three longest
   routines of 1 ms or more, for each app its three worst late frames, and the three worst stalls of the
   monitor's probe, in every minute. The capture page shows a bounded list taken from them (the 50
@@ -501,6 +509,10 @@ How to use this file:
 
 ### Security
 
+- The window now refuses to start the administrator helper when the account could replace it, or
+  could rename or rewrite a folder on its way, so a program running as a standard account can no
+  longer swap the helper before another account's administrator password is typed at the prompt. The
+  installed helper sits in Program Files, which only an administrator can change.
 - The release build no longer has the update signing key in its environment. The installer is built
   with no secret, a separate job that receives only the installer signs it, and a third job holds the
   permissions to publish the draft release, so a compromised build dependency cannot use the key or

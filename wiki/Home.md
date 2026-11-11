@@ -6,7 +6,7 @@ Vestigium runs on Windows 10 22H2 and Windows 11 (x64), in English and Brazilian
 
 ## Start here
 
-- [Installation](./Installation.md): download it and install it for your user.
+- [Installation](./Installation.md): download it and install it on your PC.
 - [First run](./First-run.md): start monitoring and set the three things worth setting.
 - [FAQ](./FAQ.md): short answers to the usual questions.
 

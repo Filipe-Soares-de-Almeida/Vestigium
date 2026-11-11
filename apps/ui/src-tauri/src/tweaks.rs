@@ -18,7 +18,7 @@ use vestigium_store::TweakChangeRow;
 use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 use crate::agent::{Link, UiError, refused};
-use crate::capture::{launch_elevated, sibling_helper};
+use crate::capture::{HELPER_UNAVAILABLE, launch_elevated, sibling_helper};
 use crate::history::{History, TweakHistory};
 
 const DAY_MS: i64 = 24 * 3_600_000;
@@ -146,8 +146,7 @@ fn changed_since(row: &TweakChangeRow) -> bool {
 
 /// Runs the helper elevated with `args` and waits for it; its exit code, when it has one.
 pub fn run_helper(args: &str) -> Result<Option<u32>, UiError> {
-    let helper = sibling_helper()
-        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
     Ok(launch_elevated(&helper, args)?.wait())
 }
 

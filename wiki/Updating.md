@@ -17,8 +17,8 @@ In **Settings › Updates**, select **Check now**. The answer is **Latest versio
 When a newer version exists, a dialog says **Version … is available** and lists what changed in it.
 
 1. Select **Update and restart**. The dialog shows the download as it goes; **Cancel** stops it.
-2. The installer runs on its own, with a progress bar and no questions. It needs no administrator prompt.
-3. It closes the window and the monitor, replaces the program, starts the monitor again if it was running, and reopens the window. Monitoring stops only while the files are replaced.
+2. Windows asks for an administrator's permission to replace the program, in `C:\Program Files\Vestigium`. Select **Yes**, or type an administrator's password. The installer then runs on its own, with a progress bar and no questions.
+3. It closes the window and the monitor, replaces the program, starts the monitor again as your user if it was running, and reopens the window. Monitoring stops only while the files are replaced.
 
 Your history and settings stay. Vestigium installs an update only if it carries the project's update signature, so a modified download is refused.
 
