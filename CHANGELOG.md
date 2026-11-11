@@ -61,27 +61,6 @@ How to use this file:
 - The Portuguese Now line for a disk cause now reads "provavelmente quase todo por" the process,
   instead of the clumsy "provavelmente principalmente por".
 
-### Security
-
-- The release build no longer has the update signing key in its environment. The installer is built
-  with no secret, a separate job that receives only the installer signs it, and a third job holds the
-  permissions to publish the draft release, so a compromised build dependency cannot use the key or
-  alter the installer before it is signed. The actions the release uses are pinned to commits.
-- A tweak plan can no longer be swapped while the administrator permission prompt is open. The window
-  now keeps the plan file locked against writing and passes the helper its SHA-256, and the helper
-  refuses to run a plan that does not match it.
-- The administrator helper now loads the Windows libraries it needs from the Windows system folder
-  only, so a file with the name of one of them left beside the helper is never run with administrator
-  rights.
-- The crash dump scan no longer follows a junction or link inside a dump folder, so a link planted
-  there cannot make the administrator helper or the monitor list or read another dump.
-- The administrator helper now checks, from the open result file itself, that it was created in the
-  folder it was asked for, and deletes it through that same handle if a link was swapped in on the
-  way, so a result file can no longer end up in another folder.
-- The administrator helper now reads a tweak plan or a dump deletion list through one open handle that
-  no one else can write to, and removes the surface scan's progress file through the handle that
-  created it, so a folder swapped for a link while a job runs cannot redirect those steps.
-
 ### Fixed
 
 - Once the crash dump of a blue screen is read, the report page and the copied report use the
@@ -471,6 +450,27 @@ How to use this file:
   their own sentence, and when the disk readings were normal the sentence says so and that the disk
   may not be the cause, in English and Portuguese. The step to back up the files now names the
   disk instead of showing a bare placeholder.
+
+### Security
+
+- The release build no longer has the update signing key in its environment. The installer is built
+  with no secret, a separate job that receives only the installer signs it, and a third job holds the
+  permissions to publish the draft release, so a compromised build dependency cannot use the key or
+  alter the installer before it is signed. The actions the release uses are pinned to commits.
+- A tweak plan can no longer be swapped while the administrator permission prompt is open. The window
+  now keeps the plan file locked against writing and passes the helper its SHA-256, and the helper
+  refuses to run a plan that does not match it.
+- The administrator helper now loads the Windows libraries it needs from the Windows system folder
+  only, so a file with the name of one of them left beside the helper is never run with administrator
+  rights.
+- The crash dump scan no longer follows a junction or link inside a dump folder, so a link planted
+  there cannot make the administrator helper or the monitor list or read another dump.
+- The administrator helper now checks, from the open result file itself, that it was created in the
+  folder it was asked for, and deletes it through that same handle if a link was swapped in on the
+  way, so a result file can no longer end up in another folder.
+- The administrator helper now reads a tweak plan or a dump deletion list through one open handle that
+  no one else can write to, and removes the surface scan's progress file through the handle that
+  created it, so a folder swapped for a link while a job runs cannot redirect those steps.
 
 ## [0.1.0] - 2026-11-09
 
