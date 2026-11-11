@@ -15,11 +15,13 @@ import Banner from "./Banner.svelte";
 import Start from "../screens/captures/Start.svelte";
 
 const MIN = 60_000;
-const OWN: CaptureRun = { started_ms: Date.now() - 2 * MIN, ends_ms: Date.now() + 3 * MIN, own: true };
-const SINCE: CaptureRun = { started_ms: Date.now() - 7 * MIN, ends_ms: null, own: false };
+const NOW = Date.now();
+const OWN: CaptureRun = { started_ms: NOW - 2 * MIN, ends_ms: NOW + 3 * MIN, own: true };
+const SINCE: CaptureRun = { started_ms: NOW - 7 * MIN, ends_ms: null, own: false };
 const EXISTS: CaptureRun = { started_ms: null, ends_ms: null, own: false };
 
 function reset(): void {
+  captures.now = NOW;
   captures.run = null;
   captures.refused = false;
   captures.finished = null;
