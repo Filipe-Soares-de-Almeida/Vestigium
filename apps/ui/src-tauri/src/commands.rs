@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
@@ -14,9 +14,11 @@ use vestigium_store::CaptureSummary;
 
 use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
-    CAPTURE_MINUTES, CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished,
-    HELPER_UNAVAILABLE, ScanFinished, capture_file, delete_dumps_args, dump_scan_args, dumps_file,
-    helper_args, launch_elevated, scan_args, scan_file, sibling_helper,
+    CAPTURE_GRACE, CAPTURE_MARGIN, CAPTURE_MINUTES, CancelClock, CaptureFinished, CaptureRun,
+    CaptureStop, DeleteFinished, DumpScanFinished, Ended, HELPER_UNAVAILABLE, SCAN_CEILING,
+    ScanFinished, TEST_GRACE, Waited, capture_end, capture_file, delete_dumps_args, dump_scan_args,
+    dumps_file, helper_args, launch_elevated, scan_args, scan_file, sibling_helper, test_end,
+    wait_result,
 };
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
@@ -43,6 +45,11 @@ pub struct AppState {
     live: Mutex<LiveSlot>,
     /// The deep capture this window started, until its helper exits.
     capture_run: Arc<Mutex<Option<CaptureRun>>>,
+    /// How to stop that capture: the flag its wait watches and the file its helper polls.
+    capture_stop: Arc<Mutex<Option<CaptureStop>>>,
+    /// Set to stop waiting for a health scan or a dump read in progress.
+    scan_cancel: Arc<AtomicBool>,
+    dump_cancel: Arc<AtomicBool>,
     /// The hardware test this window started, until it ends.
     test: Arc<Mutex<Option<RunningTest>>>,
     /// The thread of a test that runs in this window, which closing the window waits for.
@@ -56,6 +63,9 @@ impl Default for AppState {
             link: Arc::new(Link::new(Link::sibling_agent())),
             live: Mutex::new(LiveSlot::default()),
             capture_run: Arc::new(Mutex::new(None)),
+            capture_stop: Arc::new(Mutex::new(None)),
+            scan_cancel: Arc::new(AtomicBool::new(false)),
+            dump_cancel: Arc::new(AtomicBool::new(false)),
             test: Arc::new(Mutex::new(None)),
             test_thread: Arc::new(Mutex::new(None)),
         }
@@ -243,6 +253,7 @@ pub async fn start_capture(
     }
     let link = state.link.clone();
     let slot = state.capture_run.clone();
+    let stop_slot = state.capture_stop.clone();
     blocking(move || {
         if lock(&slot).is_some() {
             return Err(UiError::Failed("a deep capture is already running".into()));
@@ -266,14 +277,28 @@ pub async fn start_capture(
             ends_ms: started_ms + minutes as i64 * 60_000,
         };
         *lock(&slot) = Some(run);
+        let stop = CaptureStop::new(out.with_extension("stop"));
+        *lock(&stop_slot) = Some(stop.clone());
         std::thread::spawn(move || {
-            let exit_code = process.wait();
+            let ceiling = Duration::from_secs(minutes * 60) + CAPTURE_MARGIN;
+            let asked = || stop.asked.load(Ordering::Acquire);
+            let waited = process.wait(Some(ceiling), &asked, CAPTURE_GRACE);
+            let (exit_code, ended) = capture_end(waited, asked());
+            let _ = std::fs::remove_file(&stop.file);
             let ids = match link.call(&Request::ImportResults) {
                 Ok(Response::Imported { captures, .. }) => captures,
                 _ => Vec::new(),
             };
             *lock(&slot) = None;
-            let _ = app.emit("capture-finished", CaptureFinished { ids, exit_code });
+            *lock(&stop_slot) = None;
+            let _ = app.emit(
+                "capture-finished",
+                CaptureFinished {
+                    ids,
+                    exit_code,
+                    ended,
+                },
+            );
         });
         Ok(run)
     })
@@ -284,6 +309,37 @@ pub async fn start_capture(
 #[tauri::command]
 pub fn capture_run(state: State<'_, AppState>) -> Option<CaptureRun> {
     *lock(&state.capture_run)
+}
+
+/// Tells the helper of the deep capture under way to stop and keep nothing; the window stops
+/// waiting for it after a few seconds whether or not it has exited.
+#[tauri::command]
+pub fn cancel_capture(state: State<'_, AppState>) -> Result<(), UiError> {
+    let stop = lock(&state.capture_stop).clone();
+    match stop {
+        Some(stop) => stop.ask().map_err(|err| UiError::Failed(err.to_string())),
+        None => Err(UiError::Failed("no capture is running".into())),
+    }
+}
+
+/// Which helper read a cancel stops waiting for.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HelperRead {
+    Scan,
+    Dumps,
+}
+
+/// Makes the window stop waiting for a health scan or a dump read in progress; the read command
+/// then answers `Cancelled`. The helper is not told: it ends by its own limits and the watcher
+/// imports whatever it still writes.
+#[tauri::command]
+pub fn cancel_helper_read(state: State<'_, AppState>, read: HelperRead) {
+    let flag = match read {
+        HelperRead::Scan => &state.scan_cancel,
+        HelperRead::Dumps => &state.dump_cancel,
+    };
+    flag.store(true, Ordering::Release);
 }
 
 /// Asks the watcher to store every finished capture it has not stored yet; returns their ids.
@@ -308,6 +364,8 @@ pub async fn health(state: State<'_, AppState>) -> Result<HealthDto, UiError> {
 #[tauri::command]
 pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiError> {
     let link = state.link.clone();
+    let cancel = state.scan_cancel.clone();
+    cancel.store(false, Ordering::Release);
     blocking(move || {
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
@@ -317,7 +375,8 @@ pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiEr
         if let Some(folder) = out.parent() {
             std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
         }
-        let exit_code = launch_elevated(&helper, &scan_args(&out))?.wait();
+        let process = launch_elevated(&helper, &scan_args(&out))?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &cancel)?;
         let scans = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { scans, .. }) => scans,
             _ => Vec::new(),
@@ -348,13 +407,15 @@ pub async fn dumps(state: State<'_, AppState>) -> Result<DumpsDto, UiError> {
 #[tauri::command]
 pub async fn start_dump_scan(state: State<'_, AppState>) -> Result<DumpScanFinished, UiError> {
     let link = state.link.clone();
+    let cancel = state.dump_cancel.clone();
+    cancel.store(false, Ordering::Release);
     blocking(move || {
         let (helper, out) = helper_and_file("dumps")?;
-        let exit_code = launch_elevated(
+        let process = launch_elevated(
             &helper,
             &dump_scan_args(&out, current_user_sid().ok().as_deref()),
-        )?
-        .wait();
+        )?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &cancel)?;
         let dumps = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { dumps, .. }) => dumps,
             _ => Vec::new(),
@@ -384,11 +445,11 @@ pub async fn delete_dumps(
         let (helper, list) = helper_and_file("delete")?;
         std::fs::write(&list, paths.join("\r\n"))
             .map_err(|err| UiError::Failed(err.to_string()))?;
-        let exit_code = launch_elevated(
+        let process = launch_elevated(
             &helper,
             &delete_dumps_args(&list, current_user_sid().ok().as_deref()),
-        )?
-        .wait();
+        )?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &AtomicBool::new(false))?;
         let (deleted, refused, failed) = match link.call(&Request::ImportResults) {
             Ok(Response::Imported {
                 deleted,
@@ -612,12 +673,14 @@ fn start_in_window(
                         id,
                         run: Some(run),
                         exit_code: None,
+                        ended: Ended::Done,
                     }
                 }
                 Err(_) => TestFinished {
                     id: None,
                     run: None,
                     exit_code: None,
+                    ended: Ended::Done,
                 },
             };
             *lock(&worker_slot) = None;
@@ -700,16 +763,22 @@ pub async fn start_surface_scan(
                 return Err(err);
             }
         };
+        let asked = running.stop.clone();
         std::thread::spawn(move || {
             let progress = out.with_extension("progress");
-            let exit_code = loop {
+            let mut clock = CancelClock::new(TEST_GRACE);
+            let waited = loop {
                 if let Some(code) = process.exited_within(2_000) {
-                    break code;
+                    break Waited::Exited(code);
                 }
                 if let Some(p) = read_progress(&progress) {
                     let _ = app.emit("test-progress", TestProgress::Surface(p));
                 }
+                if clock.expired(asked.load(Ordering::Acquire)) {
+                    break Waited::Abandoned;
+                }
             };
+            let (exit_code, ended) = test_end(waited, asked.load(Ordering::Acquire));
             let id = imported_test(&link);
             *lock(&slot) = None;
             let _ = app.emit(
@@ -718,6 +787,7 @@ pub async fn start_surface_scan(
                     id,
                     run: None,
                     exit_code,
+                    ended,
                 },
             );
         });
@@ -752,8 +822,11 @@ pub async fn start_volume_check(
                 return Err(err);
             }
         };
+        let asked = running.stop.clone();
         std::thread::spawn(move || {
-            let exit_code = process.wait();
+            let requested = || asked.load(Ordering::Acquire);
+            let waited = process.wait(None, &requested, TEST_GRACE);
+            let (exit_code, ended) = test_end(waited, requested());
             let id = imported_test(&link);
             *lock(&slot) = None;
             let _ = app.emit(
@@ -762,6 +835,7 @@ pub async fn start_volume_check(
                     id,
                     run: None,
                     exit_code,
+                    ended,
                 },
             );
         });

@@ -1,6 +1,6 @@
 // Written by the `wire` test of the window crate; do not edit by hand.
 // Refresh with `UPDATE_FIXTURES=1 cargo test -p vestigium-ui wire`.
-import type { Advice, AgentLink, AgentStatus, AppFrames, Applier, BenchMode, BenchResult, Benchmark, BootDelay, BootReport, BootTime, BugCheckDto, Bus, CaptureDto, CaptureFinished, CaptureNote, CaptureRun, CaptureSource, CaptureSummary, Cause, Channel, ColorTheme, Columns, Concern, Confidence, CoreLoad, CrashControlDto, CrashKind, Culprit, DelayKind, DeleteFinished, DetailLevel, DiagnosticDetail, DiagnosticResult, DiskDetailDto, DiskDto, DiskHealth, DiskInfo, DiskLoad, DriverLatency, DumpCulprit, DumpDto, DumpKind, DumpScanFinished, DumpsDto, Episode, EpisodeDetailDto, EpisodeKind, EventMeaning, Evidence, Fact, FactKind, FaultDto, FindingDto, FindingKind, FrameHitch, Gap, GapReason, HangOutcome, HangSpan, HealthDto, HealthFact, Helped, HistoryReset, HistoryState, Hive, HungWindow, Lanes, LanguagePref, LiveMessage, LivePoint, LongRoutine, MachineInfo, MarksDto, Measure, Media, MemoryDiagnostic, MemoryDto, MemoryError, MemoryQuick, Metric, MonitorSource, MonitorState, MonitorStatus, NextStep, NowFrame, NvmeDetail, NvmeHealth, Occurrence, OccurrenceDto, OccurrenceKind, OccurrenceSummary, PageFile, Pattern, PcState, ProbeHiccup, ProcessFacts, ProcessSample, ProcessTop, ProgramMarks, ProgramPoint, Reading, Reference, Region, Resolution, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, RunningTest, Sample, ScanFinished, ScanUnderWay, SecurityProduct, SettingChange, SettingResult, SettingValue, Settings, SettingsDto, Severity, Signature, SlowBlock, SmartAttribute, SmartPoint, SourceFailure, StartupList, Subject, SurfaceProgress, SurfaceScan, Suspect, Takes, TestData, TestFinished, TestKind, TestOutcome, TestProgress, TestRun, TestRunDto, TestSpan, TestsDto, ThemePref, TimelineDto, TrayState, Trigger, TweakChange, TweakId, TweakRow, TweakSetting, TweakSignal, TweakStatus, TweakValue, TweaksApplied, TweaksDto, UiError, UiErrorKind, VolumeCheck, VolumeDto, VolumeResult, WinEvent, Window } from "../../lib/types";
+import type { Advice, AgentLink, AgentStatus, AppFrames, Applier, BenchMode, BenchResult, Benchmark, BootDelay, BootReport, BootTime, BugCheckDto, Bus, CaptureDto, CaptureFinished, CaptureNote, CaptureRun, CaptureSource, CaptureSummary, Cause, Channel, ColorTheme, Columns, Concern, Confidence, CoreLoad, CrashControlDto, CrashKind, Culprit, DelayKind, DeleteFinished, DetailLevel, DiagnosticDetail, DiagnosticResult, DiskDetailDto, DiskDto, DiskHealth, DiskInfo, DiskLoad, DriverLatency, DumpCulprit, DumpDto, DumpKind, DumpScanFinished, DumpsDto, Ended, Episode, EpisodeDetailDto, EpisodeKind, EventMeaning, Evidence, Fact, FactKind, FaultDto, FindingDto, FindingKind, FrameHitch, Gap, GapReason, HangOutcome, HangSpan, HealthDto, HealthFact, Helped, HistoryReset, HistoryState, Hive, HungWindow, Lanes, LanguagePref, LiveMessage, LivePoint, LongRoutine, MachineInfo, MarksDto, Measure, Media, MemoryDiagnostic, MemoryDto, MemoryError, MemoryQuick, Metric, MonitorSource, MonitorState, MonitorStatus, NextStep, NowFrame, NvmeDetail, NvmeHealth, Occurrence, OccurrenceDto, OccurrenceKind, OccurrenceSummary, PageFile, Pattern, PcState, ProbeHiccup, ProcessFacts, ProcessSample, ProcessTop, ProgramMarks, ProgramPoint, Reading, Reference, Region, Resolution, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, RunningTest, Sample, ScanFinished, ScanUnderWay, SecurityProduct, SettingChange, SettingResult, SettingValue, Settings, SettingsDto, Severity, Signature, SlowBlock, SmartAttribute, SmartPoint, SourceFailure, StartupList, Subject, SurfaceProgress, SurfaceScan, Suspect, Takes, TestData, TestFinished, TestKind, TestOutcome, TestProgress, TestRun, TestRunDto, TestSpan, TestsDto, ThemePref, TimelineDto, TrayState, Trigger, TweakChange, TweakId, TweakRow, TweakSetting, TweakSignal, TweakStatus, TweakValue, TweaksApplied, TweaksDto, UiError, UiErrorKind, VolumeCheck, VolumeDto, VolumeResult, WinEvent, Window } from "../../lib/types";
 import type { CheckResult, NotesGroup, Progress, Release, UpdatePrefs } from "../../lib/update.svelte";
 import type { About } from "../../screens/settings/data";
 
@@ -645,6 +645,8 @@ export const uiErrorSamples = [
   {"kind":"failed","message":"something failed"},
   {"kind":"declined","message":"the permission prompt was declined"},
   {"kind":"changed_since","message":"a setting now holds a value that Vestigium did not write"},
+  {"kind":"helper_timed_out","message":"the helper did not finish in time"},
+  {"kind":"cancelled","message":"the person cancelled"},
 ] satisfies UiError[];
 
 export const uiErrorKindSamples = [
@@ -657,6 +659,8 @@ export const uiErrorKindSamples = [
   "failed",
   "declined",
   "changed_since",
+  "helper_timed_out",
+  "cancelled",
 ] satisfies UiErrorKind[];
 
 export const routineKindSamples = [
@@ -714,9 +718,17 @@ export const captureRunSamples = [
 ] satisfies CaptureRun[];
 
 export const captureFinishedSamples = [
-  {"ids":[4,5],"exit_code":0},
-  {"ids":[4,5],"exit_code":null},
+  {"ids":[4,5],"exit_code":0,"ended":"Done"},
+  {"ids":[4,5],"exit_code":null,"ended":"Done"},
+  {"ids":[4,5],"exit_code":5,"ended":"Cancelled"},
+  {"ids":[4,5],"exit_code":null,"ended":"TimedOut"},
 ] satisfies CaptureFinished[];
+
+export const endedSamples = [
+  "Done",
+  "Cancelled",
+  "TimedOut",
+] satisfies Ended[];
 
 export const concernSamples = [
   "Attention",
@@ -1468,10 +1480,11 @@ export const testProgressSamples = [
 ] satisfies TestProgress[];
 
 export const testFinishedSamples = [
-  {"id":8,"run":{"subject":"Pc","started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Clean","data":{"MemoryQuick":{"total_bytes":17179869184,"tested_bytes":2000000000,"rounds":2,"passes":3,"error_count":1,"errors":[{"offset":4096,"pattern":"OwnAddress","expected":255,"actual":254},{"offset":4096,"pattern":"Random","expected":255,"actual":254},{"offset":4096,"pattern":"Compare","expected":255,"actual":254},{"offset":4096,"pattern":"SolidBits","expected":255,"actual":254},{"offset":4096,"pattern":"Checkerboard","expected":255,"actual":254},{"offset":4096,"pattern":"WalkingOnes","expected":255,"actual":254},{"offset":4096,"pattern":"WalkingZeros","expected":255,"actual":254}],"failure":"out of memory"}}},"exit_code":0},
-  {"id":8,"run":{"subject":{"Disk":"0 C:"},"started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Problems","data":{"DiskSurface":{"disk":0,"media":"Hdd","disk_bytes":1000000000000,"sector_bytes":512,"from_bytes":0,"to_bytes":1000000000000,"bands":[4,4,4,4,4,4],"unreadable_blocks":2,"regions":["Unread",{"Read":{"worst_ms":12.5}},"Unreadable"],"worst":[{"offset":4096,"ms":480.5}],"unreadable":[8192],"failure":"read failed","outside_io":true}}},"exit_code":0},
-  {"id":8,"run":{"subject":{"Volume":"C:\\"},"started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Interrupted","data":{"VolumeCheck":{"volume":"C:\\","exit_code":0,"result":"ProblemsFound","output":"The file system is fine.","dirty_before":false,"dirty_after":true}}},"exit_code":0},
-  {"id":null,"run":null,"exit_code":null},
+  {"id":8,"run":{"subject":"Pc","started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Clean","data":{"MemoryQuick":{"total_bytes":17179869184,"tested_bytes":2000000000,"rounds":2,"passes":3,"error_count":1,"errors":[{"offset":4096,"pattern":"OwnAddress","expected":255,"actual":254},{"offset":4096,"pattern":"Random","expected":255,"actual":254},{"offset":4096,"pattern":"Compare","expected":255,"actual":254},{"offset":4096,"pattern":"SolidBits","expected":255,"actual":254},{"offset":4096,"pattern":"Checkerboard","expected":255,"actual":254},{"offset":4096,"pattern":"WalkingOnes","expected":255,"actual":254},{"offset":4096,"pattern":"WalkingZeros","expected":255,"actual":254}],"failure":"out of memory"}}},"exit_code":0,"ended":"Done"},
+  {"id":8,"run":{"subject":{"Disk":"0 C:"},"started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Problems","data":{"DiskSurface":{"disk":0,"media":"Hdd","disk_bytes":1000000000000,"sector_bytes":512,"from_bytes":0,"to_bytes":1000000000000,"bands":[4,4,4,4,4,4],"unreadable_blocks":2,"regions":["Unread",{"Read":{"worst_ms":12.5}},"Unreadable"],"worst":[{"offset":4096,"ms":480.5}],"unreadable":[8192],"failure":"read failed","outside_io":true}}},"exit_code":0,"ended":"Done"},
+  {"id":8,"run":{"subject":{"Volume":"C:\\"},"started_ms":1790000000000,"ended_ms":1790000600000,"outcome":"Interrupted","data":{"VolumeCheck":{"volume":"C:\\","exit_code":0,"result":"ProblemsFound","output":"The file system is fine.","dirty_before":false,"dirty_after":true}}},"exit_code":0,"ended":"Done"},
+  {"id":null,"run":null,"exit_code":null,"ended":"Done"},
+  {"id":9,"run":null,"exit_code":0,"ended":"Cancelled"},
 ] satisfies TestFinished[];
 
 export const updatePrefsSamples = [

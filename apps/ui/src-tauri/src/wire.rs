@@ -37,7 +37,9 @@ use vestigium_store::{CaptureSummary, StoreError};
 
 use crate::about::AboutDto;
 use crate::agent::{AgentLink, SettingsDto, UiError};
-use crate::capture::{CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, ScanFinished};
+use crate::capture::{
+    CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, Ended, ScanFinished,
+};
 use crate::history::{
     BugCheckDto, CaptureDto, CaptureNote, Columns, CrashControlDto, DumpDto, DumpsDto,
     EpisodeDetailDto, FaultDto, FindingDto, HealthDto, HistoryState, MarksDto, OccurrenceDto,
@@ -1522,6 +1524,8 @@ fn ui_errors() -> Vec<UiError> {
         Failed => UiError::Failed(string("something failed")),
         Declined => UiError::Declined,
         ChangedSince => UiError::ChangedSince,
+        HelperTimedOut => UiError::HelperTimedOut,
+        Cancelled => UiError::Cancelled,
     )
 }
 
@@ -1913,12 +1917,27 @@ fn render() -> String {
     wire.add(
         TYPES,
         "CaptureFinished",
-        [Some(0), None]
-            .map(|exit_code| CaptureFinished {
-                ids: vec![4, 5],
-                exit_code,
-            })
-            .to_vec(),
+        [
+            (Some(0), Ended::Done),
+            (None, Ended::Done),
+            (Some(5), Ended::Cancelled),
+            (None, Ended::TimedOut),
+        ]
+        .map(|(exit_code, ended)| CaptureFinished {
+            ids: vec![4, 5],
+            exit_code,
+            ended,
+        })
+        .to_vec(),
+    );
+    wire.add(
+        TYPES,
+        "Ended",
+        variants!(Ended:
+            Done => Ended::Done,
+            Cancelled => Ended::Cancelled,
+            TimedOut => Ended::TimedOut,
+        ),
     );
     wire.add(TYPES, "Concern", concerns());
     wire.add(TYPES, "FindingKind", FindingKind::ALL.to_vec());
@@ -2271,12 +2290,22 @@ fn render() -> String {
                 id: Some(8),
                 run: Some(run),
                 exit_code: Some(0),
+                ended: Ended::Done,
             })
-            .chain([TestFinished {
-                id: None,
-                run: None,
-                exit_code: None,
-            }])
+            .chain([
+                TestFinished {
+                    id: None,
+                    run: None,
+                    exit_code: None,
+                    ended: Ended::Done,
+                },
+                TestFinished {
+                    id: Some(9),
+                    run: None,
+                    exit_code: Some(0),
+                    ended: Ended::Cancelled,
+                },
+            ])
             .collect(),
     );
 

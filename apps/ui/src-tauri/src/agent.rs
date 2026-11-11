@@ -40,6 +40,10 @@ pub enum UiError {
     Declined,
     #[error("a setting now holds a value that Vestigium did not write")]
     ChangedSince,
+    #[error("the helper did not finish in time")]
+    HelperTimedOut,
+    #[error("the person cancelled")]
+    Cancelled,
 }
 
 impl UiError {
@@ -110,6 +114,8 @@ impl Serialize for UiError {
             UiError::Failed(_) => "failed",
             UiError::Declined => "declined",
             UiError::ChangedSince => "changed_since",
+            UiError::HelperTimedOut => "helper_timed_out",
+            UiError::Cancelled => "cancelled",
         };
         Wire {
             kind,

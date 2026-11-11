@@ -178,11 +178,11 @@ export const handlers: Record<string, Handler> = {
       const id = Math.max(0, ...STORED.keys()) + 1;
       run = null;
       if (query.get("capture-fail") === "1") {
-        void emit("capture-finished", { ids: [], exit_code: 1 });
+        void emit("capture-finished", { ids: [], exit_code: 1, ended: "Done" });
         return;
       }
       STORED.set(id, capture(id, now, 4));
-      void emit("capture-finished", { ids: [id], exit_code: 0 });
+      void emit("capture-finished", { ids: [id], exit_code: 0, ended: "Done" });
     }, seconds * 1000);
     return run;
   },

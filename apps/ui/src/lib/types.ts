@@ -520,7 +520,9 @@ export type UiErrorKind =
   | "ipc"
   | "failed"
   | "declined"
-  | "changed_since";
+  | "changed_since"
+  | "helper_timed_out"
+  | "cancelled";
 
 /** What a failed command rejects with; the window words it from `kind`. */
 export interface UiError {
@@ -614,10 +616,14 @@ export interface CaptureRun {
   ends_ms: number;
 }
 
-/** Sent as the `capture-finished` event when the helper exits. */
+/** How a wait for the helper ended: it finished, the person cancelled, or it was still running at its limit. */
+export type Ended = "Done" | "Cancelled" | "TimedOut";
+
+/** Sent as the `capture-finished` event when the helper exits or the window stops waiting for it. */
 export interface CaptureFinished {
   ids: number[];
   exit_code: number | null;
+  ended: Ended;
 }
 
 /** How much a health finding asks for attention. */
@@ -1276,4 +1282,5 @@ export interface TestFinished {
   id: number | null;
   run: TestRun | null;
   exit_code: number | null;
+  ended: Ended;
 }

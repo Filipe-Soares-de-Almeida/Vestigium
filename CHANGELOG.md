@@ -139,6 +139,11 @@ How to use this file:
 
 ### Fixed
 
+- The window no longer waits forever for the elevated helper. A deep capture that is still running
+  two minutes past its length, a full scan or a dump read past 30 minutes and a batch of tweaks past
+  10 minutes are given up on, and the card is free for another try instead of staying on
+  "Capturing" or "Reading". A volume check or a disk scan that was stopped and whose helper has not
+  answered after 30 seconds is also given up on, so Stop always ends the wait.
 - In Portuguese, a tweak that changed nothing, or only some of its settings, now says "alterado"
   instead of "gravado", the word the app keeps for recording.
 - The monitor no longer leaves a hole in its samples while the history database is busy: the

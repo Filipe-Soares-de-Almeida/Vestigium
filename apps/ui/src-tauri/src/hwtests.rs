@@ -17,6 +17,7 @@ use vestigium_core::hwtest::{
 use vestigium_core::{MachineInfo, Media};
 
 use crate::agent::UiError;
+use crate::capture::Ended;
 
 /// How far back the Tests page lists earlier runs.
 pub const RUNS_SHOWN_MS: i64 = 365 * 24 * 3_600_000;
@@ -150,6 +151,7 @@ pub struct TestFinished {
     pub id: Option<i64>,
     pub run: Option<TestRun>,
     pub exit_code: Option<u32>,
+    pub ended: Ended,
 }
 
 pub fn memory_now() -> MemoryDto {

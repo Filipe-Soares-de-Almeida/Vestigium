@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,9 @@ use vestigium_store::TweakChangeRow;
 use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 use crate::agent::{Link, UiError, refused};
-use crate::capture::{HELPER_UNAVAILABLE, launch_elevated, sibling_helper};
+use crate::capture::{
+    HELPER_UNAVAILABLE, TWEAK_CEILING, launch_elevated, sibling_helper, wait_result,
+};
 use crate::history::{History, TweakHistory};
 
 const DAY_MS: i64 = 24 * 3_600_000;
@@ -147,7 +150,8 @@ fn changed_since(row: &TweakChangeRow) -> bool {
 /// Runs the helper elevated with `args` and waits for it; its exit code, when it has one.
 pub fn run_helper(args: &str) -> Result<Option<u32>, UiError> {
     let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
-    Ok(launch_elevated(&helper, args)?.wait())
+    let process = launch_elevated(&helper, args)?;
+    wait_result(&process, TWEAK_CEILING, &AtomicBool::new(false))
 }
 
 /// Applies the tweaks picked: the user's own through the watcher, the rest in one elevated batch

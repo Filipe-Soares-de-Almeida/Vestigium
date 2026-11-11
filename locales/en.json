@@ -57,6 +57,8 @@
   "ui.common.severity.Severe": "severe",
   "ui.common.error.declined": "Administrator permission denied. Nothing ran.",
   "ui.common.error.changed_since": "Windows now holds a different value than the one Vestigium set, so the undo was not run.",
+  "ui.common.error.helper_timed_out": "The helper did not finish in time. Try again.",
+  "ui.common.error.cancelled": "Cancelled.",
 
   "ui.shell.title": "Vestigium",
   "ui.shell.nav.label": "Navigation",
