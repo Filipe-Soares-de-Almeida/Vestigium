@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  export type StatusKind = "critical" | "overload" | "attention" | "ok" | "info";
+  export type StatusKind = "critical" | "overload" | "attention" | "ok" | "info" | "no_reading" | "silent" | "unverified";
 </script>
 
 <script lang="ts">
@@ -36,6 +36,15 @@
     {:else if kind === "ok"}
       <circle cx="8" cy="8" r="7.2" fill="currentColor" />
       <path class="cut" d="M4.9 8.2l2.2 2.2 4-4.4" />
+    {:else if kind === "no_reading"}
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M5.2 8h5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    {:else if kind === "silent"}
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M4.4 11.6l7.2-7.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    {:else if kind === "unverified"}
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <circle cx="8" cy="8" r="1.5" fill="currentColor" />
     {:else}
       <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
       <path d="M8 7.2v3.5M8 5v.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />

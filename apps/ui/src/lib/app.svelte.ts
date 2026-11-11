@@ -5,6 +5,7 @@ import { applySettings } from "./prefs";
 import { toast } from "./toast.svelte";
 import type { AgentLink, HistoryState, Settings, SettingsDto } from "./types";
 import { pollWhileShown } from "./visibility";
+import { unverifiedSince } from "./monitor";
 
 const POLL_MS = 5000;
 const PROBE_MS = 60_000;
@@ -34,6 +35,20 @@ class App {
   unreachable = $derived(this.link?.link === "mismatch");
   /** Sensitive mode saw stutters worth a deep capture. */
   suggestCapture = $derived(this.link?.link === "running" && this.link.suggest_capture);
+  /** The watcher's account of its own watching; `null` unless it runs. */
+  monitor = $derived(this.link?.link === "running" ? this.link.monitor : null);
+  /** When the watcher started, Unix milliseconds; now while it does not run. */
+  started = $derived(this.link?.link === "running" ? this.link.started_at_ms : Date.now());
+  /** The last thing that went wrong in the watcher, for the technical level. */
+  lastError = $derived(this.link?.link === "running" ? this.link.last_error : null);
+  /** The watcher runs but has produced no sample for a while, and nothing is paused or asleep. */
+  noReading = $derived(this.monitor?.state === "no_reading");
+  /** Samples come, but some data source fails. */
+  degraded = $derived(this.monitor?.state === "degraded");
+  /** Since when the health check has not finished, once that has lasted long enough; the poll refreshes it. */
+  unverified = $derived(
+    this.link?.link === "running" && !this.paused && !this.link.suspended ? unverifiedSince(this.link, Date.now()) : null,
+  );
   /** Settings and pause can change only while the watcher runs. */
   editable = $derived(this.settings?.editable ?? false);
 

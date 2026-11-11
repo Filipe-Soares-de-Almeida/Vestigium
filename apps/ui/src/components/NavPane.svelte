@@ -7,6 +7,7 @@
   import Icon from "./Icon.svelte";
   import Mark from "./Mark.svelte";
   import StatusMark from "./StatusMark.svelte";
+  import ToneMark from "./ToneMark.svelte";
 
   const status = $derived(shellStatus());
   const group = $derived.by(() => {
@@ -46,7 +47,7 @@
       {/each}
     </ul>
   {/if}
-  <p class="foot"><i class={status.tone} aria-hidden="true"></i>{status.text}</p>
+  <p class="foot"><ToneMark tone={status.tone} />{status.text}</p>
 </nav>
 
 <style>
@@ -179,29 +180,7 @@
     color: var(--ink2);
     font: 400 12.5px/1.35 var(--f);
   }
-  .foot i {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-  .foot i.ok {
-    background: var(--good);
-  }
-  .foot i.paused,
-  .foot i.off {
-    box-shadow: inset 0 0 0 2px var(--ink3);
-  }
   @media (forced-colors: active) {
-    .foot i.ok {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
-    .foot i.paused,
-    .foot i.off {
-      forced-color-adjust: none;
-      box-shadow: inset 0 0 0 2px CanvasText;
-    }
     .item[aria-current="page"]::before {
       forced-color-adjust: none;
       background: Highlight;

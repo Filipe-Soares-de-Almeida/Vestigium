@@ -1,8 +1,8 @@
 // Stand-in for the window's Rust side in a plain browser (npm run dev); ./fixtures/*.ts add `handlers`.
-// URL: ?link=running|stopped|mismatch&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
+// URL: ?link=running|stopped|mismatch&monitor=ok|no_reading|degraded|unverified&paused=1&sensitive=1&history=empty&maximized=1&fail=<command>:<kind>&delay=<ms>&theme=&color=&language=&detail=
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
-import type { AgentLink, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
+import type { AgentLink, MonitorStatus, Settings, SettingsDto, TimelineDto, UiError } from "../lib/types";
 
 export type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -29,6 +29,31 @@ const state = {
 };
 
 const startedAt = Date.now();
+const monitorMode = query.get("monitor") ?? "ok";
+
+/** The watcher's account of its own watching, for the `monitor` URL parameter. */
+function monitorStatus(): MonitorStatus {
+  const now = Date.now();
+  const watching: MonitorStatus = {
+    state: "watching",
+    failing: [],
+    no_reading_since_ms: null,
+    resumed_ms: startedAt,
+    health_attempt_ms: now - 60_000,
+    health_ok_ms: now - 60_000,
+    health_unread: [],
+  };
+  if (monitorMode === "no_reading") {
+    return { ...watching, state: "no_reading", no_reading_since_ms: now - 82 * 60_000 };
+  }
+  if (monitorMode === "degraded") {
+    return { ...watching, state: "degraded", failing: [{ source: "counters", since_ms: now - 82 * 60_000, error: "PdhCollectQueryData failed: 0xC0000BBD" }] };
+  }
+  if (monitorMode === "unverified") {
+    return { ...watching, health_attempt_ms: now - 60_000, health_ok_ms: now - 4 * 3_600_000, health_unread: ["TwoAntivirus"] };
+  }
+  return watching;
+}
 const delayMs = Number(query.get("delay") ?? 0);
 
 function refuse(kind: UiError["kind"]): Promise<never> {
@@ -52,20 +77,12 @@ const base: Record<string, Handler> = {
           sensitive_until_ms: state.sensitive ? Date.now() + 1_800_000 : null,
           state: "normal",
           started_at_ms: startedAt,
-          last_sample_ms: Date.now(),
-          last_error: null,
+          last_sample_ms: monitorMode === "no_reading" ? Date.now() - 82 * 60_000 : Date.now(),
+          last_error: monitorMode === "no_reading" ? "the performance counters could not be opened" : null,
           suggest_capture: query.get("suggest") === "1",
           cpu_pct: 0.1,
           suspended: false,
-          monitor: {
-            state: "watching",
-            failing: [],
-            no_reading_since_ms: null,
-            resumed_ms: startedAt,
-            health_attempt_ms: null,
-            health_ok_ms: null,
-            health_unread: [],
-          },
+          monitor: monitorStatus(),
         }
       : { link: state.link },
   settings: () => {

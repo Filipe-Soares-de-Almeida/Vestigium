@@ -3,6 +3,7 @@
   import Icon from "../components/Icon.svelte";
   import Mark from "../components/Mark.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
+  import ToneMark from "../components/ToneMark.svelte";
   import { formatDuration, formatTime } from "../lib/format";
   import { health } from "../lib/health.svelte";
   import { buildGroups, entryHref } from "../lib/groups";
@@ -53,7 +54,7 @@
         <span class="mark"><Mark /></span>
         <div class="who">
           <h1>{t("ui.shell.title")}</h1>
-          <p class="state"><i class={status.tone} aria-hidden="true"></i>{status.text}</p>
+          <p class="state"><ToneMark tone={status.tone} />{status.text}</p>
         </div>
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>
@@ -162,19 +163,6 @@
     margin: 0 0 4px;
     color: var(--ink2);
     font-size: 13.5px;
-  }
-  .state i {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-  .state i.ok {
-    background: var(--good);
-  }
-  .state i.paused,
-  .state i.off {
-    box-shadow: inset 0 0 0 2px var(--ink3);
   }
   .quick {
     display: flex;
@@ -345,17 +333,6 @@
     }
     .card {
       width: 192px;
-    }
-  }
-  @media (forced-colors: active) {
-    .state i.ok {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
-    .state i.paused,
-    .state i.off {
-      forced-color-adjust: none;
-      box-shadow: inset 0 0 0 2px CanvasText;
     }
   }
 </style>
