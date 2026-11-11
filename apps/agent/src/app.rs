@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
 use vestigium_collect::{
-    EventSubscription, ProbeConfig, Wake, WindowsSettings, spawn_probe, wall_ms,
+    EventSubscription, ProbeConfig, Wake, WindowsSettings, interrupt_ms, spawn_probe, wall_ms,
 };
 use vestigium_core::{
     Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PROGRAM_FRAMES_MAX, PlanItem,
@@ -27,6 +27,7 @@ use vestigium_store::Store;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
+use crate::clock::{steady_to_wall, wall_to_steady};
 use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
 use crate::instance::Instance;
 use crate::orphan::release_orphaned_capture;
@@ -102,6 +103,8 @@ fn failed(err: impl std::fmt::Display) -> StartError {
 /// No code holds two of these mutexes at once.
 pub struct Shared {
     pub gate: Arc<RunGate>,
+    /// Here `paused_until_ms` is an instant of the steady clock; the status answer turns it into
+    /// the wall-clock instant the window shows.
     pub status: Arc<Mutex<AgentStatus>>,
     pub sensitive: Arc<SensitiveMode>,
     pub recent: Arc<Mutex<RecentState>>,
@@ -161,12 +164,16 @@ fn apply_user_tweak(
     }
 }
 
-/// Pauses or resumes watching; a pause with `until_ms` ends by itself at that time.
+/// Pauses or resumes watching; a pause with `until_ms`, a wall-clock instant, ends by itself
+/// when that much time has passed on the steady clock.
 pub fn set_paused(shared: &Shared, paused: bool, until_ms: Option<i64>) {
+    let (wall, steady) = (wall_ms(), interrupt_ms());
     // The status and the gate change under one guard, so they never disagree.
     let mut status = lock(&shared.status);
     status.paused = paused;
-    status.paused_until_ms = until_ms.filter(|_| paused);
+    status.paused_until_ms = until_ms
+        .filter(|_| paused)
+        .map(|end| wall_to_steady(end, wall, steady));
     shared.gate.set(if paused {
         GateState::Paused
     } else {
@@ -195,8 +202,11 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
         Request::Status => {
             let state = Level::of(&lock(&shared.recent)).state();
             let base = lock(&shared.status).clone();
+            let (wall, steady) = (wall_ms(), interrupt_ms());
+            let shown = |end: i64| steady_to_wall(end, wall, steady);
             Response::Status(AgentStatus {
-                sensitive_until_ms: shared.sensitive.until_ms(),
+                paused_until_ms: base.paused_until_ms.map(shown),
+                sensitive_until_ms: shared.sensitive.until_ms().map(shown),
                 state,
                 ..base
             })
@@ -225,7 +235,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             Response::Done
         }
         Request::SetSensitive { on } => {
-            shared.sensitive.set(on, wall_ms());
+            shared.sensitive.set(on, interrupt_ms());
             shutdown::wake();
             Response::Done
         }
@@ -886,7 +896,8 @@ pub(crate) mod tests {
     fn status_reflects_the_agent() {
         let shared = shared();
         lock(&shared.status).started_at_ms = 42;
-        shared.sensitive.set(true, 1_000);
+        let steady = interrupt_ms();
+        shared.sensitive.set(true, steady);
         *lock(&shared.recent) = RecentState {
             occurrences: 1,
             severe: 1,
@@ -899,8 +910,28 @@ pub(crate) mod tests {
         };
 
         assert_eq!(status.started_at_ms, 42);
-        assert_eq!(status.sensitive_until_ms, Some(1_000 + 30 * 60 * 1_000));
+        // Thirty minutes from now on the wall clock, whatever the clocks read.
+        let end = status.sensitive_until_ms.unwrap();
+        assert!((end - (wall_ms() + 30 * 60 * 1_000)).abs() < 2_000, "{end}");
         assert_eq!(status.state, TrayState::Problem);
+    }
+
+    #[test]
+    fn sensitive_mode_ignores_a_wall_clock_jump() {
+        let shared = shared();
+        handle(Request::SetSensitive { on: true }, &shared, None);
+
+        // The deadline is kept on the steady clock, thirty minutes ahead of it: a wall-clock
+        // step cannot reach it, and the mode ends when the steady clock gets there.
+        let end = shared.sensitive.until_ms().unwrap();
+        let steady = interrupt_ms();
+        assert!((end - (steady + 30 * 60 * 1_000)).abs() < 2_000, "{end}");
+        assert!(!shared.sensitive.expire(steady + 29 * 60 * 1_000));
+        assert!(shared.sensitive.expire(end));
+
+        // What the window is told moves with the wall clock it is shown against.
+        let (wall, now) = (1_900_000_000_000, 5_000_000);
+        assert_eq!(steady_to_wall(now + 60_000, wall, now), wall + 60_000);
     }
 
     /// Runs two closures on their own threads and fails if either is still stuck after five seconds.
@@ -1329,32 +1360,55 @@ pub(crate) mod tests {
     #[test]
     fn a_timed_pause_reports_its_end_until_resumed() {
         let shared = shared();
+        let until = wall_ms() + 600_000;
 
         handle(
             Request::SetPaused {
                 paused: true,
-                until_ms: Some(1_700_000_000_000),
+                until_ms: Some(until),
             },
             &shared,
             None,
         );
-        assert!(matches!(
-            handle(Request::Status, &shared, None),
-            Response::Status(AgentStatus {
-                paused_until_ms: Some(1_700_000_000_000),
-                ..
-            })
-        ));
+        let Response::Status(status) = handle(Request::Status, &shared, None) else {
+            panic!("not a status");
+        };
+        assert!((status.paused_until_ms.unwrap() - until).abs() < 2_000);
 
         handle(
             Request::SetPaused {
                 paused: false,
-                until_ms: Some(1_700_000_000_000),
+                until_ms: Some(until),
             },
             &shared,
             None,
         );
         assert_eq!(lock(&shared.status).paused_until_ms, None);
+    }
+
+    #[test]
+    fn timed_pause_ignores_a_wall_clock_jump() {
+        let shared = shared();
+        handle(
+            Request::SetPaused {
+                paused: true,
+                until_ms: Some(wall_ms() + 600_000),
+            },
+            &shared,
+            None,
+        );
+
+        // Kept ten minutes ahead on the steady clock, which only the sleeping system moves.
+        let end = lock(&shared.status).paused_until_ms.unwrap();
+        assert!((end - (interrupt_ms() + 600_000)).abs() < 2_000, "{end}");
+
+        // A wall-clock step changes what the window is shown, never how long is left.
+        let (steady, wall) = (end - 600_000, 1_900_000_000_000);
+        let wall_after_step = wall - 3_600_000;
+        assert_eq!(
+            steady_to_wall(end, wall_after_step, steady) - wall_after_step,
+            600_000
+        );
     }
 
     #[test]

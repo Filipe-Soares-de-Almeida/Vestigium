@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use vestigium_collect::{
     BlackboxRing, CollectError, Delivered, EventSubscription, PdhReading, Waited, Wake,
-    WindowsHealth, disk_media, hung_pids, logical_cpus, memory_info, physical_drive, unbiased_ms,
-    wall_ms,
+    WindowsHealth, disk_media, hung_pids, interrupt_ms, logical_cpus, memory_info, physical_drive,
+    unbiased_ms, wall_ms,
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
@@ -116,6 +116,7 @@ pub struct Wiring {
     /// Tried about once a minute while `subscription` is `None`; `None` never tries again.
     pub resubscribe: Option<Subscriber>,
     pub sensitive: Arc<SensitiveMode>,
+    /// `paused_until_ms` is an instant of the steady clock here, as in the shared status.
     pub status: Arc<Mutex<AgentStatus>>,
     /// What the tray shows about the last 24 h.
     pub recent: Arc<Mutex<RecentState>>,
@@ -344,7 +345,7 @@ impl Sampler {
                 if let Some(warning) = &held.warning {
                     sampler.report(warning);
                 }
-                sampler.fall = Fall::after(held, history_last, now);
+                sampler.fall = Fall::after(held, history_last, now, interrupt_ms());
                 if sampler.fall.is_none() {
                     ring.release_held();
                 }
@@ -446,7 +447,7 @@ impl Sampler {
                 trim_at = Some(ticks + TRIM_AFTER_TICKS);
                 continue;
             }
-            if self.sensitive.expire(wall_ms()) {
+            if self.sensitive.expire(interrupt_ms()) {
                 shutdown::wake();
             }
 
@@ -784,7 +785,7 @@ impl Sampler {
 
     /// Moves delivered events into the black box and the next batch, with their bookmark.
     fn take_events(&mut self) {
-        let now = wall_ms();
+        let steady_ms = interrupt_ms();
         while let Ok(delivered) = self.events_rx.try_recv() {
             let event = &delivered.event;
             if event.meaning == EventMeaning::HardwareError && event.ts_ms >= self.started_ms {
@@ -797,7 +798,7 @@ impl Sampler {
                 self.dumps_due = true;
             }
             if let Some(fall) = self.fall.as_mut() {
-                fall.offer(event, now);
+                fall.offer(event, steady_ms);
             }
             self.blackbox.push_event(delivered.event.clone());
             if batch_has_room(&self.events, &delivered.event) {
@@ -858,7 +859,12 @@ impl Sampler {
     /// Turns a fall Windows has spoken about into a post-mortem, and records the time away;
     /// `force` settles it with what is known so far.
     fn settle_fall(&mut self, now: i64, force: bool) {
-        if !force && !self.fall.as_ref().is_some_and(|f| f.settled(now)) {
+        if !force
+            && !self
+                .fall
+                .as_ref()
+                .is_some_and(|f| f.settled(interrupt_ms()))
+        {
             return;
         }
         let Some(fall) = self.fall.take() else {
@@ -1021,19 +1027,22 @@ impl Sampler {
     }
 
     /// Closes what the black box holds and writes everything, before a pause, a suspend or a stop.
-    /// Blocks while paused and ends a timed pause when its time comes; the wall clock is read
-    /// again at least every minute, so a pause spent asleep still ends on time after waking.
+    /// Blocks while paused and ends a timed pause when its time comes; the steady clock, which
+    /// counts sleep and ignores wall-clock changes, is read again at least every minute.
     fn wait_out_pause(&self, gate: &RunGate) -> GateState {
         loop {
             let until = lock(&self.status).paused_until_ms;
             let left_ms = until.map_or(PAUSE_CHECK_MS, |end| {
-                (end - wall_ms()).clamp(0, PAUSE_CHECK_MS)
+                (end - interrupt_ms()).clamp(0, PAUSE_CHECK_MS)
             });
             if until.is_some() && left_ms == 0 {
                 // A pause asked for meanwhile replaces this one; the status and the gate change
                 // under one guard, so a new pause is never ended by the old one.
                 let mut status = lock(&self.status);
-                if status.paused_until_ms.is_some_and(|end| end <= wall_ms()) {
+                if status
+                    .paused_until_ms
+                    .is_some_and(|end| end <= interrupt_ms())
+                {
                     status.paused = false;
                     status.paused_until_ms = None;
                     gate.set(GateState::Running);
@@ -2974,7 +2983,7 @@ mod tests {
         {
             let mut status = lock(&running.status);
             status.paused = true;
-            status.paused_until_ms = Some(wall_ms() + 500);
+            status.paused_until_ms = Some(interrupt_ms() + 500);
         }
         running.gate.set(GateState::Paused);
         let resumed = wait_until(PATIENCE, || {

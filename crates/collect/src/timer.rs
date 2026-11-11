@@ -7,7 +7,9 @@ use windows::Win32::System::Threading::{
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateEventW, CreateWaitableTimerExW, INFINITE,
     SetEvent, SetWaitableTimer, TIMER_ALL_ACCESS, WaitForMultipleObjects, WaitForSingleObject,
 };
-use windows::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTimePrecise;
+use windows::Win32::System::WindowsProgramming::{
+    QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise,
+};
 use windows::core::PCWSTR;
 
 use crate::CollectError;
@@ -140,6 +142,14 @@ pub fn unbiased_ms() -> f64 {
     ticks_100ns as f64 / 10_000.0
 }
 
+/// Milliseconds of interrupt time since boot, counting the time spent asleep or hibernating and
+/// never moving with the wall clock: the clock for deadlines that must survive both.
+pub fn interrupt_ms() -> i64 {
+    // SAFETY: a plain read of the interrupt-time counter.
+    let ticks_100ns = unsafe { QueryInterruptTimePrecise() };
+    i64::try_from(ticks_100ns / 10_000).unwrap_or(i64::MAX)
+}
+
 /// The wall clock, Unix epoch milliseconds.
 pub fn wall_ms() -> i64 {
     SystemTime::now()
@@ -153,6 +163,17 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    #[test]
+    fn interrupt_time_runs_forward_and_is_not_the_wall_clock() {
+        let first = interrupt_ms();
+        std::thread::sleep(Duration::from_millis(30));
+        let second = interrupt_ms();
+        assert!(second - first >= 25, "{first} then {second}");
+        // Counted from boot, so far below an epoch time, and never behind the unbiased clock.
+        assert!(second < wall_ms());
+        assert!(second as f64 >= unbiased_ms() - 2.0);
+    }
 
     #[test]
     fn a_wait_with_no_wake_lasts_its_time() {

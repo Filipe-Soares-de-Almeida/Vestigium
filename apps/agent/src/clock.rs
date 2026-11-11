@@ -1,4 +1,5 @@
-//! Tells a wall-clock step apart from the unbiased clock that paces the sampler.
+//! Tells a wall-clock step apart from the unbiased clock that paces the sampler, and moves a
+//! deadline between the wall clock the window speaks and the steady clock the agent counts on.
 
 /// A step of the wall clock beyond the unbiased clock bigger than this is a clock change.
 pub const JUMP_THRESHOLD_MS: f64 = 2_000.0;
@@ -40,9 +41,40 @@ impl ClockWatch {
     }
 }
 
+/// The steady-clock instant that matches a wall-clock instant, given both clocks read together.
+pub fn wall_to_steady(wall_instant_ms: i64, now_wall_ms: i64, now_steady_ms: i64) -> i64 {
+    now_steady_ms.saturating_add(wall_instant_ms.saturating_sub(now_wall_ms))
+}
+
+/// The wall-clock instant that matches a steady-clock instant, given both clocks read together.
+pub fn steady_to_wall(steady_instant_ms: i64, now_wall_ms: i64, now_steady_ms: i64) -> i64 {
+    now_wall_ms.saturating_add(steady_instant_ms.saturating_sub(now_steady_ms))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_deadline_keeps_its_remaining_time_across_the_two_clocks() {
+        let (wall, steady) = (1_800_000_000_000, 7_000_000);
+        let steady_end = wall_to_steady(wall + 1_800_000, wall, steady);
+        assert_eq!(steady_end, steady + 1_800_000);
+        assert_eq!(steady_to_wall(steady_end, wall, steady), wall + 1_800_000);
+    }
+
+    #[test]
+    fn a_wall_clock_step_moves_the_shown_end_but_not_the_remaining_time() {
+        let (wall, steady) = (1_800_000_000_000, 7_000_000);
+        let steady_end = wall_to_steady(wall + 1_800_000, wall, steady);
+
+        // A minute later the wall clock goes back an hour; the steady clock does not notice.
+        let (wall_after, steady_after) = (wall + 60_000 - 3_600_000, steady + 60_000);
+        let shown = steady_to_wall(steady_end, wall_after, steady_after);
+
+        assert_eq!(shown - wall_after, 1_740_000, "29 minutes are still left");
+        assert_eq!(steady_end - steady_after, 1_740_000);
+    }
 
     const START_WALL: i64 = 1_800_000_000_000;
 

@@ -37,8 +37,9 @@ pub struct Fall {
     ring: RingContents,
     /// The last second watched, from the ring or the history, whichever is newer.
     last_ms: i64,
+    /// When the wait for Windows ends, on the steady clock.
     deadline_ms: i64,
-    /// What the Kernel-Power 41 said, when it arrived and the time it is stamped with.
+    /// What the Kernel-Power 41 said, when it arrived (steady clock) and the time it is stamped with.
     loss: Option<Loss>,
     down_ms: Option<i64>,
     next_boot: Vec<WinEvent>,
@@ -49,23 +50,31 @@ pub struct Fall {
 /// The Kernel-Power 41 of a fall.
 #[derive(Debug)]
 struct Loss {
+    /// When the 41 was delivered, on the steady clock.
     seen_ms: i64,
     stamp_ms: i64,
     kind: CrashKind,
 }
 
 impl Fall {
-    /// `None` when the ring was closed cleanly or nothing was ever watched.
-    pub fn after(ring: RingContents, history_last_ms: Option<i64>, now_ms: i64) -> Option<Fall> {
+    /// `None` when the ring was closed cleanly or nothing was ever watched. `wall_ms` stamps the
+    /// start and `steady_ms` times the wait; a last second ahead of the wall clock is read as
+    /// the wall clock now, since the clock was set back.
+    pub fn after(
+        ring: RingContents,
+        history_last_ms: Option<i64>,
+        wall_ms: i64,
+        steady_ms: i64,
+    ) -> Option<Fall> {
         if ring.clean {
             return None;
         }
         let ring_last = ring.samples.last().map(|s| s.ts_ms);
-        let last_ms = ring_last.max(history_last_ms)?;
+        let last_ms = ring_last.max(history_last_ms)?.min(wall_ms);
         Some(Fall {
             ring,
             last_ms,
-            deadline_ms: now_ms + WAIT_FOR_FALL_MS,
+            deadline_ms: steady_ms.saturating_add(WAIT_FOR_FALL_MS),
             loss: None,
             down_ms: None,
             next_boot: Vec::new(),
@@ -78,9 +87,10 @@ impl Fall {
         self.last_ms
     }
 
-    /// Takes in a delivered event: what the next boot logged after the last second watched dates
-    /// and classifies the fall, and what was logged just before it joins the evidence window.
-    pub fn offer(&mut self, event: &WinEvent, now_ms: i64) {
+    /// Takes in a delivered event, at `steady_ms` on the steady clock: what the next boot logged
+    /// after the last second watched dates and classifies the fall, and what was logged just
+    /// before it joins the evidence window.
+    pub fn offer(&mut self, event: &WinEvent, steady_ms: i64) {
         if event.ts_ms <= self.last_ms {
             if event.ts_ms >= self.last_ms - POSTMORTEM_BEFORE_MS
                 && !self.before.iter().any(|kept| same_record(kept, event))
@@ -95,7 +105,7 @@ impl Fall {
         match event.meaning {
             EventMeaning::PowerLoss if self.loss.is_none() => {
                 self.loss = power_loss_detail(&event.data_xml).map(|d| Loss {
-                    seen_ms: now_ms,
+                    seen_ms: steady_ms,
                     stamp_ms: event.ts_ms,
                     kind: d.crash_kind(),
                 });
@@ -108,11 +118,12 @@ impl Fall {
         self.next_boot.push(event.clone());
     }
 
-    /// Waiting is over: the fall is dated, its date did not come, or Windows logged no fall at all.
-    pub fn settled(&self, now_ms: i64) -> bool {
-        now_ms >= self.deadline_ms
+    /// Waiting is over: the fall is dated, its date did not come, or Windows logged no fall at
+    /// all; `steady_ms` reads the steady clock.
+    pub fn settled(&self, steady_ms: i64) -> bool {
+        steady_ms >= self.deadline_ms
             || self.loss.as_ref().is_some_and(|loss| {
-                self.down_ms.is_some() || now_ms - loss.seen_ms >= WAIT_FOR_DATE_MS
+                self.down_ms.is_some() || steady_ms - loss.seen_ms >= WAIT_FOR_DATE_MS
             })
     }
 
@@ -284,13 +295,13 @@ mod tests {
             clean: true,
             ..RingContents::default()
         };
-        assert!(Fall::after(clean, Some(1_000), 2_000).is_none());
-        assert!(Fall::after(unclean(), None, 2_000).is_none());
+        assert!(Fall::after(clean, Some(1_000), 2_000, 2_000).is_none());
+        assert!(Fall::after(unclean(), None, 2_000, 2_000).is_none());
     }
 
     #[test]
     fn a_fall_waits_for_its_date_then_settles() {
-        let mut fall = Fall::after(unclean(), Some(100_000), 200_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(100_000), 200_000, 200_000).unwrap();
         // A 41 from before the last watched second is history, not this fall.
         fall.offer(
             &event(50_000, EventMeaning::PowerLoss, BLUE_SCREEN),
@@ -328,7 +339,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let last = 1_000_000;
-        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 2_000_000).unwrap();
         fall.offer(&disk_event(last - 90_000, 1), 2_000_000);
         fall.offer(&disk_event(last, 2), 2_000_000);
 
@@ -348,7 +359,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let last = 1_000_000;
-        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 2_000_000).unwrap();
         fall.offer(&disk_event(last - POSTMORTEM_BEFORE_MS - 1, 1), 2_000_000);
 
         let occurrence = settled_occurrence(fall, &store);
@@ -373,7 +384,7 @@ mod tests {
                 ..Batch::default()
             })
             .unwrap();
-        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 2_000_000).unwrap();
         fall.offer(&stored, 2_000_000);
         fall.offer(&stored, 2_000_000);
 
@@ -388,8 +399,50 @@ mod tests {
     }
 
     #[test]
+    fn a_last_second_ahead_of_the_wall_clock_still_lets_the_41_count() {
+        // The wall clock was set back since the last run: the history ends at 100_000 but it is 50_000 now.
+        let mut fall = Fall::after(unclean(), Some(100_000), 50_000, 7_000_000).unwrap();
+        assert_eq!(fall.last_ms(), 50_000);
+        fall.offer(
+            &event(60_000, EventMeaning::PowerLoss, BLUE_SCREEN),
+            7_000_000,
+        );
+        assert!(fall.loss.is_some(), "the 41 stamped after the start counts");
+    }
+
+    #[test]
+    fn fall_wait_is_not_stretched_by_a_clock_step_back() {
+        // Only the steady clock times the wait: the wall clock of the start is never read again.
+        let fall = Fall::after(unclean(), Some(100_000), 50_000, 7_000_000).unwrap();
+        assert!(!fall.settled(7_000_000 + WAIT_FOR_FALL_MS - 1));
+        assert!(fall.settled(7_000_000 + WAIT_FOR_FALL_MS));
+
+        let mut dated = Fall::after(unclean(), Some(100_000), 150_000, 7_000_000).unwrap();
+        dated.offer(
+            &event(400_000, EventMeaning::PowerLoss, BLUE_SCREEN),
+            7_001_000,
+        );
+        assert!(!dated.settled(7_001_000 + WAIT_FOR_DATE_MS - 1));
+        assert!(dated.settled(7_001_000 + WAIT_FOR_DATE_MS));
+    }
+
+    #[test]
+    fn a_41_long_after_the_last_second_with_no_6008_is_still_a_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let last = 1_000_000;
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 7_000_000).unwrap();
+        fall.offer(
+            &event(last + 45 * 60_000, EventMeaning::PowerLoss, BLUE_SCREEN),
+            7_000_000,
+        );
+        assert!(fall.settled(7_000_000 + WAIT_FOR_DATE_MS));
+        assert!(fall.occurrence(&store).unwrap().is_none());
+    }
+
+    #[test]
     fn no_word_from_windows_settles_as_a_plain_stop() {
-        let fall = Fall::after(unclean(), Some(100_000), 200_000).unwrap();
+        let fall = Fall::after(unclean(), Some(100_000), 200_000, 200_000).unwrap();
         assert!(!fall.settled(200_000 + WAIT_FOR_FALL_MS - 1));
         assert!(fall.settled(200_000 + WAIT_FOR_FALL_MS));
     }
@@ -398,7 +451,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let last = 1_000_000;
-        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 2_000_000).unwrap();
         fall.offer(
             &event(
                 last + stamp_after_last_ms,
@@ -428,7 +481,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let last = 1_000_000;
-        let mut fall = Fall::after(unclean(), Some(last), 2_000_000).unwrap();
+        let mut fall = Fall::after(unclean(), Some(last), 2_000_000, 2_000_000).unwrap();
         fall.offer(
             &event(last + 45 * 60_000, EventMeaning::PowerLoss, BLUE_SCREEN),
             2_000_000,

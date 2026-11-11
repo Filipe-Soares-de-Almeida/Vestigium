@@ -6,7 +6,7 @@ use vestigium_core::{DEFAULT_PROBE_PERIOD, SENSITIVE_PROBE_PERIOD};
 
 use crate::app::lock;
 
-/// When sensitive mode turns itself off, while it is on.
+/// When sensitive mode turns itself off, while it is on, as an instant of the steady clock.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Sensitive {
     until_ms: Option<i64>,
@@ -53,7 +53,7 @@ impl SensitiveMode {
         })
     }
 
-    /// Turns sensitive mode on, restarting its deadline, or off.
+    /// Turns sensitive mode on, restarting its deadline, or off; `now_ms` reads the steady clock.
     pub fn set(&self, on: bool, now_ms: i64) {
         let mut state = lock(&self.state);
         if on {
@@ -74,12 +74,13 @@ impl SensitiveMode {
         self.probe.clone()
     }
 
-    /// When sensitive mode turns itself off, while it is on.
+    /// When sensitive mode turns itself off, while it is on, on the steady clock.
     pub fn until_ms(&self) -> Option<i64> {
         lock(&self.state).until_ms()
     }
 
-    /// Turns sensitive mode off once its deadline has passed; true only on the check that did it.
+    /// Turns sensitive mode off once its deadline has passed on the steady clock `now_ms` reads;
+    /// true only on the check that did it.
     pub fn expire(&self, now_ms: i64) -> bool {
         let mut state = lock(&self.state);
         if !state.expired(now_ms) {

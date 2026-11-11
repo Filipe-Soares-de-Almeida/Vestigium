@@ -5,7 +5,7 @@ use std::process::Command;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use vestigium_brand::Badge;
-use vestigium_collect::wall_ms;
+use vestigium_collect::interrupt_ms;
 use vestigium_core::{ColorTheme, GateState, RecentState};
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::TrayState;
@@ -231,7 +231,9 @@ impl Tray {
         } else if id == self.pause.id() {
             set_paused(shared, shared.gate.state() == GateState::Running, None);
         } else if id == self.sensitive.id() {
-            shared.sensitive.set(self.sensitive.is_checked(), wall_ms());
+            shared
+                .sensitive
+                .set(self.sensitive.is_checked(), interrupt_ms());
         } else if id == self.autostart.id() {
             let _ = if self.autostart.is_checked() {
                 autostart::enable(&self.exe)

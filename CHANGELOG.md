@@ -394,6 +394,11 @@ How to use this file:
 - The ten-minute chart on the Now screen no longer stops growing after the wall clock steps back. Before,
   every new point looked older than the last one and was ignored until the clock caught up; now the
   points that lie ahead of the new time are dropped and the chart goes on from there.
+- A wall clock that jumps no longer lengthens or cuts short sensitive mode, a timed pause or the wait
+  for Windows to log a fall. These now run on a steady clock that keeps counting while the PC sleeps and
+  ignores time changes, so a thirty-minute pause still ends thirty minutes later and the end time the
+  window shows follows the corrected clock. A fall whose last watched second lies ahead of a clock that
+  was set back is still recognised.
 - The watcher can no longer freeze for good when the window asks for its status at the very moment the
   tray icon refreshes. Before, two of its threads could each wait for the other, which stopped the
   tray menu and the icon, kept suspend notices from being handled and left the window showing a
