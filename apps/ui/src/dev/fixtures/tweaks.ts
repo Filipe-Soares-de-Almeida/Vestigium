@@ -1,4 +1,4 @@
-// Tweaks page data. URL: ?tweaks=some|none|applied (default some) &restore=off|failed|dropped|unconfirmed|skipped &restore-after=<attempt that succeeds> &tweak-ms=<wait>
+// Tweaks page data. URL: ?tweaks=some|none|applied|interrupted-all|interrupted-none|interrupted-unknown|interrupted-mixed|interrupted-doubt (default some) &restore=off|failed|dropped|unconfirmed|skipped &restore-after=<attempt that succeeds> &tweak-ms=<wait>
 // Every name, path and value here is invented; nothing was read from a real PC.
 import type {
   Advice,
@@ -39,6 +39,10 @@ const localDumps = String.raw`SOFTWARE\Microsoft\Windows\Windows Error Reporting
 const approval = (hive: typeof LM | typeof CU, name: string): TweakSetting => ({
   StartupApproval: { hive, list: "Run", name },
 });
+/** Codes the watcher records for a setting after the helper stopped: found written, as before, or neither. */
+const WRITTEN = 0x2000_0002;
+const UNCHANGED = 0x2000_0003;
+const UNKNOWN = 0x2000_0004;
 const disabled: TweakValue = { Bytes: [3, 0, 0, 0, 0, 80, 140, 120, 18, 77, 219, 1] };
 
 function advice(
@@ -152,6 +156,7 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
       history: [],
     };
   }
+  if (level.startsWith("interrupted-")) return interrupted(level.slice("interrupted-".length));
   if (level === "applied") {
     const [first, dvrAdvice] = ALL;
     const row = (id: number, a: Advice, days: number, undone: number | null): TweakRow => ({
@@ -185,6 +190,39 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
     };
   }
   return { advice: ALL, history: [] };
+}
+
+/** What the watcher found each of the three dump settings holding, per outcome of the stopped helper. */
+const FOUND: Record<string, number[]> = {
+  all: [WRITTEN, WRITTEN, WRITTEN],
+  none: [UNCHANGED, UNCHANGED, UNCHANGED],
+  unknown: [UNKNOWN, UNKNOWN, UNKNOWN],
+  mixed: [WRITTEN, UNCHANGED, UNKNOWN],
+  doubt: [UNCHANGED, UNKNOWN, UNKNOWN],
+};
+
+/** The dump tweak after a helper that stopped before it reported, with what was found in Windows. */
+function interrupted(outcome: string): { advice: Advice[]; history: TweakRow[] } {
+  const dumps = ALL.find((a) => a.tweak === "AppDumps")!;
+  const found = FOUND[outcome] ?? FOUND.mixed;
+  const row: TweakRow = {
+    id: 1,
+    applied_ms: now - 2 * HOUR,
+    undone_ms: null,
+    applier: "Elevated",
+    change: {
+      tweak: dumps.tweak,
+      subject: null,
+      undo_of: null,
+      results: dumps.changes.map((c, i) => ({ change: c, error: found[i] })),
+      restore_point: "Unconfirmed",
+      journal: 1,
+    },
+    helped: null,
+    outside: false,
+  };
+  const advice = found.every((e) => e === WRITTEN) ? settledBy(dumps) : dumps;
+  return { advice: ALL.map((a) => (a === dumps ? advice : a)), history: [row] };
 }
 
 /** The advice once its changes are written: nothing left to change, the new values in place. */
@@ -264,7 +302,9 @@ export const handlers: Record<string, Handler> = {
       change: {
         ...row.change,
         undo_of: id,
-        results: row.change.results.map((r) => ({ change: { ...r.change, from: r.change.to, to: r.change.from }, error: null })),
+        results: row.change.results
+          .filter((r) => r.error === null || r.error === WRITTEN)
+          .map((r) => ({ change: { ...r.change, from: r.change.to, to: r.change.from }, error: null })),
       },
       helped: null,
     };

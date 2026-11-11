@@ -133,3 +133,94 @@ test("system_restore_off_shows_its_own_title", async () => {
 
   expect(pointDialog(page)!.querySelector("h2")?.textContent).toBe(t("ui.tweaks.no_point.title.off"));
 });
+
+const WRITTEN = 0x2000_0002;
+const UNCHANGED = 0x2000_0003;
+const UNKNOWN = 0x2000_0004;
+
+/** A change whose helper stopped, with what the watcher found each setting holding. */
+function stopped(id: number, found: number[]): TweakRow {
+  const base = tweakRowSamples[1];
+  return {
+    ...base,
+    id,
+    undone_ms: null,
+    outside: false,
+    applier: "Elevated",
+    change: {
+      ...base.change,
+      tweak: advice.tweak,
+      subject: null,
+      undo_of: null,
+      results: advice.changes.map((c, i) => ({ change: c, error: found[i] })),
+      restore_point: "Unconfirmed",
+    },
+  };
+}
+
+async function showStopped(found: number[]) {
+  const calls = answer({
+    tweaks: () => ({ advice: [advice], history: [stopped(7, found)], last_restore_point_ms: null }) satisfies TweaksDto,
+    undo_tweak: () => ({ ids: [8], exit_code: 0 }),
+  });
+  await tweaks.load();
+  const page = show(Tweaks, { key: "FastStartup", group: null });
+  await until(() => page.querySelector(".hrow") !== null, "the history");
+  return { calls, page };
+}
+
+test("a_stopped_change_with_some_settings_written_explains_itself_and_confirms_the_undo_in_the_card", async () => {
+  const { calls, page } = await showStopped([WRITTEN, UNKNOWN]);
+
+  expect(page.textContent).toContain(t("ui.tweaks.why.lead"));
+  expect(page.textContent).toContain(t("ui.tweaks.why.mixed"));
+  expect(page.textContent).toContain(t("ui.tweaks.why.mixed.undo"));
+  expect(page.textContent).toContain(t("ui.tweaks.set.written"));
+  expect(page.textContent).toContain(t("ui.tweaks.set.unknown"));
+  expect(page.querySelector(".hrow")!.textContent).toContain(t("ui.tweaks.row.interrupted.part"));
+  expect(page.querySelector(".hrow")!.textContent).not.toContain(t("ui.tweaks.row.refused"));
+
+  named(page, t("ui.tweaks.undo"))!.click();
+  await until(() => named(page, t("ui.tweaks.undo.interrupted.go")) !== undefined, "the inline question");
+  expect(page.textContent).toContain(t("ui.tweaks.undo.interrupted.title"));
+  expect(page.querySelector<HTMLDialogElement>("dialog.confirm")?.open).toBe(false);
+  expect(calls.of("undo_tweak")).toHaveLength(0);
+
+  named(page, t("ui.tweaks.undo.interrupted.go"))!.click();
+  await until(() => calls.of("undo_tweak").length === 1, "the undo");
+  expect(calls.of("undo_tweak")[0].id).toBe(7);
+  await until(() => toast.message === `${t("ui.tweaks.toast.undone", { name: "Fast startup", value: "off" })} · ${t("ui.tweaks.toast.undone.left")}`, "the toast");
+});
+
+test("cancelling_the_inline_question_changes_nothing", async () => {
+  const { calls, page } = await showStopped([WRITTEN, WRITTEN]);
+
+  named(page, t("ui.tweaks.undo"))!.click();
+  await until(() => named(page, t("ui.tweaks.cancel")) !== undefined, "the inline question");
+  expect(page.textContent).toContain(t("ui.tweaks.undo.title"));
+  named(page, t("ui.tweaks.cancel"))!.click();
+  await until(() => named(page, t("ui.tweaks.cancel")) === undefined, "the question to close");
+
+  expect(named(page, t("ui.tweaks.undo"))).toBeDefined();
+  expect(calls.of("undo_tweak")).toHaveLength(0);
+});
+
+test("a_stopped_change_with_an_unknown_outcome_offers_no_undo_and_does_not_claim_nothing_was_written", async () => {
+  const { page } = await showStopped([UNKNOWN, UNKNOWN]);
+
+  expect(page.textContent).toContain(t("ui.tweaks.why.unknown"));
+  expect(page.textContent).toContain(t("ui.tweaks.fact.unconfirmed"));
+  expect(page.querySelector(".hrow")!.textContent).toContain(t("ui.tweaks.row.interrupted.unknown"));
+  expect(page.textContent).not.toContain(t("ui.tweaks.row.refused"));
+  expect(named(page, t("ui.tweaks.undo"))).toBeUndefined();
+  expect(named(page, t("ui.tweaks.apply_one"))).toBeDefined();
+});
+
+test("a_stopped_change_that_left_everything_as_it_was_says_so_and_offers_apply", async () => {
+  const { page } = await showStopped([UNCHANGED, UNCHANGED]);
+
+  expect(page.textContent).toContain(t("ui.tweaks.why.none"));
+  expect(page.querySelector(".hrow")!.textContent).toContain(t("ui.tweaks.row.interrupted.none"));
+  expect(named(page, t("ui.tweaks.undo"))).toBeUndefined();
+  expect(named(page, t("ui.tweaks.apply_one"))).toBeDefined();
+});

@@ -7,6 +7,7 @@ import type {
   Helped,
   RestorePoint,
   SettingChange,
+  SettingResult,
   TweakId,
   TweakRow,
   TweakSetting,
@@ -64,6 +65,10 @@ export type Shown = "signal" | "quiet" | "applied" | "set" | "unavailable" | "pr
 const ERROR_MAY_HAVE_CHANGED = 0x2000_0001;
 /** The helper stopped before it reported, and Windows holds the value it was to write. */
 const ERROR_INTERRUPTED_WRITTEN = 0x2000_0002;
+/** The helper stopped before it reported, and Windows still holds the value from before. */
+const ERROR_INTERRUPTED_UNCHANGED = 0x2000_0003;
+/** The helper stopped before it reported, and Windows holds neither value, or it cannot be read. */
+const ERROR_INTERRUPTED_UNKNOWN = 0x2000_0004;
 /** The helper found a point Windows logged as created missing from the list. */
 const ERROR_RESTORE_DROPPED = 0x2000_0005;
 const wrote = (x: { error: number | null }) =>
@@ -152,35 +157,38 @@ const POWER_NAMES: Record<string, string> = {
   "48e6b7a6-50f5-4782-a5d4-53bb8f07e226": "USB selective suspend (AC)",
 };
 
-/** A setting's name and value as Windows names them. */
-function technical(setting: TweakSetting, value: TweakValue): string {
-  const label =
-    typeof setting === "string"
-      ? setting
-      : "Dword" in setting
-        ? setting.Dword.name
-        : "Key" in setting
-          ? setting.Key.key.split("\\").pop() ?? ""
-          : "Service" in setting
-            ? setting.Service.name
-            : "PowerAc" in setting
-              ? (POWER_NAMES[setting.PowerAc.setting] ?? setting.PowerAc.setting)
-              : `StartupApproved\\${setting.StartupApproval.list}\\${setting.StartupApproval.name}`;
-  let shownValue: string;
-  if (value === "Absent" || value === "Present") shownValue = k(`raw.${value}`);
-  else if ("Dword" in value) shownValue = String(value.Dword);
-  else if ("Index" in value) shownValue = String(value.Index);
-  else if ("Scheme" in value) shownValue = value.Scheme;
-  else if ("On" in value) shownValue = k(`raw.hiberfile.${value.On ? "on" : "off"}`);
-  else if ("Bytes" in value) shownValue = value.Bytes.slice(0, 1).map((b) => b.toString(16).padStart(2, "0")).join("");
-  else
-    shownValue = k("raw.service", {
-      start: value.Service.start,
-      delayed: value.Service.delayed ? k("raw.delayed") : "",
-      state: k(value.Service.running ? "raw.running" : "raw.stopped"),
-    });
-  return `${label} = ${shownValue}`;
+/** A setting's name as Windows names it. */
+function settingLabel(setting: TweakSetting): string {
+  return typeof setting === "string"
+    ? setting
+    : "Dword" in setting
+      ? setting.Dword.name
+      : "Key" in setting
+        ? setting.Key.key.split("\\").pop() ?? ""
+        : "Service" in setting
+          ? setting.Service.name
+          : "PowerAc" in setting
+            ? (POWER_NAMES[setting.PowerAc.setting] ?? setting.PowerAc.setting)
+            : `StartupApproved\\${setting.StartupApproval.list}\\${setting.StartupApproval.name}`;
 }
+
+/** A value as Windows shows it. */
+function rawValue(value: TweakValue): string {
+  if (value === "Absent" || value === "Present") return k(`raw.${value}`);
+  if ("Dword" in value) return String(value.Dword);
+  if ("Index" in value) return String(value.Index);
+  if ("Scheme" in value) return value.Scheme;
+  if ("On" in value) return k(`raw.hiberfile.${value.On ? "on" : "off"}`);
+  if ("Bytes" in value) return value.Bytes.slice(0, 1).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return k("raw.service", {
+    start: value.Service.start,
+    delayed: value.Service.delayed ? k("raw.delayed") : "",
+    state: k(value.Service.running ? "raw.running" : "raw.stopped"),
+  });
+}
+
+/** A setting's name and value as Windows names them. */
+const technical = (setting: TweakSetting, value: TweakValue) => `${settingLabel(setting)} = ${rawValue(value)}`;
 
 export interface Change {
   from: string;
@@ -282,15 +290,97 @@ export function helpedWhy(h: Helped): string | null {
   return k(h.before_ms < least ? "helped.why.time.before" : "helped.why.time.after", args);
 }
 
+/** What the watcher found one setting holding after the helper stopped; `null` for any other result. */
+export type Settle = "written" | "unchanged" | "unknown";
+
+export function settleOf(x: SettingResult): Settle | null {
+  if (x.error === ERROR_INTERRUPTED_WRITTEN) return "written";
+  if (x.error === ERROR_INTERRUPTED_UNCHANGED) return "unchanged";
+  return x.error === ERROR_INTERRUPTED_UNKNOWN ? "unknown" : null;
+}
+
+/** How a stopped change ended as a whole: every setting alike, some holding the new value, or none known. */
+export type Interrupted = "all" | "none" | "unknown" | "part" | "doubt";
+
+/** The outcome of a change whose helper stopped before it reported; `null` for any other change. */
+export function interruptedOf(r: TweakRow): Interrupted | null {
+  if (r.change.undo_of !== null) return null;
+  const found = r.change.results.map(settleOf).filter((x) => x !== null);
+  if (!found.length) return null;
+  const count = (s: Settle) => found.filter((x) => x === s).length;
+  if (count("written") === found.length) return "all";
+  if (count("unchanged") === found.length) return "none";
+  if (count("unknown") === found.length) return "unknown";
+  return count("written") ? "part" : "doubt";
+}
+
+/** The newest change of a tweak when its helper stopped and nothing has happened to it since. */
+export function openInterrupted(rows: TweakRow[]): TweakRow | null {
+  const [newest] = rows;
+  return newest && newest.undone_ms === null && !newest.outside && interruptedOf(newest) !== null ? newest : null;
+}
+
+/** Whether Undo has a setting to put back: one holds the new value. */
+export const undoable = (r: TweakRow) => r.change.results.some((x) => settleOf(x) === "written");
+
 /** Where a history row stands, in words. */
 export function rowState(r: TweakRow): { mark: "Ok" | "Attention" | "Closed"; text: string } {
   const failed = r.change.results.some((x) => x.error !== null && x.error !== ERROR_INTERRUPTED_WRITTEN);
   const written = r.change.results.some(wrote);
+  const stopped = interruptedOf(r);
   if (r.change.undo_of !== null) return { mark: "Closed", text: k("row.undo") };
   if (r.undone_ms !== null) return { mark: "Closed", text: k("row.undone", { when: at(r.undone_ms) }) };
+  if (stopped && !(r.outside && written)) {
+    return { mark: stopped === "none" ? "Closed" : "Attention", text: k(`row.interrupted.${stopped}`) };
+  }
   if (!written) return { mark: "Attention", text: k("row.refused") };
   if (r.outside) return { mark: "Attention", text: k("row.outside") };
   return { mark: failed ? "Attention" : "Ok", text: k(failed ? "row.partial" : "row.in_place") };
+}
+
+/** The sentence at the head of the note on a stopped change. */
+export const interruptedLead = () => k("why.lead");
+
+/** What the stopped change left in Windows, and whether Undo is there for it. */
+export function interruptedOutcome(kind: Interrupted, canUndo: boolean): string {
+  if (kind === "part" || kind === "doubt") return k("why.mixed") + (canUndo ? ` ${k("why.mixed.undo")}` : "");
+  return k(`why.${kind}`);
+}
+
+/** Settings with a plain name of their own, by tweak. */
+const NAMED: Partial<Record<TweakId, number>> = { GameDvr: 3, AppDumps: 3 };
+
+/** One setting of a stopped change, named, with what was found. */
+export interface Found {
+  name: string;
+  settle: Settle;
+  word: string;
+}
+
+/** Each setting of a stopped change with what Windows held when the watcher looked. */
+export function foundOf(a: { tweak: TweakId; subject: string | null }, r: TweakRow, level: DetailLevel): Found[] {
+  return r.change.results.flatMap((x, i) => {
+    const settle = settleOf(x);
+    if (settle === null) return [];
+    const plain = i < (NAMED[a.tweak] ?? 0) ? k(`set.name.${a.tweak}.${i}`) : name(a, "Simple");
+    const label = level === "Technical" ? `${settingLabel(x.change.setting)} = ${rawValue(x.change.from)} → ${rawValue(x.change.to)}` : plain;
+    return [{ name: label, settle, word: k(`set.${settle}`) }];
+  });
+}
+
+/** The mark that goes with what one setting was found holding. */
+export const settleMark = (s: Settle): StatusKind => (s === "written" ? "ok" : s === "unchanged" ? "info" : "attention");
+
+/** The mark for the stopped change as a whole. */
+export const interruptedMark = (kind: Interrupted): StatusKind => (kind === "none" ? "info" : "attention");
+
+/** "Interrupted 2 h ago", for a change whose helper stopped. */
+export const interruptedWhen = (r: TweakRow) => k("sub.interrupted", { when: at(r.applied_ms) });
+
+/** What the card shows as current for a setting the helper never confirmed. */
+export function unconfirmed(setting: TweakSetting, level: DetailLevel): string {
+  const word = k("fact.unconfirmed");
+  return level === "Technical" ? `${settingLabel(setting)} = ${word.toLocaleLowerCase()}` : word;
 }
 
 export function restorePoint(p: RestorePoint | null): string {

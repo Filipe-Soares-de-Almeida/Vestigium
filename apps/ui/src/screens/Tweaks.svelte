@@ -22,21 +22,27 @@
   import { at } from "./dumps/words";
   import { statusOf } from "./tests/status";
   import HelpedBars from "./tweaks/HelpedBars.svelte";
+  import InterruptedNote from "./tweaks/InterruptedNote.svelte";
   import {
     againLine,
     changeOf,
     GROUP,
     ICON,
     inPlace,
+    interruptedOf,
+    interruptedWhen,
     metric,
     name,
     nowOf,
+    openInterrupted,
     pointCase,
     restorePoint,
     risk,
     rowState,
+    settleOf,
     shown,
     signal,
+    unconfirmed,
     what,
     whyNot,
   } from "./tweaks/words";
@@ -163,16 +169,29 @@
     if (now?.kind === "apply") {
       await carry((without) => tweaks.apply(now.items.map(pickOf), without), applied(now.items));
     } else if (now?.kind === "undo") {
-      const back = (changeOf(now.advice, now.row.change.results.map((r) => r.change), "Simple")[0]?.from ?? "").toLocaleLowerCase();
-      await carry((without) => tweaks.undo(now.row.id, without), t("ui.tweaks.toast.undone", { name: name(now.advice, "Simple"), value: back }));
+      await undo(now.row, now.advice);
     }
   }
+
+  /** Puts back what a change wrote, and says so; settings the helper never confirmed are left alone. */
+  async function undo(row: TweakRow, a: Advice): Promise<void> {
+    const back = (changeOf(a, row.change.results.map((r) => r.change), "Simple")[0]?.from ?? "").toLocaleLowerCase();
+    const left = row.change.results.some((r) => settleOf(r) === "unknown") ? ` · ${t("ui.tweaks.toast.undone.left")}` : "";
+    await carry((without) => tweaks.undo(row.id, without), t("ui.tweaks.toast.undone", { name: name(a, "Simple"), value: back }) + left);
+  }
+
+  /** When a change was made, or stopped, as the page words it. */
+  const whenText = (row: TweakRow) =>
+    interruptedOf(row) === null ? t("ui.tweaks.sub.applied", { when: at(row.applied_ms) }) : interruptedWhen(row);
 
   function sub(a: Advice): string {
     const s = stateOf(a);
     if (s === "signal") return signal(a.signals[0]);
     if (s === "quiet") return whyNot(a);
-    if (s === "applied") return t("ui.tweaks.sub.applied", { when: at(inPlace(a, history)?.applied_ms ?? 0) });
+    if (s === "applied") {
+      const held = inPlace(a, history);
+      return held ? whenText(held) : "";
+    }
     if (s === "set") return t("ui.tweaks.status.set");
     return t(`ui.tweaks.sub.${s}`);
   }
@@ -235,10 +254,14 @@
   <BackLink href={href.tweaks(null, backTo)} label={groupName(backTo)} />
   {#if current}
     {@const s = stateOf(current)}
-    {@const change = changeOf(current, current.changes, level)}
     {@const rowsHere = rowsOf(current)}
     {@const holding = inPlace(current, history)}
-    <PageHead title={name(current, level)} sub="{groupName(backTo)} · {sub(current)}" />
+    {@const stopped = openInterrupted(rowsHere)}
+    {@const unconf = stopped !== null && interruptedOf(stopped) === "unknown" && holding === null}
+    {@const change = changeOf(current, current.changes, level).map((c, i) =>
+      unconf ? { ...c, from: unconfirmed(current.changes[i]?.setting ?? current.changes[0].setting, level) } : c,
+    )}
+    <PageHead title={name(current, level)} sub="{groupName(backTo)} · {stopped ? interruptedWhen(stopped) : sub(current)}" />
     <div class="cols2">
       <div>
         <Block title={t("ui.tweaks.section.what")}>
@@ -256,7 +279,7 @@
           </Block>
         {:else if s === "applied"}
           <Block title={t("ui.tweaks.section.applied")}>
-            <p class="p">{t("ui.tweaks.sub.applied", { when: at(holding?.applied_ms ?? 0) })}</p>
+            <p class="p">{holding ? whenText(holding) : ""}</p>
           </Block>
         {:else}
           <Block title={t("ui.tweaks.section.state")}>
@@ -266,6 +289,17 @@
       </div>
 
       <Block title={t("ui.tweaks.section.change")}>
+        {#if stopped}
+          {#key stopped.id}
+            <InterruptedNote
+              row={stopped}
+              advice={current}
+              {level}
+              disabled={blocked || tweaks.busy}
+              onundo={() => void undo(stopped, current)}
+            />
+          {/key}
+        {/if}
         {#if change.length}
           {#each change as c, i (i)}
             <div class="chg">
@@ -284,12 +318,14 @@
             <div><dt>{t("ui.tweaks.fact.cost")}</dt><dd>{risk(current)}</dd></div>
           </dl>
         {/if}
-        {#if holding}
+        {#if holding && stopped?.id === holding.id}
+          <div class="acts"><span class="muted">{whenText(holding)}</span></div>
+        {:else if holding}
           <div class="acts">
             <button type="button" class="btn" disabled={blocked || tweaks.busy} onclick={() => ask({ kind: "undo", row: holding, advice: current })}>
               <Icon name="undo" />{t("ui.tweaks.undo")}
             </button>
-            <span class="muted">{t("ui.tweaks.sub.applied", { when: at(holding.applied_ms) })}</span>
+            <span class="muted">{whenText(holding)}</span>
           </div>
         {:else if current.status === "Ready" && s !== "set"}
           <div class="acts">

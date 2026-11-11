@@ -438,6 +438,13 @@ How to use this file:
   ten minutes later the watcher compares each setting with what Windows holds: a setting that holds
   the new value is recorded as written and can be undone, one that holds the old value as unchanged,
   and anything else as unknown, with no Undo. The window and the watcher must be updated together.
+- The tweaks page now says what a stopped helper left behind. On the tweak's card, a note under "What
+  changes" says the helper stopped before it finished and what was found: Windows holds the new value
+  and Undo is offered, nothing was changed, or it is not known and no Undo is offered. When only some
+  settings hold the new value, the note lists each one with what was found and Undo touches only
+  those. Undo asks inside the note, saying exactly what goes back, instead of in a dialog. A change
+  that could not be checked no longer reads "Nothing was written": its history row says "Interrupted"
+  with the outcome, the card shows the current value as not confirmed and offers Apply again.
 - If the watcher's connection channel to the window ever fails, the watcher now notes the reason, opens
   it again after a second, and exits only when that keeps failing, instead of carrying on with no
   channel while the window says it is not running.
