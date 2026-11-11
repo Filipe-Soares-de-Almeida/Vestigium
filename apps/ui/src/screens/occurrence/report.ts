@@ -26,6 +26,7 @@ import {
   formatStamp,
   sameDay,
 } from "./format";
+import { coveredLine } from "../capture/words";
 import { causeName as shortCause } from "../today/text";
 
 // The words of a report, built from its typed facts and evidence at the reader's detail level.
@@ -690,9 +691,21 @@ export function reportMarkdown(dto: OccurrenceDto): string {
   if (dto.sensitive) head.push(k("sensitive"));
   lines.push(`## ${headline(dto, "Simple")}`, "", head.join(" · "), "");
   const main = dto.suspects[0];
-  if (main) lines.push(summaryOf(main.cause, main.confidence), "");
-  const note = noteOf(dto.suspects);
-  if (note) lines.push(`> ${note}`, "");
+  const fall = crashOf(dto) ? ".PostMortem" : "";
+  if (main) {
+    lines.push(`**${k("cause.title")}** (${k(`confidence.${main.confidence}`)})`, "");
+    lines.push(summaryOf(main.cause, main.confidence), "");
+  }
+  const notes: string[] = [];
+  if (dto.truncated) notes.push(k(`chart.truncated${fall}`));
+  if (!fall && dto.window.samples.length > 0 && freezes(dto).length > 0) notes.push(k("md.blank"));
+  if (dto.tests.length) notes.push(k("during_test", { test: k(`test.${dto.tests[0].kind}`) }));
+  if (dto.capture) notes.push(coveredLine(dto.capture));
+  else {
+    const suggestion = noteOf(dto.suspects);
+    if (suggestion) notes.push(suggestion);
+  }
+  for (const note of notes) lines.push(`> ${note}`, "");
 
   lines.push(`### ${k("md.suspects")}`, "");
   dto.suspects.forEach((s, i) => {

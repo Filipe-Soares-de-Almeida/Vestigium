@@ -639,6 +639,11 @@ function blueScreen(): OccurrenceDto {
   });
 }
 
+function withCaveats(o: OccurrenceDto): OccurrenceDto {
+  const test = { id: 1, kind: "MemoryQuick" as const, subject: "Pc" as const, started_ms: o.start_ms - 20_000, ended_ms: o.start_ms + 20_000, outcome: "Clean" as const };
+  return { ...o, truncated: true, tests: [test] };
+}
+
 const FIXTURES = new Map(
   [
     storageFreeze(),
@@ -658,11 +663,14 @@ const FIXTURES = new Map(
 
 /** `?covered=1`: a deep capture covers occurrence 6, as the report of an older capture would. */
 const COVERED = new URLSearchParams(location.search).get("covered") === "1";
+/** `?caveats=1`: every occurrence is cut short and overlaps a Vestigium test, and 6 has a capture. */
+const CAVEATS = new URLSearchParams(location.search).get("caveats") === "1";
 
 export const handlers: Record<string, Handler> = {
   occurrence: (args) => {
-    const found = FIXTURES.get(args.id as number) ?? null;
-    if (!found || !COVERED || found.id !== 6) return found;
+    const plain = FIXTURES.get(args.id as number) ?? null;
+    const found = plain && CAVEATS ? withCaveats(plain) : plain;
+    if (!found || !(COVERED || CAVEATS) || found.id !== 6) return found;
     return {
       ...found,
       capture: {

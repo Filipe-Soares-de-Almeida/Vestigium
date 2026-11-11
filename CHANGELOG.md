@@ -24,6 +24,10 @@ How to use this file:
 
 ### Changed
 
+- The report copied as Markdown now opens with the probable cause and its confidence, and keeps
+  the caveats the screen shows: a window cut short, gaps while the PC was not responding, a
+  Vestigium test running at the time, and a deep capture that covered the minutes. The copied
+  capture result shows its confidence beside the title.
 - The report summary and the capture title no longer state a cause as fact when the engine is
   unsure: a driver holding a core, slow rendering, a maxed-out CPU, full memory or a power or
   thermal limit now read "may have" at low confidence, and at medium confidence too for these

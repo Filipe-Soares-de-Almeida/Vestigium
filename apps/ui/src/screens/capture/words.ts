@@ -596,7 +596,9 @@ export function compareLine(entries: Entry[]): string | null {
 export function resultMarkdown(dto: CaptureDto): string {
   const simple = buildResult(dto, "Simple");
   const tech = buildResult(dto, "Technical");
-  const lines: string[] = [`## ${simple.title}`, "", `${simple.meta}`, ""];
+  const top = conclusionOf(dto, driverRows(dto));
+  const confidence = top.kind === "none" ? "" : ` (${confidenceOf(top.finding)})`;
+  const lines: string[] = [`## ${simple.title}${confidence}`, "", `${simple.meta}`, ""];
   if (simple.main) lines.push(simple.main.summary, "");
   for (const note of tech.notes) lines.push(`> ${note.head}. ${note.body}${note.reason ? ` (${note.reason})` : ""}`, "");
   if (tech.main) {

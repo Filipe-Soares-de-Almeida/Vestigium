@@ -538,6 +538,7 @@
   "ui.occurrence.md.events": "Eventos do Windows",
   "ui.occurrence.md.steps": "O que fazer",
   "ui.occurrence.md.footer": "Relatório gerado pelo Vestigium.",
+  "ui.occurrence.md.blank": "Enquanto o PC não respondia, nada pôde ser lido; as leituras têm lacunas.",
   "ui.occurrence.cause.DriverModule.sub": "identificado pela captura",
   "ui.occurrence.cause.DriverModule.intermediary": "atende outros drivers; a causa pode estar no dispositivo por trás dele",
   "ui.occurrence.cause.Frames.sub": "quadros com renderização lenta",
