@@ -4,7 +4,7 @@ import { formatDuration, formatNumber, formatTime } from "../../lib/format";
 import { t } from "../../lib/i18n.svelte";
 import type { AppFrames, CaptureDto, CaptureNote, DetailLevel, Suspect } from "../../lib/types";
 import { appName, formatDay, formatDayShort, formatList, formatMs, sameDay } from "../occurrence/format";
-import { evidenceLines, type Line, lineFor, stepsOf, type Step, type Texts } from "../occurrence/report";
+import { evidenceLines, isHedged, type Line, lineFor, stepsOf, type Step, type Texts } from "../occurrence/report";
 import {
   alignment,
   conclusionOf,
@@ -155,16 +155,17 @@ function titleOf(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): string
     }
     if (top.kind === "intermediary") return k("title.layer", { name });
     if (level === "Detailed") return count("title.driver.d", row.over, { name, max: usText(row.maxUs) });
-    return k("title.driver", { name });
+    return k(isHedged("Driver", top.finding.confidence) ? "title.driver.maybe" : "title.driver", { name });
   }
   if (top.kind === "app") {
     const name = appName(top.app?.name ?? "");
-    if (!top.app) return k("title.app", { name });
+    const app = isHedged("Frames", top.finding.confidence) ? "title.app.maybe" : "title.app";
+    if (!top.app) return k(app, { name });
     if (level === "Technical") {
       return k("title.app.tech", { exe: top.app.name, hitches: formatNumber(top.app.hitches), frames: formatNumber(top.app.frames), worst: frameText(top.app.worst_ms) });
     }
     if (level === "Detailed") return count("title.app.d", top.app.hitches, { name, worst: frameText(top.app.worst_ms) });
-    return k("title.app", { name });
+    return k(app, { name });
   }
   return k("title.none");
 }
@@ -224,7 +225,7 @@ function summaryOf(dto: CaptureDto, level: DetailLevel, top: ReturnType<typeof c
     const name = top.app ? appName(top.app.name) : "";
     const app = top.app;
     return pick(level, {
-      plain: t("ui.occurrence.summary.Frames", { app: name }),
+      plain: t(`ui.occurrence.summary.Frames${isHedged("Frames", top.finding.confidence) ? ".maybe" : ""}`, { app: name }),
       figures: app
         ? k("summary.app.figures", { hitches: formatNumber(app.hitches), frames: formatNumber(app.frames), worst: frameText(app.worst_ms), median: frameText(app.median_ms) })
         : null,

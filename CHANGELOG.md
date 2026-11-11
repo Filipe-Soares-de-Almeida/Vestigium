@@ -24,6 +24,10 @@ How to use this file:
 
 ### Changed
 
+- The report summary and the capture title no longer state a cause as fact when the engine is
+  unsure: a driver holding a core, slow rendering, a maxed-out CPU, full memory or a power or
+  thermal limit now read "may have" at low confidence, and at medium confidence too for these
+  causes, in English and Portuguese.
 - The Now line and the Today cause line that name the process using the disk now say "probably",
   as the occurrence summary already did, because the per-process disk figure also counts data
   that never reaches the disk, such as pipe and inter-process traffic.

@@ -1,4 +1,4 @@
-// Eight occurrences for the report in the browser, #/occurrence/1 to 8 (8 is a fall), all today; any other id is gone.
+// Fourteen occurrences for the report in the browser, #/occurrence/1 to 14 (8, 13 and 14 are falls), all today; any other id is gone.
 import type {
   Cause,
   Columns,
@@ -497,6 +497,52 @@ function unclear(): OccurrenceDto {
   });
 }
 
+/** A light freeze on a calm PC with one suspect, for the sentences each confidence has to word. */
+function calmFreeze(id: number, start: number, suspects: Suspect[], samples = true): OccurrenceDto {
+  const calm = steady(id, 12, 52);
+  return build({
+    id,
+    start,
+    end: start + 500,
+    kind: "Freeze",
+    severity: "Light",
+    triggers: [{ Freeze: { start_ms: start, end_ms: start + 500, lag_ms: 520 } }],
+    moment: (rel) => (!samples || rel === 0 ? null : { ...calm(), lag: rel === 1 ? 520 : undefined }),
+    procs: () => (samples ? [proc(4412, "Browser.exe", 4, 2.6 * GB, 300 * 1024)] : []),
+    suspects,
+    facts: [
+      [0, { FreezeStarted: { duration_ms: 520 } }],
+      [500, "FreezeEnded"],
+    ],
+  });
+}
+
+/** A driver on one core for 30 % of it: low confidence. */
+function lowDriver(): OccurrenceDto {
+  const start = at(9, 20, 12);
+  return calmFreeze(9, start, [
+    suspect({ Driver: { core: 0 } }, "Low", [m(start - 3000, "CoreDpcIsrPct", 31, 25, "0")], ["EnableSensitiveMode", "DeepCapture"]),
+  ]);
+}
+
+/** The performance ceiling below normal with nothing else to show: low confidence. */
+function lowThrottling(): OccurrenceDto {
+  const start = at(10, 5, 40);
+  return calmFreeze(10, start, [
+    suspect("Throttling", "Low", [m(start - 4000, "PerfLimitPct", 88, 95)], ["CheckCooling", "CheckPowerPlan"]),
+  ]);
+}
+
+/** A capture found slow frames in one app: medium confidence. */
+function mediumFrames(): OccurrenceDto {
+  const start = at(11, 15, 2);
+  return calmFreeze(11, start, [
+    suspect({ Frames: { app: "Starfall.exe" } }, "Medium", [
+      { Frames: { app: "Starfall.exe", frames: 5400, hitches: 38, worst_ms: 96, median_ms: 8.3 } },
+    ], []),
+  ]);
+}
+
 /** Seven stutters in sensitive mode while a video conversion held every core. */
 function stutters(): OccurrenceDto {
   const start = at(12, 40, 10);
@@ -589,9 +635,19 @@ function blueScreen(): OccurrenceDto {
 }
 
 const FIXTURES = new Map(
-  [storageFreeze(), appHang(), diskEpisode(), memoryEpisode(), reported(), unclear(), stutters(), blueScreen()].map(
-    (o) => [o.id, o],
-  ),
+  [
+    storageFreeze(),
+    appHang(),
+    diskEpisode(),
+    memoryEpisode(),
+    reported(),
+    unclear(),
+    stutters(),
+    blueScreen(),
+    lowDriver(),
+    lowThrottling(),
+    mediumFrames(),
+  ].map((o) => [o.id, o]),
 );
 
 /** `?covered=1`: a deep capture covers occurrence 6, as the report of an older capture would. */

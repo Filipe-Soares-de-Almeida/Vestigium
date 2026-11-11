@@ -3,6 +3,7 @@ import { formatClock, formatDuration, formatNumber, formatPercent, formatTime } 
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   Cause,
+  Confidence,
   CrashKind,
   DetailLevel,
   Evidence,
@@ -402,8 +403,17 @@ function suspectView(s: Suspect, o: Occurrence, level: DetailLevel): SuspectView
   };
 }
 
-function summaryOf(cause: Cause): string {
-  if (typeof cause === "string") return k(`summary.${cause}`);
+/** Causes that name a mechanism: below High they are worded as a possibility, not a fact. */
+const MECHANISM: readonly CauseKind[] = ["Driver", "DriverModule", "Frames", "Throttling", "Cpu", "Memory"];
+
+/** Whether a sentence for this cause must say it "may" be so at this confidence. */
+export function isHedged(kind: CauseKind, confidence: Confidence): boolean {
+  return confidence !== "High" && MECHANISM.includes(kind);
+}
+
+function summaryOf(cause: Cause, confidence: Confidence): string {
+  const maybe = isHedged(causeKind(cause), confidence) ? ".maybe" : "";
+  if (typeof cause === "string") return k(`summary.${cause}${maybe}`);
   if ("Storage" in cause) {
     const disk = cause.Storage.disk;
     return k("summary.Storage", { disk: disk ? k("disk_the", { disk: diskName(disk) }) : k("disk_any") });
@@ -420,22 +430,22 @@ function summaryOf(cause: Cause): string {
   }
   if ("Memory" in cause) {
     const process = cause.Memory.process;
-    return [k("summary.Memory"), process ? k("summary.Memory.who", { app: appName(process) }) : ""]
+    return [k(`summary.Memory${maybe}`), process ? k("summary.Memory.who", { app: appName(process) }) : ""]
       .filter(Boolean)
       .join(" ");
   }
   if ("Cpu" in cause) {
     const apps = cause.Cpu.processes.map(appName);
-    return [k("summary.Cpu"), apps.length ? kn("summary.Cpu.who", apps.length, { apps: formatList(apps) }) : ""]
+    return [k(`summary.Cpu${maybe}`), apps.length ? kn("summary.Cpu.who", apps.length, { apps: formatList(apps) }) : ""]
       .filter(Boolean)
       .join(" ");
   }
-  if ("Driver" in cause) return k("summary.Driver");
+  if ("Driver" in cause) return k(`summary.Driver${maybe}`);
   if ("DriverModule" in cause) {
     const { module, intermediary } = cause.DriverModule;
-    return k(intermediary ? "summary.DriverModule.intermediary" : "summary.DriverModule", { module });
+    return k(intermediary ? "summary.DriverModule.intermediary" : `summary.DriverModule${maybe}`, { module });
   }
-  if ("Frames" in cause) return k("summary.Frames", { app: appName(cause.Frames.app) });
+  if ("Frames" in cause) return k(`summary.Frames${maybe}`, { app: appName(cause.Frames.app) });
   if ("BlueScreen" in cause) return k("summary.BlueScreen", { code: bugcheck(cause.BlueScreen.code) });
   if ("PowerCut" in cause) {
     return [k("summary.PowerCut"), cause.PowerCut.no_dump ? k("summary.PowerCut.no_dump") : ""]
@@ -656,7 +666,7 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
     cause: causeKind(main.cause),
     main: suspectView(main, dto, level),
     others: rest.map((s) => suspectView(s, dto, level)),
-    summary: summaryOf(main.cause),
+    summary: summaryOf(main.cause, main.confidence),
     note: noteOf(dto.suspects),
     steps: stepsOf(dto.suspects),
     facts: dto.facts.map((f) => ({
@@ -678,7 +688,7 @@ export function reportMarkdown(dto: OccurrenceDto): string {
   if (dto.sensitive) head.push(k("sensitive"));
   lines.push(`## ${headline(dto, "Simple")}`, "", head.join(" · "), "");
   const main = dto.suspects[0];
-  if (main) lines.push(summaryOf(main.cause), "");
+  if (main) lines.push(summaryOf(main.cause, main.confidence), "");
   const note = noteOf(dto.suspects);
   if (note) lines.push(`> ${note}`, "");
 
