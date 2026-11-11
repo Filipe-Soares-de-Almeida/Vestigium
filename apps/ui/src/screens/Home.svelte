@@ -5,14 +5,17 @@
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
   import ToneMark from "../components/ToneMark.svelte";
   import { formatDuration, formatTime } from "../lib/format";
+  import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { buildGroups, entryHref } from "../lib/groups";
   import { t, tn } from "../lib/i18n.svelte";
+  import { passState } from "../lib/monitor";
   import { morph } from "../lib/morph.svelte";
   import { href } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
   import { today } from "../lib/today.svelte";
+  import { notCurrent } from "./health/words";
   import { occurrenceMark } from "./today/text";
 
   const status = $derived(shellStatus());
@@ -29,7 +32,7 @@
         ? { line: t("ui.home.health.failed"), kind: "no_reading" }
         : { line: t("ui.common.loading"), kind: null };
     }
-    if (open === 0) return { line: t("ui.home.health.none"), kind: "ok" };
+    if (open === 0) return notCurrent(passState(app.link, Date.now())) ?? { line: t("ui.home.health.none"), kind: "ok" };
     const line = critical
       ? `${tn("ui.shell.nav.health.open", open)} · ${tn("ui.shell.nav.health.critical", critical)}`
       : tn("ui.shell.nav.health.open", open);

@@ -575,6 +575,15 @@ How to use this file:
   today's marks", "No reading of the tweaks" or "No reading of the health checks" with a neutral mark
   and the side pane leaves the counts out; while the first read is still under way the card shows
   Loading and no mark. A later failed refresh keeps the counts already read.
+- The Health screen no longer says "All normal" or marks a check as fine when it was not read. A check
+  the last health pass could not read, such as the antivirus query when Windows does not answer, or
+  a disk that gave no answer to the health query, now shows "Not verified" with a neutral mark. When
+  the hourly health check has not finished for three hours, every check it covers shows "Not verified
+  since" the time of the last one that finished, the opening sentence says so instead of "All normal",
+  and the line under the title shows the last completed check and the attempt that failed. A disk
+  that is a hard drive left alone because it was idle is not counted as unread. When the monitor does not
+  answer, the screen says the list is only the last one saved. The Memory screen, the Today health card
+  and the side pane follow the same marks, and a monitor that is stopped adds nothing.
 
 ### Security
 

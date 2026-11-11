@@ -1,4 +1,4 @@
-import type { AgentStatus, FindingKind, MonitorSource, SourceFailure } from "./types";
+import type { AgentLink, AgentStatus, FindingKind, MonitorSource, SourceFailure } from "./types";
 
 /** A health check whose last success is this old, with a later attempt failed, counts as not verified. */
 export const HEALTH_STALE_MS = 3 * 60 * 60_000;
@@ -25,7 +25,26 @@ export function failingSince(failing: SourceFailure[]): number | null {
   return failing.length ? Math.min(...failing.map((f) => f.since_ms)) : null;
 }
 
-/** Whether the pass could not read this kind of finding. */
-export function unreadKind(status: AgentStatus | null, kind: FindingKind): boolean {
-  return status?.monitor.health_unread.includes(kind) ?? false;
+/** How the checks of the hourly pass stand, as the Health screen needs them. */
+export interface PassState {
+  /** No pass has finished lately, or the monitor does not answer: nothing it says is current. */
+  stale: boolean;
+  /** When the last pass finished, if that is known; `null` when the monitor is silent. */
+  since: number | null;
+  /** The monitor does not answer, so the list is only the last one saved. */
+  silent: boolean;
+  /** Kinds the last finished pass could not read. */
+  unread: FindingKind[];
+}
+
+/**
+ * The state of the hourly pass from what the watcher said last; `null` when it says nothing about
+ * it (stopped, not the same version, or not heard yet), so the screen shows nothing new.
+ */
+export function passState(link: AgentLink | null, now: number): PassState | null {
+  if (link === null) return null;
+  if (link.link === "silent") return { stale: true, since: null, silent: true, unread: [] };
+  if (link.link !== "running") return null;
+  const since = unverifiedSince(link, now);
+  return { stale: since !== null, since, silent: false, unread: link.monitor.health_unread };
 }

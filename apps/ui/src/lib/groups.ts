@@ -1,8 +1,10 @@
 import type { IconName } from "../components/Icon.svelte";
-import { areaState, AREAS } from "../screens/health/areas";
+import { type AreaState, areaState, AREAS, statusKindOf } from "../screens/health/areas";
 import { formatBytes } from "../screens/occurrence/format";
+import { app } from "./app.svelte";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
+import { passState } from "./monitor";
 import { type DumpGroup, href, type Route, type TweakGroup } from "./router.svelte";
 import type { StatusKind } from "../components/StatusMark.svelte";
 import { keyOf, tweaks } from "./tweaks.svelte";
@@ -83,8 +85,11 @@ const fromHistory = (r: Route) => (r.screen === "occurrence" || r.screen === "pe
 const onHistory = (r: Route) => r.screen === "history" || fromHistory(r);
 const onHealth = (area: string | null) => (r: Route) => r.screen === "health" && (r.area ?? null) === area;
 const onTests = (device: string | null) => (r: Route) => r.screen === "tests" && (r.device ?? null) === device;
-const mark = (concern: "Critical" | "Attention" | "Ok" | "Unknown"): StatusKind | undefined =>
-  concern === "Critical" ? "critical" : concern === "Attention" ? "attention" : undefined;
+/** What an area shows in the pane: only what needs a look, which includes what was not verified. */
+const mark = (state: AreaState): StatusKind | undefined => {
+  const kind = statusKindOf(state.mark, state.why);
+  return kind === "critical" || kind === "attention" || kind === "unverified" || kind === "silent" ? kind : undefined;
+};
 
 const DUMP_ICON: Record<DumpGroup, IconName> = { blue: "pc", live: "chip", app: "app" };
 
@@ -113,7 +118,8 @@ function tweakListOf(r: Route): TweakGroup | null {
 /** Builds every group from what the stores hold now; read it inside `$derived` to follow them. */
 export function buildGroups(): Group[] {
   const disks = hwtests.dto?.disks ?? [];
-  const areas = health.dto ? AREAS.map((a) => areaState(a, health.dto!)) : [];
+  const pass = passState(app.link, Date.now());
+  const areas = health.dto ? AREAS.map((a) => areaState(a, health.dto!, pass)) : [];
   const dumpBytes = dumps.dto?.space_bytes ?? 0;
   const dumpEntries = dumps.dto ? entries(dumps.dto) : [];
   const occurrences = today.occurrences.length;
@@ -138,7 +144,7 @@ export function buildGroups(): Group[] {
     dumps: dumpBytes ? t("ui.group.dumps.sub_n", { size: formatBytes(dumpBytes) }) : undefined,
     settings: t("ui.group.settings.sub_n", { version: updates.version }),
   };
-  const diskAreaMark = areas.find((a) => a.area.id === "disks")?.mark;
+  const diskArea = areas.find((a) => a.area.id === "disks");
   const g = (key: GroupKey, icon: IconName, extra: Partial<Group> & Pick<Group, "items">): Group => ({
     key,
     icon,
@@ -177,7 +183,7 @@ export function buildGroups(): Group[] {
           href: href.health(a.id),
           label: t(`ui.health.area.${a.id}`),
           icon: a.icon,
-          status: areas[i] ? mark(areas[i].mark) : undefined,
+          status: areas[i] ? mark(areas[i]) : undefined,
           match: onHealth(a.id),
         })),
       ],
@@ -190,7 +196,7 @@ export function buildGroups(): Group[] {
           href: href.health("disks"),
           label: t("ui.item.disk_alerts"),
           icon: "health",
-          status: diskAreaMark ? mark(diskAreaMark) : undefined,
+          status: diskArea ? mark(diskArea) : undefined,
           match: onHealth("disks"),
         },
         ...disks.map((d) => ({

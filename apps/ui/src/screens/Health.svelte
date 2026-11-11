@@ -10,29 +10,43 @@
   import RowList from "../components/RowList.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
   import { app } from "../lib/app.svelte";
+  import { formatTime } from "../lib/format";
   import { health } from "../lib/health.svelte";
   import { t, tn } from "../lib/i18n.svelte";
+  import { passState } from "../lib/monitor";
   import { relatedLinks } from "../lib/related.svelte";
   import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
-  import { areaOf, AREAS, areaState, findArea, type Mark } from "./health/areas";
+  import { areaOf, AREAS, areaState, findArea, statusKindOf } from "./health/areas";
   import Finding from "./health/Finding.svelte";
   import Scan from "./health/Scan.svelte";
   import { formatDayShort } from "./occurrence/format";
-  import { checkText, findingTitle, lede, when } from "./health/words";
+  import { areaUnknownText, checkText, findingTitle, lede, markWord, when } from "./health/words";
 
   let { area: areaId }: { area: string | null } = $props();
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const area = $derived(findArea(areaId));
-  const states = $derived(health.dto ? AREAS.map((a) => areaState(a, health.dto!)) : []);
-  const current = $derived(area && health.dto ? areaState(area, health.dto) : null);
+  /** How the hourly check stands, from the watcher's last answer; nothing when it says nothing. */
+  const pass = $derived(passState(app.link, Date.now()));
+  const states = $derived(health.dto ? AREAS.map((a) => areaState(a, health.dto!, pass)) : []);
+  const current = $derived(area && health.dto ? areaState(area, health.dto, pass) : null);
   const checks = $derived(states.reduce((n, s) => n + s.checks.filter((c) => c.mark === "Ok").length, 0));
-  const worst: StatusKind = $derived(health.critical ? "critical" : health.attention ? "attention" : "ok");
+  /** Some area is unknown because a check was not read or is out of date, not because it needs a scan. */
+  const unverified = $derived(states.some((s) => s.mark === "Unknown" && s.why !== null && s.why !== "scan"));
+  const worst: StatusKind = $derived(
+    health.critical ? "critical" : health.attention ? "attention" : pass?.silent ? "silent" : unverified ? "unverified" : "ok",
+  );
 
-  const statusOf = (mark: Mark): StatusKind =>
-    mark === "Critical" ? "critical" : mark === "Attention" ? "attention" : mark === "Unknown" ? "info" : "ok";
-  const markWord = (mark: Mark): string => t(`ui.health.mark.${mark}`);
+  /** The line under the title: when the hourly check last finished, and a failed attempt after it. */
+  const checkLine = $derived.by((): string | null => {
+    const monitor = app.monitor;
+    if (monitor === null || monitor.health_attempt_ms === null) return null;
+    const { health_attempt_ms: attempt, health_ok_ms: ok } = monitor;
+    if (ok !== null && ok >= attempt) return t("ui.health.scan.last_ok", { when: when(ok) });
+    if (ok === null) return t("ui.health.scan.never_finished", { attempt: formatTime(attempt) });
+    return t("ui.health.scan.failed", { when: when(ok), attempt: formatTime(attempt) });
+  });
 
   /** The latest of what happened: alerts that opened, alerts that closed and the last full scan. */
   const history = $derived.by(() => {
@@ -84,8 +98,8 @@
 
 {#snippet areaMeta()}
   {#if current}
-    {@const kind = statusOf(current.mark)}
-    <StatusMark {kind} word={markWord(current.mark)} />
+    {@const kind = statusKindOf(current.mark, current.why)}
+    <StatusMark {kind} word={markWord(current.mark, current.why)} />
     {#if current.open.length}<span>{tn("ui.health.area.points", current.open.length)}</span>{/if}
   {/if}
 {/snippet}
@@ -95,7 +109,7 @@
 {:else}
   <PageHead
     title={t("ui.health.title")}
-    sub={health.dto?.last_scan_ms ? t("ui.health.scan.last", { when: when(health.dto.last_scan_ms) }) : t("ui.health.scan.never")}
+    sub={checkLine ?? (health.dto?.last_scan_ms ? t("ui.health.scan.last", { when: when(health.dto.last_scan_ms) }) : t("ui.health.scan.never"))}
   />
 {/if}
 
@@ -110,14 +124,14 @@
   {#if current.open.length === 0}
     <p class="lede">{t("ui.health.area.none")}</p>
   {/if}
-  {#if current.checks.some((c) => c.mark === "Unknown")}
+  {#if current.checks.some((c) => c.why === "scan")}
     <Scan {level} />
   {/if}
   <Block title={t("ui.health.area.ok_title")}>
     {#if current.checks.length}
       <ul class="okl">
         {#each current.checks as check (check.kind)}
-          <li><StatusMark kind={check.mark === "Ok" ? "ok" : "info"} size={20} reveal /><span>{checkText(check)}</span></li>
+          <li><StatusMark kind={statusKindOf(check.mark, check.why)} size={20} reveal /><span>{checkText(check, pass)}</span></li>
         {/each}
       </ul>
     {:else}
@@ -129,14 +143,14 @@
     <p class="lede">{t("ui.health.lede.first")}</p>
   {:else}
     <p class="lede">
-      <span class="lead"><StatusMark kind={worst} word={markWord(worst === "critical" ? "Critical" : worst === "attention" ? "Attention" : "Ok")} /></span>
-      {#each lede(health.dto, level, checks) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
+      <span class="lead"><StatusMark kind={worst} word={worst === "silent" || worst === "unverified" ? undefined : markWord(worst === "critical" ? "Critical" : worst === "attention" ? "Attention" : "Ok")} /></span>
+      {#each lede(health.dto, level, checks, pass) as part, i (i)}{#if part.bold}<b>{part.text}</b>{:else}{part.text}{/if}{/each}
     </p>
   {/if}
   <Block title={t("ui.health.areas_label")}>
     <RowList>
       {#each states as s (s.area.id)}
-        {@const kind = statusOf(s.mark)}
+        {@const kind = statusKindOf(s.mark, s.why)}
         <RowCard
           href={href.health(s.area.id)}
           icon={s.area.icon}
@@ -146,11 +160,11 @@
             : s.open.length
               ? findingTitle(s.open[0], level)
               : s.mark === "Unknown"
-                ? t("ui.health.area.unknown")
+                ? areaUnknownText(s.why, pass)
                 : tn("ui.health.area.fine", s.checks.length)}
         >
           {#snippet right()}
-            <StatusMark {kind} reveal word={markWord(s.mark)} />
+            <StatusMark {kind} reveal word={markWord(s.mark, s.why)} />
             <span class="count">{s.open.length ? tn("ui.health.area.points", s.open.length) : ""}</span>
           {/snippet}
         </RowCard>
