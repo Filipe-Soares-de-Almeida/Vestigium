@@ -47,6 +47,16 @@ jobs:
           $name = if ($env:VERSION) { "Vestigium_$($env:VERSION)_x64-setup.exe" } else { '*-setup.exe' }
           if (-not (Get-ChildItem target/release/bundle/nsis -Filter $name)) { throw "The installer $name was not built." }
 
+      - name: Check that only administrators can change the installed program
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe')
+          if ($setup.Count -ne 1) { throw "Expected one installer, found $($setup.Count)." }
+          $install = Start-Process $setup[0].FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "The installer exited with code $($install.ExitCode)." }
+          ./tools/check-install-folder.ps1
+          # A check that the installed files carry a valid signature goes here once the builds are signed.
+
       - name: Keep the unsigned installer for the signing job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
