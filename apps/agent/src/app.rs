@@ -35,6 +35,7 @@ use crate::orphan::release_orphaned_capture;
 use crate::readings::windows_source_set;
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
+use crate::service::Epoch;
 use crate::tray::{Action, Level, Tray};
 use crate::{autostart, paths, power, shutdown};
 
@@ -117,8 +118,9 @@ pub struct Shared {
     /// The pressure episodes of the last ten minutes, ended or under way.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     pub settings: Arc<Mutex<Settings>>,
-    /// Set when the history was cleared; the sampler drops what it still holds in memory.
-    pub cleared: Arc<AtomicBool>,
+    /// Counts the clears of the history; the sampler drops what it holds in memory when it moves,
+    /// and the storage thread what was queued before it.
+    pub epoch: Arc<Epoch>,
     /// Late probe wakes of the last fifteen minutes, kept while sensitive mode is on.
     pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     /// Where the helper leaves finished deep captures.
@@ -262,10 +264,9 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             let Some(store) = store else {
                 return error(ErrorCode::Failed, "the history database is not open");
             };
-            if let Err(err) = store.clear_history() {
+            if let Err(err) = shared.epoch.clear(|| store.clear_history()) {
                 return error(ErrorCode::Failed, err);
             }
-            shared.cleared.store(true, Ordering::Release);
             lock(&shared.readings).clear();
             lock(&shared.programs).clear();
             lock(&shared.pressure).clear();
@@ -437,7 +438,7 @@ fn keep_pipe_serving(
     }
 }
 
-fn panic_text(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_text(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|text| text.to_string())
@@ -478,7 +479,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
-        cleared: Arc::new(AtomicBool::new(false)),
+        epoch: Arc::new(Epoch::default()),
         hiccups: Arc::new(Mutex::new(VecDeque::new())),
         captures_dir: data_dir.join("captures"),
         scans_dir: data_dir.join("scans"),
@@ -548,7 +549,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 pressure: shared.pressure.clone(),
                 hiccups: shared.hiccups.clone(),
                 settings: shared.settings.clone(),
-                cleared: shared.cleared.clone(),
+                epoch: shared.epoch.clone(),
                 health_due: shared.health_due.clone(),
                 ring_path: Some(data_dir.join("blackbox.ring")),
                 source_set: windows_source_set(),
@@ -804,7 +805,7 @@ pub(crate) mod tests {
             programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
-            cleared: Arc::new(AtomicBool::new(false)),
+            epoch: Arc::new(Epoch::default()),
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             captures_dir: PathBuf::from("captures"),
             scans_dir: PathBuf::from("scans"),
@@ -1189,7 +1190,7 @@ pub(crate) mod tests {
             handle(Request::ClearHistory, &shared, Some(&mut store)),
             Response::Done
         );
-        assert!(shared.cleared.load(Ordering::Acquire));
+        assert_eq!(shared.epoch.current(), 1);
         assert_eq!(lock(&shared.readings).iter().count(), 0);
         assert_eq!(*lock(&shared.recent), RecentState::default());
     }
@@ -1227,7 +1228,7 @@ pub(crate) mod tests {
                 ..
             }
         ));
-        assert!(!shared.cleared.load(Ordering::Acquire));
+        assert_eq!(shared.epoch.current(), 0, "a failed clear starts no epoch");
         assert_eq!(lock(&shared.readings).iter().count(), 1);
     }
 

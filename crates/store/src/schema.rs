@@ -308,6 +308,14 @@ impl Store {
         Ok(tx.commit()?)
     }
 
+    /// The file this connection writes; `None` for an in-memory or temporary database.
+    pub fn path(&self) -> Option<PathBuf> {
+        self.conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+    }
+
     /// Opens an existing database without writing to it, as the UI does while the agent runs.
     pub fn open_read_only(path: &Path) -> Result<Store, StoreError> {
         if !path.is_file() {
@@ -544,6 +552,27 @@ fn migrate(conn: &mut Connection, from: u32) -> Result<(), StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_read_only_connection_sees_what_the_writer_commits_and_cannot_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let reader = Store::open_read_only(&writer.path().unwrap()).unwrap();
+        assert!(reader.bookmark_xml().unwrap().is_none());
+
+        writer
+            .append_batch(&Batch {
+                bookmark_xml: Some("<BookmarkList/>".to_string()),
+                ..Batch::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            reader.bookmark_xml().unwrap().as_deref(),
+            Some("<BookmarkList/>")
+        );
+        assert!(reader.conn.execute("DELETE FROM gap", []).is_err());
+    }
 
     #[test]
     fn only_wal_is_accepted_as_the_journal_mode() {

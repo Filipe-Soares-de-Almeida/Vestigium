@@ -15,7 +15,10 @@ mod power;
 mod readings;
 mod sampler;
 mod sensitive;
+mod service;
 mod shutdown;
+#[cfg(test)]
+mod testing;
 mod tray;
 
 use vestigium_i18n::{Catalog, Lang};

@@ -85,6 +85,10 @@ How to use this file:
 
 ### Fixed
 
+- The monitor no longer leaves a hole in its samples while the history database is busy: the
+  batches are now written by a thread of their own, so a write that waits for the database no
+  longer delays the next second's reading. Clearing the history also discards what was still waiting
+  to be written, so a batch queued just before the clear no longer brings old data back after it.
 - Once the crash dump of a blue screen is read, the report page and the copied report use the
   dump's own next steps instead of the generic driver update. When the dump blames a Windows
   component that serves other drivers, such as storport.sys, the Dumps screen no longer says to

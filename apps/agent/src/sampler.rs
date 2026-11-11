@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vestigium_collect::{
     BlackboxRing, CollectError, Delivered, EventSubscription, PdhReading, Waited, Wake,
@@ -21,7 +21,7 @@ use vestigium_core::{
     Settings, Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
-use vestigium_store::{Batch, Batcher, Segment, Store, StoreError};
+use vestigium_store::{Batch, Batcher, Segment, Store};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use vestigium_core::health::Concern;
@@ -34,6 +34,7 @@ use crate::health::{HealthPass, PassNow};
 use crate::power::PowerNotice;
 use crate::readings::{Backoff, Readings, Source, SourceHealths, SourceSet, Waiter};
 use crate::sensitive::SensitiveMode;
+use crate::service::{BATCHES_KEPT, Epoch, Job, Links, Queued, Service, shed_into};
 use crate::shutdown;
 
 const TICK_MS: f64 = 1000.0;
@@ -60,8 +61,9 @@ const DISK_BUSY_MS: i64 = 60_000;
 const FIRST_HEALTH_AFTER_MS: i64 = 60_000;
 /// How long a late probe wake stays available to a capture that ends later: the longest capture.
 const HICCUPS_KEPT_MS: i64 = CAPTURE_MINUTES_MAX as i64 * 60_000;
-/// Batches kept for another try after a failed write; past this the oldest loses its samples.
-const BATCHES_KEPT: usize = 3;
+/// How long a pause, a suspend or the end of the thread waits for the storage thread to write
+/// what was handed to it.
+const DRAIN_WAIT: Duration = Duration::from_secs(1);
 /// How long a failed Event Log subscription waits before the next attempt.
 const SUBSCRIBE_RETRY_MS: i64 = 60_000;
 /// Occurrences and episodes kept for another try after a failed write; each one is large.
@@ -131,8 +133,8 @@ pub struct Wiring {
     pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     /// Retention is read from here at every prune, so a change applies on the next one.
     pub settings: Arc<Mutex<Settings>>,
-    /// Set by the pipe after it cleared the history.
-    pub cleared: Arc<AtomicBool>,
+    /// Counts the clears of the history; the pipe advances it, the sampler forgets what it held.
+    pub epoch: Arc<Epoch>,
     /// Set by the pipe after it stored a health scan.
     pub health_due: Arc<AtomicBool>,
     /// The black box file that outlives a fall; `None` keeps none.
@@ -144,21 +146,37 @@ pub struct Wiring {
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
 pub fn run_sampler(store: Store, wiring: Wiring) -> io::Result<SamplerHandle> {
     let (done_tx, done_rx) = mpsc::channel();
+    let (service, db) = start_storage(store, &wiring)?;
     thread::Builder::new()
         .name("sampler".to_string())
         .spawn(move || {
             let gate = wiring.gate.clone();
-            let mut sampler = Sampler::new(store, wiring);
+            let mut sampler = Sampler::new(service, db, wiring);
             sampler.run(&gate);
             sampler.take_events();
             sampler.settle_fall(wall_ms(), true);
             sampler.leave(GapReason::Stopped);
             sampler.close_ring();
+            sampler.service.stop(DRAIN_WAIT);
             let _ = done_tx.send(());
         })?;
     Ok(SamplerHandle {
         done: Mutex::new(done_rx),
     })
+}
+
+/// Hands the history to a storage thread; the file's path comes back for the sampler's own reads.
+fn start_storage(store: Store, wiring: &Wiring) -> io::Result<(Service, Option<PathBuf>)> {
+    let db = store.path();
+    let service = Service::start(
+        store,
+        Links {
+            status: wiring.status.clone(),
+            epoch: wiring.epoch.clone(),
+            health_due: wiring.health_due.clone(),
+        },
+    )?;
+    Ok((service, db))
 }
 
 /// True when the wall clock entered an hour that has not been pruned yet.
@@ -167,6 +185,13 @@ pub fn prune_due(pruned_hour: Option<i64>, now_ms: i64) -> bool {
 }
 
 struct Sampler {
+    /// The storage thread, which owns the write connection.
+    service: Service,
+    /// Jobs the full queue did not take, oldest first, tried again every tick.
+    backlog: VecDeque<Queued>,
+    epoch: Arc<Epoch>,
+    /// The epoch of the history this sampler holds in memory.
+    seen_epoch: u64,
     store: Store,
     batcher: Batcher,
     blackbox: Blackbox,
@@ -186,14 +211,11 @@ struct Sampler {
     pressure: Arc<Mutex<Vec<PressureSpan>>>,
     hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     settings: Arc<Mutex<Settings>>,
-    cleared: Arc<AtomicBool>,
     health_due: Arc<AtomicBool>,
     /// Events and the bookmark that covers them, waiting for the next batch.
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
     gaps: Vec<Gap>,
-    /// Batches whose write failed, oldest first, tried again with the next flush.
-    waiting: VecDeque<Batch>,
     /// Occurrences and episodes whose write failed, oldest first, tried again at the next `keep`.
     unstored: VecDeque<Output>,
     /// How often a batch is written, and when the last one was.
@@ -211,8 +233,6 @@ struct Sampler {
     health: HealthPass<WindowsHealth>,
     /// When the first health pass is due; afterwards a pass runs with every hourly prune.
     first_health_ms: Option<i64>,
-    /// Set until the first stored batch with events has asked for a health pass.
-    event_pass_pending: bool,
     /// When each disk last had I/O.
     disk_active_ms: HashMap<String, i64>,
     commit_limit_bytes: u64,
@@ -277,7 +297,11 @@ impl Sources {
 }
 
 impl Sampler {
-    fn new(store: Store, wiring: Wiring) -> Sampler {
+    fn new(service: Service, db: Option<PathBuf>, wiring: Wiring) -> Sampler {
+        let store = db
+            .as_deref()
+            .and_then(|path| Store::open(path).ok())
+            .expect("the history opens a second time");
         let now = wall_ms();
         let opened = wiring.ring_path.as_deref().map(BlackboxRing::open);
         let machine = store.machine().ok().flatten().unwrap_or(MachineInfo {
@@ -286,6 +310,10 @@ impl Sampler {
             disks: Vec::new(),
         });
         let mut sampler = Sampler {
+            service,
+            backlog: VecDeque::new(),
+            seen_epoch: wiring.epoch.current(),
+            epoch: wiring.epoch,
             batcher: Batcher::new(wiring.flush),
             blackbox: Blackbox::new(machine, wiring.timing),
             probe_rx: wiring.probe_rx,
@@ -304,12 +332,10 @@ impl Sampler {
             pressure: wiring.pressure,
             hiccups: wiring.hiccups,
             settings: wiring.settings,
-            cleared: wiring.cleared,
             health_due: wiring.health_due,
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
-            waiting: VecDeque::new(),
             unstored: VecDeque::new(),
             flush_ms: i64::try_from(wiring.flush.as_millis()).unwrap_or(i64::MAX),
             last_write_ms: now,
@@ -321,7 +347,6 @@ impl Sampler {
             own_cpu: CpuWindow::new(OWN_CPU_SPAN_MS),
             health: HealthPass::new(WindowsHealth),
             first_health_ms: Some(now + FIRST_HEALTH_AFTER_MS),
-            event_pass_pending: true,
             disk_active_ms: HashMap::new(),
             commit_limit_bytes: 0,
             critical_findings: 0,
@@ -500,6 +525,7 @@ impl Sampler {
     fn tick(&mut self, sources: &mut Sources, woke: f64, sampler_lag_ms: f32, ticks: usize) {
         let ts_ms = wall_ms();
         self.forget_if_cleared();
+        self.push_backlog();
         self.blackbox.cut_gaps_to(ts_ms);
         self.watch_clock(ts_ms, woke);
         let sensitive = self.sensitive.is_on();
@@ -923,12 +949,15 @@ impl Sampler {
         self.gaps.clear();
         if self.bookmark_xml.is_none() {
             self.bookmark_xml = self
-                .waiting
+                .backlog
                 .iter()
                 .rev()
-                .find_map(|b| b.bookmark_xml.clone());
+                .find_map(|queued| match &queued.job {
+                    Job::Batch(batch) => batch.bookmark_xml.clone(),
+                    _ => None,
+                });
         }
-        self.waiting.clear();
+        self.backlog.clear();
         self.unstored.clear();
         self.blackbox = self.blackbox.emptied();
         if let Some(ring) = self.ring.as_mut() {
@@ -1082,6 +1111,7 @@ impl Sampler {
         lock(&self.now).pressure.clear();
         *lock(&self.pressure) = self.blackbox.recent_pressure();
         self.flush_final();
+        self.drain();
         if let Some(ring) = &self.ring
             && let Err(err) = ring.flush()
         {
@@ -1106,13 +1136,15 @@ impl Sampler {
     /// True when events, gaps or a failed batch have waited a whole interval for samples that
     /// did not come.
     fn events_due(&self, now_ms: i64) -> bool {
-        (!self.events.is_empty() || !self.gaps.is_empty() || !self.waiting.is_empty())
+        (!self.events.is_empty() || !self.gaps.is_empty() || self.service.is_retrying())
             && now_ms.saturating_sub(self.last_write_ms) >= self.flush_ms
     }
 
     /// Drops what was buffered before a clear that finished since the last look.
     fn forget_if_cleared(&mut self) {
-        if self.cleared.swap(false, Ordering::AcqRel) {
+        let epoch = self.epoch.current();
+        if epoch != self.seen_epoch {
+            self.seen_epoch = epoch;
             self.forget(wall_ms());
         }
     }
@@ -1131,8 +1163,8 @@ impl Sampler {
         self.write(segments);
     }
 
-    /// Writes segments, events with their bookmark, and gaps in one transaction; a batch that
-    /// fails waits for the next flush.
+    /// Hands segments, events with their bookmark, and gaps to the storage thread as one batch; a
+    /// batch with nothing new still goes while earlier ones wait for another try.
     fn write(&mut self, segments: Vec<Segment>) {
         self.last_write_ms = wall_ms();
         let batch = Batch {
@@ -1141,64 +1173,75 @@ impl Sampler {
             bookmark_xml: self.bookmark_xml.take(),
             gaps: mem::take(&mut self.gaps),
         };
-        if !batch.is_empty() {
-            self.waiting.push_back(batch);
+        if !batch.is_empty() || self.service.is_retrying() {
+            self.send(Job::Batch(batch));
+        } else {
+            self.push_backlog();
         }
-        self.send_waiting();
     }
 
-    /// Writes the waiting batches oldest first and stops at the first failure; beyond the cap
-    /// the oldest loses its samples.
-    fn send_waiting(&mut self) {
-        while let Some(batch) = self.waiting.pop_front() {
-            let Err(err) = self.store.append_batch(&batch) else {
-                self.ask_pass_after_events(&batch);
-                continue;
-            };
-            self.report(&err);
-            if matches!(err, StoreError::Sqlite(_)) {
-                self.waiting.push_front(batch);
+    /// Queues a job behind the ones that did not fit before it.
+    fn send(&mut self, job: Job) {
+        self.backlog.push_back(Queued {
+            epoch: self.seen_epoch,
+            job,
+        });
+        self.push_backlog();
+    }
+
+    /// Hands the backlog to the storage thread in order, until its queue is full; beyond the cap
+    /// the oldest batch loses its samples.
+    fn push_backlog(&mut self) {
+        while let Some(queued) = self.backlog.pop_front() {
+            if let Err(back) = self.service.submit(queued) {
+                self.backlog.push_front(back);
                 break;
             }
-            if let Some(kept) = without_unstorable(batch) {
-                self.waiting.push_front(kept);
-            }
         }
-        while self.waiting.len() > BATCHES_KEPT {
+        while self.backlog_batches() > BATCHES_KEPT {
             self.shed_oldest();
         }
     }
 
-    /// The first stored batch that holds events asks for a health pass, which reads stored events.
-    fn ask_pass_after_events(&mut self, batch: &Batch) {
-        if self.event_pass_pending && !batch.events.is_empty() {
-            self.event_pass_pending = false;
-            self.health_due.store(true, Ordering::Release);
+    fn backlog_batches(&self) -> usize {
+        self.backlog
+            .iter()
+            .filter(|queued| matches!(queued.job, Job::Batch(_)))
+            .count()
+    }
+
+    /// Drops the samples of the oldest batch in the backlog and records a gap over their span; its
+    /// events, gaps and bookmark move into the next one.
+    fn shed_oldest(&mut self) {
+        let is_batch = |queued: &Queued| matches!(queued.job, Job::Batch(_));
+        let Some(first) = self.backlog.iter().position(is_batch) else {
+            return;
+        };
+        let Some(Queued {
+            job: Job::Batch(oldest),
+            ..
+        }) = self.backlog.remove(first)
+        else {
+            return;
+        };
+        if let Some(Queued {
+            job: Job::Batch(next),
+            ..
+        }) = self.backlog.iter_mut().find(|queued| is_batch(queued))
+        {
+            shed_into(oldest, next);
         }
     }
 
-    /// Drops the samples of the oldest waiting batch and records a gap over their span; its
-    /// events, gaps and bookmark move into the next one.
-    fn shed_oldest(&mut self) {
-        let Some(oldest) = self.waiting.pop_front() else {
-            return;
-        };
-        let span = oldest
-            .segments
-            .iter()
-            .map(|s| s.start_ms)
-            .min()
-            .zip(oldest.segments.iter().map(|s| s.end_ms).max());
-        if let Some(next) = self.waiting.front_mut() {
-            next.events.splice(0..0, oldest.events);
-            next.gaps.splice(0..0, oldest.gaps);
-            next.gaps.extend(span.map(|(start_ms, end_ms)| Gap {
-                start_ms,
-                end_ms,
-                reason: GapReason::NotSaved,
-            }));
-            next.bookmark_xml = next.bookmark_xml.take().or(oldest.bookmark_xml);
+    /// Waits for the storage thread to write what was handed to it, for at most `DRAIN_WAIT`.
+    fn drain(&mut self) {
+        let deadline = Instant::now() + DRAIN_WAIT;
+        while !self.backlog.is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+            self.push_backlog();
         }
+        self.service
+            .flush(deadline.saturating_duration_since(Instant::now()));
     }
 
     /// Notes how a source read, tells the status about a new error, and hands the result back.
@@ -1216,20 +1259,6 @@ impl Sampler {
     fn report(&self, err: &dyn std::fmt::Display) {
         lock(&self.status).last_error = Some(err.to_string());
     }
-}
-
-/// What of a batch can still be stored after a value in it had no stored code: its samples and
-/// bookmark; `None` when the batch already holds nothing else.
-fn without_unstorable(batch: Batch) -> Option<Batch> {
-    if batch.events.is_empty() && batch.gaps.is_empty() {
-        return None;
-    }
-    let kept = Batch {
-        segments: batch.segments,
-        bookmark_xml: batch.bookmark_xml,
-        ..Batch::default()
-    };
-    (!kept.is_empty()).then_some(kept)
 }
 
 /// Adds the late wakes among `ticks` to `kept`, then drops what is old and keeps the worst
@@ -1299,6 +1328,7 @@ mod tests {
 
     use super::*;
     use crate::readings::{Waiter, windows_source_set};
+    use crate::testing::{Refusal, WriterLock, disk_event, quiet, wait_until};
     use vestigium_collect::{CpuReading, HighResTimer, MemoryInfo};
     use vestigium_core::DiskLoad;
 
@@ -1315,6 +1345,7 @@ mod tests {
 
     /// What a test keeps of a sampler's wiring: the gate, the shared state and the senders.
     struct Ties {
+        epoch: Arc<Epoch>,
         gate: Arc<RunGate>,
         status: Arc<Mutex<AgentStatus>>,
         now: Arc<Mutex<NowFrame>>,
@@ -1362,6 +1393,7 @@ mod tests {
         let status = Arc::new(Mutex::new(AgentStatus::default()));
         let sensitive = SensitiveMode::new(ProbeConfig::new(DEFAULT_PROBE_PERIOD), SENSITIVE_FOR);
         let now = Arc::new(Mutex::new(NowFrame::default()));
+        let epoch = Arc::new(Epoch::default());
         let wiring = Wiring {
             flush,
             timing: QUICK,
@@ -1384,12 +1416,13 @@ mod tests {
             pressure: Arc::new(Mutex::new(Vec::new())),
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
-            cleared: Arc::new(AtomicBool::new(false)),
+            epoch: epoch.clone(),
             health_due: Arc::new(AtomicBool::new(false)),
             ring_path: Some(dir.join("blackbox.ring")),
             source_set,
         };
         let ties = Ties {
+            epoch,
             gate,
             status,
             now,
@@ -1421,18 +1454,6 @@ mod tests {
             .map(|s| decode::<Sample>(&s.data).unwrap().len())
             .sum();
         (segments.len(), count, segments.last().map(|s| s.end_ms))
-    }
-
-    /// Polls `done` until it holds or `timeout` passes; CI runners are slow and noisy.
-    fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if done() {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        done()
     }
 
     const PATIENCE: Duration = Duration::from_secs(15);
@@ -2246,27 +2267,6 @@ mod tests {
         parts.map(|v| v as u16)
     }
 
-    fn quiet(ts_ms: i64) -> Sample {
-        Sample {
-            ts_ms,
-            cpu_pct: 20.0,
-            dpc_pct: 0.0,
-            isr_pct: 0.0,
-            perf_limit_pct: Some(100.0),
-            proc_perf_pct: Some(100.0),
-            mem_total_bytes: 16 << 30,
-            mem_avail_bytes: 1 << 30,
-            commit_bytes: 20 << 30,
-            commit_limit_bytes: 24 << 30,
-            hard_faults_per_s: Some(0.0),
-            gpu_pct: None,
-            probe_max_lag_ms: 1.0,
-            sampler_lag_ms: 0.0,
-            cores: Vec::new(),
-            disks: Vec::new(),
-        }
-    }
-
     #[test]
     fn clean_exit_is_not_a_crash() {
         let dir = tempfile::tempdir().unwrap();
@@ -2465,24 +2465,17 @@ mod tests {
         assert!(stored, "the event and its bookmark were not stored");
     }
 
-    fn disk_event(record_id: u64) -> WinEvent {
-        WinEvent {
-            ts_ms: wall_ms(),
-            channel: Channel::System,
-            provider: "disk".to_string(),
-            id: 153,
-            record_id,
-            level: 3,
-            meaning: EventMeaning::DiskRetry,
-            data_xml: String::new(),
-        }
-    }
-
     /// A sampler driven by hand over a history file in `dir`.
     fn manual_sampler(dir: &std::path::Path) -> Sampler {
         let store = Store::open(&dir.join("vestigium.db")).unwrap();
         let (wiring, _) = wire(dir, Duration::from_secs(300), quiet_set());
-        Sampler::new(store, wiring)
+        over(store, wiring)
+    }
+
+    /// A sampler over `store`, driven by hand.
+    fn over(store: Store, wiring: Wiring) -> Sampler {
+        let (service, db) = start_storage(store, &wiring).unwrap();
+        Sampler::new(service, db, wiring)
     }
 
     #[test]
@@ -2491,9 +2484,10 @@ mod tests {
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
         let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let due = wiring.health_due.clone();
-        let mut sampler = Sampler::new(store, wiring);
+        let mut sampler = over(store, wiring);
 
         sampler.flush();
+        sampler.drain();
         assert!(
             !due.load(Ordering::Acquire),
             "a batch without events asks nothing"
@@ -2510,6 +2504,7 @@ mod tests {
             .unwrap();
         sampler.take_events();
         sampler.flush();
+        sampler.drain();
         assert!(due.load(Ordering::Acquire));
 
         due.store(false, Ordering::Release);
@@ -2524,6 +2519,7 @@ mod tests {
             .unwrap();
         sampler.take_events();
         sampler.flush();
+        sampler.drain();
         assert!(
             !due.load(Ordering::Acquire),
             "later batches do not ask again"
@@ -2551,6 +2547,7 @@ mod tests {
         let back = ts - 3_600_000;
 
         sampler.watch_clock(back + 1_000, 1_000.0);
+        sampler.drain();
 
         assert!(sampler.batcher.take_final().is_empty());
         assert!(lock(&sampler.readings).iter().next().is_none());
@@ -2575,173 +2572,49 @@ mod tests {
         assert!(!sampler.batcher.take_final().is_empty());
     }
 
-    /// Holds the writer lock of the history file in `dir` until it is dropped.
-    struct WriterLock(rusqlite::Connection);
-
-    impl WriterLock {
-        fn take(dir: &std::path::Path) -> WriterLock {
-            let conn = rusqlite::Connection::open(dir.join("vestigium.db")).unwrap();
-            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
-            WriterLock(conn)
-        }
-    }
-
-    impl Drop for WriterLock {
-        fn drop(&mut self) {
-            let _ = self.0.execute_batch("ROLLBACK");
-        }
-    }
-
     #[test]
-    fn a_batch_that_fails_to_write_is_stored_by_the_next_flush() {
+    fn a_write_stuck_on_the_database_does_not_delay_the_samples() {
         let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
-        let ts = wall_ms();
-        sampler.batcher.push_sample(quiet(ts));
-        sampler.events.push(disk_event(1));
-        sampler.bookmark_xml = Some("first".to_string());
+        let running = start(dir.path(), Duration::from_secs(1));
+        assert!(
+            wait_until(PATIENCE, || sampled(&running.status)),
+            "no sample taken"
+        );
 
         let held = WriterLock::take(dir.path());
-        sampler.flush_final();
-        drop(held);
-        assert!(lock(&sampler.status).last_error.is_some());
-
-        sampler.events.push(disk_event(2));
-        sampler.bookmark_xml = Some("second".to_string());
-        sampler.flush();
-
-        let store = history(dir.path());
-        let ids: Vec<u64> = store
-            .events(i64::MIN, i64::MAX)
-            .unwrap()
-            .iter()
-            .map(|e| e.record_id)
-            .collect();
-        assert_eq!(ids, vec![1, 2]);
-        assert_eq!(samples(dir.path()).1, 1);
-        assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("second"));
-    }
-
-    /// Makes every insert into `table` fail until the returned guard is dropped.
-    struct Refusal(rusqlite::Connection, &'static str);
-
-    impl Refusal {
-        fn of(dir: &std::path::Path, table: &'static str) -> Refusal {
-            let conn = rusqlite::Connection::open(dir.join("vestigium.db")).unwrap();
-            conn.execute_batch(&format!(
-                "CREATE TRIGGER refuse_{table} BEFORE INSERT ON {table}
-                 BEGIN SELECT RAISE(ABORT, 'refused'); END"
-            ))
-            .unwrap();
-            Refusal(conn, table)
-        }
-    }
-
-    impl Drop for Refusal {
-        fn drop(&mut self) {
-            let _ = self
-                .0
-                .execute_batch(&format!("DROP TRIGGER refuse_{}", self.1));
-        }
-    }
-
-    #[test]
-    fn batches_that_keep_failing_wait_up_to_the_cap_then_lose_their_samples() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
-        let refusal = Refusal::of(dir.path(), "segment");
-        let ts = wall_ms();
-        let mut lost = None;
-        for n in 1..=4u64 {
-            sampler.batcher.push_sample(quiet(ts + n as i64 * 60_000));
-            sampler.events.push(disk_event(n));
-            sampler.bookmark_xml = Some(format!("bookmark {n}"));
-            sampler.flush_final();
-            if n == 1 {
-                let first = &sampler.waiting[0].segments;
-                lost = Some((
-                    first.iter().map(|s| s.start_ms).min().unwrap(),
-                    first.iter().map(|s| s.end_ms).max().unwrap(),
-                ));
+        let began = Instant::now();
+        let mut seen = lock(&running.status).last_sample_ms;
+        let mut moved = Instant::now();
+        let mut longest = Duration::ZERO;
+        while began.elapsed() < Duration::from_secs(6) {
+            thread::sleep(Duration::from_millis(20));
+            let latest = lock(&running.status).last_sample_ms;
+            if latest != seen {
+                longest = longest.max(moved.elapsed());
+                seen = latest;
+                moved = Instant::now();
             }
         }
-        let (lost_start, lost_end) = lost.unwrap();
-
-        assert_eq!(sampler.waiting.len(), BATCHES_KEPT);
-        assert_eq!(sampler.waiting[0].events.len(), 2);
-        drop(refusal);
-        sampler.flush();
-
-        let store = history(dir.path());
-        assert_eq!(store.events(i64::MIN, i64::MAX).unwrap().len(), 4);
-        assert_eq!(samples(dir.path()).1, 3);
-        assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("bookmark 4"));
-        assert!(sampler.waiting.is_empty());
-        assert_eq!(
-            store.gaps(i64::MIN, i64::MAX).unwrap(),
-            vec![Gap {
-                start_ms: lost_start,
-                end_ms: lost_end,
-                reason: GapReason::NotSaved,
-            }]
-        );
-    }
-
-    #[test]
-    fn a_batch_without_samples_that_is_dropped_leaves_no_gap() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
-        let refusal = Refusal::of(dir.path(), "event");
-        for n in 1..=4u64 {
-            sampler.events.push(disk_event(n));
-            sampler.flush();
-        }
-        drop(refusal);
-
-        sampler.flush();
+        drop(held);
+        let stored = wait_until(PATIENCE, || samples(dir.path()).1 >= 1);
+        stop(&running);
 
         assert!(
-            history(dir.path())
-                .gaps(i64::MIN, i64::MAX)
-                .unwrap()
-                .is_empty()
+            longest < Duration::from_millis(1_800),
+            "the samples stalled for {longest:?} while the database was busy"
+        );
+        assert!(
+            stored,
+            "the batches waiting on the thread were never stored"
         );
     }
 
     #[test]
-    fn a_failed_batch_makes_the_next_interval_due_with_nothing_new() {
+    fn what_was_held_before_a_clear_is_not_written() {
         let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
-        let _refusal = Refusal::of(dir.path(), "event");
-        sampler.events.push(disk_event(1));
-        sampler.flush();
-        assert!(sampler.events.is_empty());
-
-        assert!(sampler.events_due(sampler.last_write_ms + sampler.flush_ms));
-    }
-
-    #[test]
-    fn clearing_the_history_drops_the_waiting_batches_and_keeps_the_bookmark() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
-        let refusal = Refusal::of(dir.path(), "event");
-        sampler.events.push(disk_event(1));
-        sampler.bookmark_xml = Some("held".to_string());
-        sampler.flush();
-        drop(refusal);
-
-        sampler.forget(wall_ms());
-        sampler.flush();
-
-        let store = history(dir.path());
-        assert!(store.events(i64::MIN, i64::MAX).unwrap().is_empty());
-        assert_eq!(store.bookmark_xml().unwrap().as_deref(), Some("held"));
-    }
-
-    #[test]
-    fn a_batch_from_before_a_clear_is_not_written() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut sampler = manual_sampler(dir.path());
+        let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
+        let mut sampler = over(store, wiring);
         let ts = wall_ms();
         sampler.batcher.push_sample(quiet(ts));
         sampler.events.push(disk_event(1));
@@ -2750,9 +2623,10 @@ mod tests {
             end_ms: ts + 1,
             reason: GapReason::Paused,
         });
-        sampler.cleared.store(true, Ordering::Release);
+        ties.epoch.clear(|| Ok::<_, ()>(())).unwrap();
 
         sampler.flush_final();
+        sampler.drain();
 
         let store = history(dir.path());
         assert!(store.events(i64::MIN, i64::MAX).unwrap().is_empty());
@@ -2763,7 +2637,101 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(!sampler.cleared.load(Ordering::Acquire));
+        assert_eq!(sampler.seen_epoch, 1);
+    }
+
+    #[test]
+    fn a_full_queue_keeps_batches_in_the_backlog_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let release = Arc::new(AtomicBool::new(false));
+        let waited = release.clone();
+        let hold = Queued {
+            epoch: 0,
+            job: Job::Run(Box::new(move |_| {
+                while !waited.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            })),
+        };
+        assert!(sampler.service.submit(hold).is_ok());
+        let sent = crate::service::QUEUE_BOUND as u64 + 2;
+        for n in 1..=sent {
+            sampler.events.push(disk_event(n));
+            sampler.write(Vec::new());
+        }
+
+        assert!(
+            !sampler.backlog.is_empty(),
+            "the queue did not take them all"
+        );
+        release.store(true, Ordering::Release);
+        sampler.drain();
+
+        assert!(sampler.backlog.is_empty());
+        let ids: Vec<u64> = history(dir.path())
+            .events(i64::MIN, i64::MAX)
+            .unwrap()
+            .iter()
+            .map(|e| e.record_id)
+            .collect();
+        assert_eq!(ids, (1..=sent).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_backlog_beyond_the_cap_loses_the_samples_of_its_oldest_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let release = Arc::new(AtomicBool::new(false));
+        let waited = release.clone();
+        let hold = Queued {
+            epoch: 0,
+            job: Job::Run(Box::new(move |_| {
+                while !waited.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            })),
+        };
+        assert!(sampler.service.submit(hold).is_ok());
+        let filler = Batch {
+            events: vec![disk_event(1)],
+            ..Batch::default()
+        };
+        for _ in 0..crate::service::QUEUE_BOUND {
+            let queued = Queued {
+                epoch: 0,
+                job: Job::Batch(filler.clone()),
+            };
+            assert!(sampler.service.submit(queued).is_ok());
+        }
+        let ts = wall_ms();
+        for n in 1..=BATCHES_KEPT as i64 + 1 {
+            sampler.batcher.push_sample(quiet(ts + n * 60_000));
+            sampler.bookmark_xml = Some(format!("bookmark {n}"));
+            sampler.flush_final();
+        }
+
+        assert_eq!(sampler.backlog.len(), BATCHES_KEPT);
+        let Some(Queued {
+            job: Job::Batch(first),
+            ..
+        }) = sampler.backlog.front()
+        else {
+            panic!("the backlog holds no batch");
+        };
+        assert_eq!(
+            first.gaps.iter().map(|g| g.reason).collect::<Vec<_>>(),
+            [GapReason::NotSaved],
+            "the shed batch is recorded as a gap in the next one"
+        );
+        release.store(true, Ordering::Release);
+        sampler.drain();
+        let (_, count, _) = samples(dir.path());
+        assert_eq!(count, BATCHES_KEPT);
+        assert_eq!(
+            history(dir.path()).bookmark_xml().unwrap().as_deref(),
+            Some(format!("bookmark {}", BATCHES_KEPT + 1).as_str())
+        );
     }
 
     /// A subscription to an event no log holds, so it starts and stays silent.
@@ -2824,7 +2792,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
-        let mut sampler = Sampler::new(store, wiring);
+        let mut sampler = over(store, wiring);
         for round in 0..4 {
             for n in 0..60 {
                 let ts = 1_000 + round * 60 + n;
@@ -2862,7 +2830,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
-        let mut sampler = Sampler::new(store, wiring);
+        let mut sampler = over(store, wiring);
         for round in 0..2 {
             for n in 0..BATCH_EVENT_EXEMPLARS as i64 {
                 let at = round * 100 + n;
@@ -2891,7 +2859,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (wiring, ties) = wire(dir.path(), Duration::from_secs(300), quiet_set());
         let store = Store::open(&dir.path().join("vestigium.db")).unwrap();
-        let mut sampler = Sampler::new(store, wiring);
+        let mut sampler = over(store, wiring);
         sampler.bookmark_xml = Some("held".to_string());
         let mut later = delivered(2_000, "disk", 153, EventMeaning::DiskRetry, String::new());
         later.bookmark_xml = None;
@@ -2901,31 +2869,6 @@ mod tests {
 
         assert_eq!(sampler.events.len(), 1);
         assert_eq!(sampler.bookmark_xml.as_deref(), Some("held"));
-    }
-
-    #[test]
-    fn a_batch_with_an_unstorable_value_keeps_only_samples_and_bookmark() {
-        let batch = Batch {
-            segments: vec![Segment {
-                series: Series::Samples,
-                start_ms: 1,
-                end_ms: 2,
-                data: vec![1],
-            }],
-            events: vec![disk_event(1)],
-            bookmark_xml: Some("mark".to_string()),
-            gaps: vec![Gap {
-                start_ms: 1,
-                end_ms: 2,
-                reason: GapReason::Paused,
-            }],
-        };
-
-        let kept = without_unstorable(batch).unwrap();
-        assert_eq!(kept.segments.len(), 1);
-        assert_eq!(kept.bookmark_xml.as_deref(), Some("mark"));
-        assert!(kept.events.is_empty() && kept.gaps.is_empty());
-        assert_eq!(without_unstorable(kept), None);
     }
 
     /// The occurrences the sampler's black box closes for one long freeze, and the poll time.
@@ -3168,7 +3111,7 @@ mod tests {
             pressure: shared.pressure.clone(),
             hiccups: shared.hiccups.clone(),
             settings: shared.settings.clone(),
-            cleared: shared.cleared.clone(),
+            epoch: shared.epoch.clone(),
             health_due: shared.health_due.clone(),
             ring_path: Some(dir.path().join("blackbox.ring")),
             source_set: quiet_set(),
