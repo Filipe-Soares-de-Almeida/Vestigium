@@ -4,6 +4,20 @@ use vestigium_ipc::{AgentStatus, MonitorState, MonitorStatus};
 
 /// Without a sample for this long, and nothing paused, the agent says it has no reading.
 pub const NO_READING_AFTER_MS: i64 = 5_000;
+/// A health check whose last success is this old, with a later attempt failed, is not verified.
+pub const HEALTH_STALE_MS: i64 = 3 * 60 * 60_000;
+
+/// When the health check last finished, if it has failed since and that was long enough ago to
+/// matter; a check that never finished counts from the start of the watching.
+pub fn unverified_since(status: &AgentStatus, now_ms: i64) -> Option<i64> {
+    let monitor = &status.monitor;
+    let attempt = monitor.health_attempt_ms?;
+    if monitor.health_ok_ms.is_some_and(|ok| ok >= attempt) {
+        return None;
+    }
+    let since = monitor.health_ok_ms.unwrap_or(status.started_at_ms);
+    (now_ms.saturating_sub(since) >= HEALTH_STALE_MS).then_some(since)
+}
 
 /// The status as the agent answers it at `now_ms`: the stored fields and the state worked out from
 /// them, so a sampler that stopped writing still shows.
@@ -114,6 +128,33 @@ mod tests {
 
         assert_eq!(view(&paused, NOW).state, MonitorState::Watching);
         assert_eq!(view(&suspended, NOW).state, MonitorState::Watching);
+    }
+
+    #[test]
+    fn a_health_check_is_unverified_after_three_hours_without_a_success() {
+        let mut checked = status();
+        checked.monitor.health_ok_ms = Some(NOW - 4 * 60 * 60_000);
+        assert_eq!(unverified_since(&checked, NOW), None, "no attempt since");
+
+        checked.monitor.health_attempt_ms = Some(NOW - 60_000);
+        assert_eq!(
+            unverified_since(&checked, NOW),
+            checked.monitor.health_ok_ms
+        );
+
+        checked.monitor.health_ok_ms = Some(NOW - 2 * 60 * 60_000);
+        assert_eq!(unverified_since(&checked, NOW), None, "still fresh enough");
+
+        checked.monitor.health_ok_ms = Some(NOW - 30_000);
+        assert_eq!(
+            unverified_since(&checked, NOW),
+            None,
+            "a success after the attempt"
+        );
+
+        checked.monitor.health_ok_ms = None;
+        checked.started_at_ms = NOW - 5 * 60 * 60_000;
+        assert_eq!(unverified_since(&checked, NOW), Some(NOW - 5 * 60 * 60_000));
     }
 
     #[test]

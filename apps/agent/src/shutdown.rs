@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE,
+    PostQuitMessage, RegisterClassW, SetTimer, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE,
     WM_DISPLAYCHANGE, WM_ENDSESSION, WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
     WNDCLASSW, WS_OVERLAPPED,
 };
@@ -21,6 +21,12 @@ static ON_END_SESSION: OnceLock<Handler> = OnceLock::new();
 static SESSION_WINDOW: OnceLock<usize> = OnceLock::new();
 /// Posted to make the message loop run once, so the tray shows a change made elsewhere.
 const WM_APP_WAKE: u32 = WM_APP + 1;
+/// How often the message loop runs by itself, so the tray shows a sampler that stopped writing.
+#[cfg(not(test))]
+const TRAY_REFRESH_MS: u32 = 15_000;
+#[cfg(test)]
+const TRAY_REFRESH_MS: u32 = 50;
+const TRAY_TIMER_ID: usize = 1;
 /// Set when Windows reports a changed setting or display: theme, scale or monitors.
 static DISPLAY_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -55,6 +61,8 @@ pub fn watch_session_end(on_end: impl Fn() + Send + Sync + 'static) -> windows::
         )?
     };
     let _ = SESSION_WINDOW.set(window.0 as usize);
+    // SAFETY: a timer of the window just made; its WM_TIMER needs no handler, only the loop's turn.
+    unsafe { SetTimer(Some(window), TRAY_TIMER_ID, TRAY_REFRESH_MS, None) };
     Ok(window)
 }
 
@@ -151,6 +159,18 @@ mod tests {
             // SAFETY: posts a message carrying no pointers to the window this thread just made.
             unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.unwrap();
             pump(|| {});
+            let _ = done.send(());
+        });
+        assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    #[test]
+    fn the_message_loop_runs_by_itself_on_a_timer() {
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            watch_session_end(|| {}).unwrap();
+            // Nothing is posted: only the window's timer can give the loop a turn.
+            pump(quit);
             let _ = done.send(());
         });
         assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());

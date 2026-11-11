@@ -22,6 +22,18 @@ How to use this file:
 
 ## [Unreleased]
 
+### Added
+
+- The tray icon and its tooltip now say when the monitor is not reading the PC. With no sample for
+  more than a few seconds and nothing paused, the icon takes a dash badge and the tooltip says "no
+  reading since" the time of the last sample; when only some data sources fail it takes an
+  exclamation mark and names the source, or how many; and when the hourly health check has not
+  finished for three hours it takes a dot, so nothing looks normal that was not read. These badges
+  rank above the severe-freeze and slowdown badges of the last 24 hours, which the tooltip still
+  lists, and below paused and sensitive mode. The icon checks every 15 seconds, so a stopped sampler
+  shows within a minute. A tooltip that would pass the 127 characters Windows shows now drops its last
+  line instead of being cut.
+
 ### Changed
 
 - Vestigium now installs for every account on the PC, in C:\Program Files\Vestigium, instead of for

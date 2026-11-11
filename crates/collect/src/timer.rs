@@ -1,12 +1,15 @@
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_EVENT, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{
+    CloseHandle, FILETIME, HANDLE, SYSTEMTIME, WAIT_EVENT, WAIT_OBJECT_0,
+};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateEventW, CreateWaitableTimerExW, INFINITE,
     SetEvent, SetWaitableTimer, TIMER_ALL_ACCESS, WaitForMultipleObjects, WaitForSingleObject,
 };
+use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::System::WindowsProgramming::{
     QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise,
 };
@@ -157,12 +160,40 @@ pub fn wall_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
+/// Hour and minute on the local clock of an instant given in Unix epoch milliseconds.
+pub fn local_hour_minute(ms: i64) -> Option<(u8, u8)> {
+    /// 100 ns ticks between 1601-01-01, the FILETIME epoch, and 1970-01-01.
+    const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+    let ticks = ms.checked_mul(10_000)?.checked_add(UNIX_EPOCH_TICKS)?;
+    let ticks = u64::try_from(ticks).ok()?;
+    let file_time = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let (mut utc, mut local) = (SYSTEMTIME::default(), SYSTEMTIME::default());
+    // SAFETY: both calls read their input and write only the structures passed by reference.
+    unsafe {
+        FileTimeToSystemTime(&file_time, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
+    }
+    Some((local.wHour as u8, local.wMinute as u8))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
     use super::*;
+
+    #[test]
+    fn the_local_clock_is_a_whole_number_of_hours_and_minutes_from_utc() {
+        // 2026-11-11 12:00:00 UTC; every zone is a multiple of 15 minutes from it.
+        let (hour, minute) = local_hour_minute(1_794_398_400_000).unwrap();
+
+        assert!(hour < 24 && minute % 15 == 0, "{hour}:{minute}");
+        assert_eq!(local_hour_minute(i64::MAX), None);
+    }
 
     #[test]
     fn interrupt_time_runs_forward_and_is_not_the_wall_clock() {

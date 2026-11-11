@@ -65,6 +65,12 @@ pub enum Badge {
     Problem,
     Paused,
     Sensitive,
+    /// No sample for a while although nothing is paused: a dash.
+    NoReading,
+    /// Reading, but a source fails: an exclamation mark.
+    Partial,
+    /// The health check has not finished lately: a dot.
+    Unverified,
 }
 
 /// The colour themes of the app; the tray takes each one's accent.
@@ -159,8 +165,36 @@ pub fn tray(size: u32, badge: Badge, colours: TrayInk) -> Image {
             canvas.fill(&ring, colours.ink, 1.0);
             canvas.fill(&knockout(0.9), colours.ink, 1.0);
         }
+        Badge::NoReading => {
+            canvas.erase(&knockout(3.9));
+            canvas.fill(&ink_bar(10.2, 11.75, 4.6, 1.5), colours.ink, 1.0);
+        }
+        Badge::Partial => {
+            canvas.erase(&knockout(3.9));
+            canvas.fill(&ink_bar(11.75, 9.4, 1.5, 3.5), colours.ink, 1.0);
+            let dot = Shape::Circle {
+                centre: (12.5, 14.6),
+                radius: 0.85,
+            };
+            canvas.fill(&dot, colours.ink, 1.0);
+        }
+        Badge::Unverified => {
+            canvas.erase(&knockout(3.9));
+            canvas.fill(&knockout(1.3), colours.ink, 1.0);
+        }
     }
     canvas.image()
+}
+
+/// A rounded bar of the badge, on the 16 grid.
+fn ink_bar(x: f32, y: f32, w: f32, h: f32) -> Shape {
+    Shape::Rect {
+        x,
+        y,
+        w,
+        h,
+        radius: 0.7,
+    }
 }
 
 /// The app icon, `size` pixels a side: the red Lapidado with its fixed facets, in every theme.
@@ -216,12 +250,15 @@ fn grow_16((x, y): Point) -> Point {
 mod tests {
     use super::*;
 
-    const ALL: [Badge; 5] = [
+    const ALL: [Badge; 8] = [
         Badge::None,
         Badge::Attention,
         Badge::Problem,
         Badge::Paused,
         Badge::Sensitive,
+        Badge::NoReading,
+        Badge::Partial,
+        Badge::Unverified,
     ];
 
     fn colours() -> TrayInk {
@@ -307,6 +344,48 @@ mod tests {
         assert_eq!(image.pixel(25, 25)[3], 0xff);
         assert!(ring.iter().any(|&alpha| alpha > 0xe0));
         assert!(ring.iter().any(|&alpha| alpha < 0x20));
+    }
+
+    #[test]
+    fn the_monitor_badges_are_ink_marks_cut_out_of_the_glyph() {
+        for size in [16, 24, 32] {
+            let scale = size as f32 / 16.0;
+            let at = |x: f32, y: f32| ((x * scale) as u32, (y * scale) as u32);
+            let (dx, dy) = at(12.5, 12.5);
+
+            let dash = tray(size, Badge::NoReading, colours());
+            let (bx, by) = at(12.5, 12.5);
+            assert_eq!(
+                dash.pixel(bx, by),
+                [0xff, 0xff, 0xff, 0xff],
+                "dash at {size}"
+            );
+            let (tx, ty) = at(12.5, 10.0);
+            assert_eq!(
+                dash.pixel(tx, ty)[3],
+                0,
+                "the cut-out stays clear at {size}"
+            );
+
+            let bang = tray(size, Badge::Partial, colours());
+            let (sx, sy) = at(12.5, 10.8);
+            assert_eq!(
+                bang.pixel(sx, sy),
+                [0xff, 0xff, 0xff, 0xff],
+                "stroke at {size}"
+            );
+            let (ex, ey) = at(12.5, 14.6);
+            assert!(bang.pixel(ex, ey)[3] > 0x80, "dot at {size}");
+
+            let dot = tray(size, Badge::Unverified, colours());
+            assert_eq!(dot.pixel(dx, dy), [0xff, 0xff, 0xff, 0xff], "dot at {size}");
+            let (rx, ry) = at(10.6, 12.5);
+            assert_eq!(
+                dot.pixel(rx, ry)[3],
+                0,
+                "the cut-out stays clear around the dot"
+            );
+        }
     }
 
     #[test]
