@@ -106,6 +106,7 @@ fn inputs(found: &TweakHistory, now_ms: i64) -> TweakInputs {
         captures: found.captures.clone(),
         events: found.events.clone(),
         tests: found.tests.clone(),
+        covered: found.covered.clone(),
     }
 }
 

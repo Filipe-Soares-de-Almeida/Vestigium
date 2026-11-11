@@ -21,11 +21,11 @@
   import type { Advice, RestorePoint, TweakPick, TweakRow } from "../lib/types";
   import { at } from "./dumps/words";
   import { statusOf } from "./tests/status";
+  import HelpedBars from "./tweaks/HelpedBars.svelte";
   import {
     againLine,
     changeOf,
     GROUP,
-    helpedVerdict,
     ICON,
     inPlace,
     metric,
@@ -331,17 +331,7 @@
               </div>
             {/if}
             {#if r.helped && r.undone_ms === null && r.change.undo_of === null}
-              {@const h = r.helped}
-              {@const max = Math.max(h.before, h.after, 1)}
-              <div
-                class="helped"
-                role="img"
-                aria-label={t("ui.tweaks.helped.label", { metric: metric(current.tweak), before: h.before, after: h.after, days: h.days })}
-              >
-                <div><span>{t("ui.tweaks.helped.before")}</span><i style:width="{Math.max((h.before / max) * 100, 3)}%"></i><b>{h.before}</b></div>
-                <div><span>{t("ui.tweaks.helped.after")}</span><i class="after" style:width="{Math.max((h.after / max) * 100, 3)}%"></i><b>{h.after}</b></div>
-                <small>{helpedVerdict(h.before, h.after)} · {tn("ui.tweaks.helped.span", h.days, { metric: metric(current.tweak) })}</small>
-              </div>
+              <HelpedBars helped={r.helped} metric={metric(current.tweak)} />
             {/if}
             {#if level === "Technical" && r.change.restore_point}
               <small class="mono">{restorePoint(r.change.restore_point)}</small>
@@ -521,38 +511,6 @@
   .chg-t + .chg-t::before {
     content: " · ";
     color: var(--ink3);
-  }
-  .helped {
-    display: grid;
-    gap: 6px;
-    max-width: 420px;
-    margin-top: 10px;
-    font-size: 13px;
-  }
-  .helped div {
-    display: grid;
-    grid-template-columns: 64px minmax(0, 1fr) 40px;
-    gap: 10px;
-    align-items: center;
-  }
-  .helped span {
-    color: var(--ink2);
-  }
-  .helped i {
-    display: block;
-    height: 8px;
-    border-radius: 4px;
-    background: var(--ink3);
-  }
-  .helped i.after {
-    background: var(--accent);
-  }
-  .helped b {
-    text-align: right;
-    font-weight: 600;
-  }
-  .helped small {
-    color: var(--ink2);
   }
   .mono {
     display: block;

@@ -1,9 +1,10 @@
-import { formatDuration } from "../../lib/format";
+import { formatDuration, formatNumber } from "../../lib/format";
 import type { StatusKind } from "../../components/StatusMark.svelte";
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   Advice,
   DetailLevel,
+  Helped,
   RestorePoint,
   SettingChange,
   TweakId,
@@ -249,8 +250,36 @@ const METRIC: Partial<Record<TweakId, string>> = {
 
 export const metric = (tweak: TweakId) => k(`helped.metric.${METRIC[tweak] ?? "stutters"}`);
 
-export function helpedVerdict(before: number, after: number): string {
-  return k(after < before ? "helped.fewer" : after > before ? "helped.more" : "helped.same");
+const HOUR_MS = 3_600_000;
+
+/** Whole hours the monitor sampled, rounded down so "only 11 h" never reads as the 12 h asked. */
+export const monitoredHours = (ms: number) => Math.floor(ms / HOUR_MS);
+
+/** Events per monitored hour; zero when nothing was monitored. */
+export const ratePerHour = (events: number, ms: number) => (ms > 0 ? events / (ms / HOUR_MS) : 0);
+
+/** A rate as written next to its bar: "0,11 por hora", "0" or "<0,01" for a rate that rounds to nothing. */
+export function rateText(events: number, ms: number): string {
+  const rate = ratePerHour(events, ms);
+  if (events === 0) return k("helped.rate", { rate: formatNumber(0) });
+  return k("helped.rate", { rate: rate < 0.01 ? `<${formatNumber(0.01, 2)}` : formatNumber(rate, 2) });
+}
+
+/** What the comparison says, in words. */
+export const helpedWord = (h: Helped) => k(`helped.verdict.${h.verdict}`);
+
+/** Whether the comparison lacks data, and so is drawn as an outline. */
+export const lacksData = (h: Helped) => h.verdict === "NotEnoughEvents" || h.verdict === "NotEnoughTime";
+
+/** Why the comparison says nothing yet; `null` once it says something. */
+export function helpedWhy(h: Helped): string | null {
+  const need = { min: h.min_events };
+  if (h.verdict === "NotEnoughEvents") return kn("helped.why.events", h.before + h.after, need);
+  if (h.verdict !== "NotEnoughTime") return null;
+  const least = h.min_hours * HOUR_MS;
+  const args = { before: monitoredHours(h.before_ms), after: monitoredHours(h.after_ms), min: h.min_hours };
+  if (h.before_ms < least && h.after_ms < least) return k("helped.why.time.both", args);
+  return k(h.before_ms < least ? "helped.why.time.before" : "helped.why.time.after", args);
 }
 
 /** Where a history row stands, in words. */

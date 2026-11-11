@@ -328,6 +328,14 @@ How to use this file:
   so long ago that the days before it fall outside the 30 days of history the watcher keeps. Before,
   a change applied more than 23 days ago was compared against a before period that was cut short or
   empty, so it could report fewer problems or no difference by mistake.
+- The Did it help comparison on the Optimizations screen now compares how often the problem happened
+  per hour the monitor was watching, not the raw counts. Before, 3 stutters on a day when the PC ran
+  for 20 hours and 2 on a day it ran for 2 hours read as fewer, and any difference at all was called
+  fewer or more. The two bars now show the rate per monitored hour, drawn from zero, with the count and
+  the hours behind each, such as 18 in 168 h. It says fewer or more only with at least 5 events in
+  both periods together, at least 12 monitored hours in each period and one rate at least twice the
+  other; otherwise it says there is not enough data yet, draws dashed outlines and tells what is
+  missing. The text no longer calls a small difference significant.
 - Crash dumps kept in a subfolder of the crash dumps folder no longer disappear from the list and from
   the space count until the next dump scan. The watcher's own listing now reads one level of
   subfolders, as the dump scan does, so it no longer marks those dumps as deleted.

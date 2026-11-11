@@ -21,8 +21,8 @@ use vestigium_core::{
     Advice, AppFrames, Applier, BUCKETS, CaptureSource, Cause, Channel, ColorTheme, Confidence,
     CoreLoad, CrashKind, Culprit, DeepCapture, DetailLevel, DiskInfo, DiskLoad, DriverLatency,
     DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Evidence, Fact, FactKind,
-    FrameHitch, Gap, GapReason, Guid, HangOutcome, HangSpan, Helped, HistoryReset, Hive,
-    HungWindow, LanguagePref, LongRoutine, MachineInfo, Media, Metric, NextStep, Occurrence,
+    FrameHitch, Gap, GapReason, Guid, HangOutcome, HangSpan, Helped, HelpedVerdict, HistoryReset,
+    Hive, HungWindow, LanguagePref, LongRoutine, MachineInfo, Media, Metric, NextStep, Occurrence,
     OccurrenceKind, OccurrenceSummary, PcState, ProbeHiccup, ProcessSample, ProcessTop,
     ProgramPoint, Reading, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, Sample,
     Setting, SettingChange, SettingResult, SettingValue, Settings, Severity, Signal, Signature,
@@ -1094,6 +1094,19 @@ fn tweak_changes() -> Vec<TweakChange> {
     all
 }
 
+fn helped_sample() -> Helped {
+    Helped {
+        days: 7,
+        before: 9,
+        after: 2,
+        before_ms: 168 * 3_600_000,
+        after_ms: 160 * 3_600_000,
+        verdict: HelpedVerdict::Fewer,
+        min_events: 5,
+        min_hours: 12,
+    }
+}
+
 fn tweak_rows() -> Vec<TweakRowDto> {
     tweak_changes()
         .into_iter()
@@ -1104,11 +1117,7 @@ fn tweak_rows() -> Vec<TweakRowDto> {
             undone_ms: (index % 2 == 0).then_some(1_790_000_100_000),
             applier: Applier::ALL[index % Applier::ALL.len()],
             change,
-            helped: (index % 2 == 0).then_some(Helped {
-                days: 7,
-                before: 9,
-                after: 2,
-            }),
+            helped: (index % 2 == 0).then_some(helped_sample()),
             outside: index % 2 == 1,
         })
         .collect()
@@ -2076,15 +2085,8 @@ fn render() -> String {
     );
     wire.add(TYPES, "RestorePoint", restore_points());
     wire.add(TYPES, "TweakChange", tweak_changes());
-    wire.add(
-        TYPES,
-        "Helped",
-        vec![Helped {
-            days: 7,
-            before: 9,
-            after: 2,
-        }],
-    );
+    wire.add(TYPES, "Helped", vec![helped_sample()]);
+    wire.add(TYPES, "HelpedVerdict", HelpedVerdict::ALL.to_vec());
     wire.add(TYPES, "TweakRow", tweak_rows());
     wire.add(
         TYPES,

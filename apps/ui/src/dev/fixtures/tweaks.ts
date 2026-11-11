@@ -17,6 +17,7 @@ import type { Handler } from "../mock";
 
 const query = new URLSearchParams(location.search);
 const DAY = 24 * 60 * 60_000;
+const HOUR = 60 * 60_000;
 const now = Date.now();
 
 const LM = "LocalMachine" as const;
@@ -166,7 +167,16 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
         restore_point: a.applier === "Elevated" ? { Reused: { at_ms: now - (days + 1) * DAY } } : null,
         journal: a.applier === "Elevated" ? id : null,
       },
-      helped: { days: Math.min(days, 7), before: 9, after: 2 },
+      helped: {
+        days: Math.min(days, 7),
+        before: 9,
+        after: 2,
+        before_ms: 160 * HOUR,
+        after_ms: 150 * HOUR,
+        verdict: "Fewer",
+        min_events: 5,
+        min_hours: 12,
+      },
       outside: false,
     });
     return {

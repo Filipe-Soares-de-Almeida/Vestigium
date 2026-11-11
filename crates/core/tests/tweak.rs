@@ -4,10 +4,10 @@ use vestigium_core::health::{
 };
 use vestigium_core::hwtest::{Outcome, TestData, TestRun, VolumeCheck, VolumeResult};
 use vestigium_core::{
-    CaptureCauses, Cause, Channel, Culprit, Episode, EpisodeKind, EventMeaning, Hive,
-    OccurrenceKind, OccurrenceSummary, SCHEME_BALANCED, SCHEME_POWER_SAVER, Setting, SettingChange,
-    Severity, Signal, StartupEntry, StartupList, Status, TWEAKS, TweakId, TweakInputs, Value,
-    WinEvent, advise, disabled_approval, helped, undo,
+    CaptureCauses, Cause, Channel, Covered, Culprit, Episode, EpisodeKind, EventMeaning,
+    HelpedVerdict, Hive, OccurrenceKind, OccurrenceSummary, SCHEME_BALANCED, SCHEME_POWER_SAVER,
+    Setting, SettingChange, Severity, Signal, StartupEntry, StartupList, Status, TWEAKS, TweakId,
+    TweakInputs, Value, WinEvent, advise, disabled_approval, helped, undo,
 };
 
 const DAY: i64 = 24 * 60 * 60_000;
@@ -30,6 +30,7 @@ fn inputs() -> TweakInputs {
         captures: Vec::new(),
         events: Vec::new(),
         tests: Vec::new(),
+        covered: Vec::new(),
     }
 }
 
@@ -660,6 +661,136 @@ fn helped_is_withheld_when_the_before_window_leaves_the_evidence() {
     assert!(helped(TweakId::GameDvr, truncated, &after).is_none());
     let beyond = NOW - 40 * DAY;
     assert!(helped(TweakId::GameDvr, beyond, &after).is_none());
+}
+
+const MINUTE: i64 = 60_000;
+
+/// Minutes of full sampling over `[from, to)`.
+fn watched(from: i64, to: i64) -> Vec<Covered> {
+    (from.div_euclid(MINUTE)..to.div_euclid(MINUTE))
+        .map(|m| Covered {
+            minute_ms: m * MINUTE,
+            ms: 60_000,
+        })
+        .collect()
+}
+
+/// An input set with `before` stutters in the week before the change and `after` in the week after,
+/// the monitor sampling for `before_hours` and `after_hours` of them.
+fn stutter_weeks(
+    before: u32,
+    before_hours: i64,
+    after: u32,
+    after_hours: i64,
+) -> (TweakInputs, i64) {
+    let applied = NOW - 8 * DAY;
+    let mut i = with(inputs(), TweakId::GameDvr, &[]);
+    let stutter = |at| occurrence(at, OccurrenceKind::Stutter, Cause::Unclear);
+    i.occurrences = (0..before)
+        .map(|n| stutter(applied - DAY + i64::from(n) * MINUTE))
+        .chain((0..after).map(|n| stutter(applied + DAY + i64::from(n) * MINUTE)))
+        .collect();
+    i.covered = watched(applied - before_hours * 60 * MINUTE, applied);
+    i.covered
+        .extend(watched(applied, applied + after_hours * 60 * MINUTE));
+    (i, applied)
+}
+
+fn verdict_of(before: u32, before_hours: i64, after: u32, after_hours: i64) -> HelpedVerdict {
+    let (i, applied) = stutter_weeks(before, before_hours, after, after_hours);
+    helped(TweakId::GameDvr, applied, &i)
+        .expect("counted")
+        .verdict
+}
+
+#[test]
+fn helped_needs_enough_events_and_a_clear_ratio() {
+    assert_eq!(verdict_of(2, 168, 2, 168), HelpedVerdict::NotEnoughEvents);
+    assert_eq!(verdict_of(4, 168, 0, 168), HelpedVerdict::NotEnoughEvents);
+    assert_eq!(
+        verdict_of(3, 168, 2, 168),
+        HelpedVerdict::Same,
+        "five is enough"
+    );
+    assert_eq!(verdict_of(10, 168, 4, 168), HelpedVerdict::Fewer);
+    assert_eq!(verdict_of(6, 168, 5, 168), HelpedVerdict::Same);
+    assert_eq!(verdict_of(4, 168, 10, 168), HelpedVerdict::More);
+    assert_eq!(
+        verdict_of(5, 168, 0, 168),
+        HelpedVerdict::Fewer,
+        "none after"
+    );
+    assert_eq!(
+        verdict_of(0, 168, 5, 168),
+        HelpedVerdict::More,
+        "none before"
+    );
+    assert_eq!(
+        verdict_of(8, 168, 4, 168),
+        HelpedVerdict::Fewer,
+        "exactly twice"
+    );
+    assert_eq!(verdict_of(0, 168, 0, 168), HelpedVerdict::NotEnoughEvents);
+}
+
+#[test]
+fn helped_compares_rates_per_monitored_hour() {
+    // The same count on both sides, but the monitor watched five times longer before.
+    assert_eq!(verdict_of(6, 100, 6, 20), HelpedVerdict::More);
+    // Fewer in raw count after, yet more per hour.
+    assert_eq!(verdict_of(6, 150, 5, 20), HelpedVerdict::More);
+    let (i, applied) = stutter_weeks(6, 100, 6, 20);
+    let h = helped(TweakId::GameDvr, applied, &i).unwrap();
+    assert_eq!((h.before, h.after), (6, 6));
+    assert_eq!(
+        (h.before_ms, h.after_ms),
+        (100 * 60 * MINUTE, 20 * 60 * MINUTE)
+    );
+}
+
+#[test]
+fn helped_needs_hours_of_monitoring_on_each_side() {
+    assert_eq!(verdict_of(12, 168, 2, 2), HelpedVerdict::NotEnoughTime);
+    assert_eq!(verdict_of(12, 11, 2, 168), HelpedVerdict::NotEnoughTime);
+    assert_eq!(
+        verdict_of(12, 12, 2, 12),
+        HelpedVerdict::Fewer,
+        "12 h is enough"
+    );
+    assert_eq!(
+        verdict_of(12, 0, 2, 0),
+        HelpedVerdict::NotEnoughTime,
+        "no division by zero"
+    );
+    let (mut i, applied) = stutter_weeks(12, 168, 2, 168);
+    i.covered.clear();
+    let h = helped(TweakId::GameDvr, applied, &i).unwrap();
+    assert_eq!((h.before_ms, h.after_ms), (0, 0));
+    assert_eq!(h.verdict, HelpedVerdict::NotEnoughTime);
+}
+
+#[test]
+fn a_stretch_with_no_stored_minutes_is_not_monitored_time() {
+    // The watcher did not run for the first six days after the change; no gap was stored.
+    let (mut i, applied) = stutter_weeks(12, 168, 12, 168);
+    assert_eq!(
+        helped(TweakId::GameDvr, applied, &i).unwrap().verdict,
+        HelpedVerdict::Same
+    );
+    i.covered
+        .retain(|c| c.minute_ms < applied || c.minute_ms >= applied + 6 * DAY);
+    let h = helped(TweakId::GameDvr, applied, &i).unwrap();
+    assert_eq!(h.after_ms, 24 * 60 * MINUTE);
+    assert_eq!(h.verdict, HelpedVerdict::More);
+    // A partly sampled minute counts for what was sampled.
+    i.covered = vec![Covered {
+        minute_ms: applied + MINUTE,
+        ms: 30_000,
+    }];
+    assert_eq!(
+        helped(TweakId::GameDvr, applied, &i).unwrap().after_ms,
+        30_000
+    );
 }
 
 struct FakeStore {

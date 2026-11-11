@@ -953,11 +953,21 @@ export interface TweakChange {
   journal: number | null;
 }
 
-/** The same signal counted in equal spans before and after a change. */
+/** What the counts before and after a change say once the time watched on each side is weighed. */
+export type HelpedVerdict = "NotEnoughEvents" | "NotEnoughTime" | "Fewer" | "More" | "Same";
+
+/** The same signal counted in equal spans before and after a change, with the time sampled in each. */
 export interface Helped {
   days: number;
   before: number;
   after: number;
+  /** Milliseconds the monitor sampled in the span before the change. */
+  before_ms: number;
+  after_ms: number;
+  verdict: HelpedVerdict;
+  /** The least events and the least monitored hours behind a verdict. */
+  min_events: number;
+  min_hours: number;
 }
 
 /** One change in the history; `outside` means Windows now holds something else. */

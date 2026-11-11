@@ -4,8 +4,8 @@ use vestigium_core::health::FindingKind;
 use vestigium_core::hwtest::{BenchMode, Bus, Outcome, PATTERNS, TestKind, VolumeResult};
 use vestigium_core::{
     Applier, Cause, ColorTheme, Confidence, DetailLevel, DumpKind, EpisodeKind, EventMeaning,
-    GapReason, LanguagePref, Media, Metric, OccurrenceKind, PcState, RunAs, Severity, Signature,
-    TWEAKS, Takes, ThemePref,
+    GapReason, HelpedVerdict, LanguagePref, Media, Metric, OccurrenceKind, PcState, RunAs,
+    Severity, Signature, TWEAKS, Takes, ThemePref,
 };
 use vestigium_i18n::{Catalog, Lang};
 
@@ -177,6 +177,7 @@ fn families() -> Vec<Family> {
         suffixed("ui.dumps.kind", "tech", dumps),
         family("ui.tweaks.applier", names(&Applier::ALL)),
         family("ui.tweaks.takes", names(&Takes::ALL)),
+        family("ui.tweaks.helped.verdict", names(&HelpedVerdict::ALL)),
         family("ui.tweaks.name", tweaks.clone()),
         suffixed("ui.tweaks.name", "tech", tweaks.clone()),
         family("ui.tweaks.what", tweaks.clone()),

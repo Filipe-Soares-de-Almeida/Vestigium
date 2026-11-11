@@ -5,8 +5,8 @@ use vestigium_core::health::FindingKind;
 use vestigium_core::hwtest::{BenchMode, Bus, Outcome, PATTERNS, Pattern, TestKind, VolumeResult};
 use vestigium_core::{
     Applier, Channel, ColorTheme, Confidence, DetailLevel, DumpKind, EventMeaning, GapReason,
-    HangOutcome, LanguagePref, Media, Metric, OccurrenceKind, PcState, Severity, TWEAKS, Takes,
-    ThemePref, TweakId,
+    HangOutcome, HelpedVerdict, LanguagePref, Media, Metric, OccurrenceKind, PcState, Severity,
+    TWEAKS, Takes, ThemePref, TweakId,
 };
 
 macro_rules! lists_every_variant {
@@ -131,6 +131,11 @@ lists_every_variant!(
     Takes: Now, NextShutdown, NextSignIn, Restart
 );
 
+lists_every_variant!(
+    helped_verdict_lists_every_variant,
+    HelpedVerdict::ALL,
+    HelpedVerdict: NotEnoughEvents, NotEnoughTime, Fewer, More, Same
+);
 lists_every_variant!(
     tweak_catalog_lists_every_tweak,
     TWEAKS,

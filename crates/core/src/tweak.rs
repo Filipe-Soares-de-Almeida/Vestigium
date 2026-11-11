@@ -16,6 +16,13 @@ pub const BIG_HIBERFILE: u64 = 1 << 30;
 const DAY_MS: i64 = 24 * 60 * 60_000;
 /// Longest span "did it help?" compares before and after a change.
 const HELPED_DAYS: i64 = 7;
+const HOUR_MS: i64 = 60 * 60_000;
+/// Fewest events, in both windows together, that a comparison needs.
+pub const HELPED_MIN_EVENTS: u32 = 5;
+/// Fewest hours the monitor must have sampled in each window.
+pub const HELPED_MIN_HOURS: u32 = 12;
+/// How many times larger one rate must be than the other to be called different.
+const HELPED_RATIO: i64 = 2;
 /// FILETIME counts 100 ns from 1601; Unix milliseconds count from 1970.
 const FILETIME_UNIX_MS: i64 = 11_644_473_600_000;
 
@@ -476,6 +483,16 @@ pub struct TweakInputs {
     pub events: Vec<WinEvent>,
     /// Hardware test runs over the same span, whose load is not evidence for a tweak.
     pub tests: Vec<TestRun>,
+    /// Time the monitor sampled, by minute, over the same span.
+    pub covered: Vec<Covered>,
+}
+
+/// How much of one wall-clock minute the monitor sampled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Covered {
+    /// Start of the minute, Unix epoch milliseconds.
+    pub minute_ms: i64,
+    pub ms: u32,
 }
 
 /// One thing Vestigium observed that backs a tweak; the UI words it.
@@ -1058,12 +1075,77 @@ fn signals(tweak: TweakId, inputs: &TweakInputs) -> Vec<Signal> {
     out
 }
 
-/// The same signal counted in equal spans before and after a change, at most a week each.
+/// What the counts before and after a change say, once the time watched on each side is weighed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HelpedVerdict {
+    /// Fewer events in both windows together than a comparison needs.
+    NotEnoughEvents,
+    /// One window was monitored for less time than a comparison needs.
+    NotEnoughTime,
+    Fewer,
+    More,
+    Same,
+}
+
+impl HelpedVerdict {
+    /// Every variant, in declaration order.
+    pub const ALL: [HelpedVerdict; 5] = [
+        HelpedVerdict::NotEnoughEvents,
+        HelpedVerdict::NotEnoughTime,
+        HelpedVerdict::Fewer,
+        HelpedVerdict::More,
+        HelpedVerdict::Same,
+    ];
+}
+
+/// The same signal counted in equal spans before and after a change, at most a week each, with the
+/// time the monitor sampled in each span and what that says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Helped {
     pub days: u32,
     pub before: u32,
     pub after: u32,
+    /// Milliseconds sampled in the span before the change.
+    pub before_ms: i64,
+    pub after_ms: i64,
+    pub verdict: HelpedVerdict,
+    /// The least events and the least monitored hours behind a verdict.
+    pub min_events: u32,
+    pub min_hours: u32,
+}
+
+/// Milliseconds sampled in `[from, to)`; a minute counts in the span its start falls in.
+fn monitored_ms(inputs: &TweakInputs, from: i64, to: i64) -> i64 {
+    inputs
+        .covered
+        .iter()
+        .filter(|c| c.minute_ms >= from && c.minute_ms < to)
+        .map(|c| i64::from(c.ms))
+        .sum()
+}
+
+/// Compares events per monitored hour; needs enough time on each side and enough events overall.
+fn judge(before: u32, before_ms: i64, after: u32, after_ms: i64) -> HelpedVerdict {
+    let least_ms = i64::from(HELPED_MIN_HOURS) * HOUR_MS;
+    if before_ms < least_ms || after_ms < least_ms {
+        return HelpedVerdict::NotEnoughTime;
+    }
+    if before + after < HELPED_MIN_EVENTS {
+        return HelpedVerdict::NotEnoughEvents;
+    }
+    // before / before_ms against after / after_ms, cross-multiplied so nothing rounds.
+    let (before_rate, after_rate) = (
+        i128::from(before) * i128::from(after_ms),
+        i128::from(after) * i128::from(before_ms),
+    );
+    let ratio = i128::from(HELPED_RATIO);
+    if before_rate >= after_rate * ratio {
+        HelpedVerdict::Fewer
+    } else if after_rate >= before_rate * ratio {
+        HelpedVerdict::More
+    } else {
+        HelpedVerdict::Same
+    }
 }
 
 /// Whether a change helped, by the signal that backs its tweak; `None` for a tweak with nothing to
@@ -1093,10 +1175,21 @@ pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<H
             }
         })
     };
+    let (before, after) = (
+        count(applied_ms - span, applied_ms)?,
+        count(applied_ms, applied_ms + span)?,
+    );
+    let before_ms = monitored_ms(inputs, applied_ms - span, applied_ms);
+    let after_ms = monitored_ms(inputs, applied_ms, applied_ms + span);
     Some(Helped {
         days: days as u32,
-        before: count(applied_ms - span, applied_ms)?,
-        after: count(applied_ms, applied_ms + span)?,
+        before,
+        after,
+        before_ms,
+        after_ms,
+        verdict: judge(before, before_ms, after, after_ms),
+        min_events: HELPED_MIN_EVENTS,
+        min_hours: HELPED_MIN_HOURS,
     })
 }
 

@@ -4,10 +4,10 @@ use serde::Serialize;
 use vestigium_core::health::{BootReport, Finding, Measure, Subject};
 use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
-    CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Fault,
-    Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample, Reading,
-    Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit, heaviest,
-    pc_state, same_program, steady_only, usage,
+    CaptureCauses, Covered, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning,
+    Fault, Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample,
+    Reading, Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit,
+    heaviest, pc_state, same_program, steady_only, usage,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
@@ -23,6 +23,8 @@ pub struct SmartPointDto {
 }
 
 /// How far back the health page lists the findings that closed.
+/// The longest window a change is compared over, on each side of it.
+const HELPED_SPAN_MS: i64 = 7 * 24 * 3_600_000;
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
 /// How far back the dumps page lists the blue screens Windows reported.
 const REPORTS_SHOWN_MS: i64 = 365 * 24 * 3_600_000;
@@ -368,6 +370,8 @@ pub struct TweakHistory {
     pub events: Vec<WinEvent>,
     /// Test runs over the evidence span.
     pub tests: Vec<TestRun>,
+    /// Time sampled by minute, from a week before the oldest change shown.
+    pub covered: Vec<Covered>,
     pub machine: Option<MachineInfo>,
     /// Newest first: those of the shown span and every one still in place.
     pub changes: Vec<TweakChangeRow>,
@@ -423,6 +427,11 @@ impl History {
                 }
             }
             changes.sort_by_key(|r| std::cmp::Reverse((r.applied_ms, r.id)));
+            let covered_from = changes
+                .iter()
+                .map(|c| c.applied_ms - HELPED_SPAN_MS)
+                .min()
+                .map_or(now_ms, |oldest| oldest.max(from));
             Ok(TweakHistory {
                 findings: store
                     .open_findings()?
@@ -436,6 +445,14 @@ impl History {
                 tests: test_spans(store, from, now_ms)?
                     .into_iter()
                     .map(|(_, run)| run)
+                    .collect(),
+                covered: store
+                    .minutes(covered_from, now_ms)?
+                    .iter()
+                    .map(|m| Covered {
+                        minute_ms: m.ts_ms,
+                        ms: u32::from(m.samples.min(60)) * 1_000,
+                    })
                     .collect(),
                 machine: store.machine()?,
                 changes,
@@ -1133,6 +1150,45 @@ mod tests {
 
         assert_eq!(timeline.columns.state[10], PcState::Suspended);
         assert_eq!(timeline.columns.state[90], PcState::Calm);
+    }
+
+    #[test]
+    fn tweak_history_counts_the_time_the_monitor_sampled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let now_ms = DAY_START_MS + 20 * 24 * HOUR_MS;
+        let applied_ms = now_ms - 10 * 24 * HOUR_MS;
+        let change = vestigium_core::TweakChange {
+            tweak: vestigium_core::TweakId::GameDvr,
+            subject: None,
+            undo_of: None,
+            results: Vec::new(),
+            restore_point: None,
+            journal: None,
+        };
+        store
+            .record_tweak_change(&change, applied_ms, vestigium_core::Applier::User)
+            .unwrap();
+        // Two hours around the change, then a stretch the watcher was not running.
+        let minutes: Vec<MinuteSample> = (-60..60)
+            .map(|m| minute(applied_ms + m * MINUTE_MS, 3.0))
+            .collect();
+        store
+            .append(&[Segment {
+                series: Series::Minutes,
+                start_ms: minutes[0].ts_ms,
+                end_ms: minutes[minutes.len() - 1].ts_ms,
+                data: encode(&minutes),
+            }])
+            .unwrap();
+
+        let found = history
+            .tweak_history(now_ms, 30 * 24 * HOUR_MS, 30 * 24 * HOUR_MS)
+            .unwrap();
+
+        let ms: u32 = found.covered.iter().map(|c| c.ms).sum();
+        assert_eq!(ms, 120 * 1_000, "one sample a minute in the stored minutes");
+        assert!(found.covered.iter().all(|c| c.minute_ms % MINUTE_MS == 0));
     }
 
     #[test]
