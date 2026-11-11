@@ -24,6 +24,17 @@ How to use this file:
 
 ### Added
 
+- A deep capture, a volume check, a dump read and a full scan can now be cancelled from their own
+  card. Cancelling a capture or a volume check asks first and says what happens: the helper is
+  asked to stop and the window stops waiting for it, the time captured so far is not saved, and a
+  check only reads, so nothing is repaired. The dump read and the full scan, which take seconds,
+  cancel at once. A cancelled capture keeps nothing, and the card keeps a line saying what was
+  cancelled and what is still valid.
+- When the helper does not finish in time, a dialog on the job's own screen now says so once and
+  offers to try again. From another screen, the side item and the home tile of its group take the
+  attention mark until that dialog has been seen, and the card keeps a line about the last attempt.
+  A capture that the window gave up on does not claim that nothing was lost, since the helper may
+  still finish it.
 - The helper that runs a deep capture can now be told to stop. A stop file beside the capture ends
   it within a quarter of a second: the trace and the frame reader are closed, nothing is saved and
   the helper exits with its own code for a cancelled capture.

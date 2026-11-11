@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import HelperLine from "../../components/HelperLine.svelte";
   import Icon from "../../components/Icon.svelte";
   import { app } from "../../lib/app.svelte";
   import { captures } from "../../lib/capture.svelte";
@@ -51,6 +52,7 @@
 </script>
 
 <section class="start" aria-label={t("ui.captures.start.title")}>
+  <HelperLine job="capture" />
   {#if context}
     <p class="p context" tabindex="-1" use:focusHere>{context}</p>
   {/if}

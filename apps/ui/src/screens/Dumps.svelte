@@ -4,6 +4,8 @@
   import Block from "../components/Block.svelte";
   import Checkbox from "../components/Checkbox.svelte";
   import ErrorView from "../components/ErrorView.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
+  import HelperLine from "../components/HelperLine.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
@@ -181,7 +183,11 @@
     <Block title={t("ui.dumps.read.title")}>
       {#if dumps.reading === "running"}
         <p class="p status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.dumps.read.running")}</p>
+        <div class="acts">
+          <button type="button" class="btn" onclick={() => void dumps.cancelRead()}>{t("ui.helper.cancel.dumps")}</button>
+        </div>
       {:else}
+        <HelperLine job="dumps" />
         {#if dumps.reading === "declined"}
           <p class="p" role="status"><b>{t("ui.dumps.read.declined.title")}</b> {t("ui.dumps.read.declined.body")}</p>
         {:else if dumps.reading === "failed"}
@@ -207,6 +213,7 @@
           <AdminPill />
         </div>
       {/if}
+      <HelperDialogs job="dumps" onretry={() => void dumps.read()} />
     </Block>
   </div>
 

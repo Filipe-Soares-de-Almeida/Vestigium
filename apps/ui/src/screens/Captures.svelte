@@ -3,6 +3,7 @@
 
   import BackLink from "../components/BackLink.svelte";
   import Block from "../components/Block.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
   import { occurrence } from "../lib/api";
@@ -48,6 +49,12 @@
 {/if}
 <PageHead title={t("ui.captures.title")} />
 <p class="lede">{t("ui.captures.lede")}</p>
+
+<HelperDialogs
+  job="capture"
+  onconfirm={() => void captures.cancel()}
+  onretry={() => void captures.begin(captures.lastMinutes)}
+/>
 
 <div class="cols2">
   <Block title={t("ui.captures.start.title")}>

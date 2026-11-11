@@ -40,7 +40,7 @@
           >
             <Icon name={item.icon} />
             <span class="label">{item.label}</span>
-            {#if item.status}<StatusMark kind={item.status} size={14} reveal />{/if}
+            {#if item.status}<StatusMark kind={item.status} word={item.statusWord} size={14} reveal />{/if}
             {#if item.meta}<span class="meta">{item.meta}</span>{/if}
           </a>
         </li>

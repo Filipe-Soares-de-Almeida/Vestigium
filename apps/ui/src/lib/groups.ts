@@ -4,6 +4,7 @@ import { formatBytes } from "../screens/occurrence/format";
 import { app } from "./app.svelte";
 import { dumps } from "./dumps.svelte";
 import { health } from "./health.svelte";
+import { helperJobs, type JobKey } from "./helper.svelte";
 import { passState } from "./monitor";
 import { type DumpGroup, href, type Route, type TweakGroup } from "./router.svelte";
 import type { StatusKind } from "../components/StatusMark.svelte";
@@ -39,6 +40,10 @@ export interface NavItem {
   icon: IconName;
   /** A status shown as its symbol; the word appears on hover. */
   status?: StatusKind;
+  /** Replaces the default word of the status. */
+  statusWord?: string;
+  /** The entry's helper job did not finish in time and nobody was told yet. */
+  late?: boolean;
   /** A short trailing value, such as a size. */
   meta?: string;
   /** True for the routes this entry stands for. */
@@ -92,6 +97,13 @@ const mark = (state: AreaState): StatusKind | undefined => {
 };
 
 const DUMP_ICON: Record<DumpGroup, IconName> = { blue: "pc", live: "chip", app: "app" };
+
+/** The attention mark an entry takes while its job's helper did not finish in time and nobody was told. */
+const lateMark = (job: JobKey): Pick<NavItem, "status" | "statusWord" | "late"> =>
+  helperJobs.unseen(job) ? { status: "attention", statusWord: t("ui.helper.timeout.title"), late: true } : {};
+
+/** Whether a group holds an entry whose helper job did not finish in time and nobody was told yet. */
+export const hasLate = (group: Group): boolean => group.items.some((item) => item.late);
 
 /** The dump list a route shows: the one asked for, or the one of the dump it opens; none for the overview. */
 function dumpListOf(r: Route): DumpGroup | null {
@@ -178,7 +190,7 @@ export function buildGroups(): Group[] {
     }),
     g("health", "health", {
       items: [
-        { href: href.health(), label: t("ui.item.overview"), icon: "health", match: onHealth(null) },
+        { href: href.health(), label: t("ui.item.overview"), icon: "health", ...lateMark("health"), match: onHealth(null) },
         ...AREAS.map((a, i) => ({
           href: href.health(a.id),
           label: t(`ui.health.area.${a.id}`),
@@ -262,6 +274,7 @@ export function buildGroups(): Group[] {
           href: href.dumps(),
           label: t("ui.item.overview"),
           icon: "dumps",
+          ...lateMark("dumps"),
           meta: dumpBytes ? formatBytes(dumpBytes) : undefined,
           match: (r) => r.screen === "dumps" && dumpListOf(r) === null,
         },
@@ -280,6 +293,7 @@ export function buildGroups(): Group[] {
           href: href.captures(),
           label: t("ui.shell.nav.captures"),
           icon: "captures",
+          ...lateMark("capture"),
           match: (r) => r.screen === "captures" || r.screen === "capture",
         },
       ],

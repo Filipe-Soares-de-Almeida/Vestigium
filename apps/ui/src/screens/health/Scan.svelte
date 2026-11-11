@@ -1,6 +1,8 @@
 <script lang="ts">
   import AdminPill from "../../components/AdminPill.svelte";
   import Block from "../../components/Block.svelte";
+  import HelperDialogs from "../../components/HelperDialogs.svelte";
+  import HelperLine from "../../components/HelperLine.svelte";
   import Icon from "../../components/Icon.svelte";
   import { app } from "../../lib/app.svelte";
   import { health } from "../../lib/health.svelte";
@@ -18,7 +20,11 @@
 <Block title={t("ui.health.scan.title")}>
   {#if health.phase === "running"}
     <p class="p status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.health.scan.running")}</p>
+    <div class="acts">
+      <button type="button" class="btn" onclick={() => void health.cancelScan()}>{t("ui.helper.cancel.health")}</button>
+    </div>
   {:else}
+    <HelperLine job="health" />
     {#if health.phase === "declined"}
       <p class="p" role="status"><b>{t("ui.health.scan.declined.title")}</b> {t("ui.health.scan.declined.body")}</p>
     {:else if health.phase === "failed"}
@@ -53,6 +59,7 @@
       <AdminPill />
     </div>
   {/if}
+  <HelperDialogs job="health" onretry={() => void health.scan()} />
 </Block>
 
 <style>

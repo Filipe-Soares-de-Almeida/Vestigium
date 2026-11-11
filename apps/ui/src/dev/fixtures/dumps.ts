@@ -3,6 +3,7 @@
 // Every name, path and code here is invented; nothing was read from a real PC.
 import type { DeleteFinished, DumpDto, DumpScanFinished, DumpsDto } from "../../lib/types";
 import type { Handler } from "../mock";
+import { holdRead } from "./helper";
 
 const query = new URLSearchParams(location.search);
 const HOUR = 3_600_000;
@@ -219,7 +220,7 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, Number(query.get
 export const handlers: Record<string, Handler> = {
   dumps: () => data(),
   start_dump_scan: async () => {
-    await wait();
+    await holdRead("dumps", Number(query.get("dump-ms") ?? 1500), query.get("dump-hang") === "1");
     if (query.get("dump-fail") === "1") return { dumps: [], exit_code: 1 } satisfies DumpScanFinished;
     const full = [kernelMemory, kernelMini, liveReport, gameCrash, toolCrash, olderMini, deleted, hardwareStop, storageLayer];
     list = list.map((d) => full.find((f) => f.id === d.id && f.analyzed_ms !== null) ?? d);

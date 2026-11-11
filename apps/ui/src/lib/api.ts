@@ -102,6 +102,16 @@ export function captureRun(): Promise<CaptureRun | null> {
   return invoke("capture_run");
 }
 
+/** Tells the helper of the deep capture under way to stop and keep nothing. */
+export function cancelCapture(): Promise<void> {
+  return invoke("cancel_capture");
+}
+
+/** Makes the window stop waiting for a full scan or a dump read in progress; its command then rejects as cancelled. */
+export function cancelHelperRead(read: "scan" | "dumps"): Promise<void> {
+  return invoke("cancel_helper_read", { read });
+}
+
 /** Stores the finished captures the watcher has not stored yet; resolves to their ids. */
 export function importCaptures(): Promise<number[]> {
   return invoke("import_captures");

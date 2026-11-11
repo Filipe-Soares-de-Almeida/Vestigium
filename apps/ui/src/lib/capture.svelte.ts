@@ -1,13 +1,15 @@
 import { listen } from "@tauri-apps/api/event";
 
 import {
+  cancelCapture,
   capture as readCapture,
   captureRun,
   captures as readList,
   importCaptures,
   startCapture,
 } from "./api";
-import { errorKind } from "./errors";
+import { errorKind, errorText } from "./errors";
+import { helperJobs } from "./helper.svelte";
 import { t } from "./i18n.svelte";
 import { toast } from "./toast.svelte";
 import type { CaptureDto, CaptureFinished, CaptureRun, CaptureSummary } from "./types";
@@ -38,6 +40,10 @@ class Captures {
   finished = $state<number | null>(null);
   /** The clock the waiting card reads; it moves once a second only while a capture runs. */
   now = $state(Date.now());
+  /** The helper was told to stop and the window waits for it to end. */
+  cancelling = $state(false);
+  /** The length of the last capture asked for, for a new try after a timeout. */
+  lastMinutes = $state(5);
 
   #cache = new Map<number, CaptureDto>();
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -82,6 +88,8 @@ class Captures {
     this.asking = true;
     this.problem = null;
     this.finished = null;
+    this.lastMinutes = minutes;
+    helperJobs.clear("capture");
     try {
       this.#setRun(await startCapture(minutes));
     } catch (error) {
@@ -89,6 +97,18 @@ class Captures {
       this.problemError = error;
     } finally {
       this.asking = false;
+    }
+  }
+
+  /** Tells the helper to stop and keep nothing; the end arrives as the finished event. */
+  async cancel(): Promise<void> {
+    if (!this.run || this.cancelling) return;
+    this.cancelling = true;
+    try {
+      await cancelCapture();
+    } catch (error) {
+      this.cancelling = false;
+      toast.show(errorText(error));
     }
   }
 
@@ -120,8 +140,14 @@ class Captures {
 
   async #ended(done: CaptureFinished): Promise<void> {
     this.#setRun(null);
-    const ok = done.exit_code === 0 && done.ids.length > 0;
-    if (!ok) this.problem = "interrupted";
+    this.cancelling = false;
+    // A capture the helper saved counts as finished even when a cancel or a limit came as it ended.
+    const ok = done.ids.length > 0 && (done.exit_code === 0 || done.ended !== "Done");
+    if (!ok) {
+      if (done.ended === "Cancelled") helperJobs.record("capture", "cancelled");
+      else if (done.ended === "TimedOut") helperJobs.record("capture", "timeout");
+      else this.problem = "interrupted";
+    }
     await this.#load();
     if (ok) {
       this.finished = done.ids[done.ids.length - 1];

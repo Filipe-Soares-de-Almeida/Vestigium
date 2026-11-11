@@ -5,6 +5,8 @@
   import Block from "../components/Block.svelte";
   import type { MarkKind } from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
+  import HelperLine from "../components/HelperLine.svelte";
   import HistList from "../components/HistList.svelte";
   import Icon, { type IconName } from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
@@ -15,6 +17,7 @@
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { errorText } from "../lib/errors";
+  import { helperJobs } from "../lib/helper.svelte";
   import { formatNumber, formatPercent } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
@@ -197,7 +200,7 @@
     }
     if (running?.kind === "VolumeCheck") {
       const root = typeof running.subject === "object" && "Volume" in running.subject ? running.subject.Volume : "";
-      return { title: t("ui.tests.live.check", { volume: vol(root) }), note: t("ui.tests.live.check.note"), frac: null, facts: [], bad: false, stoppable: false };
+      return { title: t("ui.tests.live.check", { volume: vol(root) }), note: t("ui.tests.live.check.note"), frac: null, facts: [], bad: false, stoppable: true, confirm: true };
     }
     const s = p?.kind === "surface" ? p : dto.scan?.progress;
     if (running?.kind === "DiskSurface" || dto.scan) {
@@ -306,10 +309,19 @@
         <span class="pbar" class:indeterminate={live.frac === null} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={live.frac === null ? undefined : Math.round(live.frac * 100)}>
           <i style:width={live.frac === null ? undefined : `${live.frac * 100}%`}></i>
         </span>
-        {#if live.stoppable}
+        {#if live.stoppable && "confirm" in live}
+          {#if hwtests.stopping}
+            <button type="button" class="btn" disabled aria-disabled="true">{t("ui.helper.cancelling")}</button>
+          {:else}
+            <button type="button" class="btn" onclick={() => helperJobs.ask("check")}>{t("ui.helper.cancel.check")}</button>
+          {/if}
+        {:else if live.stoppable}
           <button type="button" class="btn" onclick={() => void stop()}>{t("ui.tests.cancel")}</button>
         {/if}
       </div>
+      {#if "confirm" in live && hwtests.stopping}
+        <p class="note" role="status">{t("ui.helper.cancelling.note")}</p>
+      {/if}
       {#if live.facts.length}
         <p class="note facts-line" class:bad={live.bad}>{#each live.facts as f, i (i)}<span>{f}</span>{/each}</p>
       {/if}
@@ -554,6 +566,7 @@
               {@const cs = statusOf(c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown")}
               <p class="state"><StatusMark kind={cs.kind} word={t(`ui.tests.check.${c.result}`)} /></p>
             {/if}
+            <HelperLine job="check" volume={v.root} />
             <dl class="kv">
               <div><dt>{t("ui.tests.fs.volume")}</dt><dd>{vol(v.root)}</dd></div>
               <div><dt>{t("ui.tests.fs.last")}</dt><dd>{check ? at(check.ended_ms) : t("ui.tests.check.never")}</dd></div>
@@ -664,6 +677,8 @@
     <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
   {/if}
 {/if}
+
+<HelperDialogs job="check" onconfirm={() => void stop()} />
 
 <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => (asking = null)}>
   {#if asking?.kind === "bench"}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { captures } from "../../lib/capture.svelte";
   import { focusHere } from "../../lib/focus";
+  import { helperJobs } from "../../lib/helper.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
   import { formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
@@ -33,6 +34,16 @@
   </p>
   <span class="pbar" aria-hidden="true"><i style:width="{done}%"></i></span>
   <p class="note">{t("ui.captures.wait.body", { time: formatTime(run.ends_ms) })}</p>
+  {#if captures.cancelling}
+    <p class="note" role="status">{t("ui.helper.cancelling.note")}</p>
+  {/if}
+  <div class="acts">
+    {#if captures.cancelling}
+      <button type="button" class="btn" disabled aria-disabled="true">{t("ui.helper.cancelling")}</button>
+    {:else}
+      <button type="button" class="btn" onclick={() => helperJobs.ask("capture")}>{t("ui.helper.cancel.capture")}</button>
+    {/if}
+  </div>
 </section>
 
 <style>

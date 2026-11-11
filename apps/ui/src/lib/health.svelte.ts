@@ -1,5 +1,6 @@
-import { health as readHealth, startScan } from "./api";
+import { cancelHelperRead, health as readHealth, startScan } from "./api";
 import { errorKind } from "./errors";
+import { helperJobs } from "./helper.svelte";
 import { t, tn } from "./i18n.svelte";
 import { toast } from "./toast.svelte";
 import type { FindingDto, HealthDto } from "./types";
@@ -40,10 +41,20 @@ class Health {
     }
   }
 
+  /** Stops waiting for the scan in progress; the scan then ends as cancelled. */
+  async cancelScan(): Promise<void> {
+    try {
+      await cancelHelperRead("scan");
+    } catch {
+      // The scan ends by itself when the helper does.
+    }
+  }
+
   /** Asks Windows for permission, runs the scan in the helper and reads the findings it changed. */
   async scan(): Promise<void> {
     if (this.phase === "running") return;
     this.phase = "running";
+    helperJobs.clear("health");
     const before = new Set(this.dto?.open.map(key) ?? []);
     try {
       const done = await startScan();
@@ -58,7 +69,13 @@ class Health {
       this.phase = "done";
       toast.show(this.found ? tn("ui.health.scan.toast.found", this.found) : t("ui.health.scan.toast.none"));
     } catch (error) {
-      this.phase = errorKind(error) === "declined" ? "declined" : "failed";
+      const kind = errorKind(error);
+      if (kind === "cancelled" || kind === "helper_timed_out") {
+        helperJobs.record("health", kind === "cancelled" ? "cancelled" : "timeout");
+        this.phase = "idle";
+      } else {
+        this.phase = kind === "declined" ? "declined" : "failed";
+      }
     }
   }
 }

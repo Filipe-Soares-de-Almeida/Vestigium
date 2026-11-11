@@ -324,7 +324,7 @@ export const handlers: Record<string, Handler> = {
     return running;
   },
   stop_test: () => {
-    if (running) finish({ id: 95, run: null, exit_code: 0, ended: "Done" });
+    if (running) finish({ id: 95, run: null, exit_code: 0, ended: running.kind === "VolumeCheck" ? "Cancelled" : "Done" });
     return null;
   },
   test_running: () => running,

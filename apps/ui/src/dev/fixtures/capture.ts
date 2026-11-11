@@ -167,6 +167,8 @@ const STORED = new Map(
 const left = Number(query.get("capture-left") ?? 0);
 let run: CaptureRun | null = left ? { started_ms: Date.now() - 48_000, ends_ms: Date.now() + left * 1000 } : null;
 
+let ending: ReturnType<typeof setTimeout> | undefined;
+
 export const handlers: Record<string, Handler> = {
   start_capture: async (args) => {
     const minutes = Number(args.minutes);
@@ -174,9 +176,13 @@ export const handlers: Record<string, Handler> = {
     const seconds = Number(query.get("capture-secs") ?? minutes * 60);
     const now = Date.now();
     run = { started_ms: now, ends_ms: now + seconds * 1000 };
-    setTimeout(() => {
+    ending = setTimeout(() => {
       const id = Math.max(0, ...STORED.keys()) + 1;
       run = null;
+      if (query.get("capture-late") === "1") {
+        void emit("capture-finished", { ids: [], exit_code: null, ended: "TimedOut" });
+        return;
+      }
       if (query.get("capture-fail") === "1") {
         void emit("capture-finished", { ids: [], exit_code: 1, ended: "Done" });
         return;
@@ -187,6 +193,14 @@ export const handlers: Record<string, Handler> = {
     return run;
   },
   capture_run: () => run,
+  cancel_capture: () => {
+    clearTimeout(ending);
+    setTimeout(() => {
+      run = null;
+      void emit("capture-finished", { ids: [], exit_code: 5, ended: "Cancelled" });
+    }, 600);
+    return null;
+  },
   import_captures: () => [],
   captures: (args) =>
     [...STORED.values()]

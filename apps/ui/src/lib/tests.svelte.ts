@@ -11,6 +11,7 @@ import {
   tests as readTests,
 } from "./api";
 import { errorKind } from "./errors";
+import { helperJobs } from "./helper.svelte";
 import type { DiskDetailDto, DiskDto, RunningTest, TestFinished, TestProgress, TestsDto } from "./types";
 
 /** How a request to start a test ended. */
@@ -29,6 +30,8 @@ class Tests {
   details = $state.raw<Record<number, DiskDetailDto>>({});
   /** Windows is asking for permission, or a test is being set up. */
   busy = $state(false);
+  /** A stop was asked for and the test has not ended yet. */
+  stopping = $state(false);
 
   /** Listens for progress and the end of a test for the whole window; returns the function that stops it. */
   listen(): () => void {
@@ -36,6 +39,12 @@ class Tests {
       this.progress = event.payload;
     });
     const finished = listen<TestFinished>("test-finished", (event) => {
+      const was = this.running;
+      if (event.payload.ended === "Cancelled" && was?.kind === "VolumeCheck") {
+        const root = typeof was.subject === "object" && "Volume" in was.subject ? was.subject.Volume : undefined;
+        helperJobs.record("check", "cancelled", root);
+      }
+      this.stopping = false;
       this.finished = event.payload;
       this.running = null;
       this.progress = null;
@@ -71,6 +80,7 @@ class Tests {
   }
 
   volume(root: string): Promise<Started> {
+    helperJobs.clear("check");
     return this.#start(() => startVolumeCheck(root));
   }
 
@@ -89,7 +99,13 @@ class Tests {
 
   /** Stops the running test, or the disk scan the helper runs for an earlier window. */
   async stop(): Promise<void> {
-    await stopTest(this.running ? null : (this.dto?.scan?.stem ?? null));
+    this.stopping = true;
+    try {
+      await stopTest(this.running ? null : (this.dto?.scan?.stem ?? null));
+    } catch (error) {
+      this.stopping = false;
+      throw error;
+    }
   }
 
   async readDetail(disk: DiskDto): Promise<void> {

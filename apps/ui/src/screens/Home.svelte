@@ -7,7 +7,7 @@
   import { formatDuration, formatTime } from "../lib/format";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
-  import { buildGroups, entryHref } from "../lib/groups";
+  import { buildGroups, entryHref, hasLate } from "../lib/groups";
   import { t, tn } from "../lib/i18n.svelte";
   import { passState } from "../lib/monitor";
   import { morph } from "../lib/morph.svelte";
@@ -122,7 +122,10 @@
       {#each tiles as group (group.key)}
         <li>
           <a class="tile" href={entryHref(group)} data-morph="g:{group.key}" onclick={() => morph.remember(`g:${group.key}`)}>
-            <span class="tile-ic"><Icon name={group.icon} /></span>
+            <span class="tile-ic">
+              <Icon name={group.icon} />
+              {#if hasLate(group)}<span class="dot"><StatusMark kind="attention" word={t("ui.helper.timeout.title")} size={14} reveal /></span>{/if}
+            </span>
             <span class="text"><b>{group.name}</b><small>{group.sub}</small></span>
           </a>
         </li>
@@ -311,10 +314,11 @@
     padding: 16px 16px 18px;
   }
   .tile-ic {
+    position: relative;
     margin-top: 1px;
     color: var(--accent);
   }
-  .tile-ic :global(svg) {
+  .tile-ic > :global(svg) {
     width: 30px;
     height: 30px;
   }
