@@ -89,6 +89,11 @@ How to use this file:
   batches are now written by a thread of their own, so a write that waits for the database no
   longer delays the next second's reading. Clearing the history also discards what was still waiting
   to be written, so a batch queued just before the clear no longer brings old data back after it.
+- A freeze, a stall, the post-mortem of a fall and the machine's disk facts are now stored by that
+  same thread, so a slow write no longer delays the reading of the second it happens in. What the
+  monitor reads about the last fall comes through a read-only connection that never waits for a
+  write. An occurrence that cannot be stored is still tried again every second and given up after
+  five failed tries, as before.
 - Once the crash dump of a blue screen is read, the report page and the copied report use the
   dump's own next steps instead of the generic driver update. When the dump blames a Windows
   component that serves other drivers, such as storport.sys, the Dumps screen no longer says to

@@ -15,13 +15,13 @@ use vestigium_collect::{
 };
 use vestigium_core::{
     Blackbox, CAPTURE_MINUTES_MAX, CpuWindow, DiskInfo, EventMeaning, Gap, GapReason, GateState,
-    HICCUP_MS, HungWindow, INTERVAL_KEPT, INTERVAL_MS, MachineInfo, Media, Notable,
-    OccurrenceSummary, Output, PressureSpan, ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop,
-    ProgramRing, REPORTED_EXEMPLARS, RING_MS, Reading, RecentState, Ring, RunGate, Sample,
-    Settings, Severity, Timing, WinEvent, heaviest, last_seen, process_rates, programs,
+    HICCUP_MS, HungWindow, INTERVAL_KEPT, INTERVAL_MS, MachineInfo, Media, Notable, Output,
+    PressureSpan, ProbeHiccup, ProbeTick, ProcessCounters, ProcessTop, ProgramRing,
+    REPORTED_EXEMPLARS, RING_MS, Reading, RecentState, Ring, RunGate, Sample, Settings, Severity,
+    Timing, WinEvent, heaviest, last_seen, process_rates, programs,
 };
 use vestigium_ipc::{AgentStatus, NowFrame};
-use vestigium_store::{Batch, Batcher, Segment, Store};
+use vestigium_store::{Batch, Batcher, Segment, Store, StoreError};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 
 use vestigium_core::health::Concern;
@@ -66,8 +66,6 @@ const HICCUPS_KEPT_MS: i64 = CAPTURE_MINUTES_MAX as i64 * 60_000;
 const DRAIN_WAIT: Duration = Duration::from_secs(1);
 /// How long a failed Event Log subscription waits before the next attempt.
 const SUBSCRIBE_RETRY_MS: i64 = 60_000;
-/// Occurrences and episodes kept for another try after a failed write; each one is large.
-const OUTPUTS_KEPT: usize = 5;
 /// Events of one provider and id stored per batch: above what the black box keeps for one report
 /// and far above the counts the health checks need.
 const BATCH_EVENT_EXEMPLARS: usize = 4 * REPORTED_EXEMPLARS;
@@ -146,12 +144,12 @@ pub struct Wiring {
 /// Starts the 1 Hz sampler, which feeds the black box and writes into `store`.
 pub fn run_sampler(store: Store, wiring: Wiring) -> io::Result<SamplerHandle> {
     let (done_tx, done_rx) = mpsc::channel();
-    let (service, db) = start_storage(store, &wiring)?;
+    let storage = start_storage(store, &wiring)?;
     thread::Builder::new()
         .name("sampler".to_string())
         .spawn(move || {
             let gate = wiring.gate.clone();
-            let mut sampler = Sampler::new(service, db, wiring);
+            let mut sampler = Sampler::new(storage, wiring);
             sampler.run(&gate);
             sampler.take_events();
             sampler.settle_fall(wall_ms(), true);
@@ -165,18 +163,34 @@ pub fn run_sampler(store: Store, wiring: Wiring) -> io::Result<SamplerHandle> {
     })
 }
 
-/// Hands the history to a storage thread; the file's path comes back for the sampler's own reads.
-fn start_storage(store: Store, wiring: &Wiring) -> io::Result<(Service, Option<PathBuf>)> {
+/// The storage thread, and what the sampler needs to read and hear back from it.
+struct Storage {
+    service: Service,
+    /// Occurrences and episodes the thread gave up after too many failed writes.
+    dropped: Receiver<Output>,
+    /// The history file, which the sampler reads through connections of its own.
+    db: Option<PathBuf>,
+}
+
+/// Hands the history to a storage thread.
+fn start_storage(store: Store, wiring: &Wiring) -> io::Result<Storage> {
     let db = store.path();
+    let (dropped_tx, dropped) = mpsc::channel();
     let service = Service::start(
         store,
         Links {
             status: wiring.status.clone(),
             epoch: wiring.epoch.clone(),
             health_due: wiring.health_due.clone(),
+            now: wiring.now.clone(),
+            dropped: dropped_tx,
         },
     )?;
-    Ok((service, db))
+    Ok(Storage {
+        service,
+        dropped,
+        db,
+    })
 }
 
 /// True when the wall clock entered an hour that has not been pruned yet.
@@ -187,6 +201,9 @@ pub fn prune_due(pruned_hour: Option<i64>, now_ms: i64) -> bool {
 struct Sampler {
     /// The storage thread, which owns the write connection.
     service: Service,
+    dropped: Receiver<Output>,
+    /// The history file, read through a connection opened for each read.
+    db: Option<PathBuf>,
     /// Jobs the full queue did not take, oldest first, tried again every tick.
     backlog: VecDeque<Queued>,
     epoch: Arc<Epoch>,
@@ -216,8 +233,6 @@ struct Sampler {
     events: Vec<WinEvent>,
     bookmark_xml: Option<String>,
     gaps: Vec<Gap>,
-    /// Occurrences and episodes whose write failed, oldest first, tried again at the next `keep`.
-    unstored: VecDeque<Output>,
     /// How often a batch is written, and when the last one was.
     flush_ms: i64,
     last_write_ms: i64,
@@ -297,20 +312,32 @@ impl Sources {
 }
 
 impl Sampler {
-    fn new(service: Service, db: Option<PathBuf>, wiring: Wiring) -> Sampler {
+    fn new(storage: Storage, wiring: Wiring) -> Sampler {
+        let Storage {
+            service,
+            dropped,
+            db,
+        } = storage;
         let store = db
             .as_deref()
             .and_then(|path| Store::open(path).ok())
             .expect("the history opens a second time");
+        let history = db.as_deref().map(Store::open_read_only);
         let now = wall_ms();
         let opened = wiring.ring_path.as_deref().map(BlackboxRing::open);
-        let machine = store.machine().ok().flatten().unwrap_or(MachineInfo {
-            logical_cpus: logical_cpus(),
-            mem_total_bytes: memory_info().map_or(0, |m| m.total_bytes),
-            disks: Vec::new(),
-        });
+        let machine = history
+            .as_ref()
+            .and_then(|history| history.as_ref().ok())
+            .and_then(|history| history.machine().ok().flatten())
+            .unwrap_or(MachineInfo {
+                logical_cpus: logical_cpus(),
+                mem_total_bytes: memory_info().map_or(0, |m| m.total_bytes),
+                disks: Vec::new(),
+            });
         let mut sampler = Sampler {
             service,
+            dropped,
+            db,
             backlog: VecDeque::new(),
             seen_epoch: wiring.epoch.current(),
             epoch: wiring.epoch,
@@ -336,7 +363,6 @@ impl Sampler {
             events: Vec::new(),
             bookmark_xml: None,
             gaps: Vec::new(),
-            unstored: VecDeque::new(),
             flush_ms: i64::try_from(wiring.flush.as_millis()).unwrap_or(i64::MAX),
             last_write_ms: now,
             away_since: None,
@@ -362,8 +388,11 @@ impl Sampler {
             source_health: SourceHealths::default(),
             store,
         };
-        sampler.recall_last_day(now);
-        let history_last = sampler.store.last_sample_end_ms().ok().flatten();
+        let history = history.and_then(Result::ok);
+        if let Some(history) = &history {
+            sampler.recall_last_day(history, now);
+        }
+        let history_last = history.and_then(|history| history.last_sample_end_ms().ok().flatten());
         match opened {
             Some(Ok((ring, held))) => {
                 if let Some(warning) = &held.warning {
@@ -393,14 +422,14 @@ impl Sampler {
     }
 
     /// Counts what the history already holds for the last 24 h, so the tray survives a restart.
-    fn recall_last_day(&mut self, now: i64) {
-        if let Ok(open) = self.store.open_findings() {
+    fn recall_last_day(&mut self, history: &Store, now: i64) {
+        if let Ok(open) = history.open_findings() {
             self.critical_findings = open
                 .iter()
                 .filter(|f| f.finding.concern == Concern::Critical)
                 .count() as u32;
         }
-        if let Ok(occurrences) = self.store.occurrences(now - DAY_MS, now) {
+        if let Ok(occurrences) = history.occurrences(now - DAY_MS, now) {
             lock(&self.now).latest = occurrences.last().cloned();
             for o in occurrences {
                 let severe = o.severity == Severity::Severe;
@@ -408,7 +437,7 @@ impl Sampler {
                     .remember(o.end_ms, Notable::Occurrence { severe });
             }
         }
-        if let Ok(episodes) = self.store.episodes(now - DAY_MS, now) {
+        if let Ok(episodes) = history.episodes(now - DAY_MS, now) {
             for e in episodes.iter().filter(|e| !e.kind.is_hint()) {
                 self.blackbox.remember(e.end_ms, Notable::Episode);
             }
@@ -797,11 +826,18 @@ impl Sampler {
         if now < self.next_subscribe_ms {
             return;
         }
+        if self.resubscribe.is_none() {
+            return;
+        }
+        self.next_subscribe_ms = now + SUBSCRIBE_RETRY_MS;
+        let bookmark = self
+            .history()
+            .and_then(|history| history.bookmark_xml())
+            .ok()
+            .flatten();
         let Some(start) = self.resubscribe.as_mut() else {
             return;
         };
-        self.next_subscribe_ms = now + SUBSCRIBE_RETRY_MS;
-        let bookmark = self.store.bookmark_xml().ok().flatten();
         match start(bookmark.as_deref()) {
             Ok(subscription) => self.subscription = Some(subscription),
             Err(err) => self.report(&format!("the Event Log subscription failed: {err}")),
@@ -835,50 +871,23 @@ impl Sampler {
         }
     }
 
-    /// Stores occurrences and episodes right away, those that failed before first; gaps wait for
-    /// the batch.
+    /// Hands occurrences and episodes to the storage thread right away; gaps wait for the batch.
+    /// While some wait on the thread for another try, they are asked for again each second.
     fn keep(&mut self, outputs: Vec<Output>, now: i64) {
-        let again = mem::take(&mut self.unstored);
-        for output in again.into_iter().chain(outputs) {
-            let stored = match &output {
-                Output::Occurrence(occurrence) => {
-                    self.store.insert_occurrence(occurrence).map(|id| {
-                        lock(&self.now).latest = Some(OccurrenceSummary {
-                            id,
-                            kind: occurrence.kind,
-                            start_ms: occurrence.start_ms,
-                            end_ms: occurrence.end_ms,
-                            severity: occurrence.severity,
-                            cause: occurrence.cause(),
-                        });
-                    })
-                }
-                Output::Episode(episode) => self.store.insert_episode(episode).map(drop),
-                Output::Gap(gap) => {
-                    self.gaps.push(*gap);
-                    Ok(())
-                }
-            };
-            if let Err(err) = stored {
-                self.report(&err);
-                self.hold_unstored(output);
+        for output in outputs {
+            match output {
+                Output::Occurrence(occurrence) => self.send(Job::Occurrence(occurrence)),
+                Output::Episode(episode) => self.send(Job::Episode(episode)),
+                Output::Gap(gap) => self.gaps.push(gap),
             }
         }
+        if self.backlog.is_empty() && self.service.holds_outputs() {
+            self.send(Job::Retry);
+        }
+        for given_up in self.dropped.try_iter() {
+            self.blackbox.forget_notable(&given_up);
+        }
         self.publish_recent(now);
-    }
-
-    /// Keeps an output that failed to store for the next try; past the cap the oldest is dropped
-    /// and no longer counted.
-    fn hold_unstored(&mut self, output: Output) {
-        if matches!(output, Output::Gap(_)) {
-            return;
-        }
-        self.unstored.push_back(output);
-        while self.unstored.len() > OUTPUTS_KEPT
-            && let Some(oldest) = self.unstored.pop_front()
-        {
-            self.blackbox.forget_notable(&oldest);
-        }
     }
 
     /// Turns a fall Windows has spoken about into a post-mortem, and records the time away;
@@ -898,7 +907,7 @@ impl Sampler {
         if let Some(ring) = &self.ring {
             ring.release_held();
         }
-        let reason = match fall.occurrence(&self.store) {
+        let reason = match self.history().and_then(|history| fall.occurrence(&history)) {
             Ok(Some(occurrence)) => {
                 let severe = occurrence.severity == Severity::Severe;
                 self.blackbox
@@ -958,7 +967,6 @@ impl Sampler {
                 });
         }
         self.backlog.clear();
-        self.unstored.clear();
         self.blackbox = self.blackbox.emptied();
         if let Some(ring) = self.ring.as_mut() {
             ring.clear();
@@ -1023,9 +1031,7 @@ impl Sampler {
                 })
                 .collect(),
         };
-        if let Err(err) = self.store.set_machine(&machine) {
-            self.report(&err);
-        }
+        self.send(Job::Machine(machine.clone()));
         self.blackbox.set_machine(machine);
     }
 
@@ -1173,8 +1179,10 @@ impl Sampler {
             bookmark_xml: self.bookmark_xml.take(),
             gaps: mem::take(&mut self.gaps),
         };
-        if !batch.is_empty() || self.service.is_retrying() {
+        if !batch.is_empty() {
             self.send(Job::Batch(batch));
+        } else if self.service.is_retrying() {
+            self.send(Job::Retry);
         } else {
             self.push_backlog();
         }
@@ -1230,6 +1238,14 @@ impl Sampler {
         }) = self.backlog.iter_mut().find(|queued| is_batch(queued))
         {
             shed_into(oldest, next);
+        }
+    }
+
+    /// A connection that only reads, opened for the read and closed after it.
+    fn history(&self) -> Result<Store, StoreError> {
+        match &self.db {
+            Some(path) => Store::open_read_only(path),
+            None => Err(StoreError::NotFound),
         }
     }
 
@@ -1328,6 +1344,7 @@ mod tests {
 
     use super::*;
     use crate::readings::{Waiter, windows_source_set};
+    use crate::service::OUTPUTS_KEPT;
     use crate::testing::{Refusal, WriterLock, disk_event, quiet, wait_until};
     use vestigium_collect::{CpuReading, HighResTimer, MemoryInfo};
     use vestigium_core::DiskLoad;
@@ -2474,8 +2491,8 @@ mod tests {
 
     /// A sampler over `store`, driven by hand.
     fn over(store: Store, wiring: Wiring) -> Sampler {
-        let (service, db) = start_storage(store, &wiring).unwrap();
-        Sampler::new(service, db, wiring)
+        let storage = start_storage(store, &wiring).unwrap();
+        Sampler::new(storage, wiring)
     }
 
     #[test]
@@ -2572,6 +2589,25 @@ mod tests {
         assert!(!sampler.batcher.take_final().is_empty());
     }
 
+    /// Keeps the storage thread busy until the returned flag is set, once it has started.
+    fn hold_the_thread(service: &Service) -> Arc<AtomicBool> {
+        let release = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(false));
+        let (waited, begun) = (release.clone(), started.clone());
+        let hold = Queued {
+            epoch: 0,
+            job: Job::Run(Box::new(move |_| {
+                begun.store(true, Ordering::Release);
+                while !waited.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            })),
+        };
+        assert!(service.submit(hold).is_ok());
+        assert!(wait_until(PATIENCE, || started.load(Ordering::Acquire)));
+        release
+    }
+
     #[test]
     fn a_write_stuck_on_the_database_does_not_delay_the_samples() {
         let dir = tempfile::tempdir().unwrap();
@@ -2644,17 +2680,7 @@ mod tests {
     fn a_full_queue_keeps_batches_in_the_backlog_in_order() {
         let dir = tempfile::tempdir().unwrap();
         let mut sampler = manual_sampler(dir.path());
-        let release = Arc::new(AtomicBool::new(false));
-        let waited = release.clone();
-        let hold = Queued {
-            epoch: 0,
-            job: Job::Run(Box::new(move |_| {
-                while !waited.load(Ordering::Acquire) {
-                    thread::sleep(Duration::from_millis(5));
-                }
-            })),
-        };
-        assert!(sampler.service.submit(hold).is_ok());
+        let release = hold_the_thread(&sampler.service);
         let sent = crate::service::QUEUE_BOUND as u64 + 2;
         for n in 1..=sent {
             sampler.events.push(disk_event(n));
@@ -2682,17 +2708,7 @@ mod tests {
     fn a_backlog_beyond_the_cap_loses_the_samples_of_its_oldest_batch() {
         let dir = tempfile::tempdir().unwrap();
         let mut sampler = manual_sampler(dir.path());
-        let release = Arc::new(AtomicBool::new(false));
-        let waited = release.clone();
-        let hold = Queued {
-            epoch: 0,
-            job: Job::Run(Box::new(move |_| {
-                while !waited.load(Ordering::Acquire) {
-                    thread::sleep(Duration::from_millis(5));
-                }
-            })),
-        };
-        assert!(sampler.service.submit(hold).is_ok());
+        let release = hold_the_thread(&sampler.service);
         let filler = Batch {
             events: vec![disk_event(1)],
             ..Batch::default()
@@ -2898,6 +2914,7 @@ mod tests {
 
         let refusal = Refusal::of(dir.path(), "occurrence");
         sampler.keep(outputs, now);
+        sampler.drain();
         drop(refusal);
         assert!(
             history(dir.path())
@@ -2905,13 +2922,17 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert!(sampler.service.holds_outputs());
 
         sampler.keep(Vec::new(), now);
+        sampler.drain();
         sampler.keep(Vec::new(), now);
+        sampler.drain();
 
         let stored = history(dir.path()).occurrences(i64::MIN, i64::MAX).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(sampler.blackbox.recent(now).occurrences, 1);
+        assert!(!sampler.service.holds_outputs());
     }
 
     #[test]
@@ -2923,11 +2944,74 @@ mod tests {
 
         let _refusal = Refusal::of(dir.path(), "occurrence");
         sampler.keep(outputs, now);
+        sampler.drain();
+        sampler.keep(Vec::new(), now);
 
-        assert_eq!(sampler.unstored.len(), OUTPUTS_KEPT);
         assert_eq!(
             sampler.blackbox.recent(now).occurrences as usize,
             OUTPUTS_KEPT
+        );
+    }
+
+    #[test]
+    fn an_occurrence_behind_a_busy_thread_names_itself_in_the_live_frame_once_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let (outputs, now) = freeze_outputs(&mut sampler, 1);
+        let release = hold_the_thread(&sampler.service);
+        let began = Instant::now();
+
+        sampler.keep(outputs, now);
+
+        assert!(
+            began.elapsed() < Duration::from_millis(500),
+            "keeping an occurrence waited for the thread"
+        );
+        assert!(lock(&sampler.now).latest.is_none());
+        release.store(true, Ordering::Release);
+        sampler.drain();
+        let stored = history(dir.path()).occurrences(i64::MIN, i64::MAX).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            lock(&sampler.now).latest.as_ref().map(|o| o.id),
+            Some(stored[0].id)
+        );
+    }
+
+    #[test]
+    fn the_machine_facts_reach_the_history_through_the_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sampler = manual_sampler(dir.path());
+        let mut sample = quiet(wall_ms());
+        sample.disks = vec![DiskLoad {
+            name: "9 Z:".to_string(),
+            active_pct: 1.0,
+            latency_ms: Some(1.0),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(0.0),
+        }];
+
+        sampler.learn_machine(&sample);
+        sampler.drain();
+
+        let machine = history(dir.path()).machine().unwrap().unwrap();
+        assert_eq!(machine.disks.len(), 1);
+        assert_eq!(machine.disks[0].name, "9 Z:");
+    }
+
+    #[test]
+    fn a_read_never_waits_for_the_write_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let sampler = manual_sampler(dir.path());
+        let _writing = WriterLock::take(dir.path());
+
+        let read = sampler
+            .history()
+            .and_then(|history| history.samples(0, i64::MAX));
+
+        assert!(
+            read.unwrap().is_empty(),
+            "a reader never waits for the writer"
         );
     }
 

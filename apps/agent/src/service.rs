@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::io;
+use std::mem;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
@@ -7,8 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vestigium_core::{Gap, GapReason};
-use vestigium_ipc::AgentStatus;
+use vestigium_core::{Episode, Gap, GapReason, MachineInfo, Occurrence, OccurrenceSummary, Output};
+use vestigium_ipc::{AgentStatus, NowFrame};
 use vestigium_store::{Batch, Store, StoreError};
 
 use crate::app::{lock, panic_text};
@@ -18,6 +19,8 @@ pub const QUEUE_BOUND: usize = 32;
 /// Batches kept for another try after a failed write, on the thread and in a sender's backlog;
 /// past this the oldest loses its samples.
 pub const BATCHES_KEPT: usize = 3;
+/// Occurrences and episodes kept for another try after a failed write; each one is large.
+pub const OUTPUTS_KEPT: usize = 5;
 /// Stack of the storage thread: it blocks on its queue and holds no deep call chain.
 const STACK_BYTES: usize = 1 << 20;
 /// How long a sender waits between two tries to put a job in a full queue.
@@ -54,6 +57,13 @@ impl Epoch {
 pub enum Job {
     /// Samples, events with their bookmark, and gaps, written in one transaction.
     Batch(Batch),
+    /// A freeze, a stall or a fall; the live frame names it once it is stored.
+    Occurrence(Box<Occurrence>),
+    Episode(Episode),
+    /// The machine facts the disk counters made known.
+    Machine(MachineInfo),
+    /// Tries again what failed to write: batches, occurrences and episodes.
+    Retry,
     /// Answers once every job before it has run.
     Flush(Sender<()>),
     /// Answers once every job before it has run, then ends the thread.
@@ -76,6 +86,10 @@ pub struct Links {
     pub epoch: Arc<Epoch>,
     /// Set after the first stored batch that holds events, to ask for a health pass.
     pub health_due: Arc<AtomicBool>,
+    /// The live frame, which names the newest occurrence stored.
+    pub now: Arc<Mutex<NowFrame>>,
+    /// Receives the occurrences and episodes given up after too many failed writes.
+    pub dropped: Sender<Output>,
 }
 
 /// The handle to the storage thread, which owns the history's write connection.
@@ -85,6 +99,8 @@ pub struct Service {
     epoch: Arc<Epoch>,
     /// True while batches whose write failed are waiting for another try.
     retrying: Arc<AtomicBool>,
+    /// True while occurrences or episodes whose write failed are waiting for another try.
+    holding: Arc<AtomicBool>,
 }
 
 impl Service {
@@ -92,16 +108,20 @@ impl Service {
     pub fn start(store: Store, links: Links) -> io::Result<Service> {
         let (queue, jobs) = mpsc::sync_channel(QUEUE_BOUND);
         let retrying = Arc::new(AtomicBool::new(false));
+        let holding = Arc::new(AtomicBool::new(false));
         let service = Service {
             queue,
             epoch: links.epoch.clone(),
             retrying: retrying.clone(),
+            holding: holding.clone(),
         };
         let worker = Worker {
             store,
             links,
             retrying,
+            holding,
             waiting: VecDeque::new(),
+            unstored: VecDeque::new(),
             event_pass_pending: true,
             seen_epoch: 0,
         };
@@ -123,6 +143,11 @@ impl Service {
     /// Whether batches that failed to write wait on the thread for another try.
     pub fn is_retrying(&self) -> bool {
         self.retrying.load(Ordering::Acquire)
+    }
+
+    /// Whether occurrences or episodes that failed to write wait on the thread for another try.
+    pub fn holds_outputs(&self) -> bool {
+        self.holding.load(Ordering::Acquire)
     }
 
     /// The epoch a job made now belongs to.
@@ -167,8 +192,11 @@ struct Worker {
     store: Store,
     links: Links,
     retrying: Arc<AtomicBool>,
+    holding: Arc<AtomicBool>,
     /// Batches whose write failed, oldest first, tried again with the next batch.
     waiting: VecDeque<Batch>,
+    /// Occurrences and episodes whose write failed, oldest first.
+    unstored: VecDeque<Output>,
     /// Set until the first stored batch with events has asked for a health pass.
     event_pass_pending: bool,
     /// The newest epoch a job has come from.
@@ -211,6 +239,19 @@ impl Worker {
                 }
                 self.send_waiting(epoch);
             }
+            Job::Retry => {
+                self.send_waiting(epoch);
+                self.store_outputs(epoch, None);
+            }
+            Job::Occurrence(occurrence) => {
+                self.store_outputs(epoch, Some(Output::Occurrence(occurrence)));
+            }
+            Job::Episode(episode) => self.store_outputs(epoch, Some(Output::Episode(episode))),
+            Job::Machine(machine) => {
+                if let Err(err) = self.store.set_machine(&machine) {
+                    self.report(&err);
+                }
+            }
             #[cfg(test)]
             Job::Run(run) => run(&mut self.store),
             Job::Flush(_) | Job::Stop(_) => {}
@@ -235,7 +276,10 @@ impl Worker {
             bookmark_xml: Some(xml),
             ..Batch::default()
         }));
-        self.retrying.store(false, Ordering::Release);
+        self.retrying
+            .store(!self.waiting.is_empty(), Ordering::Release);
+        self.unstored.clear();
+        self.holding.store(false, Ordering::Release);
     }
 
     /// Stores a batch made in `epoch`; `false` when a clear came after it, in which case only its
@@ -280,6 +324,54 @@ impl Worker {
             .store(!self.waiting.is_empty(), Ordering::Release);
     }
 
+    /// Stores `new` after the occurrences and episodes that failed before it; one that fails again
+    /// waits for the next try, and past the cap the oldest is given up and the sampler told.
+    fn store_outputs(&mut self, epoch: u64, new: Option<Output>) {
+        let earlier = mem::take(&mut self.unstored);
+        for output in earlier.into_iter().chain(new) {
+            match self.commit_output(epoch, &output) {
+                Ok(Written::Done(Some(latest))) => lock(&self.links.now).latest = Some(latest),
+                Ok(Written::Done(None) | Written::Stale) => {}
+                Err(err) => {
+                    self.report(&err);
+                    self.unstored.push_back(output);
+                }
+            }
+        }
+        while self.unstored.len() > OUTPUTS_KEPT
+            && let Some(oldest) = self.unstored.pop_front()
+        {
+            let _ = self.links.dropped.send(oldest);
+        }
+        self.holding
+            .store(!self.unstored.is_empty(), Ordering::Release);
+    }
+
+    fn commit_output(&mut self, epoch: u64, output: &Output) -> Result<Written, StoreError> {
+        let _held = self.links.epoch.hold();
+        if epoch < self.links.epoch.current() {
+            return Ok(Written::Stale);
+        }
+        match output {
+            Output::Occurrence(occurrence) => {
+                let id = self.store.insert_occurrence(occurrence)?;
+                Ok(Written::Done(Some(OccurrenceSummary {
+                    id,
+                    kind: occurrence.kind,
+                    start_ms: occurrence.start_ms,
+                    end_ms: occurrence.end_ms,
+                    severity: occurrence.severity,
+                    cause: occurrence.cause(),
+                })))
+            }
+            Output::Episode(episode) => self
+                .store
+                .insert_episode(episode)
+                .map(|_| Written::Done(None)),
+            Output::Gap(_) => Ok(Written::Done(None)),
+        }
+    }
+
     /// The first stored batch that holds events asks for a health pass, which reads stored events.
     fn ask_pass_after_events(&mut self, batch: &Batch) {
         if self.event_pass_pending && !batch.events.is_empty() {
@@ -300,6 +392,14 @@ impl Worker {
     fn report(&self, err: &dyn std::fmt::Display) {
         lock(&self.links.status).last_error = Some(err.to_string());
     }
+}
+
+/// What came of writing an occurrence or an episode.
+enum Written {
+    /// A clear came after it was made, so it was not stored.
+    Stale,
+    /// Stored; an occurrence comes with the summary the live frame shows.
+    Done(Option<OccurrenceSummary>),
 }
 
 /// Drops the samples of `oldest` and records a gap over their span in `next`, which takes over its
@@ -360,6 +460,8 @@ mod tests {
             status: Arc::new(Mutex::new(AgentStatus::default())),
             epoch: Arc::new(Epoch::default()),
             health_due: Arc::new(AtomicBool::new(false)),
+            now: Arc::new(Mutex::new(NowFrame::default())),
+            dropped: mpsc::channel().0,
         }
     }
 
@@ -380,6 +482,8 @@ mod tests {
                     status: links.status.clone(),
                     epoch: links.epoch.clone(),
                     health_due: links.health_due.clone(),
+                    now: links.now.clone(),
+                    dropped: links.dropped.clone(),
                 },
             )
             .unwrap();
@@ -559,7 +663,7 @@ mod tests {
         assert!(rig.service.is_retrying());
         drop(refusal);
 
-        rig.batch(Batch::default());
+        rig.send(Job::Retry);
         assert!(rig.service.flush(PATIENCE));
 
         assert_eq!(event_ids(&rig.history()), [1]);
@@ -580,7 +684,7 @@ mod tests {
         assert!(rig.service.flush(PATIENCE));
         drop(refusal);
 
-        rig.batch(Batch::default());
+        rig.send(Job::Retry);
         assert!(rig.service.flush(PATIENCE));
 
         let store = rig.history();
@@ -610,7 +714,7 @@ mod tests {
         assert!(rig.service.flush(PATIENCE));
         drop(refusal);
 
-        rig.batch(Batch::default());
+        rig.send(Job::Retry);
         assert!(rig.service.flush(PATIENCE));
 
         assert!(rig.history().gaps(i64::MIN, i64::MAX).unwrap().is_empty());
