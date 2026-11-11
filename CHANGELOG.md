@@ -589,6 +589,10 @@ How to use this file:
   changes, so the window, the monitor and the helper must be updated together.
 - A deep capture whose driver trace could not be read, or received no events at all, now says the
   driver measurements are unavailable instead of reporting that zero drivers were measured.
+- A program with more than 5 % late frames in a deep capture no longer disappears from the capture
+  page. It stays in the list of apps with its share of late frames and an "Above 5 %" mark, and the
+  Technical level adds both to its table. It is still never named as a suspect, because an app that
+  draws only on demand looks late when it is idle.
 - A run of the Windows Memory Diagnostic no longer breaks History, Events, Period, Dumps and
   Settings with an error page, and memory errors it finds now open an alert in Health. History
   already recorded this way is repaired when the monitor starts. The history format changes, so the

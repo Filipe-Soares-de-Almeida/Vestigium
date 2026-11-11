@@ -1,5 +1,5 @@
-// Deep captures in the browser: #/capture/1 names a driver and an app, 2 has no frames, 3 lost events and
-// 4 found nothing. `?capture-secs=<n>` makes a started capture last n seconds instead of its minutes,
+// Deep captures in the browser: #/capture/1 names a driver and an app, 2 has no frames, 3 lost events,
+// 4 found nothing and 5 has an app with 8 % late frames beside a steady one. `?capture-secs=<n>` makes a started capture last n seconds instead of its minutes,
 // `?capture-fail=1` makes it end with the helper failing and `?capture-left=<n>` opens the window with a
 // capture that has n seconds left. `?capture-auto=1` presses the start button once the page is up, and
 // `?capture-ask=<ms>` keeps the permission prompt open that long and `?capture-none=1` starts with no
@@ -103,7 +103,7 @@ function findings(slow: number): Suspect[] {
   ];
 }
 
-function capture(id: number, start: number, slow = 380): CaptureDto {
+export function capture(id: number, start: number, slow = 380): CaptureDto {
   const FINDINGS = findings(slow);
   const base: CaptureDto = {
     id,
@@ -139,6 +139,20 @@ function capture(id: number, start: number, slow = 380): CaptureDto {
       findings: [],
     };
   }
+  if (id === 5) {
+    return {
+      ...base,
+      drivers: CALM_DRIVERS,
+      longest: [],
+      apps: [
+        { name: "Starfall.exe", pid: 9124, frames: 18_000, median_ms: 6.9, p99_ms: 41, worst_ms: 166, hitches: 1_440 },
+        { name: "Editor.exe", pid: 3380, frames: 9_200, median_ms: 16.6, p99_ms: 22, worst_ms: 38, hitches: 0 },
+      ],
+      hitches: [],
+      hiccups: [],
+      findings: [],
+    };
+  }
   if (id === 2) {
     return {
       ...base,
@@ -163,7 +177,7 @@ function capture(id: number, start: number, slow = 380): CaptureDto {
 }
 
 const STORED = new Map(
-  (query.get("capture-none") === "1" ? [] : [1, 2, 3, 4]).map((id) => [id, capture(id, START - (id - 1) * 3_600_000, id === 1 ? 12 : 380)]),
+  (query.get("capture-none") === "1" ? [] : [1, 2, 3, 4, 5]).map((id) => [id, capture(id, START - (id - 1) * 3_600_000, id === 1 ? 12 : 380)]),
 );
 const left = Number(query.get("capture-left") ?? 0);
 const elsewhere = Number(query.get("capture-else") ?? 0);

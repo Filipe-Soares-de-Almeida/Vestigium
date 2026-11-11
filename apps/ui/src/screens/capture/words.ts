@@ -15,10 +15,13 @@ import {
   type DriverRow,
   driverRows,
   framesFailed,
+  hitchesOften,
   hitchesWithCall,
   ISR_LIMIT_US,
   kernelFailed,
   lateApps,
+  lateShare,
+  OFTEN_PCT,
   minutesOf,
   nearCallsOf,
   reasonOf,
@@ -126,7 +129,7 @@ export interface ResultView {
   drivers: DriverTable | null;
   hasMarks: boolean;
   alignSummary: string;
-  apps: { rows: AppLine[]; quiet: string | null } | null;
+  apps: { rows: AppLine[]; quiet: string | null; often: string[] } | null;
   /** What the capture measured when nothing stood out. */
   measured: string;
 }
@@ -137,7 +140,17 @@ export interface AppLine {
   exe: string;
   summary: string;
   detail: string | null;
+  /** The app's late frames as a share of its frames, as text. */
+  share: string;
+  /** Marked because more than `OFTEN_PCT` of its frames were late; never named as a suspect. */
+  often: boolean;
   app: AppFrames;
+}
+
+/** The share of late frames as a number: "< 0.1" below a tenth of a percent. */
+export function shareNumber(app: AppFrames): string {
+  const pct = lateShare(app);
+  return pct > 0 && pct < 0.1 ? `< ${formatNumber(0.1, 1)}` : formatNumber(pct, 1);
 }
 
 function confidenceOf(s: Suspect): string {
@@ -368,7 +381,7 @@ function driverTable(dto: CaptureDto, level: DetailLevel, all: DriverRow[]): Dri
   };
 }
 
-function appLines(dto: CaptureDto, level: DetailLevel): { rows: AppLine[]; quiet: string | null } {
+function appLines(dto: CaptureDto, level: DetailLevel): { rows: AppLine[]; quiet: string | null; often: string[] } {
   const late = lateApps(dto);
   const rows = late.map((app): AppLine => {
     const name = appName(app.name);
@@ -378,6 +391,8 @@ function appLines(dto: CaptureDto, level: DetailLevel): { rows: AppLine[]; quiet
       name,
       exe: app.name,
       app,
+      share: k("apps.share", { pct: shareNumber(app) }),
+      often: hitchesOften(app),
       summary: pick(level, {
         plain: count("app.summary", app.hitches, { frames: formatNumber(app.frames), worst: frameText(app.worst_ms), median: frameText(app.median_ms) }),
         figures: k("app.summary.d", { frames: formatNumber(app.frames), median: frameText(app.median_ms), hitches: formatNumber(app.hitches), worst: frameText(app.worst_ms) }),
@@ -402,7 +417,8 @@ function appLines(dto: CaptureDto, level: DetailLevel): { rows: AppLine[]; quiet
   const quiet = level !== "Simple" && quietApps.length
     ? k("app.quiet", { apps: formatList(quietApps.map((a) => appName(a.name))), frames: formatNumber(quietApps.reduce((sum, a) => sum + a.frames, 0)) })
     : null;
-  return { rows, quiet };
+  const often = late.filter(hitchesOften).map((a) => k("app.many.body", { app: level === "Technical" ? a.name : appName(a.name), limit: OFTEN_PCT }));
+  return { rows, quiet, often };
 }
 
 function alignSummary(dto: CaptureDto, level: DetailLevel, rows: DriverRow[]): string {

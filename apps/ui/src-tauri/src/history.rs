@@ -7,7 +7,7 @@ use vestigium_core::{
     CaptureCauses, Covered, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning,
     Fault, Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample,
     Reading, Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit,
-    heaviest, pc_state, same_program, steady_only, usage,
+    heaviest, pc_state, same_program, usage,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
@@ -682,13 +682,10 @@ impl History {
 
     pub fn capture(&mut self, id: i64) -> Result<Option<CaptureDto>, StoreError> {
         let found = self.read(|store| store.capture(id))?;
-        Ok(found.flatten().map(|capture| {
-            let capture = steady_only(&capture);
-            CaptureDto {
-                id,
-                findings: capture_findings(&capture),
-                capture: capture.page_view(),
-            }
+        Ok(found.flatten().map(|capture| CaptureDto {
+            id,
+            findings: capture_findings(&capture),
+            capture: capture.page_view(),
         }))
     }
 
@@ -1541,6 +1538,41 @@ mod tests {
         assert!(dto.capture.longest.len() <= vestigium_core::PAGE_LONGEST + 15);
         assert_eq!(dto.capture.longest[0].us, 1_000 + 4_999);
         assert_eq!(store.capture(id).unwrap().unwrap().longest.len(), 5_000);
+    }
+
+    #[test]
+    fn capture_page_keeps_an_app_that_hitches_often_without_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let mut stored = vestigium_core::DeepCapture {
+            start_ms: DAY_START_MS,
+            end_ms: DAY_START_MS + 5 * 60_000,
+            kernel: vestigium_core::CaptureSource::Ok,
+            frames: vestigium_core::CaptureSource::Ok,
+            lost_events: 0,
+            drivers: Vec::new(),
+            longest: Vec::new(),
+            apps: Vec::new(),
+            hitches: Vec::new(),
+            hiccups: Vec::new(),
+        };
+        let app = |name: &str, pid: u32, hitches: u32| vestigium_core::AppFrames {
+            name: name.to_string(),
+            pid,
+            frames: 3_000,
+            median_ms: 7.0,
+            p99_ms: 40.0,
+            worst_ms: 900.0,
+            hitches,
+        };
+        stored.apps = vec![app("stutter.exe", 5, 240), app("steady.exe", 6, 2)];
+        let id = store.insert_capture(&stored).unwrap();
+
+        let dto = history.capture(id).unwrap().unwrap();
+
+        let names: Vec<&str> = dto.capture.apps.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["stutter.exe", "steady.exe"]);
+        assert!(dto.findings.is_empty());
     }
 
     #[test]

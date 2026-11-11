@@ -184,7 +184,7 @@
 
   {#if view.apps}
     <Block title={t("ui.captures.apps.title")}>
-      <Apps rows={view.apps.rows} quiet={view.apps.quiet} all={dto.apps} {level} />
+      <Apps rows={view.apps.rows} quiet={view.apps.quiet} often={view.apps.often} all={dto.apps} {level} />
     </Block>
   {/if}
 {/if}

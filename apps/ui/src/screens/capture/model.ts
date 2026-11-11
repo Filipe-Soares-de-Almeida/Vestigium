@@ -190,6 +190,15 @@ export function hitchesWithCall(dto: CaptureDto, app: AppFrames): number | null 
 /** Apps whose frames ran late, most first. */
 export const lateApps = (dto: CaptureDto): AppFrames[] => dto.apps.filter((a) => a.hitches > 0);
 
+/** Above this share of late frames an app is marked, never named: one that draws only on demand looks late when idle. */
+export const OFTEN_PCT = 5;
+
+/** The app's late frames as a percentage of its frames. */
+export const lateShare = (app: AppFrames): number => (app.frames === 0 ? 0 : (app.hitches / app.frames) * 100);
+
+/** An app with more late frames than `OFTEN_PCT` of its frames. */
+export const hitchesOften = (app: AppFrames): boolean => app.hitches * 100 > OFTEN_PCT * app.frames;
+
 export const minutesOf = (c: { start_ms: number; end_ms: number }) =>
   Math.max(1, Math.round((c.end_ms - c.start_ms) / 60_000));
 
