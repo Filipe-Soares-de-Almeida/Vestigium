@@ -414,12 +414,25 @@ export function isHedged(kind: CauseKind, confidence: Confidence): boolean {
   return confidence !== "High" && MECHANISM.includes(kind);
 }
 
-function summaryOf(cause: Cause, confidence: Confidence): string {
+/** The gravest disk event among the evidence: a bad block or paging error, then a reset, then a retry. */
+export function storageMeaning(evidence: Evidence[]): "media" | "reset" | "retry" {
+  const meanings = evidence.flatMap((e) => ("Event" in e ? [e.Event.meaning] : []));
+  if (meanings.some((m) => m === "DiskBadBlock" || m === "PagingError")) return "media";
+  if (meanings.includes("DiskRetry") && !meanings.includes("StorageReset")) return "retry";
+  return "reset";
+}
+
+function summaryOf(cause: Cause, confidence: Confidence, evidence: Evidence[]): string {
   const maybe = isHedged(causeKind(cause), confidence) ? ".maybe" : "";
   if (typeof cause === "string") return k(`summary.${cause}${maybe}`);
   if ("Storage" in cause) {
     const disk = cause.Storage.disk;
-    return k("summary.Storage", { disk: disk ? k("disk_the", { disk: diskName(disk) }) : k("disk_any") });
+    const meaning = storageMeaning(evidence);
+    const hedge = confidence === "High" ? "" : ".medium";
+    const key = meaning === "reset" ? `summary.Storage${hedge}` : `summary.Storage.${meaning}${hedge}`;
+    // The reset sentence names "the disk C:"; the others follow the word "disk" and take the bare name.
+    const named = meaning === "reset" ? (disk ? k("disk_the", { disk: diskName(disk) }) : k("disk_any")) : disk ? diskName(disk) : "";
+    return k(key, { disk: named });
   }
   if ("DiskIo" in cause) {
     const { disk, hdd, process } = cause.DiskIo;
@@ -480,6 +493,7 @@ export function stepsOf(suspects: Suspect[], fromDump: Step[] | null = null): St
     }
     const app = typeof s.cause !== "string" && "App" in s.cause ? s.cause.App.name : null;
     const driver = typeof s.cause !== "string" && "DriverModule" in s.cause ? s.cause.DriverModule.module : null;
+    const disk = typeof s.cause !== "string" && "Storage" in s.cause ? s.cause.Storage.disk : null;
     for (const step of s.next_steps) {
       if (step === "DeepCapture") continue;
       const key =
@@ -490,8 +504,11 @@ export function stepsOf(suspects: Suspect[], fromDump: Step[] | null = null): St
             : step;
       if (steps.some((known) => known.key === key)) continue;
       // A fall names no driver, so its update step speaks of drivers in general.
-      const any = step === "UpdateDriver" && !driver ? ".any" : "";
-      steps.push({ key, text: k(`step.${step}${any}`, { app: app ? appName(app) : "", driver: driver ?? "" }) });
+      const any = (step === "UpdateDriver" && !driver) || (step === "BackUpNow" && !disk) ? ".any" : "";
+      steps.push({
+        key,
+        text: k(`step.${step}${any}`, { app: app ? appName(app) : "", driver: driver ?? "", disk: disk ? diskName(disk) : "" }),
+      });
     }
   }
   return steps;
@@ -679,7 +696,7 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel, fromDump: St
     cause: causeKind(main.cause),
     main: suspectView(main, dto, level),
     others: rest.map((s) => suspectView(s, dto, level)),
-    summary: summaryOf(main.cause, main.confidence),
+    summary: summaryOf(main.cause, main.confidence, main.evidence),
     note: noteOf(dto.suspects),
     steps: stepsOf(dto.suspects, fromDump),
     facts: dto.facts.map((f) => ({
@@ -704,7 +721,7 @@ export function reportMarkdown(dto: OccurrenceDto, fromDump: Step[] | null = nul
   const fall = crashOf(dto) ? ".PostMortem" : "";
   if (main) {
     lines.push(`**${k("cause.title")}** (${k(`confidence.${main.confidence}`)})`, "");
-    lines.push(summaryOf(main.cause, main.confidence), "");
+    lines.push(summaryOf(main.cause, main.confidence, main.evidence), "");
   }
   const notes: string[] = [];
   if (dto.truncated) notes.push(k(`chart.truncated${fall}`));

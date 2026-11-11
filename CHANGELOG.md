@@ -445,6 +445,11 @@ How to use this file:
   A bad block or a paging error asks you to back up your data and test the disk; a repeated disk
   operation asks you to test the disk first, then check the cable and update the driver; the driver
   and cable steps come first only for a reset of the connection to the disk.
+- The report sentence for a disk cause now says what Windows logged. A reset of the connection to
+  the disk keeps its wording; a repeated disk operation and a bad block or paging error each get
+  their own sentence, and when the disk readings were normal the sentence says so and that the disk
+  may not be the cause, in English and Portuguese. The step to back up the files now names the
+  disk instead of showing a bare placeholder.
 
 ## [0.1.0] - 2026-11-09
 

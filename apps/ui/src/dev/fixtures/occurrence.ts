@@ -517,6 +517,20 @@ function calmFreeze(id: number, start: number, suspects: Suspect[], samples = tr
   });
 }
 
+/** A disk event of each meaning on a calm PC, with the disk slow (high) or normal (medium). */
+function diskEvent(id: number, hour: number, kind: "reset" | "retry" | "media", slow: boolean): OccurrenceDto {
+  const start = at(hour, 12, 30);
+  const [provider, evid, meaning, steps] =
+    kind === "reset"
+      ? (["storahci", 129, "StorageReset", ["UpdateStorageDriver", "CheckDiskCable", "RunDiskTest"]] as const)
+      : kind === "retry"
+        ? (["disk", 153, "DiskRetry", ["RunDiskTest", "CheckDiskCable", "UpdateStorageDriver"]] as const)
+        : (["disk", 7, "DiskBadBlock", ["BackUpNow", "RunDiskTest"]] as const);
+  const evidence: Evidence[] = [{ Event: { ts_ms: start - 2000, provider, id: evid, meaning } }];
+  if (slow) evidence.push(m(start - 1000, "DiskLatencyMs", 640, 200, "0 C:"));
+  return calmFreeze(id, start, [suspect({ Storage: { disk: slow ? "0 C:" : null } }, slow ? "High" : "Medium", evidence, [...steps])]);
+}
+
 /** A driver on one core for 30 % of it: low confidence. */
 function lowDriver(): OccurrenceDto {
   const start = at(9, 20, 12);
@@ -660,6 +674,11 @@ const FIXTURES = new Map(
     notMeasured(),
     blueScreen(13, 0x124, 5, ["CheckHardwareStability", "RunMemoryDiagnostic"]),
     blueScreen(14, 0xa, 4, ["UpdateDriver"]),
+    diskEvent(15, 15, "media", true),
+    diskEvent(16, 16, "retry", true),
+    diskEvent(17, 17, "reset", false),
+    diskEvent(18, 18, "retry", false),
+    diskEvent(19, 19, "media", false),
   ].map((o) => [o.id, o]),
 );
 
