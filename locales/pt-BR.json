@@ -1258,7 +1258,7 @@
   "ui.health.kind.DirtyRestarts.count.zero": "nenhum desligamento inesperado em 30 dias",
   "ui.health.kind.ShutdownUnfinished.title": "Desligamento interrompido",
   "ui.health.kind.ShutdownUnfinished.tech": "Kernel-Power 41 durante o desligamento (estado 6), 30 dias",
-  "ui.health.kind.ShutdownUnfinished.why": "O PC perdeu energia antes de terminar de desligar: energia cortada antes da tela apagar, ou algo atrasando o desligamento. Não é um desligamento durante o uso.",
+  "ui.health.kind.ShutdownUnfinished.why": "O PC parou antes de terminar de desligar: queda de energia, travamento ou algo segurando o desligamento. Não é um desligamento durante o uso.",
   "ui.health.kind.ShutdownUnfinished.rule": "Atenção com 2 ou mais Kernel-Power 41 com SleepInProgress 6 (desligando) em 30 dias.",
   "ui.health.kind.ShutdownUnfinished.count.one": "{count} desligamento interrompido em 30 dias",
   "ui.health.kind.ShutdownUnfinished.count.other": "{count} desligamentos interrompidos em 30 dias",

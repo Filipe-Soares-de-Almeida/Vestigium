@@ -1258,7 +1258,7 @@
   "ui.health.kind.DirtyRestarts.count.zero": "no unexpected shutdowns in 30 days",
   "ui.health.kind.ShutdownUnfinished.title": "Shutdown interrupted",
   "ui.health.kind.ShutdownUnfinished.tech": "Kernel-Power 41 while shutting down (state 6), 30 days",
-  "ui.health.kind.ShutdownUnfinished.why": "The PC lost power before it finished shutting down: power cut before the screen went dark, or something holding up the shutdown. It is not a shutdown while in use.",
+  "ui.health.kind.ShutdownUnfinished.why": "The PC stopped before it finished shutting down: a power cut, a hang, or something holding up the shutdown. It is not a shutdown while in use.",
   "ui.health.kind.ShutdownUnfinished.rule": "Attention with 2 or more Kernel-Power 41 whose SleepInProgress is 6 (shutting down) in 30 days.",
   "ui.health.kind.ShutdownUnfinished.count.one": "{count} interrupted shutdown in 30 days",
   "ui.health.kind.ShutdownUnfinished.count.other": "{count} interrupted shutdowns in 30 days",

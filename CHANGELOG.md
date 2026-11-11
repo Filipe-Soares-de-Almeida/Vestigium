@@ -47,6 +47,9 @@ How to use this file:
   is missing and that an update downloads its installer after you confirm.
 - The English Today line for a storage cause now reads "likely cause: the C: disk and its controller",
   as the Portuguese line and the report already said.
+- The Health text for an unfinished shutdown no longer states a power loss as fact: it now says the
+  PC stopped before it finished shutting down, and lists a power cut, a hang or something holding up
+  the shutdown as the possible causes, since the event alone cannot tell them apart.
 
 ### Security
 
