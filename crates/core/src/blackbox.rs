@@ -278,32 +278,37 @@ impl Blackbox {
     /// Feeds one not-responding check; `running` holds every live pid.
     pub fn push_hangs(&mut self, ts_ms: i64, hung: &[HungWindow], running: &HashSet<u32>) {
         for trigger in self.hang_tracker.push(ts_ms, hung, running) {
-            let Trigger::AppHang {
-                pid,
-                name,
-                start_ms,
-                end_ms,
-                outcome,
-            } = &trigger
-            else {
-                continue;
-            };
-            self.hangs.push(HangSpan {
-                pid: *pid,
-                name: name.clone(),
-                start_ms: *start_ms,
-                end_ms: *end_ms,
-                outcome: *outcome,
-            });
-            let first_seen = start_ms + HUNG_AFTER_MS;
-            let echo = self
-                .freezes
-                .iter()
-                .any(|&(start, end)| (start..=end + HANG_ECHO_MS).contains(&first_seen));
-            if !echo {
-                let trigger = self.after_gaps(trigger);
-                self.add(trigger);
-            }
+            self.take_hang(trigger);
+        }
+    }
+
+    /// Records a finished or closed hang in the ring and, unless a freeze explains it, as a trigger.
+    fn take_hang(&mut self, trigger: Trigger) {
+        let Trigger::AppHang {
+            pid,
+            name,
+            start_ms,
+            end_ms,
+            outcome,
+        } = &trigger
+        else {
+            return;
+        };
+        self.hangs.push(HangSpan {
+            pid: *pid,
+            name: name.clone(),
+            start_ms: *start_ms,
+            end_ms: *end_ms,
+            outcome: *outcome,
+        });
+        let first_seen = start_ms + HUNG_AFTER_MS;
+        let echo = self
+            .freezes
+            .iter()
+            .any(|&(start, end)| (start..=end + HANG_ECHO_MS).contains(&first_seen));
+        if !echo {
+            let trigger = self.after_gaps(trigger);
+            self.add(trigger);
         }
     }
 
@@ -391,6 +396,9 @@ impl Blackbox {
 
     /// Closes everything, as when watching pauses, sleeps or stops.
     pub fn drain(&mut self, now_ms: i64) -> Vec<Output> {
+        for trigger in self.hang_tracker.open_hangs(now_ms) {
+            self.take_hang(trigger);
+        }
         for pending in std::mem::take(&mut self.pending) {
             self.finish(pending, now_ms, true);
         }

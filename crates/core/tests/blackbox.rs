@@ -295,6 +295,43 @@ fn a_hang_still_going_after_a_resume_is_an_occurrence() {
 }
 
 #[test]
+fn an_open_hang_is_closed_when_watching_pauses() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 10);
+    for s in (0..=10).step_by(2) {
+        bb.push_hangs(T + s * 1_000, &[hung(11, "player.exe")], &running);
+    }
+
+    let found = occurrences(bb.drain(T + 10_000));
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, OccurrenceKind::AppHang);
+    assert!(found[0].truncated);
+    assert_eq!(found[0].end_ms, T + 10_000);
+    assert!(
+        found[0]
+            .facts
+            .iter()
+            .any(|f| matches!(&f.kind, FactKind::AppStillHung { name } if name == "player.exe"))
+    );
+    assert!(occurrences(bb.poll(T + 100_000)).is_empty());
+}
+
+#[test]
+fn a_hang_closed_by_a_pause_is_not_reported_twice() {
+    let mut bb = blackbox();
+    let running: HashSet<u32> = [11].into();
+    feed(&mut bb, -60, 10);
+    bb.push_hangs(T, &[hung(11, "player.exe")], &running);
+    let first = occurrences(bb.drain(T + 10_000));
+    bb.push_hangs(T + 12_000, &[], &running);
+
+    assert_eq!(first.len(), 1);
+    assert!(occurrences(bb.poll(T + 100_000)).is_empty());
+}
+
+#[test]
 fn a_short_hang_right_after_a_resume_is_still_dropped() {
     let gap = Gap {
         start_ms: T,

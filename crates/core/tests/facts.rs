@@ -132,3 +132,26 @@ fn the_queue_crossing_names_the_disk_of_the_peak() {
     assert_eq!(*value, 12.0);
     assert_eq!(subject.as_deref(), Some("1 D:"));
 }
+
+#[test]
+fn a_hang_still_open_when_watching_stopped_says_so() {
+    let window = quiet_window();
+    let triggers = [Trigger::AppHang {
+        pid: 11,
+        name: "player.exe".to_string(),
+        start_ms: T + 1_000,
+        end_ms: T + 12_000,
+        outcome: HangOutcome::StillHung,
+    }];
+
+    let found = facts(&triggers, &window);
+
+    let kinds: Vec<&FactKind> = found.iter().map(|f| &f.kind).collect();
+    assert!(kinds.contains(&&FactKind::AppStillHung {
+        name: "player.exe".to_string()
+    }));
+    assert!(!kinds.iter().any(|k| matches!(
+        k,
+        FactKind::AppRecovered { .. } | FactKind::AppClosedWhileHung { .. }
+    )));
+}

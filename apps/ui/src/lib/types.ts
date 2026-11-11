@@ -90,7 +90,7 @@ export type Severity = "Light" | "Medium" | "Severe";
 export type OccurrenceKind = "Freeze" | "Stutter" | "AppHang" | "Reported" | "PostMortem";
 export type Confidence = "Low" | "Medium" | "High";
 export type Channel = "System" | "Application";
-export type HangOutcome = "Recovered" | "Closed";
+export type HangOutcome = "Recovered" | "Closed" | "StillHung";
 export type GapReason = "Paused" | "Suspended" | "Stopped" | "Crashed" | "ClockChanged";
 export type Media = "Ssd" | "Hdd" | "Unknown";
 
@@ -293,7 +293,8 @@ export type FactKind =
   | { Gap: { reason: GapReason } }
   | "LastWatched"
   | { WentDown: { kind: CrashKind } }
-  | { EventsDropped: { count: number } };
+  | { EventsDropped: { count: number } }
+  | { AppStillHung: { name: string } };
 
 export interface Fact {
   at_ms: number;

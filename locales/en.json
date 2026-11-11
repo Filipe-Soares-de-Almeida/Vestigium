@@ -462,6 +462,7 @@
   "ui.occurrence.fact.AppHung.tech": "{exe}: window marked Not Responding by Windows",
   "ui.occurrence.fact.AppRecovered": "{app} responded again.",
   "ui.occurrence.fact.AppClosedWhileHung": "{app} was closed without responding again.",
+  "ui.occurrence.fact.AppStillHung": "{app} was still not responding when monitoring stopped.",
   "ui.occurrence.fact.EventsDropped": "{count} more repeats of the same event were not kept.",
   "ui.occurrence.fact.Event": "{event}.",
   "ui.occurrence.fact.Event.tech": "Event {id} from {provider}",

@@ -55,6 +55,10 @@ pub enum FactKind {
     EventsDropped {
         count: u32,
     },
+    /// An app that was still not responding when watching stopped.
+    AppStillHung {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -139,6 +143,7 @@ pub fn facts(triggers: &[Trigger], window: &Window) -> Vec<Fact> {
                 match hang.outcome {
                     HangOutcome::Recovered => FactKind::AppRecovered { name },
                     HangOutcome::Closed => FactKind::AppClosedWhileHung { name },
+                    HangOutcome::StillHung => FactKind::AppStillHung { name },
                 },
             ));
         }

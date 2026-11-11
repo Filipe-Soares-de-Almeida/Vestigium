@@ -67,6 +67,25 @@ impl HangTracker {
         triggers
     }
 
+    /// The hangs still open at `now_ms`, oldest first, as hangs still going; none is closed.
+    pub fn open_hangs(&self, now_ms: i64) -> Vec<Trigger> {
+        let mut open: Vec<(i64, u32, &String)> = self
+            .open
+            .iter()
+            .map(|(&pid, (name, first_seen))| (*first_seen, pid, name))
+            .collect();
+        open.sort_unstable();
+        open.into_iter()
+            .map(|(first_seen, pid, name)| Trigger::AppHang {
+                pid,
+                name: name.clone(),
+                start_ms: first_seen - HUNG_AFTER_MS,
+                end_ms: now_ms,
+                outcome: HangOutcome::StillHung,
+            })
+            .collect()
+    }
+
     /// Forgets every open hang, as when watching pauses.
     pub fn reset(&mut self) {
         self.open.clear();

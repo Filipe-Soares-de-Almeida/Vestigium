@@ -5,8 +5,8 @@ use vestigium_core::health::FindingKind;
 use vestigium_core::hwtest::{BenchMode, Bus, Outcome, PATTERNS, Pattern, TestKind, VolumeResult};
 use vestigium_core::{
     Applier, Channel, ColorTheme, Confidence, DetailLevel, DumpKind, EventMeaning, GapReason,
-    LanguagePref, Media, Metric, OccurrenceKind, PcState, Severity, TWEAKS, Takes, ThemePref,
-    TweakId,
+    HangOutcome, LanguagePref, Media, Metric, OccurrenceKind, PcState, Severity, TWEAKS, Takes,
+    ThemePref, TweakId,
 };
 
 macro_rules! lists_every_variant {
@@ -48,6 +48,11 @@ lists_every_variant!(
     EventMeaning: StorageReset, DiskRetry, DiskBadBlock, PagingError, DisplayReset, HardwareError,
         PowerLoss, UnexpectedShutdown, BugCheck, CpuFirmwareLimit, LowVirtualMemory, AppHang,
         AppCrash, ServiceCrash, NoCrashDump, MemoryDiagnostic
+);
+lists_every_variant!(
+    hang_outcome_lists_every_variant,
+    HangOutcome::ALL,
+    HangOutcome: Recovered, Closed, StillHung
 );
 lists_every_variant!(
     test_kind_lists_every_variant,

@@ -543,6 +543,7 @@ function factTexts(kind: FactKind): Texts {
   if ("AppClosedWhileHung" in kind) {
     return plain(k("fact.AppClosedWhileHung", { app: appName(kind.AppClosedWhileHung.name) }));
   }
+  if ("AppStillHung" in kind) return plain(k("fact.AppStillHung", { app: appName(kind.AppStillHung.name) }));
   if ("Event" in kind) {
     const { meaning, provider, id } = kind.Event;
     return { plain: k("fact.Event", { event: k(`event.${meaning}`) }), figures: null, tech: k("fact.Event.tech", { provider, id: String(id) }) };
