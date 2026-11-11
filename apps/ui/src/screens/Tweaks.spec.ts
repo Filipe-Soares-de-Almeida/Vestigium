@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { agentStatusSamples, tweakRowSamples, tweaksDtoSamples } from "../dev/fixtures/wire";
 import { answer } from "../dev/test-ipc";
-import { show, until } from "../dev/test-mount";
+import { show, unmountAll, until } from "../dev/test-mount";
 import { app } from "../lib/app.svelte";
-import { t } from "../lib/i18n.svelte";
+import { setLang, t } from "../lib/i18n.svelte";
 import { toast } from "../lib/toast.svelte";
 import { tweaks } from "../lib/tweaks.svelte";
 import type { RestorePoint, TweakRow, TweaksDto } from "../lib/types";
@@ -132,6 +132,64 @@ test("system_restore_off_shows_its_own_title", async () => {
   await until(() => pointDialog(page)?.open === true, "the restore point dialog");
 
   expect(pointDialog(page)!.querySelector("h2")?.textContent).toBe(t("ui.tweaks.no_point.title.off"));
+});
+
+test("each_reason_a_point_is_missing_has_its_own_wording_and_only_off_says_system_restore_is_off", async () => {
+  const wording = {
+    off: { title: t("ui.tweaks.no_point.title.off"), tail: t("ui.tweaks.no_point.tail.off") },
+    failed: { title: t("ui.tweaks.no_point.title.failed"), tail: t("ui.tweaks.no_point.tail") },
+    unconfirmed: { title: t("ui.tweaks.no_point.title.unconfirmed"), tail: t("ui.tweaks.no_point.tail") },
+  };
+  const cases: [RestorePoint, keyof typeof wording][] = [
+    ["Off", "off"],
+    [{ Failed: { error: 5 } }, "failed"],
+    [{ Failed: { error: 0x2000_0005 } }, "unconfirmed"],
+    ["Unconfirmed", "unconfirmed"],
+  ];
+  for (const [point, shown] of cases) {
+    serve([point]);
+    tweaks.dto = null;
+    const page = await applyFromThePage();
+    await until(() => pointDialog(page)?.open === true, "the restore point dialog");
+    const text = pointDialog(page)!.textContent ?? "";
+
+    expect(pointDialog(page)!.querySelector("h2")?.textContent).toBe(wording[shown].title);
+    expect(text).toContain(wording[shown].tail);
+    for (const other of Object.keys(wording).filter((name) => name !== shown) as (keyof typeof wording)[]) {
+      if (wording[other].title !== wording[shown].title) expect(text).not.toContain(wording[other].title);
+    }
+    if (shown !== "off") expect(text).not.toContain(wording.off.tail);
+    expect(named(page, t("ui.tweaks.no_point.retry"))).toBeDefined();
+    expect(named(page, t("ui.tweaks.no_point.go"))).toBeDefined();
+    expect(named(page, t("ui.tweaks.cancel"))).toBeDefined();
+    unmountAll();
+  }
+});
+
+test("try_again_asks_again_with_a_point_and_a_new_unconfirmed_answer_keeps_its_own_note", async () => {
+  const calls = serve(["Unconfirmed", "Unconfirmed"]);
+  const page = await applyFromThePage();
+  await until(() => pointDialog(page)?.open === true, "the restore point dialog");
+
+  named(page, t("ui.tweaks.no_point.retry"))!.click();
+  await until(() => calls.of("apply_tweaks").length === 2, "the second attempt");
+  await until(() => pointDialog(page)?.textContent?.includes(t("ui.tweaks.no_point.again.unconfirmed", { n: 2 })) ?? false, "the repeated answer");
+
+  expect(calls.of("apply_tweaks").map((c) => c.withoutRestorePoint)).toEqual([false, false]);
+  expect(pointDialog(page)!.textContent).not.toContain(t("ui.tweaks.no_point.again.failed", { n: 2 }));
+});
+
+test("a_failed_point_reads_in_portuguese_in_the_dialog_the_screen_opens", async () => {
+  serve([{ Failed: { error: 1460 } }]);
+  const page = await applyFromThePage();
+  await until(() => pointDialog(page)?.open === true, "the restore point dialog");
+  setLang("pt-BR");
+  await until(() => pointDialog(page)?.querySelector("h2")?.textContent === t("ui.tweaks.no_point.title.failed"), "the Portuguese title");
+
+  expect(pointDialog(page)!.querySelector("h2")?.textContent).toBe("O Windows não criou o ponto de restauração");
+  expect(pointDialog(page)!.textContent).toContain(t("ui.tweaks.no_point.error", { code: "1460" }));
+  expect(pointDialog(page)!.textContent).not.toContain(t("ui.tweaks.no_point.tail.off"));
+  expect(named(page, t("ui.tweaks.no_point.retry"))).toBeDefined();
 });
 
 const WRITTEN = 0x2000_0002;
