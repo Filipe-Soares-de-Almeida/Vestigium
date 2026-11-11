@@ -657,6 +657,8 @@ export interface BootDelay {
 export interface BootReport {
   boots: BootTime[];
   delays: BootDelay[];
+  /** Boot log events that could not be read, and so are missing from the report. */
+  skipped: number;
 }
 
 export type HealthFact =

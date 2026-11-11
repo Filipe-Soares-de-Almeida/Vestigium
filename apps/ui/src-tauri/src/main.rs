@@ -10,6 +10,8 @@ mod live;
 mod process;
 mod tweaks;
 mod update;
+#[cfg(test)]
+mod wire;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 

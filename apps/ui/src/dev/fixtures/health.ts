@@ -102,6 +102,7 @@ function data(): HealthDto {
     boot: {
       boots: [{ ts_ms: now - 12 * DAY, boot_ms: 108_457, main_path_ms: 68_757, post_boot_ms: 39_700 }],
       delays: [],
+      skipped: 0,
     },
   };
 }

@@ -88,7 +88,7 @@ pub use tweak::{
     ERROR_MAY_HAVE_CHANGED, ERROR_UNREADABLE, Guid, Helped, Hive, IntentItem, IntentSetting,
     PCIE_ASPM, PlanItem, RestorePoint, SCHEME_BALANCED, SCHEME_HIGH_PERFORMANCE,
     SCHEME_POWER_SAVER, SUB_PCIEXPRESS, SUB_USB, Setting, SettingChange, SettingResult,
-    SettingStore, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
+    SettingStore, SettingValue, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
     TWEAK_INTENT_VERSION, TWEAK_PLAN_VERSION, TWEAKS, Takes, TweakChange, TweakId, TweakInputs,
     TweakIntent, TweakPlan, TweakResults, USB_SELECTIVE_SUSPEND, Value, advise, apply_value,
     carry_out, changed_outside, check_item, disabled_approval, helped, intent_of,
