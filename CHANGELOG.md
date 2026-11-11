@@ -229,6 +229,11 @@ How to use this file:
 - Crash dumps kept in a subfolder of the crash dumps folder no longer disappear from the list and from
   the space count until the next dump scan. The watcher's own listing now reads one level of
   subfolders, as the dump scan does, so it no longer marks those dumps as deleted.
+- Scanning or deleting crash dumps with another account's administrator password now reads the
+  dumps of the account that asked, not those of the administrator's own profile. The window names
+  the account to the helper, which finds that account's profile in Windows and refuses anything that
+  is not a local folder. The helper also deletes the dumps it scans in a subfolder of the Minidump
+  folder, which it used to refuse. The window and the helper ship together.
 - A health alert about two antivirus products running, or about the page file, now stays open when
   Windows does not answer the check. Before, the alert closed, or never opened, whenever the Security
   Center was not up yet (often just after logon) or the page file could not be read, and a failed

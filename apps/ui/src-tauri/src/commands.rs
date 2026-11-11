@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
 use vestigium_core::{Episode, ProgramPoint, Settings};
-use vestigium_ipc::{Request, Response};
+use vestigium_ipc::{Request, Response, current_user_sid};
 
 use vestigium_store::CaptureSummary;
 
@@ -352,7 +352,11 @@ pub async fn start_dump_scan(state: State<'_, AppState>) -> Result<DumpScanFinis
     let link = state.link.clone();
     blocking(move || {
         let (helper, out) = helper_and_file("dumps")?;
-        let exit_code = launch_elevated(&helper, &dump_scan_args(&out))?.wait();
+        let exit_code = launch_elevated(
+            &helper,
+            &dump_scan_args(&out, current_user_sid().ok().as_deref()),
+        )?
+        .wait();
         let dumps = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { dumps, .. }) => dumps,
             _ => Vec::new(),
@@ -380,7 +384,11 @@ pub async fn delete_dumps(
         let (helper, list) = helper_and_file("delete")?;
         std::fs::write(&list, paths.join("\r\n"))
             .map_err(|err| UiError::Failed(err.to_string()))?;
-        let exit_code = launch_elevated(&helper, &delete_dumps_args(&list))?.wait();
+        let exit_code = launch_elevated(
+            &helper,
+            &delete_dumps_args(&list, current_user_sid().ok().as_deref()),
+        )?
+        .wait();
         let deleted = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { deleted, .. }) => deleted,
             _ => 0,

@@ -20,8 +20,8 @@ fn main() -> ExitCode {
     match job {
         job::Job::DeepCapture { minutes, out } => capture::run(minutes, &out),
         job::Job::HealthScan { out } => scan::run(&out),
-        job::Job::DumpScan { out } => dumps::run(&out),
-        job::Job::DeleteDumps { list } => delete::run(&list),
+        job::Job::DumpScan { out, user } => dumps::run(&out, user.as_ref()),
+        job::Job::DeleteDumps { list, user } => delete::run(&list, user.as_ref()),
         job::Job::Tweak { plan, sha256 } => tweak::run(&plan, &sha256),
         job::Job::DiskScan {
             disk,

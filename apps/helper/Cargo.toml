@@ -52,6 +52,7 @@ features = [
 ]
 
 [dev-dependencies]
+vestigium-ipc = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

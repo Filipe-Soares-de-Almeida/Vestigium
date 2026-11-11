@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use vestigium_collect::{
-    DumpFile, app_dump_dir, crash_control, dump_file, list_dumps_one_level, wall_ms,
-};
+use vestigium_collect::{DumpFile, crash_control, dump_file, list_dumps_one_level, wall_ms};
 use vestigium_core::{
     Analysis, DUMP_SCAN_VERSION, DumpKind, DumpRecord, DumpScan, Fault, fault_address,
     kernel_dump_kind,
@@ -19,6 +17,7 @@ use windows::Win32::System::Diagnostics::Debug::Extensions::{
 };
 use windows::core::{HSTRING, Interface, s};
 
+use crate::profile::{UserSid, app_dump_folder};
 use crate::{job, output};
 
 /// Most dumps one read looks at, newest first.
@@ -46,7 +45,7 @@ pub struct KernelHeader {
 
 /// Reads every dump in the folders Windows keeps them in and writes what each says to `out`;
 /// a dump the engine cannot read is kept with its size and date only.
-pub fn run(out: &Path) -> ExitCode {
+pub fn run(out: &Path, user: Option<&UserSid>) -> ExitCode {
     let Ok(mut file) = output::create(out, "dumps", "dumps") else {
         return ExitCode::from(job::REFUSED);
     };
@@ -55,7 +54,7 @@ pub fn run(out: &Path) -> ExitCode {
         std::env::remove_var("_NT_SYMBOL_PATH");
         std::env::remove_var("_NT_ALT_SYMBOL_PATH");
     }
-    let mut found = dump_files();
+    let mut found = dump_files(app_dump_folder(user));
     found.sort_by_key(|(f, _)| std::cmp::Reverse(f.file_ms));
     found.truncate(MOST_DUMPS);
     let started = Instant::now();
@@ -77,8 +76,9 @@ pub fn run(out: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The dump files Windows keeps, each with whether it is an app's.
-fn dump_files() -> Vec<(DumpFile, bool)> {
+/// The dump files Windows keeps, each with whether it is an app's; `app_dir` is the app crash
+/// dump folder of the account that asked.
+fn dump_files(app_dir: Option<PathBuf>) -> Vec<(DumpFile, bool)> {
     let mut files = Vec::new();
     if let Some(crash) = crash_control() {
         files.extend(dump_file(&crash.dump_file).map(|f| (f, false)));
@@ -90,7 +90,7 @@ fn dump_files() -> Vec<(DumpFile, bool)> {
             false,
         ));
     }
-    if let Some(dir) = app_dump_dir() {
+    if let Some(dir) = app_dir {
         files.extend(listed(&dir, true));
     }
     files

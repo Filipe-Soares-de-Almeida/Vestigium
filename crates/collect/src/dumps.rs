@@ -9,10 +9,11 @@ use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
     RegGetValueW,
 };
-use windows::core::{PCWSTR, w};
+use windows::core::{HSTRING, PCWSTR, w};
 
 const CRASH_CONTROL: PCWSTR = w!(r"SYSTEM\CurrentControlSet\Control\CrashControl");
 const LOCAL_DUMPS: PCWSTR = w!(r"SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps");
+const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 
 /// What Windows is set to write when it stops with a blue screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,16 +46,26 @@ pub fn crash_control() -> Option<CrashControl> {
     })
 }
 
+/// The `DumpFolder` Windows Error Reporting is set to use for every app, when it is set.
+pub fn configured_dump_folder() -> Option<PathBuf> {
+    text(LOCAL_DUMPS, w!("DumpFolder")).map(PathBuf::from)
+}
+
+/// The profile folder Windows lists for the account with this SID (`ProfileImagePath`), as written
+/// in the registry; the caller must validate both.
+pub fn profile_image_path(sid: &str) -> Option<String> {
+    let key = HSTRING::from(format!(r"{PROFILE_LIST}\{sid}"));
+    text(PCWSTR(key.as_ptr()), w!("ProfileImagePath"))
+}
+
 /// Where Windows Error Reporting keeps app crash dumps: its `DumpFolder`, else `CrashDumps`
 /// under the user's local app data.
 pub fn app_dump_dir() -> Option<PathBuf> {
-    text(LOCAL_DUMPS, w!("DumpFolder"))
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("LOCALAPPDATA")
-                .filter(|v| !v.is_empty())
-                .map(|local| PathBuf::from(local).join("CrashDumps"))
-        })
+    configured_dump_folder().or_else(|| {
+        std::env::var_os("LOCALAPPDATA")
+            .filter(|v| !v.is_empty())
+            .map(|local| PathBuf::from(local).join("CrashDumps"))
+    })
 }
 
 /// The `.dmp` files in `dir`; `None` when the folder cannot be listed, so nothing in it can be

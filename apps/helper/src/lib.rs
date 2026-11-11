@@ -10,6 +10,7 @@ pub mod job;
 mod lock;
 mod output;
 mod pinned;
+pub mod profile;
 pub mod scan;
 pub mod surface;
 pub mod tweak;

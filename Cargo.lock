@@ -4571,6 +4571,7 @@ dependencies = [
  "tempfile",
  "vestigium-collect",
  "vestigium-core",
+ "vestigium-ipc",
  "windows",
  "winresource",
 ]

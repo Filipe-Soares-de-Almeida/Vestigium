@@ -3,10 +3,11 @@ use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::ExitCode;
 
-use vestigium_collect::{app_dump_dir, crash_control, wall_ms};
+use vestigium_collect::{crash_control, wall_ms};
 use vestigium_core::{DUMP_DELETION_VERSION, DumpDeletion};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
+use crate::profile::{UserSid, app_dump_folder};
 use crate::{job, output};
 
 /// Most paths one list may name.
@@ -15,19 +16,18 @@ const MOST_PATHS: usize = 500;
 /// Where a dump may be deleted from.
 #[derive(Clone, Debug, Default)]
 pub struct DeletePlaces {
-    /// Folders whose `.dmp` files may go, but not those of their subfolders.
-    pub flat: Vec<PathBuf>,
-    /// Folders whose `.dmp` files may go, and those one folder down.
+    /// Folders whose `.dmp` files may go, and those one folder down: what the dump scan reads.
     pub deep: Vec<PathBuf>,
     /// Single files that may go, such as `MEMORY.DMP`.
     pub files: Vec<PathBuf>,
 }
 
 impl DeletePlaces {
-    fn of_this_pc() -> DeletePlaces {
+    /// The places of this PC; `app_dir` is the app crash dump folder of the account that asked.
+    pub fn of_this_pc(app_dir: Option<PathBuf>) -> DeletePlaces {
         let mut places = DeletePlaces::default();
         if let Some(crash) = crash_control() {
-            places.flat.push(crash.minidump_dir);
+            places.deep.push(crash.minidump_dir);
             places.files.push(crash.dump_file);
         }
         if let Some(root) = std::env::var_os("SystemRoot") {
@@ -35,14 +35,14 @@ impl DeletePlaces {
                 .deep
                 .push(PathBuf::from(root).join("LiveKernelReports"));
         }
-        places.deep.extend(app_dump_dir());
+        places.deep.extend(app_dir);
         places
     }
 }
 
 /// Deletes the dumps a `.delete` list names, each checked again here, and writes what happened
 /// to a `.deleted` file beside the list.
-pub fn run(list: &Path) -> ExitCode {
+pub fn run(list: &Path, user: Option<&UserSid>) -> ExitCode {
     let Ok(mut input) = output::open_existing(list, "dumps", "delete") else {
         return ExitCode::from(job::REFUSED);
     };
@@ -53,7 +53,7 @@ pub fn run(list: &Path) -> ExitCode {
     let Ok(mut file) = output::create(&list.with_extension("deleted"), "dumps", "deleted") else {
         return ExitCode::from(job::REFUSED);
     };
-    let places = DeletePlaces::of_this_pc();
+    let places = DeletePlaces::of_this_pc(app_dump_folder(user));
     let mut done = DumpDeletion {
         ts_ms: wall_ms(),
         deleted: Vec::new(),
@@ -111,7 +111,6 @@ pub fn allowed(path: &Path, places: &DeletePlaces) -> Result<(), String> {
     }
     let parent = path.parent().ok_or("no folder")?;
     let inside = places.files.iter().any(|f| same(f, path))
-        || places.flat.iter().any(|d| same(d, parent))
         || places
             .deep
             .iter()
@@ -154,17 +153,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         for folder in [
-            "Minidump",
+            "Minidump\\Sub",
             "LiveKernelReports\\WATCHDOG",
-            "CrashDumps",
+            "CrashDumps\\Game",
             "Other",
         ] {
             fs::create_dir_all(root.join(folder)).unwrap();
         }
         for file in [
             "Minidump\\1.dmp",
+            "Minidump\\Sub\\2.dmp",
             "LiveKernelReports\\WATCHDOG\\WD-1.dmp",
             "CrashDumps\\Game.exe.1.dmp",
+            "CrashDumps\\Game\\3.dmp",
             "CrashDumps\\notes.txt",
             "Other\\2.dmp",
             "MEMORY.DMP",
@@ -172,8 +173,11 @@ mod tests {
             fs::write(root.join(file), b"x").unwrap();
         }
         let places = DeletePlaces {
-            flat: vec![root.join("Minidump")],
-            deep: vec![root.join("LiveKernelReports"), root.join("CrashDumps")],
+            deep: vec![
+                root.join("Minidump"),
+                root.join("LiveKernelReports"),
+                root.join("CrashDumps"),
+            ],
             files: vec![root.join("MEMORY.DMP")],
         };
         Setup { dir, places }
@@ -185,8 +189,10 @@ mod tests {
         let root = s.dir.path();
         for ok in [
             "Minidump\\1.dmp",
+            "Minidump\\Sub\\2.dmp",
             "LiveKernelReports\\WATCHDOG\\WD-1.dmp",
             "CrashDumps\\Game.exe.1.dmp",
+            "CrashDumps\\Game\\3.dmp",
             "MEMORY.DMP",
         ] {
             assert_eq!(allowed(&root.join(ok), &s.places), Ok(()), "{ok}");
@@ -206,6 +212,34 @@ mod tests {
         ] {
             assert!(allowed(&bad, &s.places).is_err(), "{}", bad.display());
         }
+    }
+
+    #[test]
+    fn refuses_a_dump_two_folders_down() {
+        let s = setup();
+        let deeper = s.dir.path().join(r"CrashDumps\Game\Deeper");
+        fs::create_dir_all(&deeper).unwrap();
+        fs::write(deeper.join("4.dmp"), b"x").unwrap();
+        assert!(allowed(&deeper.join("4.dmp"), &s.places).is_err());
+    }
+
+    #[test]
+    fn exam_and_delete_use_the_requesting_users_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join(r"ana\AppData\Local\CrashDumps");
+        let theirs = dir.path().join(r"bia\AppData\Local\CrashDumps");
+        for folder in [&mine, &theirs] {
+            fs::create_dir_all(folder.join("Game")).unwrap();
+            fs::write(folder.join(r"Game\1.dmp"), b"x").unwrap();
+            fs::write(folder.join("2.dmp"), b"x").unwrap();
+        }
+        let places = DeletePlaces::of_this_pc(Some(mine.clone()));
+        for ok in [r"Game\1.dmp", "2.dmp"] {
+            assert_eq!(allowed(&mine.join(ok), &places), Ok(()), "{ok}");
+            assert!(allowed(&theirs.join(ok), &places).is_err(), "{ok}");
+        }
+        let nobody = DeletePlaces::of_this_pc(None);
+        assert!(allowed(&mine.join("2.dmp"), &nobody).is_err());
     }
 
     #[test]

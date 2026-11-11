@@ -74,12 +74,26 @@ pub fn dumps_file(db: &Path, started_ms: i64, extension: &str) -> Option<PathBuf
     )
 }
 
-pub fn dump_scan_args(out: &Path) -> String {
-    format!("dump-scan --out \"{}\"", out.display())
+/// ` --user-sid <SID>` for the account that asked, so the helper reads that account's dumps.
+fn user_sid_arg(sid: Option<&str>) -> String {
+    sid.map(|sid| format!(" --user-sid {sid}"))
+        .unwrap_or_default()
 }
 
-pub fn delete_dumps_args(list: &Path) -> String {
-    format!("delete-dumps --list \"{}\"", list.display())
+pub fn dump_scan_args(out: &Path, user_sid: Option<&str>) -> String {
+    format!(
+        "dump-scan --out \"{}\"{}",
+        out.display(),
+        user_sid_arg(user_sid)
+    )
+}
+
+pub fn delete_dumps_args(list: &Path, user_sid: Option<&str>) -> String {
+    format!(
+        "delete-dumps --list \"{}\"{}",
+        list.display(),
+        user_sid_arg(user_sid)
+    )
 }
 
 /// What the window gets back when the helper that read the dumps exits.
@@ -215,13 +229,26 @@ mod tests {
             PathBuf::from(r"C:\Users\some one\AppData\Local\Vestigium\data\dumps\7.dumps")
         );
         assert_eq!(
-            dump_scan_args(&out),
+            dump_scan_args(&out, None),
             r#"dump-scan --out "C:\Users\some one\AppData\Local\Vestigium\data\dumps\7.dumps""#
         );
         let list = dumps_file(db, 8, "delete").unwrap();
         assert_eq!(
-            delete_dumps_args(&list),
+            delete_dumps_args(&list, None),
             r#"delete-dumps --list "C:\Users\some one\AppData\Local\Vestigium\data\dumps\8.delete""#
+        );
+    }
+
+    #[test]
+    fn dump_args_name_the_user_who_asked() {
+        let sid = "S-1-5-21-1004336348-1177238915-682003330-1001";
+        assert_eq!(
+            dump_scan_args(Path::new(r"C:\d\7.dumps"), Some(sid)),
+            format!(r#"dump-scan --out "C:\d\7.dumps" --user-sid {sid}"#)
+        );
+        assert_eq!(
+            delete_dumps_args(Path::new(r"C:\d\8.delete"), Some(sid)),
+            format!(r#"delete-dumps --list "C:\d\8.delete" --user-sid {sid}"#)
         );
     }
 

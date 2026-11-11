@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::profile::UserSid;
+
 /// Exit code for a job the helper does not run.
 pub const REFUSED: u8 = 2;
 /// Exit code for a job that ran but could not write its result.
@@ -17,10 +19,13 @@ pub enum Job {
     DeepCapture { minutes: u64, out: PathBuf },
     /// Reads the boot diagnostics, which need elevation, into `out`.
     HealthScan { out: PathBuf },
-    /// Reads what every crash dump Windows kept says, into `out`.
-    DumpScan { out: PathBuf },
-    /// Deletes the dumps a list file names, each checked again.
-    DeleteDumps { list: PathBuf },
+    /// Reads what every crash dump Windows kept says, into `out`; app dumps are those of `user`.
+    DumpScan { out: PathBuf, user: Option<UserSid> },
+    /// Deletes the dumps a list file names, each checked again; app dumps are those of `user`.
+    DeleteDumps {
+        list: PathBuf,
+        user: Option<UserSid>,
+    },
     /// Applies or undoes the tweaks a plan file names, each checked against the catalog.
     Tweak { plan: PathBuf, sha256: String },
     /// Reads physical drive `disk` from `from_mib` to its end, never writing, into `out`.
@@ -64,27 +69,31 @@ fn value<'a>(found: &[(&str, &'a str)], flag: &str) -> Option<&'a str> {
 /// The job these arguments name, or why they name none.
 pub fn parse(args: &[String]) -> Result<Job, String> {
     let (name, rest) = args.split_first().ok_or("no job")?;
-    if name == "health-scan" || name == "dump-scan" {
-        let [flag, out] = rest else {
-            return Err(format!("{name} takes --out <file> and nothing else"));
+    if name == "health-scan" {
+        return match rest {
+            [flag, out] if flag == "--out" => Ok(Job::HealthScan {
+                out: PathBuf::from(out),
+            }),
+            _ => Err("health-scan takes --out <file> and nothing else".to_string()),
         };
-        if flag != "--out" {
-            return Err(format!("{name} takes --out <file> and nothing else"));
-        }
-        let out = PathBuf::from(out);
-        return Ok(if name == "health-scan" {
-            Job::HealthScan { out }
-        } else {
-            Job::DumpScan { out }
+    }
+    if name == "dump-scan" {
+        let found = pairs(rest, &["--out", "--user-sid"])?;
+        return Ok(Job::DumpScan {
+            out: PathBuf::from(value(&found, "--out").ok_or("--out is required")?),
+            user: value(&found, "--user-sid")
+                .map(UserSid::parse)
+                .transpose()?,
         });
     }
     if name == "delete-dumps" {
-        return match rest {
-            [flag, list] if flag == "--list" => Ok(Job::DeleteDumps {
-                list: PathBuf::from(list),
-            }),
-            _ => Err("delete-dumps takes --list <file> and nothing else".to_string()),
-        };
+        let found = pairs(rest, &["--list", "--user-sid"])?;
+        return Ok(Job::DeleteDumps {
+            list: PathBuf::from(value(&found, "--list").ok_or("--list is required")?),
+            user: value(&found, "--user-sid")
+                .map(UserSid::parse)
+                .transpose()?,
+        });
     }
     if name == "tweak" {
         let found = pairs(rest, &["--plan", "--sha256"])?;
@@ -242,13 +251,54 @@ mod tests {
         assert_eq!(
             parse(&args(&["dump-scan", "--out", r"C:\a.dumps"])),
             Ok(Job::DumpScan {
-                out: PathBuf::from(r"C:\a.dumps")
+                out: PathBuf::from(r"C:\a.dumps"),
+                user: None
             })
         );
         for bad in [
             &["dump-scan"][..],
             &["dump-scan", "--out", "a", "--path", r"C:\Windows"],
             &["dump-scan", "--path", r"C:\Windows\MEMORY.DMP"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    const SID: &str = "S-1-5-21-1004336348-1177238915-682003330-1001";
+
+    #[test]
+    fn dump_jobs_take_the_user_who_asked() {
+        let user = Some(UserSid::parse(SID).unwrap());
+        assert_eq!(
+            parse(&args(&["dump-scan", "--user-sid", SID, "--out", "o"])),
+            Ok(Job::DumpScan {
+                out: PathBuf::from("o"),
+                user: user.clone()
+            })
+        );
+        assert_eq!(
+            parse(&args(&["delete-dumps", "--list", "l", "--user-sid", SID])),
+            Ok(Job::DeleteDumps {
+                list: PathBuf::from("l"),
+                user
+            })
+        );
+        for bad in [
+            &["dump-scan", "--out", "o", "--user-sid", "S-1-5-18"][..],
+            &["dump-scan", "--out", "o", "--user-sid", r"C:\Users\other"],
+            &[
+                "dump-scan",
+                "--out",
+                "o",
+                "--user-sid",
+                SID,
+                "--user-sid",
+                SID,
+            ],
+            &["dump-scan", "--user-sid", SID],
+            &["delete-dumps", "--list", "l", "--user-sid", ""],
+            &["delete-dumps", "--user-sid", SID],
+            &["delete-dumps", "--list", "l", "--path", r"C:\Users"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }
