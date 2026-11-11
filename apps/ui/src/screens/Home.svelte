@@ -18,31 +18,49 @@
   const status = $derived(shellStatus());
   const tiles = $derived(buildGroups().filter((g) => !g.hidden));
 
+  /** What a card says: a line and a mark; no mark while its data is still being read. */
+  type Card = { line: string; kind: StatusKind | null };
+
   const open = $derived(health.dto?.open.length ?? 0);
   const critical = $derived(health.critical);
-  const healthLine = $derived(
-    open === 0
-      ? t("ui.home.health.none")
-      : critical
-        ? `${tn("ui.shell.nav.health.open", open)} · ${tn("ui.shell.nav.health.critical", critical)}`
-        : tn("ui.shell.nav.health.open", open),
-  );
-  const healthKind: StatusKind = $derived(critical ? "critical" : open ? "attention" : "ok");
-  const tweakLine = $derived(
-    tweaks.recommended ? tn("ui.shell.nav.tweaks.signals", tweaks.recommended) : t("ui.home.tweaks.none"),
-  );
-  const tweakKind: StatusKind = $derived(tweaks.recommended ? "attention" : "ok");
+  const healthCard = $derived.by((): Card => {
+    if (health.dto === null) {
+      return health.error !== null
+        ? { line: t("ui.home.health.failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    if (open === 0) return { line: t("ui.home.health.none"), kind: "ok" };
+    const line = critical
+      ? `${tn("ui.shell.nav.health.open", open)} · ${tn("ui.shell.nav.health.critical", critical)}`
+      : tn("ui.shell.nav.health.open", open);
+    return { line, kind: critical ? "critical" : "attention" };
+  });
+  const tweakCard = $derived.by((): Card => {
+    if (tweaks.dto === null) {
+      return tweaks.error !== null
+        ? { line: t("ui.home.tweaks.failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    return tweaks.recommended
+      ? { line: tn("ui.shell.nav.tweaks.signals", tweaks.recommended), kind: "attention" }
+      : { line: t("ui.home.tweaks.none"), kind: "ok" };
+  });
 
   const worst = $derived(today.worst);
   const worstMark = $derived(worst ? occurrenceMark(worst) : { kind: "ok" as StatusKind, word: "" });
-  const activityLine = $derived(
-    worst
-      ? t("ui.home.activity.worst", {
-          time: formatTime(worst.kind === "PostMortem" ? worst.end_ms : worst.start_ms),
-          duration: formatDuration(worst.end_ms - worst.start_ms),
-        })
-      : t("ui.home.activity.none"),
-  );
+  const activityCard = $derived.by((): Card => {
+    if (!today.loaded) {
+      return today.failed
+        ? { line: t("ui.home.activity.marks_failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    if (!worst) return { line: t("ui.home.activity.none"), kind: "ok" };
+    const line = t("ui.home.activity.worst", {
+      time: formatTime(worst.kind === "PostMortem" ? worst.end_ms : worst.start_ms),
+      duration: formatDuration(worst.end_ms - worst.start_ms),
+    });
+    return { line, kind: worstMark.kind };
+  });
 
 </script>
 
@@ -59,10 +77,10 @@
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>
         <li>
-          <a class="card" href={href.health()} data-morph="qs:health" onclick={() => morph.remember("qs:health")} aria-label="{t('ui.group.health')}: {healthLine}">
-            <span class="ic"><Icon name="health" /><span class="dot"><StatusMark kind={healthKind} size={14} reveal /></span></span>
+          <a class="card" href={href.health()} data-morph="qs:health" onclick={() => morph.remember("qs:health")} aria-label="{t('ui.group.health')}: {healthCard.line}">
+            <span class="ic"><Icon name="health" />{#if healthCard.kind}<span class="dot"><StatusMark kind={healthCard.kind} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.health")}</b>
-            <small>{healthLine}</small>
+            <small>{healthCard.line}</small>
           </a>
         </li>
         <li>
@@ -71,18 +89,18 @@
             href={worst ? href.occurrence(worst.id) : href.activity()}
             data-morph="qs:today"
             onclick={() => morph.remember("qs:today")}
-            aria-label="{t('ui.group.activity')}: {activityLine}"
+            aria-label="{t('ui.group.activity')}: {activityCard.line}"
           >
-            <span class="ic"><Icon name="today" /><span class="dot"><StatusMark kind={worstMark.kind} word={worstMark.word || undefined} size={14} reveal /></span></span>
+            <span class="ic"><Icon name="today" />{#if activityCard.kind}<span class="dot"><StatusMark kind={activityCard.kind} word={worst && today.loaded ? worstMark.word || undefined : undefined} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.activity")}</b>
-            <small>{activityLine}</small>
+            <small>{activityCard.line}</small>
           </a>
         </li>
         <li>
-          <a class="card" href={href.tweaks()} data-morph="qs:tweaks" onclick={() => morph.remember("qs:tweaks")} aria-label="{t('ui.group.tweaks')}: {tweakLine}">
-            <span class="ic"><Icon name="tweaks" /><span class="dot"><StatusMark kind={tweakKind} size={14} reveal /></span></span>
+          <a class="card" href={href.tweaks()} data-morph="qs:tweaks" onclick={() => morph.remember("qs:tweaks")} aria-label="{t('ui.group.tweaks')}: {tweakCard.line}">
+            <span class="ic"><Icon name="tweaks" />{#if tweakCard.kind}<span class="dot"><StatusMark kind={tweakCard.kind} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.tweaks")}</b>
-            <small>{tweakLine}</small>
+            <small>{tweakCard.line}</small>
           </a>
         </li>
         <li>

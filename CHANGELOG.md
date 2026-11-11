@@ -569,6 +569,12 @@ How to use this file:
 - A batch of history that covers more than an hour of the clock, for example after the PC clock
   jumped forward and back, is now stored in several parts of at most an hour each, so reading the
   history can always find it.
+- The home screen and the side pane no longer say "No freezes today", "Nothing recommended" or "No
+  alerts" with a green mark when what they summarise could not be read. When today's freezes, the
+  tweaks or the health checks fail to load before they were ever read, the card says "No reading of
+  today's marks", "No reading of the tweaks" or "No reading of the health checks" with a neutral mark
+  and the side pane leaves the counts out; while the first read is still under way the card shows
+  Loading and no mark. A later failed refresh keeps the counts already read.
 
 ### Security
 

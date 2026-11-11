@@ -118,13 +118,17 @@ export function buildGroups(): Group[] {
   const dumpEntries = dumps.dto ? entries(dumps.dto) : [];
   const occurrences = today.occurrences.length;
   const periods = today.periods;
+  // Until today's marks have been read, the counts are unknown and say nothing.
+  const counted = today.loaded;
   const list = new Intl.ListFormat(lang(), { type: "conjunction" });
   const memory = hwtests.dto?.memory ?? null;
   const subs: Partial<Record<GroupKey, string>> = {
-    freezes: t("ui.group.freezes.sub_n", {
-      occurrences: occurrences ? tn("ui.events.occurrences", occurrences) : t("ui.events.occurrences.none"),
-      periods: periods ? tn("ui.events.periods", periods) : t("ui.events.periods.none"),
-    }),
+    freezes: counted
+      ? t("ui.group.freezes.sub_n", {
+          occurrences: occurrences ? tn("ui.events.occurrences", occurrences) : t("ui.events.occurrences.none"),
+          periods: periods ? tn("ui.events.periods", periods) : t("ui.events.periods.none"),
+        })
+      : undefined,
     disks: disks.length
       ? list.format(disks.map((d) => (d.volumes.length ? `${diskName(d)} (${lettersOf(d)})` : diskName(d))))
       : undefined,
@@ -161,7 +165,7 @@ export function buildGroups(): Group[] {
           href: href.events(),
           label: t("ui.item.events"),
           icon: "today",
-          meta: String(occurrences + periods),
+          meta: counted ? String(occurrences + periods) : undefined,
           match: (r) => r.screen === "events" || ((r.screen === "occurrence" || r.screen === "period") && r.fromDay === null),
         },
       ],
@@ -241,7 +245,7 @@ export function buildGroups(): Group[] {
           href: href.tweaks(null, key),
           label: t(label),
           icon,
-          meta: String(count),
+          meta: tweaks.dto ? String(count) : undefined,
           match: (r: Route) => tweakListOf(r) === key,
         };
       }),
@@ -259,7 +263,7 @@ export function buildGroups(): Group[] {
           href: href.dumps(null, group),
           label: t(`ui.dumps.group.${group}`),
           icon: DUMP_ICON[group],
-          meta: String(dumpEntries.filter((e) => e.group === group && present(e)).length),
+          meta: dumps.dto ? String(dumpEntries.filter((e) => e.group === group && present(e)).length) : undefined,
           match: (r: Route) => r.screen === "dumps" && dumpListOf(r) === group,
         })),
       ],

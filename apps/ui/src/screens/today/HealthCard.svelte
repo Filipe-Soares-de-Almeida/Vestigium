@@ -19,6 +19,7 @@
       .map((f) => ({ f, area: areaOf(f.kind) })),
   );
   const line = $derived.by(() => {
+    if (health.dto === null) return health.error !== null ? t("ui.home.health.failed") : t("ui.common.loading");
     const { critical, attention } = health;
     if (!critical && !attention) return t("ui.home.health.none");
     if (critical && attention) {
