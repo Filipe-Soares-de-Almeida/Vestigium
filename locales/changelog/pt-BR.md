@@ -7,6 +7,29 @@ At release time, copy the version's section from CHANGELOG.md, keep its headings
 entries. A version missing here shows its English notes.
 -->
 
+## [0.1.2] - 2026-11-12
+
+A caixa Sobre, uma página para as notas de versão e correções na saúde dos SSDs.
+
+### Added
+
+- Avisos de licença de cada componente de código aberto na pasta de instalação.
+- Página Novidades com os destaques de cada versão.
+- Linha de resumo de cada versão nas Novidades.
+- Caixa Sobre o Vestigium com a versão de cada programa e os créditos.
+- Botões Copiar informações e Reportar um problema na caixa Sobre.
+
+### Changed
+
+- Move as notas de versão de Atualizações para uma página própria.
+- Mostra os destaques da nova versão na caixa de atualização.
+- Aponta os formulários de problema e a wiki para Sobre o Vestigium para saber a versão.
+
+### Fixed
+
+- Corrige SSDs mostrando Atenção por contadores SMART que só alertam em HDs.
+- Corrige as linhas de reserva e de erros de mídia do NVMe com o nível errado.
+
 ## [0.1.1] - 2026-11-11
 
 ### Added

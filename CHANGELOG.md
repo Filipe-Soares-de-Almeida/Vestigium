@@ -22,6 +22,10 @@ How to use this file:
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-12
+
+The About dialog, a page for the release notes and SSD health fixes.
+
 ### Added
 
 - License notices of every open-source component in the install folder.
@@ -164,6 +168,7 @@ The first release.
 - A per-user installer in English and Brazilian Portuguese that needs no administrator rights and, when
   you ask, deletes the history on uninstall.
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.0
