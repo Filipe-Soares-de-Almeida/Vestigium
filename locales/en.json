@@ -1109,6 +1109,7 @@
   "ui.settings.updates.failed": "Could not connect to GitHub. Check the connection and try again.",
   "ui.settings.updates.news": "What's new",
   "ui.settings.updates.news_none": "No version released yet.",
+  "ui.settings.updates.news_row": "Highlights of each version",
   "ui.update.ask.title": "Check for updates automatically?",
   "ui.update.ask.body": "When the window opens, at most once a day, Vestigium checks GitHub for the newest version. No PC data is sent.",
   "ui.update.ask.later": "Can be changed in Settings › Updates.",

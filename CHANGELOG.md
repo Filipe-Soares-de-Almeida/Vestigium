@@ -28,6 +28,11 @@ How to use this file:
 - Release notes page with the highlights of each version.
 - Summary line of each version in the release notes.
 
+### Changed
+
+- Move the release notes from Updates to their own page.
+- Show the highlights of the new version in the update dialog.
+
 ## [0.1.1] - 2026-11-11
 
 ### Added

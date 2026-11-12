@@ -3,10 +3,11 @@
 
   import { captures } from "../lib/capture.svelte";
   import { t, tn } from "../lib/i18n.svelte";
+  import { href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import { updates } from "../lib/update.svelte";
   import { formatSize } from "../screens/settings/data";
-  import ReleaseNotes from "./ReleaseNotes.svelte";
+  import VersionCard from "./VersionCard.svelte";
 
   // The update's dialogs: the first-open question, a newer version, and the notes after updating.
   let dialog = $state<HTMLDialogElement>();
@@ -14,6 +15,7 @@
 
   const kind = $derived(updates.dialog);
   const found = $derived(updates.found);
+  const offered = $derived(updates.offered);
   const busy = $derived(hwtests.running !== null || captures.run !== null);
   const progress = $derived.by(() => {
     const d = updates.download;
@@ -57,11 +59,13 @@
         {t("ui.update.ask.yes")}
       </button>
     </div>
-  {:else if kind === "available" && found}
+  {:else if kind === "available" && found && offered}
     <div class="in">
       <h2 id="update-title">{t("ui.update.available.title", { version: found.version })}</h2>
       <p>{t("ui.update.available.body", { current: updates.version })}</p>
-      <ReleaseNotes summary={found.summary} groups={found.groups} />
+      <div class="card" inert={progress !== null}>
+        <VersionCard release={offered} max={3} bare onnavigate={() => updates.close()} />
+      </div>
       {#if progress}
         <div class="progress" role="status">
           <div
@@ -92,11 +96,14 @@
         </button>
       {/if}
     </div>
-  {:else if kind === "news"}
+  {:else if kind === "news" && updates.news.length}
     <div class="in">
       <h2 id="update-title">{t("ui.update.news.title", { version: updates.version })}</h2>
       {#if updates.news.length > 1}<p>{tn("ui.update.news.since", updates.news.length)}</p>{/if}
-      <ReleaseNotes releases={updates.news} />
+      <div class="card"><VersionCard release={updates.news[0]} max={3} bare onnavigate={() => updates.close()} /></div>
+      {#if updates.news.length > 1}
+        <a class="every" href={href.news()} onclick={() => updates.close()}>{t("ui.settings.updates.news_row")}</a>
+      {/if}
     </div>
     <div class="acts">
       <button type="button" class="btn accent" bind:this={first} onclick={() => updates.close()}>{t("ui.update.news.ok")}</button>
@@ -146,6 +153,16 @@
     border-top: 1px solid var(--stroke2);
     border-radius: 0 0 12px 12px;
     background: var(--card2);
+  }
+  .card {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--stroke2);
+  }
+  .every {
+    justify-self: start;
+    font-size: 14px;
+    line-height: 1.5;
   }
   .progress {
     display: grid;

@@ -7,6 +7,7 @@
     health: [16, '<path d="M8 14s-5.5-3.2-5.5-7.2A3 3 0 018 5a3 3 0 015.5 1.8C13.5 10.8 8 14 8 14z" fill="none" stroke="currentColor" stroke-width="1.2"/>'],
     dumps: [16, '<path d="M3 2h7l3 3v9H3z" fill="none" stroke="currentColor" stroke-width="1.2"/>'],
     settings: [16, '<circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.2"/>'],
+    notes: [16, '<rect x="2.5" y="2" width="11" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5.3 5.6h5.4M5.3 8h5.4M5.3 10.4h3.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>'],
     copy: [16, '<rect x="5" y="2" width="9" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 5v7.5A2 2 0 005 14.5h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>'],
     arrow_left: [16, '<path d="M13 8H3.5M7.5 4L3.5 8l4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'],
     eye: [16, '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.2"/>'],

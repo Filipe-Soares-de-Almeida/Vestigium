@@ -25,10 +25,11 @@
   const settings = $derived(app.settings?.settings ?? null);
   /** The release notes pages under Updates, which read no setting. */
   const news = $derived(router.current.screen === "settings" ? router.current.news : null);
-  /** The line under each page's title: what the page is about, the watcher's state or the version. */
+  /** The line under each page's title: what the page is about, the watcher's state or the version; none on Updates. */
   const sub = $derived.by(() => {
     if (current === "watching") return shellStatus().text;
-    if (current === "updates" || current === "privacy") return t("ui.settings.updates.version_hint", { version: updates.version });
+    if (current === "updates") return undefined;
+    if (current === "privacy") return t("ui.settings.updates.version_hint", { version: updates.version });
     return t(`ui.settings.sub.${current}`);
   });
 </script>
