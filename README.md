@@ -24,7 +24,9 @@
   </picture>
 </p>
 
-https://github.com/user-attachments/assets/acbf9066-8e69-4845-bc70-5a5d37116181
+https://github.com/user-attachments/assets/0f329f1c-9d5d-4310-b51c-c7a362a10390
+
+<p align="center"><sub>A 6.8-second freeze followed from the tray icon to its likely cause and what to do, then blue screens, stutters and reversible tweaks.</sub></p>
 
 ---
 
