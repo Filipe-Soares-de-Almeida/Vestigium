@@ -22,6 +22,8 @@ How to use this file:
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-11
+
 ### Added
 
 - A deep capture that is already running is now shown, whoever started it. A neutral strip above the
@@ -759,5 +761,6 @@ The first release.
 - A per-user installer in English and Brazilian Portuguese that needs no administrator rights and, when
   you ask, deletes the history on uninstall.
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.0
