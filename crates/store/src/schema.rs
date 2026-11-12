@@ -1,12 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, params};
 use vestigium_core::{Gap, WinEvent};
 
-use crate::records::{channel_code, gap_code, meaning_code};
+use crate::codes::{channel_code, gap_code, meaning_code};
+use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 13;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -149,7 +150,66 @@ const MIGRATIONS: &[&str] = &[
         raw     INTEGER NOT NULL,
         PRIMARY KEY (disk, attr, day)
     ) WITHOUT ROWID;",
+    // Memory Diagnostic events once stored with meaning 0 get their code, 16.
+    "UPDATE event SET meaning = 16
+     WHERE meaning = 0 AND provider = 'Microsoft-Windows-MemoryDiagnostics-Results';",
+    // A capture, a scan and a tweak change are each stored once: copies from a result file that
+    // was imported twice go, the lowest id stays, and an undo of a removed copy follows the kept one.
+    "DELETE FROM capture WHERE id NOT IN (SELECT MIN(id) FROM capture GROUP BY start_ms);
+    DROP INDEX IF EXISTS capture_start;
+    CREATE UNIQUE INDEX capture_start ON capture (start_ms);
+    DELETE FROM scan WHERE id NOT IN (SELECT MIN(id) FROM scan GROUP BY ts_ms);
+    DROP INDEX IF EXISTS scan_ts;
+    CREATE UNIQUE INDEX scan_ts ON scan (ts_ms);
+    UPDATE tweak_change SET undo_of = (
+        SELECT MIN(k.id) FROM tweak_change k, tweak_change t
+        WHERE t.id = tweak_change.undo_of AND k.applied_ms = t.applied_ms AND k.tweak = t.tweak
+          AND COALESCE(k.subject, '') = COALESCE(t.subject, '')
+          AND COALESCE(k.undo_of, 0) = COALESCE(t.undo_of, 0))
+    WHERE undo_of IN (SELECT id FROM tweak_change);
+    UPDATE tweak_change SET undone_ms = (
+        SELECT d.undone_ms FROM tweak_change d
+        WHERE d.undone_ms IS NOT NULL AND d.applied_ms = tweak_change.applied_ms
+          AND d.tweak = tweak_change.tweak
+          AND COALESCE(d.subject, '') = COALESCE(tweak_change.subject, '')
+          AND COALESCE(d.undo_of, 0) = COALESCE(tweak_change.undo_of, 0)
+        ORDER BY d.id LIMIT 1)
+    WHERE undone_ms IS NULL;
+    DELETE FROM tweak_change WHERE id NOT IN (
+        SELECT MIN(id) FROM tweak_change
+        GROUP BY applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));
+    CREATE UNIQUE INDEX tweak_change_key
+        ON tweak_change (applied_ms, tweak, COALESCE(subject, ''), COALESCE(undo_of, 0));",
+    "CREATE INDEX segment_series_start ON segment (series, start_ms, end_ms);",
+    // Gap reason 6, samples that could not be written, is now stored; a reader of version 12
+    // refuses the file instead of failing on the unknown code.
+    "SELECT 1;",
 ];
+
+/// What a new database takes over from a file set aside; each statement is its own table.
+const CARRY_OVER: [&str; 3] = [
+    "INSERT OR IGNORE INTO main.tweak_change
+         (id, version, tweak, subject, applied_ms, undone_ms, undo_of, elevated, data)
+     SELECT id, version, tweak, subject, applied_ms, undone_ms, undo_of, elevated, data
+     FROM old.tweak_change ORDER BY id",
+    "INSERT OR IGNORE INTO main.setting (key, value) SELECT key, value FROM old.setting",
+    "INSERT OR IGNORE INTO main.machine (id, data) SELECT id, data FROM old.machine",
+];
+
+/// Which tables a new database copied from a file set aside.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CarryOver {
+    pub tweaks: bool,
+    pub settings: bool,
+    pub machine: bool,
+}
+
+/// A damaged history file renamed aside, and what its replacement took over from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetAside {
+    pub path: PathBuf,
+    pub carried: CarryOver,
+}
 
 /// What the agent writes in one transaction, every batch.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -172,6 +232,11 @@ impl Batch {
 
 const _: () = assert!(MIGRATIONS.len() == SCHEMA_VERSION as usize);
 
+/// Segments of one series overlapping a range, oldest first; `?4` is the earliest start read.
+pub(crate) const SEGMENTS_SQL: &str = "SELECT start_ms, end_ms, data FROM segment
+     WHERE series = ?1 AND start_ms >= ?4 AND start_ms <= ?3 AND end_ms >= ?2
+     ORDER BY start_ms";
+
 /// The history database.
 #[derive(Debug)]
 pub struct Store {
@@ -193,11 +258,89 @@ impl Store {
                 supported: SCHEMA_VERSION,
             });
         }
-        conn.pragma_update_and_check(None, "journal_mode", "WAL", |_| Ok(()))?;
+        let mode: String =
+            conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
+        require_wal(&mode)?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "cache_size", -CACHE_KIB)?;
         migrate(&mut conn, found)?;
         Ok(Store { conn })
+    }
+
+    /// Like `open`, but a file the database engine rejects as damaged is renamed aside, with its
+    /// `-wal` and `-shm` files, and a new database takes its place; returns where the file went
+    /// and what the new database took over from it. A file that cannot be renamed keeps its place
+    /// and the original error.
+    pub fn open_recovering(path: &Path) -> Result<(Store, Option<SetAside>), StoreError> {
+        // A file with no database header is moved before the engine sees it, which would
+        // delete the -wal file of a database it cannot read.
+        if has_foreign_header(path)
+            && let Some(aside) = set_aside(path)
+        {
+            return Store::open_after(path, aside);
+        }
+        match Store::open(path) {
+            Err(StoreError::Sqlite(err)) if is_damage(&err) => {
+                let Some(aside) = set_aside(path) else {
+                    return Err(StoreError::Sqlite(err));
+                };
+                Store::open_after(path, aside)
+            }
+            opened => opened.map(|store| (store, None)),
+        }
+    }
+
+    /// Opens a new database at `path` that takes over what `aside` still holds.
+    fn open_after(path: &Path, aside: PathBuf) -> Result<(Store, Option<SetAside>), StoreError> {
+        let mut store = Store::open(path)?;
+        let carried = store.carry_over_from(&aside);
+        Ok((
+            store,
+            Some(SetAside {
+                path: aside,
+                carried,
+            }),
+        ))
+    }
+
+    /// Copies the tweak changes, settings and machine facts a file set aside still holds into this
+    /// database, table by table; a table that cannot be read is skipped, a file without a database
+    /// header is not opened, and the file is opened read-only. Reports which tables were copied.
+    pub fn carry_over_from(&mut self, from: &Path) -> CarryOver {
+        let mut carried = CarryOver::default();
+        if !from.is_file() || has_foreign_header(from) {
+            return carried;
+        }
+        let uri = format!("{}?mode=ro", file_uri(from));
+        if self
+            .conn
+            .execute("ATTACH DATABASE ?1 AS old", params![uri])
+            .is_err()
+        {
+            return carried;
+        }
+        let [tweaks, settings, machine] = CARRY_OVER.map(|copy| self.copy_rows(copy).is_ok());
+        carried = CarryOver {
+            tweaks,
+            settings,
+            machine,
+        };
+        let _ = self.conn.execute_batch("DETACH DATABASE old");
+        carried
+    }
+
+    fn copy_rows(&mut self, sql: &str) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(sql, [])?;
+        Ok(tx.commit()?)
+    }
+
+    /// The file this connection writes; `None` for an in-memory or temporary database.
+    pub fn path(&self) -> Option<PathBuf> {
+        self.conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
     }
 
     /// Opens an existing database without writing to it, as the UI does while the agent runs.
@@ -267,14 +410,16 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for event in &batch.events {
+                let channel = channel_code(event.channel);
+                let meaning = meaning_code(event.meaning);
                 insert.execute(params![
                     event.ts_ms,
-                    channel_code(event.channel),
+                    channel,
                     event.provider,
                     event.id,
                     i64::try_from(event.record_id).unwrap_or(i64::MAX),
                     event.level,
-                    meaning_code(event.meaning),
+                    meaning,
                     event.data_xml
                 ])?;
             }
@@ -288,7 +433,8 @@ impl Store {
             let mut insert = tx
                 .prepare_cached("INSERT INTO gap (start_ms, end_ms, reason) VALUES (?1, ?2, ?3)")?;
             for gap in &batch.gaps {
-                insert.execute(params![gap.start_ms, gap.end_ms, gap_code(gap.reason)])?;
+                let reason = gap_code(gap.reason);
+                insert.execute(params![gap.start_ms, gap.end_ms, reason])?;
             }
         }
         tx.commit()?;
@@ -302,21 +448,115 @@ impl Store {
         from_ms: i64,
         to_ms: i64,
     ) -> Result<Vec<Segment>, StoreError> {
-        let mut query = self.conn.prepare_cached(
-            "SELECT start_ms, end_ms, data FROM segment
-             WHERE series = ?1 AND start_ms <= ?3 AND end_ms >= ?2
-             ORDER BY start_ms",
+        let mut query = self.conn.prepare_cached(SEGMENTS_SQL)?;
+        let earliest_start = from_ms.saturating_sub(MAX_SEGMENT_SPAN_MS);
+        let rows = query.query_map(
+            params![series as u8, from_ms, to_ms, earliest_start],
+            |row| {
+                Ok(Segment {
+                    series,
+                    start_ms: row.get(0)?,
+                    end_ms: row.get(1)?,
+                    data: row.get(2)?,
+                })
+            },
         )?;
-        let rows = query.query_map(params![series as u8, from_ms, to_ms], |row| {
-            Ok(Segment {
-                series,
-                start_ms: row.get(0)?,
-                end_ms: row.get(1)?,
-                data: row.get(2)?,
-            })
-        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+}
+
+/// Refuses a journal mode other than WAL, which SQLite reports instead of failing when a
+/// location cannot switch to it.
+fn require_wal(mode: &str) -> Result<(), StoreError> {
+    if mode.eq_ignore_ascii_case("wal") {
+        Ok(())
+    } else {
+        Err(StoreError::JournalMode {
+            found: mode.to_string(),
+        })
+    }
+}
+
+/// A `file:` URI for a path, with every byte outside the unreserved set percent-encoded.
+fn file_uri(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let mut uri = String::from(if text.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    });
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~/:".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
+}
+
+/// True when the file exists, holds bytes and does not begin with the SQLite header.
+fn has_foreign_header(path: &Path) -> bool {
+    use std::io::Read;
+
+    const MAGIC: &[u8; 16] = b"SQLite format 3\0";
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = Vec::with_capacity(MAGIC.len());
+    if file
+        .by_ref()
+        .take(MAGIC.len() as u64)
+        .read_to_end(&mut head)
+        .is_err()
+    {
+        return false;
+    }
+    !head.is_empty() && head != MAGIC
+}
+
+/// True when the engine says the file is not a database or is corrupt.
+fn is_damage(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(failure, _)
+            if matches!(
+                failure.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            )
+    )
+}
+
+/// Renames the database and its `-wal` and `-shm` files to `<name>.corrupt-<unix ms>` and returns
+/// the new name; when a rename fails the ones already done are undone and nothing is left moved.
+fn set_aside(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let mut stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    let aside = loop {
+        let candidate = path.with_file_name(format!("{name}.corrupt-{stamp}"));
+        if !candidate.exists() {
+            break candidate;
+        }
+        stamp += 1;
+    };
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for suffix in ["", "-wal", "-shm"] {
+        let from = path.with_file_name(format!("{name}{suffix}"));
+        let to = path.with_file_name(format!("{}{suffix}", aside.file_name()?.to_string_lossy()));
+        if suffix.is_empty() || from.exists() {
+            if std::fs::rename(&from, &to).is_err() {
+                for (from, to) in moved.iter().rev() {
+                    let _ = std::fs::rename(to, from);
+                }
+                return None;
+            }
+            moved.push((from, to));
+        }
+    }
+    Some(aside)
 }
 
 fn user_version(conn: &Connection) -> Result<u32, StoreError> {
@@ -334,4 +574,42 @@ fn migrate(conn: &mut Connection, from: u32) -> Result<(), StoreError> {
     }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_only_connection_sees_what_the_writer_commits_and_cannot_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = Store::open(&dir.path().join("vestigium.db")).unwrap();
+        let reader = Store::open_read_only(&writer.path().unwrap()).unwrap();
+        assert!(reader.bookmark_xml().unwrap().is_none());
+
+        writer
+            .append_batch(&Batch {
+                bookmark_xml: Some("<BookmarkList/>".to_string()),
+                ..Batch::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            reader.bookmark_xml().unwrap().as_deref(),
+            Some("<BookmarkList/>")
+        );
+        assert!(reader.conn.execute("DELETE FROM gap", []).is_err());
+    }
+
+    #[test]
+    fn only_wal_is_accepted_as_the_journal_mode() {
+        assert!(require_wal("wal").is_ok());
+        assert!(require_wal("WAL").is_ok());
+        for mode in ["delete", "memory", "truncate", ""] {
+            assert!(matches!(
+                require_wal(mode),
+                Err(StoreError::JournalMode { found }) if found == mode
+            ));
+        }
+    }
 }

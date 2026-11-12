@@ -2,10 +2,10 @@
   import type { Snippet } from "svelte";
 
   /** The line of facts under a detail title: a label and a value each. */
-  let { rows }: { rows: { label: string; value: string | Snippet }[] } = $props();
+  let { rows, dim = false }: { rows: { label: string; value: string | Snippet }[]; dim?: boolean } = $props();
 </script>
 
-<dl class="facts">
+<dl class="facts" class:veiled={dim}>
   {#each rows as row (row.label)}
     <div>
       <dt>{row.label}</dt>

@@ -2,7 +2,12 @@ use std::time::Duration;
 
 use vestigium_core::{MinuteRollup, MinuteSample, ProcessTop, Sample, minute_of};
 
+use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, encode};
+
+/// Most items in one segment: a 16-core sample with six disks is 385 bytes, so a chunk stays
+/// under a few MiB, far below what a segment may inflate to.
+const SEGMENT_ITEMS: usize = 2_048;
 
 /// Buffers items until a batch is due, then turns them into one segment per series.
 #[derive(Debug)]
@@ -42,7 +47,7 @@ impl Batcher {
         self.processes.push(top);
     }
 
-    /// True once the oldest buffered item is at least one interval old.
+    /// True once the oldest buffered item is at least one interval old, or the clock is behind it.
     pub fn due(&self, now_ms: i64) -> bool {
         let oldest = [
             self.samples.first().map(|s| s.ts_ms),
@@ -52,7 +57,7 @@ impl Batcher {
         .into_iter()
         .flatten()
         .min();
-        oldest.is_some_and(|ts| now_ms.saturating_sub(ts) >= self.interval_ms)
+        oldest.is_some_and(|ts| now_ms < ts || now_ms.saturating_sub(ts) >= self.interval_ms)
     }
 
     /// Empties the buffer into one segment per non-empty series; the open minute stays.
@@ -82,12 +87,38 @@ fn push_segment<T: serde::Serialize>(
     items: &[T],
     ts_ms: impl Fn(&T) -> i64,
 ) {
-    if let (Some(first), Some(last)) = (items.first(), items.last()) {
+    for chunk in split(items, &ts_ms) {
+        let stamps = chunk.iter().map(&ts_ms);
+        let (Some(start_ms), Some(end_ms)) = (stamps.clone().min(), stamps.max()) else {
+            continue;
+        };
         segments.push(Segment {
             series,
-            start_ms: ts_ms(first),
-            end_ms: ts_ms(last),
-            data: encode(items),
+            start_ms,
+            end_ms,
+            data: encode(chunk),
         });
     }
+}
+
+/// Cuts items into runs of at most `SEGMENT_ITEMS` whose stamps stay within one segment span.
+fn split<T>(items: &[T], ts_ms: impl Fn(&T) -> i64) -> Vec<&[T]> {
+    let mut runs = Vec::new();
+    let (mut from, mut low, mut high) = (0, i64::MAX, i64::MIN);
+    for (at, item) in items.iter().enumerate() {
+        let ts = ts_ms(item);
+        let (new_low, new_high) = (low.min(ts), high.max(ts));
+        let full =
+            at - from == SEGMENT_ITEMS || new_high.saturating_sub(new_low) > MAX_SEGMENT_SPAN_MS;
+        if at > from && full {
+            runs.push(&items[from..at]);
+            (from, low, high) = (at, ts, ts);
+        } else {
+            (low, high) = (new_low, new_high);
+        }
+    }
+    if from < items.len() {
+        runs.push(&items[from..]);
+    }
+    runs
 }

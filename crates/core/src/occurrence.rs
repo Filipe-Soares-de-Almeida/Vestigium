@@ -14,6 +14,17 @@ pub enum OccurrenceKind {
 }
 
 impl OccurrenceKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [OccurrenceKind; 5] = [
+        OccurrenceKind::Freeze,
+        OccurrenceKind::Stutter,
+        OccurrenceKind::AppHang,
+        OccurrenceKind::Reported,
+        OccurrenceKind::PostMortem,
+    ];
+}
+
+impl OccurrenceKind {
     pub fn of(trigger: &Trigger) -> OccurrenceKind {
         match trigger {
             Trigger::Freeze { .. } => OccurrenceKind::Freeze,
@@ -49,7 +60,8 @@ pub struct Occurrence {
     pub facts: Vec<Fact>,
     /// Sensitive mode was on while it happened.
     pub sensitive: bool,
-    /// Watching stopped before the window after it was complete.
+    /// Watching stopped before the window after it was complete, or the first seconds of the
+    /// window had already left the rings.
     pub truncated: bool,
 }
 

@@ -3,6 +3,7 @@
 
   import BackLink from "../components/BackLink.svelte";
   import Block from "../components/Block.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
   import { occurrence } from "../lib/api";
@@ -12,18 +13,14 @@
   import { t } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
-  import { rowOf } from "./capture/words";
   import History from "./captures/History.svelte";
   import Notice from "./captures/Notice.svelte";
   import Start from "./captures/Start.svelte";
-  import Waiting from "./captures/Waiting.svelte";
 
   let { forOccurrence }: { forOccurrence: number | null } = $props();
 
   /** The occurrence this page was opened from, so the start card can say what it is for. */
   let from = $state<{ id: number; context: string } | null>(null);
-
-  const finished = $derived(captures.entries?.find((e) => e.summary.id === captures.finished) ?? null);
 
   relatedLinks(() => [
     { label: t("ui.related.events_today"), href: href.events() },
@@ -49,11 +46,15 @@
 <PageHead title={t("ui.captures.title")} />
 <p class="lede">{t("ui.captures.lede")}</p>
 
+<HelperDialogs
+  job="capture"
+  onconfirm={() => void captures.cancel()}
+  onretry={() => void captures.begin(captures.lastMinutes)}
+/>
+
 <div class="cols2">
   <Block title={t("ui.captures.start.title")}>
-    {#if captures.run}
-      <Waiting run={captures.run} />
-    {:else if captures.asking}
+    {#if captures.asking}
       <Notice id="ask" title={t("ui.captures.asking.title")} body={t("ui.captures.asking.body")} />
     {:else if captures.problem === "declined"}
       <Notice id="declined" title={t("ui.captures.declined.title")} body={t("ui.captures.declined.body")}>
@@ -66,12 +67,6 @@
     {:else if captures.problem === "failed"}
       <Notice id="failed" title={t("ui.captures.failed.title")} body={errorText(captures.problemError)}>
         <button type="button" class="btn accent" onclick={() => captures.dismiss()}>{t("ui.common.retry")}</button>
-      </Notice>
-    {:else if finished}
-      {@const row = rowOf(finished)}
-      <Notice id="finished" title={t("ui.captures.finished.title")} body={`${row.title}. ${row.sub}`}>
-        <a class="btn accent" href={href.capture(finished.summary.id)}>{t("ui.captures.finished.open")}</a>
-        <button type="button" class="btn" onclick={() => captures.dismiss()}>{t("ui.captures.finished.again")}</button>
       </Notice>
     {:else}
       <Start context={from?.context ?? null} />

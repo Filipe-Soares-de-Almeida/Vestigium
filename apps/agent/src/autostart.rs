@@ -20,6 +20,17 @@ pub fn is_enabled(exe: &Path) -> bool {
     registered && startup_approved_allows(read(APPROVED_KEY, RRF_RT_REG_BINARY).as_deref())
 }
 
+/// Rewrites a Run entry that names another executable, unless Task Manager disabled it.
+/// Returns whether the entry was rewritten; a missing entry stays missing.
+pub fn repair(exe: &Path) -> windows::core::Result<bool> {
+    let run = read(RUN_KEY, RRF_RT_REG_SZ).map(|bytes| utf16_string(&bytes));
+    let approved = read(APPROVED_KEY, RRF_RT_REG_BINARY);
+    if !needs_repair(run.as_deref(), exe, approved.as_deref()) {
+        return Ok(false);
+    }
+    enable(exe).map(|()| true)
+}
+
 /// Registers `exe` to start at logon, clearing a "disabled" mark left by Task Manager.
 pub fn enable(exe: &Path) -> windows::core::Result<()> {
     let wide: Vec<u16> = format!("\"{}\"", exe.display())
@@ -117,6 +128,11 @@ fn run_value_matches(value: &str, exe: &Path) -> bool {
     path.to_lowercase() == exe.to_string_lossy().to_lowercase()
 }
 
+/// True when a Run entry exists for another path and the user has not disabled it.
+fn needs_repair(run: Option<&str>, exe: &Path, approved: Option<&[u8]>) -> bool {
+    run.is_some_and(|value| !run_value_matches(value, exe)) && startup_approved_allows(approved)
+}
+
 /// Task Manager marks a disabled entry by setting bit 0 of the first byte.
 fn startup_approved_allows(data: Option<&[u8]>) -> bool {
     data.and_then(|bytes| bytes.first())
@@ -162,6 +178,35 @@ mod tests {
     fn startup_approved_disabled_by_task_manager() {
         assert!(!startup_approved_allows(Some(&[3, 0, 0, 0, 9, 9, 9, 9])));
         assert!(!startup_approved_allows(Some(&[7, 0, 0, 0, 9, 9, 9, 9])));
+    }
+
+    #[test]
+    fn a_run_value_for_another_path_needs_repair() {
+        let old = r#""C:\Old\Vestigium\Vestigium.exe""#;
+        assert!(needs_repair(Some(old), Path::new(EXE), None));
+        assert!(needs_repair(
+            Some(old),
+            Path::new(EXE),
+            Some(&[2, 0, 0, 0, 0, 0, 0, 0])
+        ));
+    }
+
+    #[test]
+    fn a_run_value_for_this_path_is_left_alone() {
+        let value = format!("\"{EXE}\"");
+        assert!(!needs_repair(Some(&value), Path::new(EXE), None));
+    }
+
+    #[test]
+    fn a_missing_run_value_is_not_created_at_start() {
+        assert!(!needs_repair(None, Path::new(EXE), None));
+    }
+
+    #[test]
+    fn a_disabled_entry_for_another_path_is_left_alone() {
+        let old = r#""C:\Old\Vestigium\Vestigium.exe""#;
+        let disabled = [3, 0, 0, 0, 9, 9, 9, 9];
+        assert!(!needs_repair(Some(old), Path::new(EXE), Some(&disabled)));
     }
 
     #[test]

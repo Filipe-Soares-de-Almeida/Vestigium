@@ -1,11 +1,19 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
+use vestigium_core::health::FindingKind;
 use vestigium_core::{
-    EpisodeKind, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop, ProgramPoint,
-    Reading, Sample, Settings, TweakChange,
+    EpisodeKind, HistoryReset, HungWindow, OccurrenceSummary, PlanItem, PressureSpan, ProcessTop,
+    ProgramPoint, Reading, Sample, Settings, TweakChange,
 };
 
 /// Version of the messages below; both ends refuse a different one.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 22;
+
+/// How long the watcher may take to answer a request that only reads memory or flips a flag.
+pub const ANSWER_SHORT: Duration = Duration::from_secs(3);
+/// How long it may take to answer a request that works on the history or on Windows.
+pub const ANSWER_LONG: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -48,6 +56,27 @@ pub enum Request {
     },
 }
 
+impl Request {
+    /// How long the answer to this request may take before the sender calls the watcher mute.
+    pub fn answer_deadline(&self) -> Duration {
+        match self {
+            Request::SetSettings(_)
+            | Request::ClearHistory
+            | Request::ImportResults
+            | Request::ApplyUserTweak { .. } => ANSWER_LONG,
+            Request::Hello { .. }
+            | Request::Status
+            | Request::Now
+            | Request::Recent
+            | Request::ProgramRecent { .. }
+            | Request::SetPaused { .. }
+            | Request::SetSensitive { .. }
+            | Request::Settings
+            | Request::SetAutostart { .. } => ANSWER_SHORT,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -73,12 +102,15 @@ pub enum Response {
         autostart: bool,
     },
     /// The ids of the deep captures, health scans, dumps and tweak changes stored by an import, in
-    /// the order read, and how many dumps it marked as deleted.
+    /// the order read, how many dumps it marked as deleted, and how many deletions the helper
+    /// refused or could not carry out.
     Imported {
         captures: Vec<i64>,
         scans: Vec<i64>,
         dumps: Vec<i64>,
         deleted: u32,
+        refused: u32,
+        failed: u32,
         tweaks: Vec<i64>,
         tests: Vec<i64>,
     },
@@ -136,6 +168,73 @@ pub struct AgentStatus {
     /// The agent's own share of the whole machine over the last minute, 0 to 100.
     #[serde(default)]
     pub cpu_pct: Option<f32>,
+    /// The machine went to sleep and has not woken up again.
+    #[serde(default)]
+    pub suspended: bool,
+    /// How the watching itself is going.
+    #[serde(default)]
+    pub monitor: MonitorStatus,
+}
+
+/// Whether the agent is reading the machine, as the tray and the window say it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorState {
+    /// Reading, or paused or suspended on purpose.
+    #[default]
+    Watching,
+    /// Reading, but a source fails.
+    Degraded,
+    /// No sample for a while although nothing stopped the watching.
+    NoReading,
+}
+
+/// A data source the sampler reads every second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorSource {
+    Memory,
+    Cpu,
+    /// The performance counters: disks, GPU and the rest.
+    Counters,
+    Processes,
+    Timer,
+}
+
+/// A source that fails now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SourceFailure {
+    pub source: MonitorSource,
+    /// Unix epoch, milliseconds.
+    pub since_ms: i64,
+    pub error: String,
+}
+
+/// The agent's account of its own watching.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MonitorStatus {
+    pub state: MonitorState,
+    /// Sources failing now, each with its error; empty when all read.
+    #[serde(default)]
+    pub failing: Vec<SourceFailure>,
+    /// Unix epoch, milliseconds: the last sample, or the last start or resume when that is newer.
+    /// Set only while the state is no reading.
+    #[serde(default)]
+    pub no_reading_since_ms: Option<i64>,
+    /// When watching last started or resumed; a sample is expected a few seconds after it.
+    #[serde(default)]
+    pub resumed_ms: Option<i64>,
+    /// When the latest health pass was asked for, and when one last finished; Unix epoch ms.
+    #[serde(default)]
+    pub health_attempt_ms: Option<i64>,
+    #[serde(default)]
+    pub health_ok_ms: Option<i64>,
+    /// Finding kinds the latest finished pass could not read.
+    #[serde(default)]
+    pub health_unread: Vec<FindingKind>,
+    /// A damaged history file this watcher set aside, while that file is still in the data folder.
+    #[serde(default)]
+    pub history_reset: Option<HistoryReset>,
 }
 
 /// The latest second watched.

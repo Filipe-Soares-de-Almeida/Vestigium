@@ -3,6 +3,7 @@ mod security;
 mod system;
 
 use vestigium_core::health::{DiskHealth, PageFile, SecurityProduct, VolumeSpace};
+use vestigium_core::hwtest::Bus;
 
 pub use disks::{disk_bus, disk_health, disk_nvme, disk_size};
 pub use security::antivirus;
@@ -12,6 +13,8 @@ pub use system::{file_system, page_files, system_drive, volume_drive, volumes};
 pub trait HealthSource {
     /// SMART or NVMe health of physical drive `index`, kept under the counters' `name` for it.
     fn disk(&mut self, index: u32, name: &str, now_ms: i64) -> Option<DiskHealth>;
+    /// How physical drive `index` is attached.
+    fn bus(&mut self, index: u32) -> Bus;
     fn volumes(&mut self) -> Vec<VolumeSpace>;
     /// Number of the physical drive that holds Windows.
     fn system_drive(&mut self) -> Option<u32>;
@@ -26,6 +29,10 @@ pub struct WindowsHealth;
 impl HealthSource for WindowsHealth {
     fn disk(&mut self, index: u32, name: &str, now_ms: i64) -> Option<DiskHealth> {
         disk_health(index, name, now_ms)
+    }
+
+    fn bus(&mut self, index: u32) -> Bus {
+        disk_bus(index)
     }
 
     fn volumes(&mut self) -> Vec<VolumeSpace> {

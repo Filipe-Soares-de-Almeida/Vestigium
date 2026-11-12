@@ -8,18 +8,23 @@ fn aspm_item() -> PlanItem {
         tweak: TweakId::PcieAspm,
         subject: None,
         undo_of: None,
+        undo_journal: None,
         changes: vec![SettingChange {
             setting: Setting::PowerAc {
                 subgroup: SUB_PCIEXPRESS,
                 setting: PCIE_ASPM,
+                scheme: None,
             },
             from: Value::Index(2),
             to: Value::Index(0),
         }],
     }
 }
+use vestigium_core::HistoryReset;
+use vestigium_core::health::FindingKind;
 use vestigium_ipc::{
-    AgentStatus, ErrorCode, NowFrame, PROTOCOL_VERSION, Request, Response, TrayState,
+    AgentStatus, ErrorCode, MonitorSource, MonitorState, MonitorStatus, NowFrame, PROTOCOL_VERSION,
+    Request, Response, SourceFailure, TrayState,
 };
 
 fn roundtrip<T>(value: &T) -> T
@@ -73,6 +78,27 @@ fn every_response_roundtrips_as_json() {
             sensitive_until_ms: Some(42),
             state: TrayState::Attention,
             suggest_capture: true,
+            suspended: true,
+            monitor: MonitorStatus {
+                state: MonitorState::Degraded,
+                failing: vec![SourceFailure {
+                    source: MonitorSource::Counters,
+                    since_ms: 1_700_000_000_000,
+                    error: "counter query failed".to_string(),
+                }],
+                no_reading_since_ms: Some(1_700_000_100_000),
+                resumed_ms: Some(1_699_999_000_000),
+                health_attempt_ms: Some(1_700_000_200_000),
+                health_ok_ms: Some(1_700_000_000_000),
+                health_unread: vec![FindingKind::TwoAntivirus, FindingKind::DiskSmart],
+                history_reset: Some(HistoryReset {
+                    file: "vestigium.db.corrupt-1700000000000".to_string(),
+                    at_ms: 1_700_000_300_000,
+                    tweaks: true,
+                    settings: false,
+                    machine: true,
+                }),
+            },
             ..AgentStatus::default()
         }),
         Response::Now(Box::default()),
@@ -125,6 +151,8 @@ fn every_response_roundtrips_as_json() {
             scans: vec![5],
             dumps: vec![6],
             deleted: 1,
+            refused: 2,
+            failed: 3,
             tweaks: vec![7],
             tests: vec![9],
         },
@@ -143,6 +171,7 @@ fn every_response_roundtrips_as_json() {
                     })
                     .collect(),
                 restore_point: None,
+                journal: None,
             },
         },
         Response::Done,
@@ -205,4 +234,24 @@ fn status_without_suggest_capture_still_decodes() {
         panic!("not a status");
     };
     assert!(!status.suggest_capture);
+}
+
+#[test]
+fn a_status_without_the_monitor_fields_still_reads() {
+    let old = r#"{"paused":false,"sensitive_until_ms":null,"state":"normal","started_at_ms":1,
+        "last_sample_ms":null,"last_error":null}"#;
+
+    let status: AgentStatus = serde_json::from_str(old).unwrap();
+
+    assert_eq!(status.monitor, MonitorStatus::default());
+    assert!(!status.suspended);
+}
+
+#[test]
+fn a_monitor_without_a_set_aside_history_still_reads() {
+    let old = r#"{"state":"watching","failing":[]}"#;
+
+    let monitor: MonitorStatus = serde_json::from_str(old).unwrap();
+
+    assert_eq!(monitor.history_reset, None);
 }

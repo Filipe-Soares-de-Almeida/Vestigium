@@ -10,6 +10,22 @@ pub enum GapReason {
     Stopped,
     /// The PC went down while watched, and Windows said so on the next boot.
     Crashed,
+    /// The wall clock was set to another time.
+    ClockChanged,
+    /// Samples that could not be written to the history and were dropped.
+    NotSaved,
+}
+
+impl GapReason {
+    /// Every variant, in declaration order.
+    pub const ALL: [GapReason; 6] = [
+        GapReason::Paused,
+        GapReason::Suspended,
+        GapReason::Stopped,
+        GapReason::Crashed,
+        GapReason::ClockChanged,
+        GapReason::NotSaved,
+    ];
 }
 
 /// A span with nothing watched; nothing inside it counts as a stall.

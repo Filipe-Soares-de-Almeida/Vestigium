@@ -1,20 +1,26 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::{
-    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Gap, HUNG_AFTER_MS, HangSpan,
-    HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind, PressureSpan, ProbeTick,
-    ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger, WinEvent, Window, classify,
-    facts, freeze, severity, suspects,
+    Cause, Episode, EpisodeDetector, EpisodeKind, EventMeaning, Fact, FactKind, Gap, GapReason,
+    HUNG_AFTER_MS, HangSpan, HangTracker, HungWindow, MachineInfo, Occurrence, OccurrenceKind,
+    PressureSpan, ProbeTick, ProcessTop, Ring, Sample, Severity, StutterDetector, Trigger,
+    WinEvent, Window, classify, facts, freeze, severity, suspects,
 };
 
 /// How much the rings keep.
 pub const RING_MS: i64 = 10 * 60_000;
 /// After a resume, the probe and the counters settle for this long.
 pub const GAP_MARGIN_MS: i64 = 2_000;
+/// A hang that lasts this long past a gap is real, not the settling after waking.
+const HANG_AFTER_GAP_MS: i64 = 15_000;
 /// A hung app first seen this soon after a freeze is the freeze's echo.
 pub const HANG_ECHO_MS: i64 = 10_000;
 /// Freezes shorter than this leave apps responsive.
 pub const ECHOING_FREEZE_MS: i64 = 1_000;
+/// An occurrence keeps this many reported events of one provider and id; the rest are counted out.
+pub const REPORTED_EXEMPLARS: usize = 16;
+/// Reported events of one provider this close join one occurrence, which is held open that long.
+pub const REPORTED_MERGE_MS: i64 = 120_000;
 const DAY_MS: i64 = 24 * 60 * 60_000;
 
 /// How an occurrence's window is cut and when close triggers join one occurrence.
@@ -71,7 +77,74 @@ struct Pending {
     start_ms: i64,
     end_ms: i64,
     triggers: Vec<Trigger>,
+    /// Reported events left out of `triggers` because their provider and id were over the cap.
+    dropped: u32,
     sensitive: bool,
+}
+
+impl Pending {
+    /// How long past its end this waits for more: reported events can still join for longer.
+    fn hold_ms(&self, after_ms: i64) -> i64 {
+        if self
+            .triggers
+            .iter()
+            .any(|t| matches!(t, Trigger::Reported { .. }))
+        {
+            after_ms.max(REPORTED_MERGE_MS)
+        } else {
+            after_ms
+        }
+    }
+
+    /// Whether `trigger` is a reported event and one of the same provider is already here.
+    fn reported_by_same_provider(&self, trigger: &Trigger) -> bool {
+        let Trigger::Reported { event } = trigger else {
+            return false;
+        };
+        self.triggers.iter().any(
+            |t| matches!(t, Trigger::Reported { event: kept } if kept.provider == event.provider),
+        )
+    }
+
+    /// How many reported events of the same provider and id as `trigger` are already here.
+    fn repeats(&self, trigger: &Trigger) -> usize {
+        let Trigger::Reported { event } = trigger else {
+            return 0;
+        };
+        self.triggers
+            .iter()
+            .filter(|t| matches!(t, Trigger::Reported { event: kept } if kept.provider == event.provider && kept.id == event.id))
+            .count()
+    }
+
+    /// Whether a trigger spanning `start` to `end` is close enough to join this, within `max_ms`.
+    fn accepts(&self, trigger: &Trigger, start: i64, end: i64, timing: Timing) -> bool {
+        let merge_ms = if self.reported_by_same_provider(trigger) {
+            timing.merge_ms.max(REPORTED_MERGE_MS)
+        } else {
+            timing.merge_ms
+        };
+        start <= self.end_ms + merge_ms
+            && end >= self.start_ms - merge_ms
+            && end.max(self.end_ms) - start.min(self.start_ms) <= timing.max_ms
+    }
+
+    /// Whether `other` is close enough to this to join it, by the rule a trigger joins by.
+    fn reaches(&self, other: &Pending, timing: Timing) -> bool {
+        other
+            .triggers
+            .iter()
+            .any(|t| self.accepts(t, other.start_ms, other.end_ms, timing))
+    }
+
+    /// Adds the trigger unless this already holds enough reported events like it, and counts it out.
+    fn keep(&mut self, trigger: Trigger) {
+        if self.repeats(&trigger) < REPORTED_EXEMPLARS {
+            self.triggers.push(trigger);
+        } else {
+            self.dropped += 1;
+        }
+    }
 }
 
 /// Everything the agent sees goes in; everything worth storing comes out.
@@ -80,6 +153,8 @@ pub struct Blackbox {
     machine: MachineInfo,
     timing: Timing,
     samples: Ring<Sample>,
+    /// The time of the first sample this black box ever took, before the ring dropped any.
+    first_sample_ms: Option<i64>,
     tops: Ring<ProcessTop>,
     events: Ring<WinEvent>,
     hangs: Ring<HangSpan>,
@@ -107,6 +182,7 @@ impl Blackbox {
             machine,
             timing,
             samples: Ring::with_capacity(660),
+            first_sample_ms: None,
             tops: Ring::with_capacity(140),
             events: Ring::with_capacity(512),
             hangs: Ring::with_capacity(256),
@@ -156,6 +232,7 @@ impl Blackbox {
     pub fn push_sample(&mut self, sample: Sample) {
         let ended = self.episodes.push_sample(&sample, self.sensitive);
         self.ready_episodes(ended);
+        self.first_sample_ms.get_or_insert(sample.ts_ms);
         self.samples.push(sample);
     }
 
@@ -164,7 +241,8 @@ impl Blackbox {
         self.tops.push(top);
     }
 
-    /// Keeps the event; a storage reset, a display reset or a hardware error is an occurrence by itself.
+    /// Keeps the event, up to a cap per provider and id; a storage reset, a display reset or a hardware
+    /// error is an occurrence by itself.
     pub fn push_event(&mut self, event: WinEvent) {
         let watched_since = self.samples.iter().next().map(|s| s.ts_ms);
         let reported = matches!(
@@ -181,38 +259,87 @@ impl Blackbox {
                 event: event.clone(),
             });
         }
-        self.events.push(event);
+        if self.repeats_in_ring(&event) < REPORTED_EXEMPLARS {
+            self.events.push(event);
+        }
+    }
+
+    /// How many events of the same provider and id the ring holds from the span just before `event`.
+    fn repeats_in_ring(&self, event: &WinEvent) -> usize {
+        let from_ms = event.ts_ms - REPORTED_MERGE_MS;
+        self.events
+            .iter()
+            .rev()
+            .take_while(|kept| kept.ts_ms >= from_ms)
+            .filter(|kept| kept.provider == event.provider && kept.id == event.id)
+            .count()
     }
 
     /// Feeds one not-responding check; `running` holds every live pid.
     pub fn push_hangs(&mut self, ts_ms: i64, hung: &[HungWindow], running: &HashSet<u32>) {
         for trigger in self.hang_tracker.push(ts_ms, hung, running) {
-            let Trigger::AppHang {
-                pid,
-                name,
-                start_ms,
-                end_ms,
-                outcome,
-            } = &trigger
-            else {
-                continue;
-            };
-            self.hangs.push(HangSpan {
-                pid: *pid,
-                name: name.clone(),
-                start_ms: *start_ms,
-                end_ms: *end_ms,
-                outcome: *outcome,
-            });
-            let first_seen = start_ms + HUNG_AFTER_MS;
-            let echo = self
-                .freezes
-                .iter()
-                .any(|&(start, end)| (start..=end + HANG_ECHO_MS).contains(&first_seen));
-            if !echo {
-                self.add(trigger);
-            }
+            self.take_hang(trigger);
         }
+    }
+
+    /// Records a finished or closed hang in the ring and, unless a freeze explains it, as a trigger.
+    fn take_hang(&mut self, trigger: Trigger) {
+        let Trigger::AppHang {
+            pid,
+            name,
+            start_ms,
+            end_ms,
+            outcome,
+        } = &trigger
+        else {
+            return;
+        };
+        self.hangs.push(HangSpan {
+            pid: *pid,
+            name: name.clone(),
+            start_ms: *start_ms,
+            end_ms: *end_ms,
+            outcome: *outcome,
+        });
+        let first_seen = start_ms + HUNG_AFTER_MS;
+        let echo = self
+            .freezes
+            .iter()
+            .any(|&(start, end)| (start..=end + HANG_ECHO_MS).contains(&first_seen));
+        if !echo {
+            let trigger = self.after_gaps(trigger);
+            self.add(trigger);
+        }
+    }
+
+    /// A hang that touches a gap but lasts long past it starts after the gap's settling time.
+    fn after_gaps(&self, mut trigger: Trigger) -> Trigger {
+        let settled_ms = self
+            .gaps
+            .iter()
+            .filter(|gap| touches(&trigger, gap))
+            .map(|gap| gap.end_ms)
+            .max();
+        if let (
+            Trigger::AppHang {
+                start_ms, end_ms, ..
+            },
+            Some(gap_end),
+        ) = (&mut trigger, settled_ms)
+            && *end_ms - gap_end >= HANG_AFTER_GAP_MS
+        {
+            *start_ms = (*start_ms).max(gap_end + GAP_MARGIN_MS + 1);
+        }
+        trigger
+    }
+
+    /// Cuts every gap that ends after `now_ms` down to it and removes the ones that start after it,
+    /// so a gap stamped while the wall clock was ahead stops covering the time after it stepped back.
+    pub fn cut_gaps_to(&mut self, now_ms: i64) {
+        self.gaps.retain_mut(|gap| {
+            gap.end_ms = gap.end_ms.min(now_ms);
+            gap.start_ms <= now_ms
+        });
     }
 
     /// Records a hole in watching; triggers inside it, or just after it, are dropped.
@@ -258,7 +385,7 @@ impl Blackbox {
         let after_ms = self.timing.after_ms;
         let (due, waiting): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut self.pending)
             .into_iter()
-            .partition(|p| p.end_ms + after_ms <= now_ms);
+            .partition(|p| p.end_ms + p.hold_ms(after_ms) <= now_ms);
         self.pending = waiting;
         for pending in due {
             self.finish(pending, now_ms, false);
@@ -269,6 +396,9 @@ impl Blackbox {
 
     /// Closes everything, as when watching pauses, sleeps or stops.
     pub fn drain(&mut self, now_ms: i64) -> Vec<Output> {
+        for trigger in self.hang_tracker.open_hangs(now_ms) {
+            self.take_hang(trigger);
+        }
         for pending in std::mem::take(&mut self.pending) {
             self.finish(pending, now_ms, true);
         }
@@ -277,6 +407,32 @@ impl Blackbox {
         self.hang_tracker.reset();
         self.stutter.reset();
         std::mem::take(&mut self.ready)
+    }
+
+    /// Closes what is open and forgets everything stamped before the wall clock moved from
+    /// `from_ms` to `to_ms`, then records the step as a gap; a step back is a gap of no width.
+    pub fn clock_changed(&mut self, from_ms: i64, to_ms: i64) -> Vec<Output> {
+        let mut outputs = self.drain(from_ms);
+        self.samples.clear();
+        self.first_sample_ms = None;
+        self.tops.clear();
+        self.events.clear();
+        self.hangs.clear();
+        self.freezes.clear();
+        self.gaps.clear();
+        self.pressure.clear();
+        let (start_ms, end_ms) = if to_ms >= from_ms {
+            (from_ms, to_ms)
+        } else {
+            (to_ms, to_ms)
+        };
+        self.push_gap(Gap {
+            start_ms,
+            end_ms,
+            reason: GapReason::ClockChanged,
+        });
+        outputs.append(&mut self.ready);
+        outputs
     }
 
     /// The CPU, disk and memory pressure episodes under way; hints are left out.
@@ -313,6 +469,32 @@ impl Blackbox {
         self.notable.push_back((at_ms, notable));
     }
 
+    /// Takes back the count of an occurrence or episode that could not be stored.
+    pub fn forget_notable(&mut self, output: &Output) {
+        let counted = match output {
+            Output::Occurrence(occurrence) => Some((
+                occurrence.end_ms,
+                Notable::Occurrence {
+                    severe: occurrence.severity == Severity::Severe,
+                },
+            )),
+            Output::Episode(episode)
+                if !matches!(
+                    episode.kind,
+                    EpisodeKind::DpcIsrHint { .. } | EpisodeKind::DiskLatencyHint { .. }
+                ) =>
+            {
+                Some((episode.end_ms, Notable::Episode))
+            }
+            _ => None,
+        };
+        if let Some(counted) = counted
+            && let Some(at) = self.notable.iter().position(|n| *n == counted)
+        {
+            self.notable.remove(at);
+        }
+    }
+
     pub fn samples(&self) -> impl DoubleEndedIterator<Item = &Sample> {
         self.samples.iter()
     }
@@ -327,24 +509,49 @@ impl Blackbox {
         }
         let (start, end) = (trigger.start_ms(), trigger.end_ms());
         let timing = self.timing;
-        let joins = self.pending.iter_mut().find(|p| {
-            start <= p.end_ms + timing.merge_ms
-                && end >= p.start_ms - timing.merge_ms
-                && end.max(p.end_ms) - start.min(p.start_ms) <= timing.max_ms
-        });
-        match joins {
-            Some(pending) => {
-                pending.start_ms = pending.start_ms.min(start);
-                pending.end_ms = pending.end_ms.max(end);
-                pending.sensitive |= self.sensitive;
-                pending.triggers.push(trigger);
-            }
-            None => self.pending.push(Pending {
+        let joins = self
+            .pending
+            .iter()
+            .position(|p| p.accepts(&trigger, start, end, timing));
+        let Some(at) = joins else {
+            self.pending.push(Pending {
                 start_ms: start,
                 end_ms: end,
                 triggers: vec![trigger],
+                dropped: 0,
                 sensitive: self.sensitive,
-            }),
+            });
+            return;
+        };
+        let pending = &mut self.pending[at];
+        pending.start_ms = pending.start_ms.min(start);
+        pending.end_ms = pending.end_ms.max(end);
+        pending.sensitive |= self.sensitive;
+        pending.keep(trigger);
+        self.merge_bridged(at);
+    }
+
+    /// Folds into the pending occurrence at `at` every other one that its growth now reaches.
+    fn merge_bridged(&mut self, mut at: usize) {
+        let timing = self.timing;
+        while let Some(other) = self
+            .pending
+            .iter()
+            .enumerate()
+            .position(|(i, p)| i != at && self.pending[at].reaches(p, timing))
+        {
+            let absorbed = self.pending.remove(other);
+            if other < at {
+                at -= 1;
+            }
+            let merged = &mut self.pending[at];
+            merged.start_ms = merged.start_ms.min(absorbed.start_ms);
+            merged.end_ms = merged.end_ms.max(absorbed.end_ms);
+            merged.sensitive |= absorbed.sensitive;
+            merged.dropped += absorbed.dropped;
+            for trigger in absorbed.triggers {
+                merged.keep(trigger);
+            }
         }
     }
 
@@ -353,6 +560,7 @@ impl Blackbox {
             start_ms,
             end_ms,
             mut triggers,
+            dropped,
             sensitive,
         } = pending;
         triggers.sort_by_key(Trigger::start_ms);
@@ -395,6 +603,7 @@ impl Blackbox {
                 .collect(),
             machine: self.machine.clone(),
         };
+        let truncated = truncated || self.window_lost_its_start(&window);
         let kind = triggers
             .iter()
             .map(OccurrenceKind::of)
@@ -405,13 +614,21 @@ impl Blackbox {
             .map(|t| severity(stall_ms(t)))
             .max()
             .unwrap_or(Severity::Light);
+        let mut facts = facts(&triggers, &window);
+        if dropped > 0 {
+            facts.push(Fact {
+                at_ms: end_ms,
+                kind: FactKind::EventsDropped { count: dropped },
+            });
+            facts.sort_by_key(|f| f.at_ms);
+        }
         let occurrence = Occurrence {
             kind,
             start_ms,
             end_ms,
             severity,
             suspects: suspects(&triggers, &window),
-            facts: facts(&triggers, &window),
+            facts,
             triggers,
             window,
             sensitive,
@@ -425,12 +642,29 @@ impl Blackbox {
         ));
         if self.sensitive && occurrence.kind == OccurrenceKind::Stutter {
             if self.stutters == 0 {
-                self.first_stutter_open =
-                    matches!(occurrence.cause(), Cause::Driver { .. } | Cause::Unclear);
+                self.first_stutter_open = matches!(
+                    occurrence.cause(),
+                    Cause::Driver { .. } | Cause::Unclear | Cause::NotMeasured
+                );
             }
             self.stutters += 1;
         }
         self.ready.push(Output::Occurrence(Box::new(occurrence)));
+    }
+
+    /// Whether the window starts after the black box began watching but its first samples are gone.
+    fn window_lost_its_start(&self, window: &Window) -> bool {
+        let from_ms = window.from_ms;
+        let watched = self.first_sample_ms.is_some_and(|first| from_ms >= first);
+        let first_is_missing = window
+            .samples
+            .first()
+            .is_none_or(|sample| sample.ts_ms > from_ms + GAP_MARGIN_MS);
+        let in_a_gap = window
+            .gaps
+            .iter()
+            .any(|gap| gap.start_ms <= from_ms + GAP_MARGIN_MS && gap.end_ms >= from_ms);
+        watched && first_is_missing && !in_a_gap
     }
 
     fn ready_episodes(&mut self, episodes: Vec<Episode>) {

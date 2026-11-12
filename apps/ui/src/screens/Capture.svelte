@@ -22,6 +22,7 @@
   import { copyText } from "./occurrence/browser";
   import Alignment from "./capture/Alignment.svelte";
   import Apps from "./capture/Apps.svelte";
+  import Coverage from "./capture/Coverage.svelte";
   import Drivers from "./capture/Drivers.svelte";
   import { buildResult, resultMarkdown } from "./capture/words";
   import OccurrenceRow from "./today/OccurrenceRow.svelte";
@@ -104,8 +105,12 @@
     <div class="fact">
       <span class="fact-l">{t("ui.captures.fact.result")}</span>
       <span class="fact-v">
-        <StatusMark kind={view.none ? "ok" : "critical"} word={t(view.none ? "ui.captures.mark.quiet" : "ui.captures.mark.found")} />
+        <StatusMark kind={view.result.kind} word={view.result.word} />
       </span>
+    </div>
+    <div class="fact">
+      <span class="fact-l">{t("ui.captures.fact.coverage")}</span>
+      <span class="fact-v"><StatusMark kind={view.cover.mark.kind} word={view.cover.mark.word} /></span>
     </div>
   </div>
 
@@ -120,6 +125,10 @@
     </ul>
   {/if}
 
+  <Block title={t("ui.captures.cover.title")}>
+    <Coverage rows={view.cover.rows} />
+  </Block>
+
   <div class="cols2">
     <Block title={t("ui.captures.conclusion.title")}>
       {#if view.main}
@@ -131,19 +140,21 @@
             <li>{line.main}{#if line.sub}<small>{line.sub}</small>{/if}</li>
           {/each}
         </ul>
-      {:else}
-        <p class="cz-n">{t("ui.captures.none.head")}</p>
-        <p class="cz-m">{view.measured}</p>
-        <p class="p">{t("ui.captures.none.body")}</p>
-        <p class="note">{t("ui.captures.none.hint")}</p>
-        <div class="acts">
-          {#if canStart && view.minutes < 10}
-            <button type="button" class="btn accent" onclick={again}>
-              <Icon name="start" />{t("ui.captures.none.ten")}
-            </button>
-          {/if}
-          <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
-        </div>
+      {:else if view.otherwise}
+        <p class="cz-n">{view.otherwise.head}</p>
+        <p class="cz-m">{view.otherwise.sub}</p>
+        <p class="p">{view.otherwise.body}</p>
+        {#if view.otherwise.hint}<p class="note">{view.otherwise.hint}</p>{/if}
+        {#if view.otherwise.offer}
+          <div class="acts">
+            {#if canStart && view.minutes < 10}
+              <button type="button" class="btn accent" onclick={again}>
+                <Icon name="start" />{t("ui.captures.none.ten")}
+              </button>
+            {/if}
+            <a class="btn" href={href.captures()}>{t("ui.captures.none.later")}</a>
+          </div>
+        {/if}
       {/if}
     </Block>
 
@@ -184,7 +195,7 @@
 
   {#if view.apps}
     <Block title={t("ui.captures.apps.title")}>
-      <Apps rows={view.apps.rows} quiet={view.apps.quiet} all={dto.apps} {level} />
+      <Apps rows={view.apps.rows} quiet={view.apps.quiet} often={view.apps.often} all={dto.apps} {level} />
     </Block>
   {/if}
 {/if}

@@ -2,7 +2,7 @@ use vestigium_core::health::{
     BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingChange,
     FindingKind, HealthFact, HealthInputs, Measure, NvmeHealth, PageFile, Reference,
     SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_detail,
-    nvme_health, reconcile, smart_attributes,
+    nvme_health, reconcile, smart_attributes, unread_kinds,
 };
 use vestigium_core::hwtest::{
     MemoryQuick, Outcome, SurfaceAggregator, TestData, TestRun, VolumeCheck, VolumeResult,
@@ -66,6 +66,22 @@ fn disk(attributes: Vec<SmartAttribute>) -> DiskHealth {
         attributes,
         nvme: None,
     }
+}
+
+/// A disk of the machine's hard drive, the one the SMART attribute list applies to.
+fn hdd(attributes: Vec<SmartAttribute>) -> DiskHealth {
+    DiskHealth {
+        name: "1 D:".into(),
+        ..disk(attributes)
+    }
+}
+
+/// Sets byte 511 so that the 512 bytes of a SMART block sum to zero modulo 256.
+fn sealed(mut block: Vec<u8>) -> Vec<u8> {
+    block[511] = 0;
+    let sum = block.iter().fold(0u8, |a, b| a.wrapping_add(*b));
+    block[511] = sum.wrapping_neg();
+    block
 }
 
 fn nvme(critical_warning: u8, percentage_used: u8, media_errors: u64) -> NvmeHealth {
@@ -147,19 +163,73 @@ fn healthy_pc_has_no_findings() {
 #[test]
 fn smart_raw_counters_raise_attention() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(187, 1), attr(9, 4000)])];
+    inputs.disks = vec![hdd(vec![attr(187, 1), attr(9, 4000)])];
 
     let found = evaluate(&inputs);
     let smart = find(&found, FindingKind::DiskSmart).unwrap();
 
     assert_eq!(smart.concern, Concern::Attention);
-    assert_eq!(smart.subject, Subject::Disk("0 C:".into()));
+    assert_eq!(smart.subject, Subject::Disk("1 D:".into()));
     assert_eq!(smart.value, Measure::Count(1));
     assert_eq!(smart.evidence, vec![HealthFact::Attribute(attr(187, 1))]);
     assert_eq!(
         smart.next_steps,
         [NextStep::BackUpNow, NextStep::RunDiskTest]
     );
+}
+
+#[test]
+fn solid_state_watched_attributes_are_not_flagged() {
+    let mut inputs = healthy();
+    inputs.disks = vec![disk(vec![attr(5, 3), attr(187, 1)])];
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
+
+    inputs.disks = vec![hdd(vec![attr(5, 3)])];
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::DiskSmart)
+            .unwrap()
+            .concern,
+        Concern::Attention
+    );
+
+    inputs.disks[0].name = "9 Z:".into();
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
+}
+
+#[test]
+fn seagate_command_timeouts_read_as_a_16_bit_count() {
+    let mut inputs = healthy();
+    inputs.disks = vec![hdd(vec![attr(188, 0x0001_0001_0001)])];
+
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.concern, Concern::Attention);
+    assert_eq!(smart.value, Measure::Count(1));
+    assert_eq!(smart.evidence, vec![HealthFact::Attribute(attr(188, 1))]);
+}
+
+#[test]
+fn the_finding_value_is_the_highest_counter_not_their_sum() {
+    let mut inputs = healthy();
+    inputs.disks = vec![hdd(vec![
+        attr(5, 7),
+        attr(197, 2),
+        attr(188, 0x0003_0000_0001),
+    ])];
+
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.value, Measure::Count(7));
+}
+
+#[test]
+fn a_seagate_counter_with_no_timeouts_raises_nothing() {
+    let mut inputs = healthy();
+    inputs.disks = vec![hdd(vec![attr(188, 0x0001_0001_0000)])];
+
+    assert!(find(&evaluate(&inputs), FindingKind::DiskSmart).is_none());
 }
 
 #[test]
@@ -197,12 +267,73 @@ fn nvme_critical_warning_is_critical_and_wear_is_attention() {
 }
 
 #[test]
+fn an_nvme_temperature_bit_alone_is_attention() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0b010, 12, 0));
+    let found = evaluate(&inputs);
+    let hot = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(hot.concern, Concern::Attention);
+    assert_eq!(hot.next_steps, vec![NextStep::CheckCooling]);
+    assert!(hot.evidence.contains(&HealthFact::Nvme(nvme(0b010, 12, 0))));
+}
+
+#[test]
+fn an_nvme_temperature_bit_with_wear_keeps_the_wear_steps() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0b010, 93, 0));
+    let found = evaluate(&inputs);
+    let worn = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(worn.concern, Concern::Attention);
+    assert_eq!(
+        worn.next_steps,
+        vec![NextStep::BackUpNow, NextStep::RunDiskTest]
+    );
+}
+
+#[test]
+fn an_nvme_reliability_bit_stays_critical() {
+    for bits in [0b1u8, 0b100, 0b1000, 0b1_0000, 0b10_0000, 0b110] {
+        let mut inputs = healthy();
+        inputs.disks[0].nvme = Some(nvme(bits, 12, 0));
+        let found = evaluate(&inputs);
+        let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+        assert_eq!(smart.concern, Concern::Critical, "bits {bits:#b}");
+        assert!(smart.next_steps.contains(&NextStep::ReplaceDisk));
+    }
+}
+
+#[test]
+fn nvme_media_errors_are_attention_with_the_nvme_evidence() {
+    let mut inputs = healthy();
+    inputs.disks[0].nvme = Some(nvme(0, 12, 3));
+    let found = evaluate(&inputs);
+    let smart = find(&found, FindingKind::DiskSmart).unwrap();
+
+    assert_eq!(smart.concern, Concern::Attention);
+    assert!(smart.evidence.contains(&HealthFact::Nvme(nvme(0, 12, 3))));
+}
+
+#[test]
+fn smart_block_with_a_bad_checksum_is_ignored() {
+    let mut block = vec![0u8; 512];
+    block[2..14].copy_from_slice(&[5, 0x33, 0, 100, 99, 5, 0, 0, 0, 0, 0, 0]);
+    let mut block = sealed(block);
+    assert_eq!(smart_attributes(&block).len(), 1);
+
+    block[511] = block[511].wrapping_add(1);
+    assert_eq!(smart_attributes(&block), Vec::new());
+}
+
+#[test]
 fn smart_parsers_read_the_blocks_and_survive_garbage() {
     let mut block = vec![0u8; 512];
     block[2..14].copy_from_slice(&[5, 0x33, 0, 100, 99, 7, 0, 0, 0, 0, 0, 0]);
     block[14..26].copy_from_slice(&[194, 0x22, 0, 36, 60, 40, 0, 20, 0, 60, 0, 0]);
 
-    let attributes = smart_attributes(&block);
+    let attributes = smart_attributes(&sealed(block));
 
     assert_eq!(attributes.len(), 2);
     assert_eq!(
@@ -475,6 +606,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(20, 50_000), boot(2, 95_000)],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     let found = evaluate(&inputs);
     let slow = find(&found, FindingKind::SlowBoot).unwrap();
@@ -484,6 +616,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(2, 50_000)],
         delays: vec![delay(DelayKind::App, true)],
+        ..BootReport::default()
     });
     let found = evaluate(&inputs);
     assert!(
@@ -509,6 +642,7 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     inputs.boot = Some(BootReport {
         boots: vec![boot(40, 120_000)],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
 }
@@ -582,6 +716,44 @@ fn failures_rising_against_the_weeks_before() {
 }
 
 #[test]
+fn failures_rising_stays_open_inside_the_margin() {
+    let rising = (FindingKind::FailuresRising, Subject::Pc);
+    let mut inputs = healthy();
+    // Four failures in the four weeks before: one a week.
+    inputs.events = vec![app_crash(10), app_crash(17), app_crash(24), app_crash(31)];
+    inputs.events.extend([app_crash(1), app_crash(2)]);
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising),
+        None,
+        "two in a week do not open the finding"
+    );
+
+    inputs.open = vec![rising.clone()];
+    assert!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising).is_some(),
+        "one below the floor keeps an open finding"
+    );
+
+    // Eight in the four weeks before: two a week, so three is 1.5 times the average.
+    inputs.events = (0..8).map(|i| app_crash(8 + i * 3)).collect();
+    inputs
+        .events
+        .extend([app_crash(1), app_crash(2), app_crash(3)]);
+    inputs.open = Vec::new();
+    assert_eq!(find(&evaluate(&inputs), FindingKind::FailuresRising), None);
+    inputs.open = vec![rising.clone()];
+    assert!(find(&evaluate(&inputs), FindingKind::FailuresRising).is_some());
+
+    inputs.events.truncate(8);
+    inputs.events.push(app_crash(1));
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::FailuresRising),
+        None,
+        "one failure in the week closes it"
+    );
+}
+
+#[test]
 fn no_crash_dump_warning() {
     let mut inputs = healthy();
     inputs.events = vec![event(6, "volmgr", 46, EventMeaning::NoCrashDump, "")];
@@ -597,7 +769,7 @@ fn no_crash_dump_warning() {
 #[test]
 fn every_finding_carries_evidence_and_critical_comes_first() {
     let mut inputs = healthy();
-    inputs.disks = vec![disk(vec![attr(197, 2)])];
+    inputs.disks = vec![hdd(vec![attr(197, 2)])];
     inputs.volumes = vec![volume(30, 900)];
     inputs.page_files = Some(Vec::new());
     inputs.memory_high_days_7d = 4;
@@ -611,6 +783,7 @@ fn every_finding_carries_evidence_and_critical_comes_first() {
             post_boot_ms: 40_000,
         }],
         delays: Vec::new(),
+        ..BootReport::default()
     });
     inputs.events = vec![
         power_loss(1, 0, 6),
@@ -685,7 +858,7 @@ fn reconcile_opens_updates_and_closes() {
         },
     ];
 
-    let changes = reconcile(&open, &fresh);
+    let changes = reconcile(&open, &fresh, &[]);
 
     assert_eq!(
         changes,
@@ -704,9 +877,41 @@ fn reconcile_opens_updates_and_closes() {
         finding: memory.clone(),
     }];
     assert_eq!(
-        reconcile(&settled, std::slice::from_ref(&memory)),
+        reconcile(&settled, std::slice::from_ref(&memory), &[]),
         Vec::new()
     );
+}
+
+#[test]
+fn reconcile_keeps_an_open_finding_whose_source_was_not_read() {
+    let mut inputs = healthy();
+    inputs.antivirus = Some(vec![product("One", true), product("Two", true)]);
+    let two = find(&evaluate(&inputs), FindingKind::TwoAntivirus)
+        .unwrap()
+        .clone();
+    let open = vec![StoredFinding {
+        id: 7,
+        opened_ms: NOW - DAY,
+        finding: two,
+    }];
+
+    inputs.antivirus = None;
+    inputs.page_files = None;
+    let fresh = evaluate(&inputs);
+    let unread = unread_kinds(&inputs);
+
+    assert_eq!(unread, [FindingKind::TwoAntivirus, FindingKind::PageFile]);
+    assert_eq!(
+        reconcile(&open, &fresh, &unread),
+        Vec::new(),
+        "an unread source closes nothing"
+    );
+    assert_eq!(
+        reconcile(&open, &fresh, &[]),
+        vec![FindingChange::Close { id: 7 }],
+        "a source read as empty still closes it"
+    );
+    assert!(unread_kinds(&healthy()).is_empty());
 }
 
 #[test]
@@ -800,8 +1005,13 @@ fn quick(errors: u64) -> TestData {
 }
 
 fn surface(media: Media, slow_ms: &[f32], unreadable: u64) -> TestData {
+    surface_with(media, slow_ms, unreadable, false)
+}
+
+fn surface_with(media: Media, slow_ms: &[f32], unreadable: u64, outside_io: bool) -> TestData {
     let disk = 1u64 << 40;
     let mut scan = SurfaceAggregator::new(1, media, disk, 512, 0);
+    scan.set_outside_io(outside_io);
     for (i, ms) in slow_ms.iter().enumerate() {
         scan.block(i as u64 * (1 << 20), *ms);
     }
@@ -881,6 +1091,38 @@ fn slow_regions_count_only_on_hdd() {
 }
 
 #[test]
+fn slow_blocks_with_other_programs_on_the_disk_are_not_an_alert() {
+    let slow = [700.0; 12];
+    let disk = Subject::Disk("1 D:".into());
+    let mut inputs = healthy();
+    inputs.tests.push(test_run(
+        3,
+        disk.clone(),
+        surface_with(Media::Hdd, &slow, 0, true),
+    ));
+    assert!(of_kind(&evaluate(&inputs), FindingKind::DiskUnreadable).is_empty());
+
+    let mut idle = healthy();
+    idle.tests.push(test_run(
+        3,
+        disk.clone(),
+        surface_with(Media::Hdd, &slow, 0, false),
+    ));
+    assert_eq!(
+        of_kind(&evaluate(&idle), FindingKind::DiskUnreadable).len(),
+        1
+    );
+
+    let mut bad = healthy();
+    bad.tests
+        .push(test_run(3, disk, surface_with(Media::Hdd, &slow, 2, true)));
+    let found = evaluate(&bad);
+    let flagged = of_kind(&found, FindingKind::DiskUnreadable);
+    assert_eq!(flagged.len(), 1);
+    assert_eq!(flagged[0].concern, Concern::Critical);
+}
+
+#[test]
 fn a_later_clean_scan_closes_the_disk_finding() {
     let mut inputs = healthy();
     let disk = Subject::Disk("1 D:".into());
@@ -901,6 +1143,8 @@ fn volume_errors_follow_the_last_check() {
             exit_code: Some(3),
             result,
             output: String::new(),
+            dirty_before: None,
+            dirty_after: None,
         })
     };
     let volume = Subject::Volume(r"D:\".into());

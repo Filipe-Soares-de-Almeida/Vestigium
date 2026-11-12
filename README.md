@@ -52,11 +52,13 @@ on.
 - **The driver behind the lag.** A capture measures every driver's DPC/ISR latency and the frame
   times of the apps on screen, and names the driver or app behind the stutters.
 - **Health checks, tests and reversible fixes.** It flags failing disks, hardware errors and a nearly
-  full system drive, tests memory and disks without changing them, and suggests Windows settings to
-  change, each undone in one click. Security features stay as they are.
+  full system drive, tests memory and disks, and suggests Windows settings to change, each undone in
+  one click. A file system check that finds problems marks the volume, and Windows repairs it at the
+  next restart. Security features stay as they are.
 - **Light, local, no account.** The agent runs as your user and the window exits when it closes.
-  Tasks that need administrator rights ask one at a time. No telemetry: the only request that leaves
-  the PC is the update check, which the window asks about first.
+  Tasks that need administrator rights ask one at a time. No telemetry: besides the update check,
+  which the window asks about first, the app makes no request. The installer downloads the WebView2
+  runtime when it is missing, and an update downloads its installer after you confirm.
 
 ---
 
@@ -64,7 +66,9 @@ on.
 
 Download `Vestigium_<version>_x64-setup.exe` from the
 [latest release](https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/latest) and run it. It
-installs for your user, with no administrator prompt, and adds Vestigium to the Start menu.
+installs for every account on the PC, in `C:\Program Files\Vestigium`, after Windows asks for an
+administrator's permission, and adds Vestigium to the Start menu. The monitor and the window then run as
+your user.
 [First run](../../wiki/First-run) covers the first minutes: starting the monitor, the tray icon and
 the question about update checks.
 

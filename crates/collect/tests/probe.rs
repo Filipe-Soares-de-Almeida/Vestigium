@@ -46,7 +46,7 @@ fn unbiased_clock_advances() {
 #[test]
 fn probe_sends_every_tick() {
     let gate = RunGate::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(4096);
     let started = wall_ms();
     let probe = spawn_probe(
         ProbeConfig::new(Duration::from_millis(100)),
@@ -73,7 +73,7 @@ fn probe_sends_every_tick() {
 #[test]
 fn paused_probe_sends_nothing() {
     let gate = RunGate::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(4096);
     let _probe = spawn_probe(
         ProbeConfig::new(Duration::from_millis(20)),
         gate.clone(),
@@ -93,7 +93,7 @@ fn paused_probe_sends_nothing() {
 #[test]
 fn stopping_ends_the_probe_thread() {
     let gate = RunGate::new();
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(4096);
     let probe = spawn_probe(
         ProbeConfig::new(Duration::from_millis(50)),
         gate.clone(),
@@ -112,7 +112,7 @@ fn stopping_ends_the_probe_thread() {
 #[test]
 fn probe_follows_period_change() {
     let gate = RunGate::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(4096);
     let config = ProbeConfig::new(Duration::from_millis(100));
     let probe = spawn_probe(config.clone(), gate.clone(), tx).unwrap();
 

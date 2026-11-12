@@ -5,7 +5,9 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
 use vestigium_core::{RunAs, Signature};
-use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE, HWND};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, GENERIC_READ, HANDLE, HWND,
+};
 use windows::Win32::Security::Cryptography::Catalog::{
     CATALOG_INFO, CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2,
     CryptCATAdminEnumCatalogFromHash, CryptCATAdminReleaseCatalogContext,
@@ -60,22 +62,37 @@ fn open_process(pid: u32) -> Option<Owned> {
     process.ok().map(Owned)
 }
 
+/// Characters of the first buffer for a process path, and of the one retried when it is too small.
+const PATH_UNITS: usize = 1024;
+const PATH_UNITS_MAX: usize = 32768;
+
 /// The full path of the program a process runs; `None` when Windows does not let the user ask.
 pub fn image_path(pid: u32) -> Option<String> {
     let process = open_process(pid)?;
-    let mut buffer = vec![0u16; 1024];
-    let mut len = buffer.len() as u32;
-    // SAFETY: writes at most `len` characters into `buffer` and sets `len` to what it wrote.
-    let read = unsafe {
-        QueryFullProcessImageNameW(
-            process.0,
-            PROCESS_NAME_WIN32,
-            PWSTR(buffer.as_mut_ptr()),
-            &mut len,
-        )
-    };
-    read.ok()?;
-    Some(String::from_utf16_lossy(&buffer[..len as usize]))
+    let mut size = PATH_UNITS;
+    loop {
+        let mut buffer = vec![0u16; size];
+        let mut len = buffer.len() as u32;
+        // SAFETY: writes at most `len` characters into `buffer` and sets `len` to what it wrote.
+        let read = unsafe {
+            QueryFullProcessImageNameW(
+                process.0,
+                PROCESS_NAME_WIN32,
+                PWSTR(buffer.as_mut_ptr()),
+                &mut len,
+            )
+        };
+        match read {
+            Ok(()) => return Some(String::from_utf16_lossy(&buffer[..len as usize])),
+            Err(err)
+                if size < PATH_UNITS_MAX
+                    && err.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() =>
+            {
+                size = PATH_UNITS_MAX;
+            }
+            Err(_) => return None,
+        }
+    }
 }
 
 /// Reads one block of token information of at least the size of `T`.

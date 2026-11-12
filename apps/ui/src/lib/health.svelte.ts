@@ -1,8 +1,10 @@
-import { health as readHealth, startScan } from "./api";
+import { cancelHelperRead, health as readHealth, startScan } from "./api";
 import { errorKind } from "./errors";
+import { helperJobs } from "./helper.svelte";
 import { t, tn } from "./i18n.svelte";
 import { toast } from "./toast.svelte";
 import type { FindingDto, HealthDto } from "./types";
+import { pollWhileShown } from "./visibility";
 
 const REFRESH_MS = 5 * 60_000;
 /** The watcher evaluates a stored scan on its next tick; the page reads again after it. */
@@ -26,10 +28,7 @@ class Health {
   /** Reads now and every five minutes while the window is visible; returns the function that stops it. */
   watch(): () => void {
     void this.load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void this.load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(() => this.load(), REFRESH_MS);
   }
 
   /** A failed read keeps what is on screen; the error shows only when there is nothing yet. */
@@ -42,10 +41,20 @@ class Health {
     }
   }
 
+  /** Stops waiting for the scan in progress; the scan then ends as cancelled. */
+  async cancelScan(): Promise<void> {
+    try {
+      await cancelHelperRead("scan");
+    } catch {
+      // The scan ends by itself when the helper does.
+    }
+  }
+
   /** Asks Windows for permission, runs the scan in the helper and reads the findings it changed. */
   async scan(): Promise<void> {
     if (this.phase === "running") return;
     this.phase = "running";
+    helperJobs.clear("health");
     const before = new Set(this.dto?.open.map(key) ?? []);
     try {
       const done = await startScan();
@@ -60,7 +69,13 @@ class Health {
       this.phase = "done";
       toast.show(this.found ? tn("ui.health.scan.toast.found", this.found) : t("ui.health.scan.toast.none"));
     } catch (error) {
-      this.phase = errorKind(error) === "declined" ? "declined" : "failed";
+      const kind = errorKind(error);
+      if (kind === "cancelled" || kind === "helper_timed_out") {
+        helperJobs.record("health", kind === "cancelled" ? "cancelled" : "timeout");
+        this.phase = "idle";
+      } else {
+        this.phase = kind === "declined" ? "declined" : "failed";
+      }
     }
   }
 }

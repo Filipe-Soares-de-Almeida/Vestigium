@@ -16,8 +16,10 @@
   import { here, href } from "../lib/router.svelte";
   import { hwtests } from "../lib/tests.svelte";
   import type { Episode } from "../lib/types";
-  import { AREAS, areaState } from "./health/areas";
-  import { checkText, findingTitle } from "./health/words";
+  import { pollWhileShown } from "../lib/visibility";
+  import { AREAS, areaState, statusKindOf } from "./health/areas";
+  import { checkText, findingTitle, markWord } from "./health/words";
+  import { passState } from "../lib/monitor";
   import { formatBytes, formatDayShort } from "./occurrence/format";
   import { statusOf } from "./tests/status";
   import { diagnosticWord, kindOf, memoryState, outcomeMark, quickOf } from "./tests/words";
@@ -26,7 +28,8 @@
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const dto = $derived(hwtests.dto);
-  const area = $derived(health.dto ? areaState(AREAS.find((a) => a.id === "memory")!, health.dto) : null);
+  const pass = $derived(passState(app.link, Date.now()));
+  const area = $derived(health.dto ? areaState(AREAS.find((a) => a.id === "memory")!, health.dto, pass) : null);
   let today = $state.raw<Episode[]>([]);
 
   onMount(() => {
@@ -46,10 +49,7 @@
       }
     };
     untrack(() => void read());
-    const timer = setInterval(() => {
-      if (!document.hidden) void read();
-    }, 60_000);
-    return () => clearInterval(timer);
+    return pollWhileShown(read, 60_000);
   });
 
   const standing = $derived(dto ? memoryState(dto, hwtests.running !== null) : null);
@@ -130,9 +130,9 @@
 <div class="cols2">
   <Block title={t("ui.item.memory_health")}>
     {#if area}
-      {@const kind = area.mark === "Critical" ? "critical" : area.mark === "Attention" ? "attention" : area.mark === "Unknown" ? "info" : "ok"}
+      {@const kind = statusKindOf(area.mark, area.why)}
       <p class="state">
-        <StatusMark {kind} word={t(`ui.health.mark.${area.mark}`)} />
+        <StatusMark {kind} word={markWord(area.mark, area.why)} />
         <span>{area.open.length ? tn("ui.health.area.points", area.open.length) : tn("ui.health.area.fine", area.checks.length)}</span>
       </p>
       {#if area.open.length}
@@ -146,7 +146,7 @@
       {:else}
         <ul class="okl">
           {#each area.checks as check (check.kind)}
-            <li><StatusMark kind={check.mark === "Ok" ? "ok" : "info"} size={20} reveal /><span>{checkText(check)}</span></li>
+            <li><StatusMark kind={statusKindOf(check.mark, check.why)} size={20} reveal /><span>{checkText(check, pass)}</span></li>
           {/each}
         </ul>
       {/if}

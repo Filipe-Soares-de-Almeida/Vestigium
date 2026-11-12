@@ -1,18 +1,9 @@
 import type { LiveMessage, LivePoint, NowFrame } from "../../lib/types";
+import { type Hung, HungTracker } from "./hung";
 
 /** How much the chart shows. */
 export const SPAN_MS = 600_000;
-/** How long a window goes without input before Windows lists it as not responding. */
-const HUNG_AFTER_MS = 5_000;
-
-/** A window not responding, and since when as far as this screen can tell. */
-export interface Hung {
-  pid: number;
-  name: string;
-  sinceMs: number;
-  /** `false` when it was already listed as the stream began, so `sinceMs` is only a bound. */
-  exact: boolean;
-}
+export type { Hung };
 
 /** What the live stream has brought so far: the last ten minutes, the latest second, the hung windows. */
 export class Live {
@@ -26,13 +17,17 @@ export class Live {
   started = $state(false);
   /** The watcher stopped answering. */
   ended = $state(false);
+  /** It ended because the watcher is running but did not answer in time. */
+  silent = $state(false);
 
   #fresh = true;
+  #hungTracker = new HungTracker();
 
   /** Forgets everything, before a stream starts again. */
   reset(): void {
     this.started = false;
     this.ended = false;
+    this.silent = false;
   }
 
   take(message: LiveMessage): void {
@@ -42,10 +37,12 @@ export class Live {
       this.#fresh = true;
       this.started = true;
       this.ended = false;
+      this.silent = false;
       return;
     }
-    if (message.kind === "stopped") {
+    if (message.kind === "stopped" || message.kind === "silent") {
       this.ended = true;
+      this.silent = message.kind === "silent";
       return;
     }
     const now = message.point?.reading.ts_ms ?? Date.now();
@@ -54,22 +51,18 @@ export class Live {
     if (message.point) {
       this.point = message.point;
       const last = this.points.at(-1);
-      if (!last || message.point.reading.ts_ms > last.reading.ts_ms) {
+      if (!last || message.point.reading.ts_ms !== last.reading.ts_ms) {
+        // A point older than the last one means the clock stepped back: what is ahead of it goes.
         const from = now - SPAN_MS;
-        this.points = [...this.points.filter((p) => p.reading.ts_ms >= from), message.point];
+        this.points = [
+          ...this.points.filter(
+            (p) => p.reading.ts_ms >= from && p.reading.ts_ms < message.point!.reading.ts_ms,
+          ),
+          message.point,
+        ];
       }
     }
-    this.hung = message.frame.hung.map((window) => {
-      const known = this.hung.find((h) => h.pid === window.pid);
-      return (
-        known ?? {
-          pid: window.pid,
-          name: window.name,
-          sinceMs: now - HUNG_AFTER_MS,
-          exact: !this.#fresh,
-        }
-      );
-    });
+    this.hung = this.#hungTracker.update(message.frame.hung, now, Date.now(), this.#fresh);
     this.#fresh = false;
   }
 }

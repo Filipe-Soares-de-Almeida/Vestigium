@@ -10,6 +10,7 @@ mod freeze;
 mod gate;
 mod hang;
 pub mod health;
+mod history_reset;
 pub mod hwtest;
 mod machine;
 mod minute;
@@ -26,17 +27,21 @@ mod shutdown;
 mod stutter;
 mod trigger;
 mod tweak;
+mod tweak_journal;
+mod tweak_v1;
+mod tweak_v2;
 mod window;
 mod xml;
 
 pub use blackbox::{
-    Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, RING_MS,
-    RecentState, Timing,
+    Blackbox, ECHOING_FREEZE_MS, GAP_MARGIN_MS, HANG_ECHO_MS, Notable, Output, REPORTED_EXEMPLARS,
+    REPORTED_MERGE_MS, RING_MS, RecentState, Timing,
 };
 pub use capture::{
-    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_MINUTES_MAX, CAPTURE_VERSION, CaptureSource,
-    DeepCapture, DriverLatency, FrameAggregator, FrameHitch, HITCH_FACTOR, HITCH_MIN_MS,
-    HITCHES_KEPT, LONGEST_KEPT, LongRoutine, ModuleMap, ON_DEMAND_SHARE, ProbeHiccup,
+    AppFrames, BUCKET_BOUNDS_US, BUCKETS, CAPTURE_BYTES_MAX, CAPTURE_MINUTES_MAX, CAPTURE_VERSION,
+    CAPTURE_VERSION_MIN, CaptureSource, DeepCapture, DriverLatency, FrameAggregator, FrameHitch,
+    HITCH_FACTOR, HITCH_MIN_MS, INTERVAL_KEPT, INTERVAL_MS, LongRoutine, ModuleMap,
+    ON_DEMAND_SHARE, PAGE_HITCHES, PAGE_LONGEST, PAGE_MODULE_LONGEST, ProbeHiccup,
     RoutineAggregator, RoutineKind, RoutineStats, capture_findings, capture_suspects,
     is_compositor, is_intermediary, is_kernel_core, renders_steadily, steady_only,
 };
@@ -56,22 +61,23 @@ pub use facts::{Fact, FactKind, facts};
 pub use freeze::{FREEZE_MS, freeze};
 pub use gate::{GateState, RunGate};
 pub use hang::{HUNG_AFTER_MS, HangTracker, HungWindow};
+pub use history_reset::HistoryReset;
 pub use machine::{DiskInfo, MachineInfo, Media};
 pub use minute::{DiskMinute, MINUTE_MS, MinuteRollup, MinuteSample, minute_of, summarize_minute};
 pub use occurrence::{Occurrence, OccurrenceKind, OccurrenceSummary, same_program};
 pub use postmortem::{POSTMORTEM_BEFORE_MS, POSTMORTEM_REACH_MS, postmortem};
 pub use probe::{DEFAULT_PROBE_PERIOD, ProbeTick, SENSITIVE_FOR, SENSITIVE_PROBE_PERIOD};
 pub use process::{
-    CpuWindow, ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1,
-    ProgramPoint, ProgramRing, RunAs, Signature, heaviest, last_seen, process_rates, programs,
-    usage,
+    CpuWindow, PROGRAM_FRAMES_MAX, ProcessCounters, ProcessSample, ProcessSampleV1, ProcessTop,
+    ProcessTopV1, ProgramPoint, ProgramRing, RunAs, Signature, heaviest, last_seen, process_rates,
+    programs, usage,
 };
 pub use reading::{BUSY_ABOVE, PcState, Reading, pc_state};
 pub use ring::Ring;
 pub use rules::{
     Cause, Confidence, Evidence, Metric, NextStep, Suspect, crosses_down, suspects, threshold,
 };
-pub use sample::{CoreLoad, DiskLoad, Sample, SampleV1};
+pub use sample::{CoreLoad, DiskLoad, DiskLoadV2, Sample, SampleV1, SampleV2};
 pub use settings::{
     ColorTheme, DetailLevel, LanguagePref, Retention, SettingError, Settings, ThemePref,
 };
@@ -81,12 +87,20 @@ pub use shutdown::{
 pub use stutter::{BURST_COUNT, BURST_WINDOW_MS, HICCUP_MS, StutterDetector};
 pub use trigger::{HangOutcome, Severity, Trigger, severity};
 pub use tweak::{
-    Advice, Applier, BIG_HIBERFILE, CaptureCauses, ERROR_CHANGED_SINCE, ERROR_UNREADABLE, Guid,
-    Helped, Hive, PCIE_ASPM, PlanItem, RestorePoint, SCHEME_BALANCED, SCHEME_HIGH_PERFORMANCE,
-    SCHEME_POWER_SAVER, SUB_PCIEXPRESS, SUB_USB, Setting, SettingChange, SettingResult,
-    SettingStore, Signal, StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION,
-    TWEAK_PLAN_VERSION, TWEAKS, Takes, TweakChange, TweakId, TweakInputs, TweakPlan, TweakResults,
-    USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, check_item, disabled_approval,
-    helped, undo,
+    Advice, Applier, BIG_HIBERFILE, CaptureCauses, Covered, ERROR_CHANGED_SINCE,
+    ERROR_INTERRUPTED_UNCHANGED, ERROR_INTERRUPTED_UNKNOWN, ERROR_INTERRUPTED_WRITTEN,
+    ERROR_MAY_HAVE_CHANGED, ERROR_RESTORE_DROPPED, ERROR_UNREADABLE, Guid, HELPED_MIN_EVENTS,
+    HELPED_MIN_HOURS, Helped, HelpedVerdict, Hive, IntentItem, IntentSetting, PCIE_ASPM, PlanItem,
+    RestorePoint, SCHEME_BALANCED, SCHEME_HIGH_PERFORMANCE, SCHEME_POWER_SAVER, SUB_PCIEXPRESS,
+    SUB_USB, Setting, SettingChange, SettingResult, SettingStore, SettingValue, Signal,
+    StartupEntry, StartupList, Status, TWEAK_CHANGE_VERSION, TWEAK_INTENT_VERSION,
+    TWEAK_PLAN_VERSION, TWEAKS, Takes, TweakChange, TweakId, TweakInputs, TweakIntent, TweakPlan,
+    TweakResults, USB_SELECTIVE_SUSPEND, Value, advise, apply_value, carry_out, changed_outside,
+    check_item, disabled_approval, helped, intent_of, settle_interrupted, undo,
 };
+pub use tweak_journal::{
+    JournalEntry, NoJournal, TWEAK_JOURNAL_VERSION, TweakJournal, backed_by_journal, check_undo,
+};
+pub use tweak_v1::{SettingChangeV1, SettingResultV1, SettingV1, TweakChangeV1};
+pub use tweak_v2::TweakChangeV2;
 pub use window::{Gap, GapReason, HangSpan, Window};

@@ -1,5 +1,7 @@
 use rusqlite::{Row, params};
-use vestigium_core::{Applier, TWEAK_CHANGE_VERSION, TWEAKS, TweakChange, TweakId};
+use vestigium_core::{
+    Applier, TWEAK_CHANGE_VERSION, TweakChange, TweakChangeV1, TweakChangeV2, TweakId,
+};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -14,16 +16,28 @@ pub struct TweakChangeRow {
     pub change: TweakChange,
 }
 
-/// The tweak's position in the catalog, which only grows at the end.
+/// The stored code of a tweak; codes already written never change, and new tweaks take the next.
 fn tweak_code(tweak: TweakId) -> i64 {
-    TWEAKS
-        .iter()
-        .position(|t| *t == tweak)
-        .unwrap_or(usize::MAX) as i64
+    match tweak {
+        TweakId::FastStartup => 0,
+        TweakId::Hibernation => 1,
+        TweakId::PowerPlan => 2,
+        TweakId::PcieAspm => 3,
+        TweakId::UsbSuspend => 4,
+        TweakId::SysMain => 5,
+        TweakId::WindowsSearch => 6,
+        TweakId::GameDvr => 7,
+        TweakId::GpuScheduling => 8,
+        TweakId::Mpo => 9,
+        TweakId::StartupApp => 10,
+        TweakId::AppDumps => 11,
+        TweakId::CrashDump => 12,
+    }
 }
 
 impl Store {
-    /// Keeps one change; an undo also marks the change it undoes. Returns the new row's id.
+    /// Keeps one change; an undo also marks the change it undoes. Returns the new row's id, or the
+    /// stored one when the same change was recorded at the same time before.
     pub fn record_tweak_change(
         &mut self,
         change: &TweakChange,
@@ -31,9 +45,9 @@ impl Store {
         applier: Applier,
     ) -> Result<i64, StoreError> {
         let tx = self.conn.transaction()?;
-        tx.execute(
-            "INSERT INTO tweak_change (version, tweak, subject, applied_ms, undone_ms, undo_of,
-                 elevated, data)
+        let stored = tx.execute(
+            "INSERT OR IGNORE INTO tweak_change (version, tweak, subject, applied_ms, undone_ms,
+                 undo_of, elevated, data)
              VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)",
             params![
                 i64::from(TWEAK_CHANGE_VERSION),
@@ -45,8 +59,22 @@ impl Store {
                 encode(std::slice::from_ref(change))
             ],
         )?;
+        if stored == 0 {
+            return Ok(tx.query_row(
+                "SELECT id FROM tweak_change
+                 WHERE applied_ms = ?1 AND tweak = ?2 AND COALESCE(subject, '') = COALESCE(?3, '')
+                   AND COALESCE(undo_of, 0) = COALESCE(?4, 0)",
+                params![
+                    applied_ms,
+                    tweak_code(change.tweak),
+                    change.subject,
+                    change.undo_of
+                ],
+                |row| row.get(0),
+            )?);
+        }
         let id = tx.last_insert_rowid();
-        if let Some(undone) = change.undo_of {
+        if let Some(undone) = change.undo_of.filter(|_| change.succeeded()) {
             tx.execute(
                 "UPDATE tweak_change SET undone_ms = ?2 WHERE id = ?1 AND undone_ms IS NULL",
                 params![undone, applied_ms],
@@ -98,12 +126,18 @@ impl Store {
         })?;
         rows.map(|row| {
             let (id, applied_ms, undone_ms, elevated, version, data) = row?;
-            if version != i64::from(TWEAK_CHANGE_VERSION) {
+            let change = if version == i64::from(TWEAK_CHANGE_VERSION) {
+                decode::<TweakChange>(&data)?.pop()
+            } else if version == 2 {
+                decode::<TweakChangeV2>(&data)?.pop().map(TweakChange::from)
+            } else if version == 1 {
+                decode::<TweakChangeV1>(&data)?.pop().map(TweakChange::from)
+            } else {
                 return Err(StoreError::UnknownCode {
                     what: "tweak change version",
                     code: version,
                 });
-            }
+            };
             Ok(TweakChangeRow {
                 id,
                 applied_ms,
@@ -113,11 +147,27 @@ impl Store {
                 } else {
                     Applier::User
                 },
-                change: decode::<TweakChange>(&data)?
-                    .pop()
-                    .ok_or(StoreError::EmptySegment)?,
+                change: change.ok_or(StoreError::EmptySegment)?,
             })
         })
         .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vestigium_core::TWEAKS;
+
+    #[test]
+    fn tweak_codes_are_fixed() {
+        let literal: Vec<i64> = (0..13).collect();
+        assert_eq!(
+            TWEAKS.len(),
+            literal.len(),
+            "a tweak has no literal code here"
+        );
+        let stored: Vec<i64> = TWEAKS.into_iter().map(tweak_code).collect();
+        assert_eq!(stored, literal);
     }
 }

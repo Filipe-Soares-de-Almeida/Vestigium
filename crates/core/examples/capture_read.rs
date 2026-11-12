@@ -1,6 +1,6 @@
 //! Prints what a deep capture file measured and what the rules make of it: `capture_read <file>`.
 
-use vestigium_core::{CAPTURE_VERSION, DeepCapture, capture_findings};
+use vestigium_core::{CAPTURE_VERSION, CAPTURE_VERSION_MIN, DeepCapture, capture_findings};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args_os()
@@ -8,8 +8,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("usage: capture_read <file.capture>")?;
     let bytes = std::fs::read(path)?;
     let (&version, body) = bytes.split_first().ok_or("empty file")?;
-    if version != CAPTURE_VERSION {
-        return Err(format!("version {version}, expected {CAPTURE_VERSION}").into());
+    if !(CAPTURE_VERSION_MIN..=CAPTURE_VERSION).contains(&version) {
+        return Err(format!(
+            "version {version}, expected {CAPTURE_VERSION_MIN} to {CAPTURE_VERSION}"
+        )
+        .into());
     }
     let capture: DeepCapture = postcard::from_bytes(body)?;
     println!(

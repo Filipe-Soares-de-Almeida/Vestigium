@@ -27,6 +27,8 @@
     "allow-clear-history",
     "allow-start-capture",
     "allow-capture-run",
+    "allow-cancel-capture",
+    "allow-cancel-helper-read",
     "allow-import-captures",
     "allow-captures",
     "allow-capture",

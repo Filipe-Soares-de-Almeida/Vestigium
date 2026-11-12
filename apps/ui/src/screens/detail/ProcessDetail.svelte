@@ -2,6 +2,7 @@
   import Block from "../../components/Block.svelte";
   import ErrorView from "../../components/ErrorView.svelte";
   import Loading from "../../components/Loading.svelte";
+  import SilentNote from "../../components/SilentNote.svelte";
   import Spark from "../../components/Spark.svelte";
   import { processFacts, programMarks, programRecent } from "../../lib/api";
   import { app } from "../../lib/app.svelte";
@@ -9,10 +10,12 @@
   import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { ProcessFacts, ProgramMarks, ProgramPoint, RunAs, Signature } from "../../lib/types";
+  import { pollWhileShown } from "../../lib/visibility";
   import { at } from "../dumps/words";
   import { formatBytes, formatRate } from "../now/lanes";
+  import { silentNotice } from "../now/silent";
   import { NowStream } from "../now/stream.svelte";
-  import { dayStart } from "../today/day";
+  import { dayStart, keyOfEpisode } from "../today/day";
   import EpisodeRow from "../today/EpisodeRow.svelte";
   import OccurrenceRow from "../today/OccurrenceRow.svelte";
   import DetailPage from "./DetailPage.svelte";
@@ -24,6 +27,8 @@
   const REFRESH_MS = 5_000;
 
   const stream = new NowStream();
+  /** The monitor does not answer: the live numbers are the last received, faded, under a notice. */
+  const quiet = $derived(stream.stage === "quiet");
   const program = $derived(stream.view.frame?.programs?.entries.find((p) => p.name === name) ?? null);
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
 
@@ -33,6 +38,8 @@
   let facts = $state<ProcessFacts | null>(null);
   /** Today's occurrences and overload periods that involve it. */
   let marks = $state<ProgramMarks | null>(null);
+  /** Why today's occurrences could not be read, so a failed read is not shown as a calm day. */
+  let marksFailure = $state<unknown>(null);
 
   const pid = $derived(program?.pid ?? null);
   /** The PC's memory, the top of the memory chart. */
@@ -43,32 +50,42 @@
     marks
       ? [
           ...marks.occurrences.map((o) => ({ at: o.start_ms, key: `o${o.id}`, occurrence: o, episode: null })),
-          ...marks.episodes.map((e) => ({ at: e.start_ms, key: `e${e.start_ms}`, occurrence: null, episode: e })),
+          ...marks.episodes.map((e, i) => ({ at: e.start_ms, key: keyOfEpisode(e, i), occurrence: null, episode: e })),
         ].sort((a, b) => b.at - a.at)
       : [],
   );
 
   $effect(() => {
     const wanted = name;
-    const load = () =>
+    const load = () => {
+      if (app.silent) return;
       void programRecent(wanted).then(
         (rows) => (points = rows),
         () => undefined,
       );
+    };
     load();
-    const timer = setInterval(() => {
-      if (!document.hidden) load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(load, REFRESH_MS);
   });
 
-  $effect(() => {
+  const loadMarks = () => {
     const wanted = name;
     const now = Date.now();
+    marksFailure = null;
     void programMarks(wanted, dayStart(now), now).then(
-      (found) => (marks = found),
-      () => (marks = { occurrences: [], episodes: [] }),
+      (found) => {
+        if (wanted === name) marks = found;
+      },
+      (err: unknown) => {
+        if (wanted === name) marksFailure = err ?? new Error("read failed");
+      },
     );
+  };
+
+  $effect(() => {
+    void name;
+    marks = null;
+    loadMarks();
   });
 
   $effect(() => {
@@ -86,15 +103,15 @@
     typeof s === "string" ? t(`ui.detail.process.signature.${s}`) : s.Valid.signer || t("ui.detail.process.signature.Valid");
 </script>
 
-{#if !stream.watching}
+{#if stream.stage === "idle"}
   <DetailPage fallback={href.programs()} title={name}>
     <p class="text">{t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}</p>
   </DetailPage>
-{:else if stream.error !== null}
+{:else if stream.stage === "error"}
   <DetailPage fallback={href.programs()} title={name}>
     <ErrorView error={stream.error} heading="h2" onretry={() => stream.retry()} />
   </DetailPage>
-{:else if !stream.live.started}
+{:else if stream.stage === "loading"}
   <DetailPage fallback={href.programs()} title={name}><Loading /></DetailPage>
 {:else if program}
   {@const many = facts?.processes ?? 1}
@@ -103,7 +120,11 @@
     title={program.name}
     sub={`${t(windows ? "ui.detail.process.windows" : "ui.detail.process.running")}${many > 1 ? ` · ${tn("ui.detail.process.processes", many)}` : ""}`}
   >
+    {#if quiet}
+      <div class="full"><SilentNote text={silentNotice("top", stream.hasData, stream.lastAt)} /></div>
+    {/if}
     <Facts
+      dim={quiet}
       rows={[
         { label: t("ui.now.top.cpu"), value: formatPercent(program.cpu_pct, 1) },
         { label: t("ui.now.top.memory"), value: formatBytes(program.private_bytes) },
@@ -117,14 +138,14 @@
     {#if points.length > 1}
       {@const from = formatTime(points[0].ts_ms)}
       {@const to = t("ui.detail.process.now_word")}
-      <Block title={t("ui.detail.process.cpu_recent")}>
+      <Block title={t("ui.detail.process.cpu_recent")} dim={quiet}>
         <Spark values={points.map((p) => p.cpu_pct)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.cpu_of", { name })} {from} {to} format={(v) => formatPercent(v, 1)} floor={0} ceiling={100} ceilingLabel={formatPercent(100)} />
       </Block>
-      <Block title={t("ui.detail.process.mem_recent")}>
+      <Block title={t("ui.detail.process.mem_recent")} dim={quiet}>
         <Spark values={points.map((p) => p.private_bytes)} at={points.map((p) => p.ts_ms)} label={t("ui.detail.process.mem_of", { name })} {from} {to} format={formatBytes} floor={0} ceiling={memTotal ?? undefined} ceilingLabel={memTotal ? formatBytes(memTotal) : undefined} />
       </Block>
     {:else}
-      <Block title={t("ui.detail.process.cpu_recent")}>
+      <Block title={t("ui.detail.process.cpu_recent")} dim={quiet}>
         <p class="p">{t("ui.detail.process.recent_none")}</p>
       </Block>
     {/if}
@@ -140,7 +161,9 @@
       {/if}
     </Block>
     <Block title={t("ui.detail.process.today")}>
-      {#if marks === null}
+      {#if marksFailure !== null}
+        <ErrorView error={marksFailure} heading="h2" onretry={loadMarks} />
+      {:else if marks === null}
         <Loading />
       {:else if moments.length}
         <ul class="rows">
@@ -157,11 +180,14 @@
   </DetailPage>
 {:else}
   <DetailPage fallback={href.programs()} title={name}>
-    <p class="text">{t("ui.detail.process.gone")}</p>
+    <p class="text">{t(quiet ? "ui.now.lede.silent" : "ui.detail.process.gone")}</p>
   </DetailPage>
 {/if}
 
 <style>
+  .full {
+    grid-column: 1 / -1;
+  }
   .text {
     max-width: 70ch;
     margin: 18px 0 0;

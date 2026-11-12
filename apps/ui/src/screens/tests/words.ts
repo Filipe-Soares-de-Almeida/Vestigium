@@ -91,6 +91,27 @@ export function diskSurface(dto: TestsDto, disk: DiskDto): SurfaceScan | null {
 export const lastCheck = (dto: TestsDto, root: string) => lastRun(dto, "VolumeCheck", (s) => isVolume(s, root));
 export const lastBench = (dto: TestsDto, root: string) => lastRun(dto, "DiskBenchmark", (s) => isVolume(s, root));
 
+/** Whether a check marked a volume (`new`), found it already marked (`already`) or left it marked from before (`still`). */
+export type RepairMark = "new" | "already" | "still";
+
+/**
+ * How a volume stands for the repair Windows runs at the next restart, from the newest check that
+ * recorded it. A check older than this Windows session no longer counts: a boot has come since.
+ */
+export function repairMark(dto: TestsDto, root: string): RepairMark | null {
+  const checks = dto.runs.filter((r) => kindOf(r) === "VolumeCheck" && isVolume(r.subject, root));
+  for (const run of checks.reverse()) {
+    const c = checkOf(run)!;
+    // A check from before the bits were stored that found problems queued the repair too.
+    const marked = c.dirty_after ?? (c.result === "ProblemsFound" ? true : null);
+    if (marked === null) continue;
+    if (!marked || run.ended_ms < dto.boot_ms) return null;
+    if (c.result !== "ProblemsFound") return "still";
+    return c.dirty_before === true ? "already" : "new";
+  }
+  return null;
+}
+
 /** The device a running test reads; a scan the helper runs for an earlier window counts too. */
 export function runningDevice(dto: TestsDto, running: RunningTest | null): Device | null {
   if (running) {

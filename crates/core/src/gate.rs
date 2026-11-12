@@ -51,6 +51,15 @@ impl RunGate {
         *guard
     }
 
+    /// Sleeps while running, for at most `timeout`; a pause or a stop ends the wait at once.
+    pub fn wait_while_running_for(&self, timeout: Duration) -> GateState {
+        let (guard, _) = self
+            .changed
+            .wait_timeout_while(self.lock(), timeout, |state| *state == GateState::Running)
+            .unwrap_or_else(PoisonError::into_inner);
+        *guard
+    }
+
     fn lock(&self) -> MutexGuard<'_, GateState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }

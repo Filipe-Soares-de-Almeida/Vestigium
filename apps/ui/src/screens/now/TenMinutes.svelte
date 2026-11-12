@@ -3,6 +3,7 @@
 
   import Block from "../../components/Block.svelte";
   import ChartTip from "../../components/ChartTip.svelte";
+  import ToneMark from "../../components/ToneMark.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { formatClock, formatTime } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
@@ -15,6 +16,7 @@
     points,
     disk = null,
     paused = false,
+    notice,
     onsay,
   }: {
     points: LivePoint[];
@@ -22,6 +24,8 @@
     disk?: string | null;
     /** Ctrl is held: the chart stays on the second it was pressed. */
     paused?: boolean;
+    /** Set while the monitor is silent: the chart shows the last values and says so. */
+    notice?: string;
     onsay: (text: string) => void;
   } = $props();
 
@@ -172,13 +176,17 @@
 </script>
 
 {#snippet extra()}
-  <span class="live" class:paused>
-    <i class:dim={beat && !paused} aria-hidden="true"></i>{t(paused ? "ui.now.tenmin.paused" : "ui.now.tenmin.live")}
-  </span>
+  {#if notice !== undefined}
+    <span class="live"><ToneMark tone="silent" />{t("ui.now.tenmin.silent")}</span>
+  {:else}
+    <span class="live" class:paused>
+      <i class:dim={beat && !paused} aria-hidden="true"></i>{t(paused ? "ui.now.tenmin.paused" : "ui.now.tenmin.live")}
+    </span>
+  {/if}
   <ZoomBar {zoom} {range} {plot} />
 {/snippet}
 
-<Block title={t("ui.now.tenmin.title")} actions={extra}>
+<Block title={t("ui.now.tenmin.title")} actions={extra} {notice}>
 <section class="tenmin-card" aria-label={t("ui.now.tenmin.title")} bind:clientWidth={outer}>
   <div class="tenmin" style:grid-template-columns="{outer < 820 ? 120 : 160}px minmax(0, 1fr)">
     <div class="labels">

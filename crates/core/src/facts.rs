@@ -51,6 +51,14 @@ pub enum FactKind {
     WentDown {
         kind: CrashKind,
     },
+    /// Reported events of one provider and id that the occurrence did not keep past its cap.
+    EventsDropped {
+        count: u32,
+    },
+    /// An app that was still not responding when watching stopped.
+    AppStillHung {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -135,6 +143,7 @@ pub fn facts(triggers: &[Trigger], window: &Window) -> Vec<Fact> {
                 match hang.outcome {
                     HangOutcome::Recovered => FactKind::AppRecovered { name },
                     HangOutcome::Closed => FactKind::AppClosedWhileHung { name },
+                    HangOutcome::StillHung => FactKind::AppStillHung { name },
                 },
             ));
         }
@@ -183,7 +192,7 @@ fn reading(sample: &Sample, metric: Metric, mem_total: u64) -> Option<(f32, Opti
     match metric {
         Metric::CpuPct => Some((sample.cpu_pct, None)),
         Metric::MemAvailPct => avail_pct(sample, mem_total).map(|v| (v, None)),
-        Metric::HardFaultsPerS => Some((sample.hard_faults_per_s, None)),
+        Metric::HardFaultsPerS => sample.hard_faults_per_s.map(|v| (v, None)),
         Metric::DiskLatencyMs => {
             worst_disk([sample], |d| d.latency_ms).map(|(_, disk, v)| (v, Some(disk)))
         }
@@ -197,19 +206,19 @@ fn reading(sample: &Sample, metric: Metric, mem_total: u64) -> Option<(f32, Opti
             .map(|(core, c)| (c.dpc_pct + c.isr_pct, Some(core.to_string())))
             .max_by(|a, b| a.0.total_cmp(&b.0)),
         Metric::GpuPct => sample.gpu_pct.map(|v| (v, None)),
-        Metric::PerfLimitPct => Some((sample.perf_limit_pct, None)),
+        Metric::PerfLimitPct => sample.perf_limit_pct.map(|v| (v, None)),
         _ => None,
     }
 }
 
-/// When `metric` first went past its threshold, and the worst it reached.
+/// When `metric` first went past its threshold, and the worst it reached with its disk or core.
 fn crossing(metric: Metric, window: &Window) -> Option<Fact> {
     let limit = threshold(metric);
     let below = crosses_down(metric);
     let past = |v: f32| if below { v < limit } else { v >= limit };
     let worse = |a: f32, b: f32| if below { a < b } else { a > b };
-    let mut first: Option<(i64, Option<String>)> = None;
-    let mut worst: Option<f32> = None;
+    let mut first_ms: Option<i64> = None;
+    let mut worst: Option<(f32, Option<String>)> = None;
     for sample in &window.samples {
         let Some((value, subject)) = reading(sample, metric, window.machine.mem_total_bytes) else {
             continue;
@@ -217,17 +226,17 @@ fn crossing(metric: Metric, window: &Window) -> Option<Fact> {
         if !past(value) {
             continue;
         }
-        first.get_or_insert((sample.ts_ms, subject));
-        if worst.is_none_or(|w| worse(value, w)) {
-            worst = Some(value);
+        first_ms.get_or_insert(sample.ts_ms);
+        if worst.as_ref().is_none_or(|(w, _)| worse(value, *w)) {
+            worst = Some((value, subject));
         }
     }
-    let (at_ms, subject) = first?;
+    let (value, subject) = worst?;
     Some(fact(
-        at_ms,
+        first_ms?,
         FactKind::Crossed {
             metric,
-            value: worst?,
+            value,
             threshold: limit,
             subject,
         },

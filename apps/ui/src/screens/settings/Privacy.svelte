@@ -3,8 +3,13 @@
 
   import { clearHistory } from "../../lib/api";
   import { app } from "../../lib/app.svelte";
+  import { captures } from "../../lib/capture.svelte";
+  import { dumps } from "../../lib/dumps.svelte";
   import { errorText } from "../../lib/errors";
+  import { health } from "../../lib/health.svelte";
   import { t } from "../../lib/i18n.svelte";
+  import { hwtests } from "../../lib/tests.svelte";
+  import { today } from "../../lib/today.svelte";
   import { toast } from "../../lib/toast.svelte";
   import Icon from "../../components/Icon.svelte";
   import Row from "./Row.svelte";
@@ -40,6 +45,7 @@
     clearing = true;
     try {
       await clearHistory();
+      void Promise.all([hwtests.load(), captures.forget(), today.load(), dumps.load(), health.load()]);
       toast.show(t("ui.settings.privacy.cleared"));
       info = await about();
       await cancel();

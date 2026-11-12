@@ -1,3 +1,4 @@
+import type { Freed } from "../../lib/dumps.svelte";
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   BugCheckDto,
@@ -366,6 +367,10 @@ export function steps(d: DumpDto): Step[] {
     const family = familyOf(c.Module.name, d);
     if (family === "video") return [step("video_update"), step("overclock_gpu"), step("video_clean")];
     if (family === "windows" || family === "files") return [step("windows_update"), step("sfc"), step("memtest_again")];
+    // A Windows component that serves other drivers has no update of its own: the device behind it does.
+    if (c.Module.intermediary) {
+      return [step(family === "storage" ? "storage_device" : "chipset"), step("undo_recent"), step("memtest_again")];
+    }
     return [step("driver_update", { module: c.Module.name }), step("undo_recent"), step("memtest_again")];
   }
   return [step("memtest_again"), step("chipset")];
@@ -467,4 +472,11 @@ export function space(list: Entry[]): { group: Group; bytes: number }[] {
 export function lastRead(dto: DumpsDto): number | null {
   const times = dto.dumps.flatMap((d) => (d.analyzed_ms !== null ? [d.analyzed_ms] : []));
   return times.length ? Math.max(...times) : null;
+}
+
+/** What a delete that did not remove every dump asked for says, and why when the helper told. */
+export function partialDeleteText(freed: Freed): string {
+  const args = { count: freed.count, asked: freed.asked, size: formatBytes(freed.bytes) };
+  if (freed.refused + freed.failed === 0) return k("delete.toast.partial", args);
+  return k("delete.toast.partial_reasons", { ...args, refused: freed.refused, failed: freed.failed });
 }

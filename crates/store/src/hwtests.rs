@@ -1,6 +1,6 @@
 use rusqlite::{OptionalExtension, params};
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{Outcome, TEST_RUN_VERSION, TestKind, TestRun};
+use vestigium_core::hwtest::{Outcome, TEST_RUN_VERSION, TestKind, TestRun, TestRunV1, TestRunV2};
 
 use crate::{Store, StoreError, decode, encode};
 
@@ -75,7 +75,8 @@ impl Store {
         Ok(id)
     }
 
-    /// Runs that ended in `[from_ms, to_ms]`, oldest first; a row of an unknown layout is skipped.
+    /// Runs that ended in `[from_ms, to_ms]`, oldest first; a row of an unknown layout is skipped and
+    /// one of version 2 or 1 is read as a run with the fields it lacks empty.
     pub fn test_runs(&self, from_ms: i64, to_ms: i64) -> Result<Vec<TestRunRow>, StoreError> {
         let mut statement = self.conn.prepare(
             "SELECT id, version, data FROM test_run WHERE ended_ms BETWEEN ?1 AND ?2
@@ -91,13 +92,32 @@ impl Store {
         let mut runs = Vec::new();
         for row in rows {
             let (id, version, data) = row?;
-            if version != i64::from(TEST_RUN_VERSION) {
+            let run = if version == i64::from(TEST_RUN_VERSION) {
+                decode::<TestRun>(&data)?.pop()
+            } else if version == 2 {
+                decode::<TestRunV2>(&data)?.pop().map(TestRun::from)
+            } else if version == 1 {
+                decode::<TestRunV1>(&data)?.pop().map(TestRun::from)
+            } else {
                 continue;
-            }
-            if let Some(run) = decode::<TestRun>(&data)?.pop() {
+            };
+            if let Some(run) = run {
                 runs.push(TestRunRow { id, run });
             }
         }
         Ok(runs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kind_and_outcome_codes_are_fixed() {
+        let kinds: Vec<i64> = TestKind::ALL.into_iter().map(kind_code).collect();
+        let outcomes: Vec<i64> = Outcome::ALL.into_iter().map(outcome_code).collect();
+        assert_eq!(kinds, [0, 1, 2, 3]);
+        assert_eq!(outcomes, [0, 1, 2, 3]);
     }
 }

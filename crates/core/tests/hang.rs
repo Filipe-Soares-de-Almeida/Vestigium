@@ -58,3 +58,36 @@ fn recovered_and_closed_hangs_differ() {
     assert!(outcomes.contains(&(7, HangOutcome::Recovered)));
     assert!(outcomes.contains(&(9, HangOutcome::Closed)));
 }
+
+#[test]
+fn open_hangs_are_listed_as_still_hung_without_closing_them() {
+    let mut tracker = HangTracker::new();
+    tracker.push(
+        10_000,
+        &[hung(9, "viewer.exe"), hung(7, "editor.exe")],
+        &running(&[7, 9]),
+    );
+
+    let open = tracker.open_hangs(18_000);
+
+    assert_eq!(
+        open,
+        vec![
+            Trigger::AppHang {
+                pid: 7,
+                name: "editor.exe".to_string(),
+                start_ms: 5_000,
+                end_ms: 18_000,
+                outcome: HangOutcome::StillHung,
+            },
+            Trigger::AppHang {
+                pid: 9,
+                name: "viewer.exe".to_string(),
+                start_ms: 5_000,
+                end_ms: 18_000,
+                outcome: HangOutcome::StillHung,
+            },
+        ]
+    );
+    assert_eq!(tracker.open_hangs(19_000).len(), 2, "they stay open");
+}

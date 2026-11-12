@@ -1,27 +1,38 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{Cause, Confidence, Evidence, NextStep, Suspect};
 
 /// Version of the capture file and row format.
-pub const CAPTURE_VERSION: u8 = 1;
+pub const CAPTURE_VERSION: u8 = 2;
+/// The oldest capture format still read: it differs only in what a capture keeps, not in its layout.
+pub const CAPTURE_VERSION_MIN: u8 = 1;
 /// Lower edges of the duration buckets, in microseconds, as `tracerpt` reports them.
 pub const BUCKET_BOUNDS_US: [u32; 12] = [1, 2, 3, 4, 5, 10, 25, 50, 100, 250, 500, 1000];
 /// One bucket below each bound plus the last one, at or above the final bound.
 pub const BUCKETS: usize = 13;
-/// Individual DPC and ISR routines kept, longest first.
-pub const LONGEST_KEPT: usize = 50;
-/// Each module's longest routines kept besides the overall longest, so every driver shows some.
-pub const MODULE_LONGEST_KEPT: usize = 5;
+/// Length of the interval a capture keeps its worst entries by, in milliseconds.
+pub const INTERVAL_MS: i64 = 60_000;
+/// Entries kept in each interval: the routines of at least `LONG_US` of each module, the hitches of
+/// each app and the probe's hiccups, so a window of an occurrence finds what ran in it however long
+/// the capture ran.
+pub const INTERVAL_KEPT: usize = 3;
+/// Routines the capture page lists, longest first.
+pub const PAGE_LONGEST: usize = 50;
+/// Each module's longest routines the page lists besides the overall longest.
+pub const PAGE_MODULE_LONGEST: usize = 5;
+/// Hitches the capture page lists, worst first.
+pub const PAGE_HITCHES: usize = 200;
 /// The longest deep capture anyone can ask for, in minutes: a whole day.
 pub const CAPTURE_MINUTES_MAX: u64 = 24 * 60;
+/// The most a capture takes once stored, however long it ran.
+pub const CAPTURE_BYTES_MAX: usize = 8 << 20;
 /// A frame over this many times the app's median...
 pub const HITCH_FACTOR: f32 = 2.5;
 /// ...and at least this long, in milliseconds, is a hitch.
 pub const HITCH_MIN_MS: f32 = 20.0;
-pub const HITCHES_KEPT: usize = 200;
 /// Share of frames over the hitch line past which an app draws only when something changes.
 pub const ON_DEMAND_SHARE: f32 = 0.05;
 
@@ -31,6 +42,9 @@ const MIN_FRAMES: usize = 60;
 const UNKNOWN_MODULE: &str = "<unknown>";
 /// A routine this long, in microseconds, is felt on its own.
 const LONG_US: u32 = 1_000;
+/// Routines of at least `LONG_US` that, repeated in one capture, make a driver's blame certain.
+/// Not measured on a healthy PC yet: three is the starting point.
+const REPEAT_TO_BLAME: u64 = 3;
 /// A routine this long, in microseconds, counts toward the rate of long ones.
 const SLOW_US: u32 = 100;
 /// Routines of at least `SLOW_US` per minute that make a driver a suspect.
@@ -39,7 +53,7 @@ const SLOW_PER_MIN: f64 = 60.0;
 const CORE_PCT: f32 = 2.0;
 /// Hitches in a capture that make an app a suspect.
 const HITCHES_TO_BLAME: u32 = 3;
-/// How close, in milliseconds, a hiccup or hitch must be to back a routine or a hitch.
+/// How close, in milliseconds, the time spans of two events must be to back each other.
 const NEAR_MS: i64 = 50;
 /// Items of one kind kept as evidence of a suspect.
 const EVIDENCE_KEPT: usize = 5;
@@ -146,6 +160,11 @@ pub struct ProbeHiccup {
 pub enum CaptureSource {
     Ok,
     Unavailable(String),
+    /// Measured for `covered_secs` only, because of `reason`.
+    Partial {
+        covered_secs: u64,
+        reason: String,
+    },
 }
 
 /// What one deep capture measured.
@@ -163,6 +182,91 @@ pub struct DeepCapture {
     pub hiccups: Vec<ProbeHiccup>,
 }
 
+impl DeepCapture {
+    /// An upper bound of the capture's size once stored, in bytes.
+    pub fn size_estimate(&self) -> usize {
+        let sources = |s: &CaptureSource| match s {
+            CaptureSource::Ok => 1,
+            CaptureSource::Unavailable(why) => 3 + why.len(),
+            CaptureSource::Partial { reason, .. } => 14 + reason.len(),
+        };
+        let routine = |l: &LongRoutine| 21 + l.module.len();
+        let hitch = |h: &FrameHitch| 25 + h.app.len();
+        let driver = |d: &DriverLatency| 182 + d.module.len();
+        let app = |a: &AppFrames| 40 + a.name.len();
+        sources(&self.kernel)
+            + sources(&self.frames)
+            + 40
+            + self.drivers.iter().map(driver).sum::<usize>()
+            + self.longest.iter().map(routine).sum::<usize>()
+            + self.apps.iter().map(app).sum::<usize>()
+            + self.hitches.iter().map(hitch).sum::<usize>()
+            + self.hiccups.len() * 14
+    }
+
+    /// The capture as its page lists it: the `PAGE_LONGEST` longest routines and each module's
+    /// `PAGE_MODULE_LONGEST` longest, the `PAGE_HITCHES` worst hitches in time order, and everything
+    /// else as it is. A window of an occurrence reads the whole capture, not this.
+    pub fn page_view(&self) -> DeepCapture {
+        let mut longest: Vec<&LongRoutine> = self.longest.iter().collect();
+        longest.sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
+        let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut shown: Vec<LongRoutine> = Vec::new();
+        for (rank, routine) in longest.into_iter().enumerate() {
+            let own = seen.entry(&routine.module).or_default();
+            *own += 1;
+            if rank < PAGE_LONGEST || *own <= PAGE_MODULE_LONGEST {
+                shown.push(routine.clone());
+            }
+        }
+        let mut worst: Vec<&FrameHitch> = self.hitches.iter().collect();
+        worst.sort_by(|a, b| {
+            b.frame_ms
+                .total_cmp(&a.frame_ms)
+                .then(a.ts_ms.cmp(&b.ts_ms))
+        });
+        worst.truncate(PAGE_HITCHES);
+        let mut hitches: Vec<FrameHitch> = worst.into_iter().cloned().collect();
+        hitches.sort_by_key(|h| h.ts_ms);
+        DeepCapture {
+            longest: shown,
+            hitches,
+            ..self.clone()
+        }
+    }
+
+    /// Drops the shortest entries of whichever of routines, hitches and hiccups takes most room,
+    /// a tenth at a time, until the capture fits `CAPTURE_BYTES_MAX`; one within it is left as it is.
+    pub fn fit_to_ceiling(&mut self) {
+        while self.size_estimate() > CAPTURE_BYTES_MAX {
+            let routines: usize = self.longest.iter().map(|l| 21 + l.module.len()).sum();
+            let hitches: usize = self.hitches.iter().map(|h| 25 + h.app.len()).sum();
+            let hiccups = self.hiccups.len() * 14;
+            if routines == 0 && hitches == 0 && hiccups == 0 {
+                break;
+            }
+            if routines >= hitches && routines >= hiccups {
+                self.longest
+                    .sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
+                self.longest.truncate(self.longest.len() * 9 / 10);
+            } else if hitches >= hiccups {
+                self.hitches.sort_by(|a, b| {
+                    b.frame_ms
+                        .total_cmp(&a.frame_ms)
+                        .then(a.ts_ms.cmp(&b.ts_ms))
+                });
+                self.hitches.truncate(self.hitches.len() * 9 / 10);
+                self.hitches.sort_by_key(|h| h.ts_ms);
+            } else {
+                self.hiccups
+                    .sort_by(|a, b| b.lag_ms.total_cmp(&a.lag_ms).then(a.ts_ms.cmp(&b.ts_ms)));
+                self.hiccups.truncate(self.hiccups.len() * 9 / 10);
+                self.hiccups.sort_by_key(|h| h.ts_ms);
+            }
+        }
+    }
+}
+
 /// Loaded kernel images, from the session's image events.
 #[derive(Clone, Debug, Default)]
 pub struct ModuleMap {
@@ -175,15 +279,19 @@ impl ModuleMap {
         ModuleMap::default()
     }
 
-    /// Records an image; the name is the file name of `path`, and a second image at the same base replaces the first.
+    /// Records an image under the file name of `path`; an image whose range it overlaps is dropped.
     pub fn insert(&mut self, base: u64, size: u64, path: &str) {
         let name = path.rsplit(['\\', '/']).next().unwrap_or(path).to_string();
+        let end = base.saturating_add(size);
+        self.images
+            .retain(|(b, s, _)| b.saturating_add(*s) <= base || *b >= end);
         let at = self.images.partition_point(|(b, _, _)| *b < base);
-        if self.images.get(at).is_some_and(|(b, _, _)| *b == base) {
-            self.images[at] = (base, size, name);
-        } else {
-            self.images.insert(at, (base, size, name));
-        }
+        self.images.insert(at, (base, size, name));
+    }
+
+    /// Forgets the image loaded at `base`, so its range no longer names an address.
+    pub fn remove(&mut self, base: u64) {
+        self.images.retain(|(b, _, _)| *b != base);
     }
 
     pub fn find(&self, addr: u64) -> Option<&str> {
@@ -198,7 +306,8 @@ impl ModuleMap {
 struct Kept {
     us: u32,
     ts_ms: i64,
-    routine: u64,
+    /// Index of the module's name in the aggregator.
+    module: u32,
     kind: RoutineKind,
     core: u16,
 }
@@ -213,13 +322,15 @@ fn keep_longest(heap: &mut BinaryHeap<Reverse<Kept>>, kept: Kept, cap: usize) {
     }
 }
 
-/// DPC and ISR durations by routine address, folded into modules at the end.
+/// DPC and ISR durations by module, each routine credited to the module loaded at its address
+/// when it ran.
 #[derive(Debug, Default)]
 pub struct RoutineAggregator {
-    stats: HashMap<(u64, RoutineKind), RoutineStats>,
-    longest: BinaryHeap<Reverse<Kept>>,
-    /// The longest of each routine address, from which each module's longest are taken.
-    by_routine: HashMap<u64, BinaryHeap<Reverse<Kept>>>,
+    names: Vec<String>,
+    ids: HashMap<String, u32>,
+    stats: HashMap<(u32, RoutineKind), RoutineStats>,
+    /// The longest routines of at least `LONG_US` of each module in each interval.
+    by_interval: HashMap<(i64, u32), BinaryHeap<Reverse<Kept>>>,
 }
 
 impl RoutineAggregator {
@@ -227,37 +338,56 @@ impl RoutineAggregator {
         RoutineAggregator::default()
     }
 
-    pub fn add(&mut self, routine: u64, kind: RoutineKind, us: u32, core: u16, ts_ms: i64) {
-        self.stats.entry((routine, kind)).or_default().add(us);
+    fn module_id(&mut self, name: &str) -> u32 {
+        if let Some(id) = self.ids.get(name) {
+            return *id;
+        }
+        let id = self.names.len() as u32;
+        self.names.push(name.to_string());
+        self.ids.insert(name.to_string(), id);
+        id
+    }
+
+    /// Counts one routine at `routine` in the module `modules` holds there now.
+    pub fn add(
+        &mut self,
+        modules: &ModuleMap,
+        routine: u64,
+        kind: RoutineKind,
+        us: u32,
+        core: u16,
+        ts_ms: i64,
+    ) {
+        let module = self.module_id(modules.find(routine).unwrap_or(UNKNOWN_MODULE));
+        self.stats.entry((module, kind)).or_default().add(us);
         let kept = Kept {
             us,
             ts_ms,
-            routine,
+            module,
             kind,
             core,
         };
-        keep_longest(&mut self.longest, kept, LONGEST_KEPT);
-        keep_longest(
-            self.by_routine.entry(routine).or_default(),
-            kept,
-            MODULE_LONGEST_KEPT,
-        );
+        if us >= LONG_US {
+            keep_longest(
+                self.by_interval
+                    .entry((ts_ms.div_euclid(INTERVAL_MS), module))
+                    .or_default(),
+                kept,
+                INTERVAL_KEPT,
+            );
+        }
     }
 
-    /// Modules by DPC plus ISR time, most first, and the longest routines, longest first: the
-    /// overall longest and each module's own longest.
-    pub fn finish(self, modules: &ModuleMap) -> (Vec<DriverLatency>, Vec<LongRoutine>) {
-        let name = |addr: u64| modules.find(addr).unwrap_or(UNKNOWN_MODULE).to_string();
-        let mut by_module: HashMap<String, DriverLatency> = HashMap::new();
-        for ((routine, kind), stats) in &self.stats {
-            let module = name(*routine);
-            let driver = by_module
-                .entry(module.clone())
-                .or_insert_with(|| DriverLatency {
-                    module,
-                    dpc: RoutineStats::default(),
-                    isr: RoutineStats::default(),
-                });
+    /// Modules by DPC plus ISR time, most first, and the routines of at least `LONG_US` kept for each
+    /// module in each interval, longest first.
+    pub fn finish(self) -> (Vec<DriverLatency>, Vec<LongRoutine>) {
+        let mut by_module: HashMap<u32, DriverLatency> = HashMap::new();
+        for ((module, kind), stats) in &self.stats {
+            let driver = by_module.entry(*module).or_insert_with(|| DriverLatency {
+                module: self.names[*module as usize].clone(),
+                dpc: RoutineStats::default(),
+                isr: RoutineStats::default(),
+            });
             match kind {
                 RoutineKind::Dpc => driver.dpc.merge(stats),
                 RoutineKind::Isr => driver.isr.merge(stats),
@@ -269,26 +399,19 @@ impl RoutineAggregator {
                 .cmp(&a.total_us())
                 .then(a.module.cmp(&b.module))
         });
-        let mut by_module: HashMap<String, Vec<Kept>> = HashMap::new();
-        for (routine, heap) in self.by_routine {
-            by_module
-                .entry(name(routine))
-                .or_default()
-                .extend(heap.into_iter().map(|Reverse(k)| k));
-        }
-        let mut chosen: BTreeSet<Kept> = self.longest.into_iter().map(|Reverse(k)| k).collect();
-        for mut own in by_module.into_values() {
-            own.sort_by(|a, b| b.cmp(a));
-            chosen.extend(own.into_iter().take(MODULE_LONGEST_KEPT));
-        }
-        let mut kept: Vec<Kept> = chosen.into_iter().collect();
+        let mut kept: Vec<Kept> = self
+            .by_interval
+            .into_values()
+            .flatten()
+            .map(|Reverse(k)| k)
+            .collect();
         kept.sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
         let longest = kept
             .into_iter()
             .map(|k| LongRoutine {
                 ts_ms: k.ts_ms,
                 core: k.core,
-                module: name(k.routine),
+                module: self.names[k.module as usize].clone(),
                 kind: k.kind,
                 us: k.us,
             })
@@ -317,8 +440,18 @@ struct AppTrack {
     frames: u32,
     worst_ms: f32,
     bins: BTreeMap<u32, u32>,
-    /// The `HITCHES_KEPT` longest frames of at least `HITCH_MIN_MS`, shortest on top.
-    longest: BinaryHeap<Reverse<Long>>,
+    /// The `INTERVAL_KEPT` longest frames of at least `HITCH_MIN_MS` of each interval.
+    by_interval: HashMap<i64, BinaryHeap<Reverse<Long>>>,
+}
+
+/// Keeps the `cap` longest frames offered, shortest on top.
+fn keep_long(heap: &mut BinaryHeap<Reverse<Long>>, long: Long, cap: usize) {
+    if heap.len() < cap {
+        heap.push(Reverse(long));
+    } else if heap.peek().is_some_and(|Reverse(min)| *min < long) {
+        heap.pop();
+        heap.push(Reverse(long));
+    }
 }
 
 impl AppTrack {
@@ -331,12 +464,13 @@ impl AppTrack {
             return;
         }
         let long = (bin, Reverse(ts_ms), frame_ms.to_bits());
-        if self.longest.len() < HITCHES_KEPT {
-            self.longest.push(Reverse(long));
-        } else if self.longest.peek().is_some_and(|Reverse(min)| *min < long) {
-            self.longest.pop();
-            self.longest.push(Reverse(long));
-        }
+        keep_long(
+            self.by_interval
+                .entry(ts_ms.div_euclid(INTERVAL_MS))
+                .or_default(),
+            long,
+            INTERVAL_KEPT,
+        );
     }
 
     /// The frame length at `index` of all the frames sorted from shortest to longest.
@@ -370,10 +504,11 @@ impl FrameAggregator {
             .add(ts_ms, frame_ms);
     }
 
-    /// Apps with at least 60 frames, most hitches first then most frames, and the worst hitches in time order.
+    /// Apps with at least 60 frames, but not the compositor, most hitches first then most frames, and
+    /// the worst hitches of each interval of the apps that draw steadily, in time order.
     pub fn finish(self) -> (Vec<AppFrames>, Vec<FrameHitch>) {
         let mut apps = Vec::new();
-        let mut hitches = Vec::new();
+        let mut hitches: Vec<FrameHitch> = Vec::new();
         for ((name, pid), track) in self.apps {
             if (track.frames as usize) < MIN_FRAMES {
                 continue;
@@ -396,19 +531,25 @@ impl FrameAggregator {
                 worst_ms: track.worst_ms,
                 hitches: count,
             };
-            if !renders_steadily(&app) {
+            if is_compositor(&app.name) {
                 continue;
             }
-            for Reverse((bin, Reverse(ts_ms), bits)) in track.longest {
-                if hitch(ms_of(bin)) {
-                    hitches.push(FrameHitch {
-                        ts_ms,
-                        app: app.name.clone(),
-                        pid,
-                        frame_ms: f32::from_bits(bits),
-                        median_ms,
-                    });
-                }
+            if renders_steadily(&app) {
+                hitches.extend(
+                    track
+                        .by_interval
+                        .into_values()
+                        .flatten()
+                        .map(|Reverse(long)| long)
+                        .filter(|(bin, _, _)| hitch(ms_of(*bin)))
+                        .map(|(_, Reverse(ts_ms), bits)| FrameHitch {
+                            ts_ms,
+                            app: app.name.clone(),
+                            pid,
+                            frame_ms: f32::from_bits(bits),
+                            median_ms,
+                        }),
+                );
             }
             apps.push(app);
         }
@@ -419,13 +560,7 @@ impl FrameAggregator {
                 .then(a.name.cmp(&b.name))
                 .then(a.pid.cmp(&b.pid))
         });
-        hitches.sort_by(|a, b| {
-            b.frame_ms
-                .total_cmp(&a.frame_ms)
-                .then(a.ts_ms.cmp(&b.ts_ms))
-        });
-        hitches.truncate(HITCHES_KEPT);
-        hitches.sort_by_key(|h| h.ts_ms);
+        hitches.sort_by_key(|h| (h.ts_ms, h.pid, h.frame_ms.to_bits()));
         (apps, hitches)
     }
 }
@@ -495,7 +630,7 @@ pub fn capture_findings(capture: &DeepCapture) -> Vec<Suspect> {
         .drivers
         .iter()
         .filter(|d| nameable(&d.module))
-        .filter_map(|d| driver_finding(d, duration_ms))
+        .filter_map(|d| driver_finding(d, duration_ms, capture))
         .collect();
     found.extend(
         capture
@@ -507,17 +642,23 @@ pub fn capture_findings(capture: &DeepCapture) -> Vec<Suspect> {
     ranked(found, capture.lost_events)
 }
 
-fn driver_finding(driver: &DriverLatency, duration_ms: i64) -> Option<(Suspect, f64)> {
+fn driver_finding(
+    driver: &DriverLatency,
+    duration_ms: i64,
+    capture: &DeepCapture,
+) -> Option<(Suspect, f64)> {
     let intermediary = is_intermediary(&driver.module);
     let minutes = duration_ms as f64 / 60_000.0;
     let core_pct = (driver.total_us() as f64 / (duration_ms as f64 * 1_000.0) * 100.0) as f32;
     let slow = driver.dpc.at_least(SLOW_US) + driver.isr.at_least(SLOW_US);
     let max_us = driver.max_us();
+    let long = driver.dpc.at_least(LONG_US) + driver.isr.at_least(LONG_US);
     let confidence = if max_us >= LONG_US {
-        if intermediary {
-            Confidence::Medium
-        } else {
-            Confidence::High
+        let sure = long >= REPEAT_TO_BLAME || backed_on_page(&driver.module, capture);
+        match (sure, intermediary) {
+            (true, false) => Confidence::High,
+            (true, true) | (false, false) => Confidence::Medium,
+            (false, true) => Confidence::Low,
         }
     } else if slow as f64 / minutes >= SLOW_PER_MIN || core_pct >= CORE_PCT {
         if intermediary {
@@ -545,12 +686,25 @@ fn driver_finding(driver: &DriverLatency, duration_ms: i64) -> Option<(Suspect, 
             count: driver.dpc.count + driver.isr.count,
             max_us,
             at_least_100us: slow,
-            at_least_1ms: driver.dpc.at_least(LONG_US) + driver.isr.at_least(LONG_US),
+            at_least_1ms: long,
             core_pct,
         }],
         next_steps: update_driver(intermediary),
     };
     Some((suspect, f64::from(max_us)))
+}
+
+/// Whether a hiccup or a hitch lies next to one of the module's long routines kept in the capture.
+fn backed_on_page(module: &str, capture: &DeepCapture) -> bool {
+    capture
+        .longest
+        .iter()
+        .filter(|l| l.module == module && l.us >= LONG_US)
+        .any(|l| {
+            let routine = l.span();
+            capture.hiccups.iter().any(|h| routine.near(h.span()))
+                || capture.hitches.iter().any(|h| routine.near(h.span()))
+        })
 }
 
 fn app_finding(app: &AppFrames, capture: &DeepCapture) -> (Suspect, f64) {
@@ -610,16 +764,16 @@ fn window_driver(
     hitches: &[&FrameHitch],
 ) -> (Suspect, f64) {
     longs.sort_by(|a, b| b.us.cmp(&a.us).then(a.ts_ms.cmp(&b.ts_ms)));
-    let near_long = |ts_ms: i64| longs.iter().any(|l| (l.ts_ms - ts_ms).abs() <= NEAR_MS);
+    let near_long = |span: Span| longs.iter().any(|l| l.span().near(span));
     let backing_hiccups: Vec<&ProbeHiccup> = hiccups
         .iter()
         .copied()
-        .filter(|h| near_long(h.ts_ms))
+        .filter(|h| near_long(h.span()))
         .collect();
     let backing_hitches: Vec<&FrameHitch> = hitches
         .iter()
         .copied()
-        .filter(|h| near_long(h.ts_ms))
+        .filter(|h| near_long(h.span()))
         .collect();
     let intermediary = is_intermediary(module);
     let backed = !backing_hiccups.is_empty() || !backing_hitches.is_empty();
@@ -651,10 +805,10 @@ fn window_driver(
             module: module.to_string(),
             intermediary,
         },
-        confidence: if intermediary && !backed {
-            Confidence::Medium
-        } else {
+        confidence: if backed {
             Confidence::High
+        } else {
+            Confidence::Medium
         },
         evidence,
         next_steps: update_driver(intermediary),
@@ -676,7 +830,7 @@ fn window_app(
     let backing: Vec<&ProbeHiccup> = hiccups
         .iter()
         .copied()
-        .filter(|h| own.iter().any(|f| (f.ts_ms - h.ts_ms).abs() <= NEAR_MS))
+        .filter(|h| own.iter().any(|f| f.span().near(h.span())))
         .collect();
     let summary = capture
         .apps
@@ -720,6 +874,50 @@ fn frames_evidence(app: &AppFrames) -> Evidence {
     }
 }
 
+/// A stretch of time in wall milliseconds.
+#[derive(Clone, Copy)]
+struct Span {
+    from: i64,
+    to: i64,
+}
+
+impl Span {
+    /// Whether the spans overlap or lie within `NEAR_MS` of each other.
+    fn near(self, other: Span) -> bool {
+        self.from - NEAR_MS <= other.to && other.from - NEAR_MS <= self.to
+    }
+}
+
+impl LongRoutine {
+    /// A routine is stamped when it ended, so it ran up to `ts_ms`.
+    fn span(&self) -> Span {
+        Span {
+            from: self.ts_ms - i64::from(self.us / 1_000),
+            to: self.ts_ms,
+        }
+    }
+}
+
+impl ProbeHiccup {
+    /// A hiccup is stamped when the probe woke, so the lag lies before `ts_ms`.
+    fn span(&self) -> Span {
+        Span {
+            from: self.ts_ms - self.lag_ms.max(0.0).ceil() as i64,
+            to: self.ts_ms,
+        }
+    }
+}
+
+impl FrameHitch {
+    /// A frame is stamped when it began, so it lasted from `ts_ms` on.
+    fn span(&self) -> Span {
+        Span {
+            from: self.ts_ms,
+            to: self.ts_ms + self.frame_ms.max(0.0).ceil() as i64,
+        }
+    }
+}
+
 fn hitch_evidence(hitch: &FrameHitch) -> Evidence {
     Evidence::Hitch {
         ts_ms: hitch.ts_ms,
@@ -753,6 +951,8 @@ fn ranked(mut found: Vec<(Suspect, f64)>, lost_events: u32) -> Vec<Suspect> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     const START: i64 = 1_000_000;
@@ -893,55 +1093,58 @@ mod tests {
         map.insert(0x1000, 0x1000, "a.sys");
         map.insert(0x3000, 0x1000, "b.sys");
         let mut agg = RoutineAggregator::new();
-        agg.add(0x1100, RoutineKind::Dpc, 10, 0, 1);
-        agg.add(0x1200, RoutineKind::Dpc, 30, 1, 2);
-        agg.add(0x1200, RoutineKind::Isr, 5, 1, 3);
-        agg.add(0x3100, RoutineKind::Dpc, 100, 0, 4);
-        agg.add(0xdead_0000, RoutineKind::Isr, 7, 0, 5);
-        let (drivers, longest) = agg.finish(&map);
+        agg.add(&map, 0x1100, RoutineKind::Dpc, 1_100, 0, 1);
+        agg.add(&map, 0x1200, RoutineKind::Dpc, 1_300, 1, 2);
+        agg.add(&map, 0x1200, RoutineKind::Isr, 5, 1, 3);
+        agg.add(&map, 0x3100, RoutineKind::Dpc, 5_000, 0, 4);
+        agg.add(&map, 0xdead_0000, RoutineKind::Isr, 7, 0, 5);
+        let (drivers, longest) = agg.finish();
         let order: Vec<&str> = drivers.iter().map(|d| d.module.as_str()).collect();
         assert_eq!(order, ["b.sys", "a.sys", "<unknown>"]);
         let a = &drivers[1];
-        assert_eq!((a.dpc.count, a.dpc.total_us, a.dpc.max_us), (2, 40, 30));
+        assert_eq!(
+            (a.dpc.count, a.dpc.total_us, a.dpc.max_us),
+            (2, 2_400, 1_300)
+        );
         assert_eq!((a.isr.count, a.isr.total_us), (1, 5));
         assert_eq!(drivers[2].isr.count, 1);
-        assert_eq!(longest[0].module, "b.sys");
-        assert_eq!(longest.last().map(|l| l.module.as_str()), Some("a.sys"));
+        let kept: Vec<(&str, u32)> = longest.iter().map(|l| (l.module.as_str(), l.us)).collect();
+        assert_eq!(kept, [("b.sys", 5_000), ("a.sys", 1_300), ("a.sys", 1_100)]);
     }
 
     #[test]
-    fn longest_keeps_the_top_fifty() {
+    fn an_interval_keeps_its_three_longest_routines_of_a_module() {
+        let map = ModuleMap::new();
         let mut agg = RoutineAggregator::new();
-        for us in 1..=80u32 {
-            agg.add(0x10, RoutineKind::Dpc, us, 0, i64::from(us));
+        for us in 1_001..=1_080u32 {
+            agg.add(&map, 0x10, RoutineKind::Dpc, us, 0, i64::from(us));
         }
-        let (drivers, longest) = agg.finish(&ModuleMap::new());
-        assert_eq!(longest.len(), LONGEST_KEPT);
-        assert_eq!(longest.first().map(|l| l.us), Some(80));
-        assert_eq!(longest.last().map(|l| l.us), Some(31));
-        assert!(longest.windows(2).all(|w| w[0].us >= w[1].us));
-        assert_eq!(drivers[0].dpc.count, 80);
+        agg.add(&map, 0x10, RoutineKind::Dpc, 999, 0, 500);
+        let (drivers, longest) = agg.finish();
+        let kept: Vec<u32> = longest.iter().map(|l| l.us).collect();
+        assert_eq!(kept, [1_080, 1_079, 1_078], "under 1 ms stays out");
+        assert_eq!(drivers[0].dpc.count, 81, "the totals count every routine");
     }
 
     #[test]
-    fn every_module_keeps_its_own_longest() {
+    fn every_module_keeps_its_own_longest_of_each_interval() {
         let mut map = ModuleMap::new();
         map.insert(0x1000, 0x1000, "busy.sys");
         map.insert(0x3000, 0x1000, "quiet.sys");
         let mut agg = RoutineAggregator::new();
-        for us in 1_000..1_080u32 {
-            agg.add(0x1100, RoutineKind::Dpc, us, 0, i64::from(us));
+        for us in 2_000..2_080u32 {
+            agg.add(&map, 0x1100, RoutineKind::Dpc, us, 0, i64::from(us));
         }
-        for us in 1..=7u32 {
-            agg.add(
-                0x3100 + u64::from(us % 2),
-                RoutineKind::Isr,
-                us,
-                1,
-                i64::from(us),
-            );
+        for (ts_ms, us) in [
+            (10, 1_100),
+            (20, 1_200),
+            (30, 1_050),
+            (40, 1_010),
+            (70_000, 1_300),
+        ] {
+            agg.add(&map, 0x3100, RoutineKind::Isr, us, 1, ts_ms);
         }
-        let (_, longest) = agg.finish(&map);
+        let (_, longest) = agg.finish();
         let quiet: Vec<u32> = longest
             .iter()
             .filter(|l| l.module == "quiet.sys")
@@ -949,37 +1152,111 @@ mod tests {
             .collect();
         assert_eq!(
             quiet,
-            [7, 6, 5, 4, 3],
-            "its five longest, across its routines"
+            [1_300, 1_200, 1_100, 1_050],
+            "three in the first minute, one in the next"
         );
-        assert_eq!(longest.len(), LONGEST_KEPT + MODULE_LONGEST_KEPT);
+        let mut per_interval: BTreeMap<(i64, &str), usize> = BTreeMap::new();
+        for l in &longest {
+            *per_interval
+                .entry((l.ts_ms.div_euclid(INTERVAL_MS), &l.module))
+                .or_default() += 1;
+        }
+        assert!(per_interval.values().all(|n| *n <= INTERVAL_KEPT));
+        assert_eq!(longest.len(), INTERVAL_KEPT + 4);
         assert!(longest.windows(2).all(|w| w[0].us >= w[1].us));
     }
 
     #[test]
-    fn driver_over_1ms_is_high() {
+    fn one_routine_of_1ms_is_not_high() {
         let mut c = capture();
-        c.drivers = vec![driver("nvlddmkm.sys", &[20, 1_500], &[])];
+        c.drivers = vec![driver("usbxhci.sys", &[1_100], &[])];
         let found = capture_findings(&c);
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].confidence, Confidence::High);
+        assert_eq!(found[0].confidence, Confidence::Medium);
         assert_eq!(
             found[0].cause,
             Cause::DriverModule {
-                module: "nvlddmkm.sys".to_string(),
+                module: "usbxhci.sys".to_string(),
                 intermediary: false
             }
         );
         assert_eq!(found[0].next_steps, [NextStep::UpdateDriver]);
+    }
+
+    #[test]
+    fn repeated_routines_of_1ms_are_high() {
+        let mut c = capture();
+        c.drivers = vec![
+            driver("nvlddmkm.sys", &[20, 1_500, 1_200, 3_000], &[]),
+            driver("usbxhci.sys", &[1_100], &[1_100, 1_300]),
+            driver("twice.sys", &[1_100, 1_100], &[]),
+        ];
+        let found = capture_findings(&c);
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].confidence, Confidence::High);
         assert!(matches!(
             found[0].evidence[0],
             Evidence::Routine {
-                max_us: 1_500,
-                count: 2,
-                at_least_1ms: 1,
+                max_us: 3_000,
+                count: 4,
+                at_least_1ms: 3,
                 ..
             }
         ));
+        assert_eq!(
+            named(&found, "usbxhci.sys").map(|s| s.confidence),
+            Some(Confidence::High),
+            "a routine of each kind counts toward the repetition"
+        );
+        assert_eq!(
+            named(&found, "twice.sys").map(|s| s.confidence),
+            Some(Confidence::Medium)
+        );
+    }
+
+    #[test]
+    fn a_hiccup_next_to_a_long_routine_makes_a_driver_high_on_the_page() {
+        let at = START + 20_000;
+        let mut c = capture();
+        c.drivers = vec![driver("usbxhci.sys", &[1_100], &[])];
+        c.longest = vec![long(at, "usbxhci.sys", 1_100)];
+        c.hiccups = vec![ProbeHiccup {
+            ts_ms: at + 30 + NEAR_MS + 1,
+            lag_ms: 30.0,
+        }];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+        c.hiccups[0].ts_ms = at + 30 + NEAR_MS;
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
+        c.hiccups.clear();
+        c.apps = vec![app("game.exe", 3)];
+        c.hitches = vec![hitch(at - 40, "game.exe")];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
+        c.longest = vec![long(at + 5_000, "other.sys", 1_100)];
+        assert_eq!(
+            capture_findings(&c)[0].confidence,
+            Confidence::Medium,
+            "only the module's own routines are backed"
+        );
+    }
+
+    #[test]
+    fn a_lone_routine_of_an_intermediary_is_low() {
+        let mut c = capture();
+        c.drivers = vec![driver("storport.sys", &[5_000], &[])];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Low);
+        c.drivers = vec![driver("storport.sys", &[5_000; 3], &[])];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn a_lone_routine_in_a_window_is_medium() {
+        let at = START + 20_000;
+        let mut c = capture();
+        c.longest = vec![long(at, "usbxhci.sys", 1_100)];
+        let found = capture_suspects(START, START + 60_000, &c);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].confidence, Confidence::Medium);
+        assert_eq!(found[0].next_steps, [NextStep::UpdateDriver]);
     }
 
     #[test]
@@ -1004,7 +1281,7 @@ mod tests {
         assert!(!is_intermediary("storahci.sys"));
         let mut c = capture();
         c.drivers = vec![
-            driver("storport.sys", &[5_000], &[]),
+            driver("storport.sys", &[5_000; 3], &[]),
             driver("ndis.sys", &[150; 60], &[]),
         ];
         let found = capture_findings(&c);
@@ -1080,24 +1357,25 @@ mod tests {
         }
         assert_eq!(track.frames, 2_000_000);
         assert!(track.bins.len() <= 11, "one count per frame length");
-        assert_eq!(track.longest.len(), HITCHES_KEPT);
+        assert!(track.by_interval.values().all(|h| h.len() <= INTERVAL_KEPT));
+        assert!(track.by_interval.len() > 200, "every minute has its own");
         assert!((track.at(track.frames / 2) - 6.95).abs() < 0.011);
     }
 
     #[test]
-    fn frames_are_summarised_and_hitches_kept_worst_first() {
+    fn hitches_keep_the_worst_of_each_interval() {
         let mut agg = FrameAggregator::new();
         for i in 0..5_000 {
             agg.add("game", 1, i, 10.0);
         }
-        for i in 0..HITCHES_KEPT as i64 + 20 {
+        for i in 0..220i64 {
             agg.add("game", 1, 10_000 + i, 50.0 + i as f32);
         }
+        agg.add("game", 1, 300_000, 30.0);
         let (apps, hitches) = agg.finish();
-        assert_eq!(apps[0].hitches, HITCHES_KEPT as u32 + 20);
-        assert_eq!(hitches.len(), HITCHES_KEPT);
-        assert!(hitches.windows(2).all(|w| w[0].ts_ms <= w[1].ts_ms));
-        assert!(hitches.iter().all(|h| h.frame_ms >= 70.0));
+        assert_eq!(apps[0].hitches, 221);
+        let kept: Vec<f32> = hitches.iter().map(|h| h.frame_ms).collect();
+        assert_eq!(kept, [267.0, 268.0, 269.0, 30.0], "in time order");
         assert!(apps[0].p99_ms > apps[0].median_ms);
     }
 
@@ -1158,13 +1436,13 @@ mod tests {
         let mut c = capture();
         c.longest = vec![long(at, "storport.sys", 2_000)];
         c.hiccups = vec![ProbeHiccup {
-            ts_ms: at + 60,
+            ts_ms: at + 30 + NEAR_MS + 1,
             lag_ms: 30.0,
         }];
         let far = capture_suspects(START, START + 60_000, &c);
         assert_eq!(far[0].confidence, Confidence::Medium);
         c.hiccups = vec![ProbeHiccup {
-            ts_ms: at + 50,
+            ts_ms: at + 30 + NEAR_MS,
             lag_ms: 30.0,
         }];
         let near = capture_suspects(START, START + 60_000, &c);
@@ -1256,8 +1534,8 @@ mod tests {
         let mut c = capture();
         c.drivers = vec![
             driver("mid.sys", &[150; 60], &[]),
-            driver("small.sys", &[1_200], &[]),
-            driver("big.sys", &[8_000], &[]),
+            driver("small.sys", &[1_200; 3], &[]),
+            driver("big.sys", &[8_000; 3], &[]),
         ];
         c.apps = vec![app("game.exe", 3)];
         let order: Vec<Cause> = capture_findings(&c).into_iter().map(|s| s.cause).collect();
@@ -1287,13 +1565,17 @@ mod tests {
         assert_eq!(capture_findings(&c).len(), 1);
         let window = capture_suspects(START, START + 60_000, &c);
         assert_eq!(window.len(), 1);
-        assert_eq!(window[0].confidence, Confidence::High);
+        assert_eq!(window[0].confidence, Confidence::Medium);
     }
 
     #[test]
     fn capture_roundtrips_through_postcard() {
         let mut c = capture();
         c.kernel = CaptureSource::Unavailable("denied".to_string());
+        c.frames = CaptureSource::Partial {
+            covered_secs: 180,
+            reason: "PresentMon exited with 1 after 180 of 300 s".to_string(),
+        };
         c.drivers = vec![driver("a.sys", &[1, 2, 3], &[4])];
         c.longest = vec![long(START + 1, "a.sys", 4)];
         c.apps = vec![app("game.exe", 1)];
@@ -1332,7 +1614,7 @@ mod tests {
     }
 
     #[test]
-    fn compositor_and_on_demand_apps_are_left_out() {
+    fn compositor_is_left_out_and_on_demand_apps_are_kept_but_never_suspects() {
         let mut agg = FrameAggregator::new();
         for i in 0..200 {
             agg.add("dwm.exe", 10, i * 7, 7.0);
@@ -1346,8 +1628,109 @@ mod tests {
         }
         let (apps, hitches) = agg.finish();
         let names: Vec<&str> = apps.iter().map(|a| a.name.as_str()).collect();
-        assert_eq!(names, ["game.exe"]);
+        assert_eq!(names, ["browser.exe", "game.exe"]);
         assert!(hitches.iter().all(|h| h.app == "game.exe"));
+
+        let mut c = capture();
+        c.apps = apps;
+        c.hitches = hitches;
+        let named = capture_findings(&c);
+        assert!(
+            !named
+                .iter()
+                .any(|s| matches!(&s.cause, Cause::Frames { app } if app == "browser.exe"))
+        );
+    }
+
+    #[test]
+    fn app_over_five_percent_hitched_is_kept_but_never_a_suspect() {
+        let mut agg = FrameAggregator::new();
+        for i in 0..3_000 {
+            agg.add("stutter.exe", 5, i * 7, 7.0);
+        }
+        for i in 0..180 {
+            agg.add("stutter.exe", 5, 30_000 + i * 1_000, 1_000.0);
+        }
+        let (apps, hitches) = agg.finish();
+        assert_eq!(apps.len(), 1);
+        assert_eq!((apps[0].frames, apps[0].hitches), (3_180, 180));
+        assert!(!renders_steadily(&apps[0]));
+        assert!(hitches.is_empty(), "its stalls are not told from idle gaps");
+
+        let mut c = capture();
+        c.apps = apps;
+        assert!(capture_findings(&c).is_empty());
+        assert!(capture_suspects(START, START + 60_000, &c).is_empty());
+        assert!(steady_only(&c).apps.is_empty());
+    }
+
+    #[test]
+    fn window_sees_a_1_4ms_routine_among_a_thousand_longer_ones() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x1000, "busy.sys");
+        let at = START + 10 * 3_600_000 + 17_000;
+        let mut agg = RoutineAggregator::new();
+        for i in 0..1_000u32 {
+            let ts_ms = START + i64::from(i) * 86_400;
+            agg.add(&map, 0x1100, RoutineKind::Dpc, 3_000 + i * 6, 0, ts_ms);
+        }
+        agg.add(&map, 0x1100, RoutineKind::Dpc, 1_400, 1, at);
+        let (drivers, longest) = agg.finish();
+        let mut c = capture();
+        c.end_ms = START + 24 * 3_600_000;
+        c.drivers = drivers;
+        c.longest = longest;
+        let found = capture_suspects(at - 10_000, at + 10_000, &c);
+        let busy = named(&found, "busy.sys").expect("the routine of the window");
+        assert!(matches!(
+            busy.evidence[0],
+            Evidence::LongRoutine { ts_ms, us: 1_400, .. } if ts_ms == at
+        ));
+    }
+
+    #[test]
+    fn window_sees_the_hitch_of_a_quiet_app() {
+        let at = START + 10_000_000;
+        let mut agg = FrameAggregator::new();
+        for i in 0..20_000 {
+            agg.add("loud.exe", 1, START + i * 4_000, 10.0);
+            agg.add("quiet.exe", 2, START + i * 4_000, 10.0);
+        }
+        for i in 0..250 {
+            agg.add("loud.exe", 1, START + 100_000 + i * 91_000, 300.0);
+        }
+        agg.add("quiet.exe", 2, at, 45.0);
+        let (apps, hitches) = agg.finish();
+        assert_eq!(apps.len(), 2);
+        let mut c = capture();
+        c.apps = apps;
+        c.hitches = hitches;
+        let found = capture_suspects(at - 10_000, at + 10_000, &c);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].cause,
+            Cause::Frames {
+                app: "quiet.exe".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn intervals_keep_their_worst_routines_once() {
+        let map = ModuleMap::new();
+        let mut agg = RoutineAggregator::new();
+        for i in 0..200u32 {
+            let us = 5_000 + i;
+            agg.add(&map, 0x10, RoutineKind::Dpc, us, 0, i64::from(i) * 100);
+        }
+        agg.add(&map, 0x10, RoutineKind::Dpc, 1_100, 0, 130_000);
+        agg.add(&map, 0x10, RoutineKind::Dpc, 900, 0, 190_000);
+        let (_, longest) = agg.finish();
+        let keys: BTreeSet<(i64, u32)> = longest.iter().map(|l| (l.ts_ms, l.us)).collect();
+        assert_eq!(keys.len(), longest.len(), "no routine twice");
+        assert!(keys.contains(&(130_000, 1_100)), "the third minute's");
+        assert!(!keys.contains(&(190_000, 900)), "under 1 ms stays out");
+        assert_eq!(longest.len(), INTERVAL_KEPT + 1);
     }
 
     #[test]
@@ -1378,5 +1761,192 @@ mod tests {
                 .iter()
                 .any(|s| matches!(&s.cause, Cause::Frames { app } if app == "dwm.exe"))
         );
+    }
+
+    #[test]
+    fn a_routine_stays_in_the_module_that_held_its_address_when_it_ran() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x1000, r"\SystemRoot\System32\drivers\x.sys");
+        let mut agg = RoutineAggregator::new();
+        agg.add(&map, 0x1100, RoutineKind::Dpc, 2_000, 0, 10);
+        map.remove(0x1000);
+        map.insert(0x1000, 0x1000, "y.sys");
+        agg.add(&map, 0x1100, RoutineKind::Dpc, 50, 0, 20);
+        let (drivers, longest) = agg.finish();
+        let x = drivers.iter().find(|d| d.module == "x.sys").expect("x.sys");
+        let y = drivers.iter().find(|d| d.module == "y.sys").expect("y.sys");
+        assert_eq!((x.dpc.count, x.dpc.max_us), (1, 2_000));
+        assert_eq!((y.dpc.count, y.dpc.max_us), (1, 50));
+        assert_eq!(longest[0].module, "x.sys");
+    }
+
+    #[test]
+    fn a_routine_before_the_image_loaded_is_unknown() {
+        let mut map = ModuleMap::new();
+        let mut agg = RoutineAggregator::new();
+        agg.add(&map, 0x1100, RoutineKind::Isr, 30, 0, 10);
+        map.insert(0x1000, 0x1000, "late.sys");
+        agg.add(&map, 0x1100, RoutineKind::Isr, 40, 0, 20);
+        let (drivers, _) = agg.finish();
+        let unknown = drivers.iter().find(|d| d.module == UNKNOWN_MODULE);
+        assert_eq!(unknown.map(|d| d.isr.count), Some(1));
+        assert!(drivers.iter().any(|d| d.module == "late.sys"));
+    }
+
+    #[test]
+    fn an_unloaded_image_no_longer_owns_its_addresses() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x2000, "gone.sys");
+        assert_eq!(map.find(0x1800), Some("gone.sys"));
+        map.remove(0x1000);
+        assert_eq!(map.find(0x1800), None);
+        map.remove(0x9999);
+    }
+
+    #[test]
+    fn a_new_image_replaces_the_stale_ones_it_overlaps() {
+        let mut map = ModuleMap::new();
+        map.insert(0x1000, 0x1000, "old.sys");
+        map.insert(0x3000, 0x1000, "keep.sys");
+        map.insert(0x1800, 0x1000, "new.sys");
+        assert_eq!(map.find(0x1100), None);
+        assert_eq!(map.find(0x1900), Some("new.sys"));
+        assert_eq!(map.find(0x3100), Some("keep.sys"));
+    }
+
+    #[test]
+    fn a_frame_and_a_hiccup_of_one_stall_back_each_other() {
+        let mut c = capture();
+        c.apps = vec![app("game.exe", 3)];
+        c.hitches = vec![hitch(START + 1_000, "game.exe")];
+        c.hiccups = vec![ProbeHiccup {
+            ts_ms: START + 1_120,
+            lag_ms: 110.0,
+        }];
+        let found = capture_suspects(START, START + 5_000, &c);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].confidence, Confidence::High);
+        c.hiccups[0].ts_ms = START + 1_120 + 400;
+        let found = capture_suspects(START, START + 5_000, &c);
+        assert_eq!(found[0].confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn a_routine_inside_a_long_stall_backs_it() {
+        let at = START + 20_000;
+        let mut c = capture();
+        c.drivers = vec![driver("usbxhci.sys", &[1_100], &[])];
+        c.longest = vec![long(at, "usbxhci.sys", 1_100)];
+        c.hiccups = vec![ProbeHiccup {
+            ts_ms: at + 100,
+            lag_ms: 110.0,
+        }];
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::High);
+        c.hiccups[0].ts_ms = at + 110 + NEAR_MS + 1 + 110;
+        assert_eq!(capture_findings(&c)[0].confidence, Confidence::Medium);
+    }
+
+    /// A day with 30 modules long in every minute and 5 apps stalling in most of them.
+    fn busy_day() -> DeepCapture {
+        let mut map = ModuleMap::new();
+        for m in 0..30u64 {
+            map.insert(0x10_0000 * (m + 1), 0x1000, &format!("driver{m:02}.sys"));
+        }
+        let mut routines = RoutineAggregator::new();
+        let mut frames = FrameAggregator::new();
+        for minute in 0..CAPTURE_MINUTES_MAX as i64 {
+            let at = START + minute * INTERVAL_MS;
+            for m in 0..30u64 {
+                for i in 0..10u32 {
+                    let us = 1_000 + i * 45;
+                    routines.add(
+                        &map,
+                        0x10_0000 * (m + 1),
+                        RoutineKind::Dpc,
+                        us,
+                        0,
+                        at + i64::from(i),
+                    );
+                }
+            }
+            for a in 0..5 {
+                for f in 0..60 {
+                    frames.add(&format!("app{a}.exe"), a, at + f * 900, 10.0);
+                }
+                frames.add(&format!("app{a}.exe"), a, at + 55_000, 300.0);
+            }
+        }
+        let (drivers, longest) = routines.finish();
+        let (apps, hitches) = frames.finish();
+        let mut c = capture();
+        c.end_ms = START + CAPTURE_MINUTES_MAX as i64 * INTERVAL_MS;
+        c.drivers = drivers;
+        c.longest = longest;
+        c.apps = apps;
+        c.hitches = hitches;
+        c.hiccups = (0..CAPTURE_MINUTES_MAX as i64 * 3)
+            .map(|i| ProbeHiccup {
+                ts_ms: START + i * 20_000,
+                lag_ms: 9.0 + (i % 7) as f32,
+            })
+            .collect();
+        c
+    }
+
+    #[test]
+    fn a_busy_day_stays_under_the_ceiling_untouched() {
+        let c = busy_day();
+        let stored = postcard::to_allocvec(&c).unwrap().len();
+        assert!(stored < CAPTURE_BYTES_MAX, "{stored} bytes");
+        assert!(
+            c.size_estimate() >= stored,
+            "the estimate is an upper bound"
+        );
+        assert!(c.size_estimate() < CAPTURE_BYTES_MAX);
+        let mut fitted = c.clone();
+        fitted.fit_to_ceiling();
+        assert_eq!(fitted, c);
+    }
+
+    #[test]
+    fn a_capture_over_the_ceiling_loses_its_shortest_entries_first() {
+        let mut c = capture();
+        c.longest = (0..600_000u32)
+            .map(|i| {
+                long(
+                    START + i64::from(i),
+                    &format!("driver{}.sys", i % 400),
+                    1_000 + i,
+                )
+            })
+            .collect();
+        c.hitches = (0..2_000).map(|i| hitch(START + i, "app.exe")).collect();
+        let longest_us = 1_000 + 599_999;
+        assert!(c.size_estimate() > CAPTURE_BYTES_MAX);
+        c.fit_to_ceiling();
+        assert!(c.size_estimate() <= CAPTURE_BYTES_MAX);
+        assert!(postcard::to_allocvec(&c).unwrap().len() <= CAPTURE_BYTES_MAX);
+        assert_eq!(c.longest.iter().map(|l| l.us).max(), Some(longest_us));
+        assert!(c.longest.iter().all(|l| l.us > 1_000 + 100_000));
+        assert_eq!(c.hitches.len(), 2_000, "what was small enough stays");
+    }
+
+    #[test]
+    fn the_page_lists_a_bounded_view_of_a_day() {
+        let c = busy_day();
+        assert!(c.hitches.len() > PAGE_HITCHES);
+        let view = c.page_view();
+        assert_eq!(view.hitches.len(), PAGE_HITCHES);
+        assert!(view.hitches.windows(2).all(|w| w[0].ts_ms <= w[1].ts_ms));
+        assert!(view.longest.len() <= PAGE_LONGEST + 30 * PAGE_MODULE_LONGEST);
+        assert!(view.longest.windows(2).all(|w| w[0].us >= w[1].us));
+        assert_eq!(view.longest[0].us, c.longest[0].us);
+        for m in 0..30 {
+            let own = format!("driver{m:02}.sys");
+            let shown = view.longest.iter().filter(|l| l.module == own).count();
+            assert!(shown >= PAGE_MODULE_LONGEST, "{own} shows its own longest");
+        }
+        assert_eq!((&view.drivers, &view.apps), (&c.drivers, &c.apps));
+        assert_eq!(view.hiccups, c.hiccups);
     }
 }

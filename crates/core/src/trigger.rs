@@ -10,6 +10,11 @@ pub enum Severity {
     Severe,
 }
 
+impl Severity {
+    /// Every variant, in declaration order.
+    pub const ALL: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
+}
+
 /// Under 1 s is light, up to 5 s medium, longer severe.
 pub fn severity(duration_ms: f32) -> Severity {
     if duration_ms < 1_000.0 {
@@ -26,6 +31,17 @@ pub fn severity(duration_ms: f32) -> Severity {
 pub enum HangOutcome {
     Recovered,
     Closed,
+    /// Still not responding when watching stopped.
+    StillHung,
+}
+
+impl HangOutcome {
+    /// Every variant, in declaration order.
+    pub const ALL: [HangOutcome; 3] = [
+        HangOutcome::Recovered,
+        HangOutcome::Closed,
+        HangOutcome::StillHung,
+    ];
 }
 
 /// Something that starts an occurrence.

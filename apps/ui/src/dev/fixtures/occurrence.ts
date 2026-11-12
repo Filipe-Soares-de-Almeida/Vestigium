@@ -1,4 +1,4 @@
-// Eight occurrences for the report in the browser, #/occurrence/1 to 8 (8 is a fall), all today; any other id is gone.
+// Fourteen occurrences for the report in the browser, #/occurrence/1 to 14 (8, 13 and 14 are falls), all today; any other id is gone.
 import type {
   Cause,
   Columns,
@@ -161,7 +161,7 @@ function columns(samples: Sample[], fromMs: number, toMs: number): Columns {
     out.cpu.push(found?.cpu_pct ?? null);
     out.mem_used_pct.push(mem);
     out.disk_active_max.push(active);
-    out.disk_latency_max.push(found ? Math.max(...found.disks.map((d) => d.latency_ms)) : null);
+    out.disk_latency_max.push(found ? Math.max(...found.disks.map((d) => d.latency_ms ?? 0)) : null);
     out.gpu.push(found?.gpu_pct ?? null);
     out.probe_lag.push(found?.probe_max_lag_ms ?? null);
     const load = found ? Math.max(found.cpu_pct, active ?? 0, (found.gpu_pct ?? 0) * 0.55, (mem ?? 0) - 35) : 0;
@@ -290,6 +290,7 @@ function storageFreeze(): OccurrenceDto {
       [1000, { Event: { meaning: "StorageReset", provider: "storahci", id: 129 } }],
       [2000, { Event: { meaning: "DiskRetry", provider: "disk", id: 153 } }],
       [6800, "FreezeEnded"],
+      [6800, { EventsDropped: { count: 1184 } }],
       [8000, { AppHung: { name: "Chatter.exe" } }],
       [11_000, { AppRecovered: { name: "Chatter.exe" } }],
     ],
@@ -497,6 +498,71 @@ function unclear(): OccurrenceDto {
   });
 }
 
+/** A light freeze on a calm PC with one suspect, for the sentences each confidence has to word. */
+function calmFreeze(id: number, start: number, suspects: Suspect[], samples = true): OccurrenceDto {
+  const calm = steady(id, 12, 52);
+  return build({
+    id,
+    start,
+    end: start + 500,
+    kind: "Freeze",
+    severity: "Light",
+    triggers: [{ Freeze: { start_ms: start, end_ms: start + 500, lag_ms: 520 } }],
+    moment: (rel) => (!samples || rel === 0 ? null : { ...calm(), lag: rel === 1 ? 520 : undefined }),
+    procs: () => (samples ? [proc(4412, "Browser.exe", 4, 2.6 * GB, 300 * 1024)] : []),
+    suspects,
+    facts: [
+      [0, { FreezeStarted: { duration_ms: 520 } }],
+      [500, "FreezeEnded"],
+    ],
+  });
+}
+
+/** A disk event of each meaning on a calm PC, with the disk slow (high) or normal (medium). */
+function diskEvent(id: number, hour: number, kind: "reset" | "retry" | "media", slow: boolean): OccurrenceDto {
+  const start = at(hour, 12, 30);
+  const [provider, evid, meaning, steps] =
+    kind === "reset"
+      ? (["storahci", 129, "StorageReset", ["UpdateStorageDriver", "CheckDiskCable", "RunDiskTest"]] as const)
+      : kind === "retry"
+        ? (["disk", 153, "DiskRetry", ["RunDiskTest", "CheckDiskCable", "UpdateStorageDriver"]] as const)
+        : (["disk", 7, "DiskBadBlock", ["BackUpNow", "RunDiskTest"]] as const);
+  const evidence: Evidence[] = [{ Event: { ts_ms: start - 2000, provider, id: evid, meaning } }];
+  if (slow) evidence.push(m(start - 1000, "DiskLatencyMs", 640, 200, "0 C:"));
+  return calmFreeze(id, start, [suspect({ Storage: { disk: slow ? "0 C:" : null } }, slow ? "High" : "Medium", evidence, [...steps])]);
+}
+
+/** A driver on one core for 30 % of it: low confidence. */
+function lowDriver(): OccurrenceDto {
+  const start = at(9, 20, 12);
+  return calmFreeze(9, start, [
+    suspect({ Driver: { core: 0 } }, "Low", [m(start - 3000, "CoreDpcIsrPct", 31, 25, "0")], ["EnableSensitiveMode", "DeepCapture"]),
+  ]);
+}
+
+/** The performance ceiling below normal with nothing else to show: low confidence. */
+function lowThrottling(): OccurrenceDto {
+  const start = at(10, 5, 40);
+  return calmFreeze(10, start, [
+    suspect("Throttling", "Low", [m(start - 4000, "PerfLimitPct", 88, 95)], ["CheckCooling", "CheckPowerPlan"]),
+  ]);
+}
+
+/** A capture found slow frames in one app: medium confidence. */
+function mediumFrames(): OccurrenceDto {
+  const start = at(11, 15, 2);
+  return calmFreeze(11, start, [
+    suspect({ Frames: { app: "Starfall.exe" } }, "Medium", [
+      { Frames: { app: "Starfall.exe", frames: 5400, hitches: 38, worst_ms: 96, median_ms: 8.3 } },
+    ], []),
+  ]);
+}
+
+/** A freeze whose window holds no readings at all. */
+function notMeasured(): OccurrenceDto {
+  return calmFreeze(12, at(13, 2, 30), [suspect("NotMeasured", "Low", [], ["EnableSensitiveMode", "DeepCapture"])], false);
+}
+
 /** Seven stutters in sensitive mode while a video conversion held every core. */
 function stutters(): OccurrenceDto {
   const start = at(12, 40, 10);
@@ -538,12 +604,12 @@ function stutters(): OccurrenceDto {
 }
 
 /** The PC fell with a blue screen five seconds after the last stored second, memory nearly full. */
-function blueScreen(): OccurrenceDto {
-  const last = at(7, 12, 25);
+function blueScreen(id = 8, code = 0x50, hour = 7, steps: Suspect["next_steps"] = ["ReadCrashDump"]): OccurrenceDto {
+  const last = at(hour, 12, 25);
   const down = last + 5000;
-  const boot = at(7, 19, 2);
-  const n = noise(8);
-  const crash: CrashKind = { BlueScreen: { code: 0x50, params: [0, 0, 0, 0] } };
+  const boot = at(hour, 19, 2);
+  const n = noise(id);
+  const crash: CrashKind = { BlueScreen: { code, params: [0, 0, 0, 0] } };
   const loss = event(boot + 1000, "Microsoft-Windows-Kernel-Power", 41, "PowerLoss", 91002);
   const unexpected = event(boot, "EventLog", 6008, "UnexpectedShutdown", 91001);
   const report = event(boot + 12_000, "Microsoft-Windows-WER-SystemErrorReporting", 1001, "BugCheck", 91010);
@@ -551,7 +617,7 @@ function blueScreen(): OccurrenceDto {
     Event: { ts_ms: e.ts_ms, provider: e.provider, id: e.id, meaning: e.meaning },
   });
   return build({
-    id: 8,
+    id,
     start: last,
     end: down,
     kind: "PostMortem",
@@ -574,10 +640,10 @@ function blueScreen(): OccurrenceDto {
     events: [unexpected, loss, report],
     truncated: true,
     suspects: [
-      suspect({ BlueScreen: { code: 0x50 } }, "High", [loss, unexpected, report].map(asEvidence), ["UpdateDriver"]),
-      suspect({ Memory: { process: "Browser.exe" } }, "Medium", [m(last - 20_000, "MemAvailPct", 3, 5)], [
-        "CloseMemoryHeavyApp",
-      ]),
+      suspect({ BlueScreen: { code } }, "High", [loss, unexpected, report].map(asEvidence), steps),
+      ...(id === 8
+        ? [suspect({ Memory: { process: "Browser.exe" } }, "Medium", [m(last - 20_000, "MemAvailPct", 3, 5)], ["CloseMemoryHeavyApp"])]
+        : []),
     ],
     facts: [
       [-60_000, { Busiest: { metric: "PrivateBytes", name: "Browser.exe", value: 14.2 * GB } }],
@@ -588,19 +654,45 @@ function blueScreen(): OccurrenceDto {
   });
 }
 
+function withCaveats(o: OccurrenceDto): OccurrenceDto {
+  const test = { id: 1, kind: "MemoryQuick" as const, subject: "Pc" as const, started_ms: o.start_ms - 20_000, ended_ms: o.start_ms + 20_000, outcome: "Clean" as const };
+  return { ...o, truncated: true, tests: [test] };
+}
+
 const FIXTURES = new Map(
-  [storageFreeze(), appHang(), diskEpisode(), memoryEpisode(), reported(), unclear(), stutters(), blueScreen()].map(
-    (o) => [o.id, o],
-  ),
+  [
+    storageFreeze(),
+    appHang(),
+    diskEpisode(),
+    memoryEpisode(),
+    reported(),
+    unclear(),
+    stutters(),
+    blueScreen(),
+    lowDriver(),
+    lowThrottling(),
+    mediumFrames(),
+    notMeasured(),
+    blueScreen(13, 0x124, 5, ["CheckHardwareStability", "RunMemoryDiagnostic"]),
+    blueScreen(14, 0xa, 4, ["UpdateDriver"]),
+    diskEvent(15, 15, "media", true),
+    diskEvent(16, 16, "retry", true),
+    diskEvent(17, 17, "reset", false),
+    diskEvent(18, 18, "retry", false),
+    diskEvent(19, 19, "media", false),
+  ].map((o) => [o.id, o]),
 );
 
 /** `?covered=1`: a deep capture covers occurrence 6, as the report of an older capture would. */
 const COVERED = new URLSearchParams(location.search).get("covered") === "1";
+/** `?caveats=1`: every occurrence is cut short and overlaps a Vestigium test, and 6 has a capture. */
+const CAVEATS = new URLSearchParams(location.search).get("caveats") === "1";
 
 export const handlers: Record<string, Handler> = {
   occurrence: (args) => {
-    const found = FIXTURES.get(args.id as number) ?? null;
-    if (!found || !COVERED || found.id !== 6) return found;
+    const plain = FIXTURES.get(args.id as number) ?? null;
+    const found = plain && CAVEATS ? withCaveats(plain) : plain;
+    if (!found || !(COVERED || CAVEATS) || found.id !== 6) return found;
     return {
       ...found,
       capture: {

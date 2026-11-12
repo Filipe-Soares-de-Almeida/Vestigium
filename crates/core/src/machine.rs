@@ -8,6 +8,11 @@ pub enum Media {
     Unknown,
 }
 
+impl Media {
+    /// Every variant, in declaration order.
+    pub const ALL: [Media; 3] = [Media::Ssd, Media::Hdd, Media::Unknown];
+}
+
 /// One physical disk, named as the disk counters name it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DiskInfo {

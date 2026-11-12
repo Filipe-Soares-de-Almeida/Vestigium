@@ -15,8 +15,8 @@ fn crossed(facts: &[Fact], metric: Metric) -> usize {
 #[test]
 fn facts_are_in_time_order() {
     let mut window = quiet_window();
-    tweak(&mut window, -20, 5, |s| s.disks[0].latency_ms = 300.0);
-    tweak(&mut window, -3, -3, |s| s.disks[0].latency_ms = 900.0);
+    tweak(&mut window, -20, 5, |s| s.disks[0].latency_ms = Some(300.0));
+    tweak(&mut window, -3, -3, |s| s.disks[0].latency_ms = Some(900.0));
     window.events.push(event(
         T + 5_000,
         "stornvme",
@@ -77,4 +77,83 @@ fn facts_name_the_busiest_process() {
             value: 80.0,
         },
     }));
+}
+
+#[test]
+fn the_crossing_names_the_disk_of_the_peak() {
+    let mut window = quiet_window();
+    tweak(&mut window, -20, -20, |s| {
+        s.disks[0].latency_ms = Some(250.0)
+    });
+    tweak(&mut window, -5, -5, |s| s.disks[1].latency_ms = Some(800.0));
+    let found = facts(&[], &window);
+    let crossing = found
+        .iter()
+        .find(|f| {
+            matches!(
+                f.kind,
+                FactKind::Crossed {
+                    metric: Metric::DiskLatencyMs,
+                    ..
+                }
+            )
+        })
+        .expect("a latency crossing");
+
+    assert_eq!(crossing.at_ms, T - 20_000);
+    let FactKind::Crossed { value, subject, .. } = &crossing.kind else {
+        unreachable!();
+    };
+    assert_eq!(*value, 800.0);
+    assert_eq!(subject.as_deref(), Some("1 D:"));
+}
+
+#[test]
+fn the_queue_crossing_names_the_disk_of_the_peak() {
+    let mut window = quiet_window();
+    tweak(&mut window, -20, -20, |s| s.disks[0].queue_len = Some(8.5));
+    tweak(&mut window, -5, -5, |s| s.disks[1].queue_len = Some(12.0));
+    let found = facts(&[], &window);
+    let crossing = found
+        .iter()
+        .find(|f| {
+            matches!(
+                f.kind,
+                FactKind::Crossed {
+                    metric: Metric::DiskQueue,
+                    ..
+                }
+            )
+        })
+        .expect("a queue crossing");
+
+    assert_eq!(crossing.at_ms, T - 20_000);
+    let FactKind::Crossed { value, subject, .. } = &crossing.kind else {
+        unreachable!();
+    };
+    assert_eq!(*value, 12.0);
+    assert_eq!(subject.as_deref(), Some("1 D:"));
+}
+
+#[test]
+fn a_hang_still_open_when_watching_stopped_says_so() {
+    let window = quiet_window();
+    let triggers = [Trigger::AppHang {
+        pid: 11,
+        name: "player.exe".to_string(),
+        start_ms: T + 1_000,
+        end_ms: T + 12_000,
+        outcome: HangOutcome::StillHung,
+    }];
+
+    let found = facts(&triggers, &window);
+
+    let kinds: Vec<&FactKind> = found.iter().map(|f| &f.kind).collect();
+    assert!(kinds.contains(&&FactKind::AppStillHung {
+        name: "player.exe".to_string()
+    }));
+    assert!(!kinds.iter().any(|k| matches!(
+        k,
+        FactKind::AppRecovered { .. } | FactKind::AppClosedWhileHung { .. }
+    )));
 }

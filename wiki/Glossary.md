@@ -2,7 +2,7 @@ The terms Vestigium's screens use, in plain words.
 
 **Bug check**: another name for a stop code.
 
-**chkdsk**: Windows' file system check. Vestigium runs it on NTFS volumes in check-only mode (`chkdsk /scan`), and Windows does any repair, at the next restart or from the drive's **Properties › Tools › Check**.
+**chkdsk**: Windows' file system check. Vestigium runs it on NTFS volumes (`chkdsk /scan`) to look for problems. When it finds some, it marks the volume and Windows repairs it at the next restart; a repair can remove files it cannot recover.
 
 **Crash dump, minidump**: the file Windows writes when it stops with a blue screen, holding the memory of that moment: all of it or the kernel's in `MEMORY.DMP`, or a small part in a minidump. An app that crashes can leave a dump of its own, and either kind shows which driver or module was running when things failed.
 

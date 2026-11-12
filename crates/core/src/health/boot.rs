@@ -3,18 +3,52 @@ use crate::xml::data_named;
 use super::{BootDelay, BootReport, BootTime, DelayKind};
 
 /// Words that mark a slow boot step as a security product, which is never offered for removal.
-const SECURITY_WORDS: [&str; 5] = [
+const SECURITY_WORDS: [&str; 7] = [
     "defender",
     "antimalware",
+    "anti-malware",
     "antivirus",
+    "anti-virus",
     "security",
     "msmpeng",
+];
+
+/// Antivirus vendors: a name is theirs when one of its words starts with the vendor's name.
+const SECURITY_VENDORS: [&str; 13] = [
+    "avast",
+    "avira",
+    "bitdefender",
+    "comodo",
+    "eset",
+    "kaspersky",
+    "malwarebytes",
+    "mcafee",
+    "norton",
+    "sophos",
+    "trendmicro",
+    "webroot",
+    "zonealarm",
+];
+
+/// Executable stems of antivirus programs whose names carry no vendor word; a word must equal one.
+const SECURITY_STEMS: [&str; 8] = [
+    "avg", "avgui", "avgsvc", "avp", "avpui", "egui", "ekrn", "mbam",
 ];
 
 /// Whether a name looks like a security product's, which is never offered for removal.
 pub(crate) fn is_security(name: &str) -> bool {
     let name = name.to_lowercase();
-    SECURITY_WORDS.iter().any(|word| name.contains(word))
+    if SECURITY_WORDS.iter().any(|word| name.contains(word)) {
+        return true;
+    }
+    name.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .any(|word| {
+            SECURITY_STEMS.contains(&word)
+                || SECURITY_VENDORS
+                    .iter()
+                    .any(|vendor| word.starts_with(vendor))
+        })
 }
 
 impl BootReport {

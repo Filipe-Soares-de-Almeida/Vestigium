@@ -12,7 +12,8 @@
   import { t, tn } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
-  import { dayStart, type Item, itemsOf } from "./today/day";
+  import { pollWhileShown } from "../lib/visibility";
+  import { dayStart, type Item, itemsOf, keyOfItem } from "./today/day";
   import { causeName, episodeDisk, episodeKey, episodeTitle, occurrenceMark, occurrenceTitle } from "./today/text";
 
   const REFRESH_MS = 60_000;
@@ -39,10 +40,7 @@
   $effect(() => {
     if (app.history !== "ready") return;
     untrack(() => void load());
-    const timer = setInterval(() => {
-      if (!document.hidden) void load();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    return pollWhileShown(load, REFRESH_MS);
   });
 
   const KIND: Record<Exclude<Filter, "all" | "period">, string[]> = {
@@ -139,7 +137,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each shown as item (`${item.kind}-${item.start}`)}
+          {#each shown as item, i (keyOfItem(item, i))}
             {@const row = rowOf(item)}
             <tr>
               <td>{formatTime(row.at)}</td>

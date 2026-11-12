@@ -70,3 +70,36 @@ fn a_timed_wait_returns_when_resumed() {
 
     assert_eq!(waiter.join().unwrap(), GateState::Running);
 }
+
+#[test]
+fn a_running_wait_lasts_the_whole_timeout() {
+    let gate = RunGate::new();
+    let started = Instant::now();
+
+    let state = gate.wait_while_running_for(Duration::from_millis(100));
+
+    assert_eq!(state, GateState::Running);
+    assert!(started.elapsed() >= Duration::from_millis(90));
+}
+
+#[test]
+fn a_running_wait_ends_when_the_gate_stops() {
+    let gate = RunGate::new();
+    let waiter = {
+        let gate = gate.clone();
+        thread::spawn(move || {
+            let started = Instant::now();
+            (
+                gate.wait_while_running_for(Duration::from_secs(10)),
+                started.elapsed(),
+            )
+        })
+    };
+
+    thread::sleep(Duration::from_millis(50));
+    gate.set(GateState::Stopping);
+    let (state, waited) = waiter.join().unwrap();
+
+    assert_eq!(state, GateState::Stopping);
+    assert!(waited < Duration::from_secs(5), "waited {waited:?}");
+}

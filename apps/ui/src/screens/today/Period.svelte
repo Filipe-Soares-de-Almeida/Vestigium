@@ -7,6 +7,7 @@
   import RowList from "../../components/RowList.svelte";
   import Steps from "../../components/Steps.svelte";
   import { episodeDetail, marks, timeline } from "../../lib/api";
+  import { app } from "../../lib/app.svelte";
   import { t } from "../../lib/i18n.svelte";
   import type { DetailLevel, Episode, EpisodeDetailDto } from "../../lib/types";
   import { buildDay, type Day, dayStart } from "./day";
@@ -53,7 +54,7 @@
         marks(dayStart(episode.start_ms), end),
       ]);
       dto = detail;
-      day = buildDay(end, line, found);
+      day = buildDay(end, line, found, app.paused || app.stopped);
     } catch (err) {
       error = err;
     }

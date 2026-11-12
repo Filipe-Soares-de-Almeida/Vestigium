@@ -8,7 +8,7 @@ pub const PERF_INFO: GUID = GUID::from_u128(0xce1dbfb4_137e_4da6_87b0_3f59aa102c
 /// Classic kernel event class of image load and unload events.
 pub const IMAGE: GUID = GUID::from_u128(0x2cb15d1d_5fc1_11d2_abe1_00a0c911f518);
 
-/// One DPC/ISR call or one loaded image, from the kernel session.
+/// One DPC/ISR call or one image loaded or unloaded, from the kernel session.
 #[derive(Clone, Debug, PartialEq)]
 pub enum KernelRecord {
     /// A routine that ran from `initial` to the event's own timestamp, both raw QPC.
@@ -24,6 +24,8 @@ pub enum KernelRecord {
         pid: u32,
         path: String,
     },
+    /// An image removed from memory.
+    ImageUnload { base: u64, pid: u32 },
 }
 
 /// The DPC, ISR or image record in a kernel event; other events, and short ones, give `None`.
@@ -42,7 +44,7 @@ pub fn kernel_record(event: &RawEvent) -> Option<KernelRecord> {
             routine: u64::from_le_bytes(data.get(8..16)?.try_into().ok()?),
         });
     }
-    if event.provider == IMAGE && matches!(event.opcode, 3 | 10) && event.version >= 2 {
+    if event.provider == IMAGE && matches!(event.opcode, 2 | 3 | 10) && event.version >= 2 {
         let units: Vec<u16> = data
             .get(56..)?
             .as_chunks::<2>()
@@ -51,10 +53,15 @@ pub fn kernel_record(event: &RawEvent) -> Option<KernelRecord> {
             .map(|c| u16::from_le_bytes(*c))
             .take_while(|u| *u != 0)
             .collect();
+        let base = u64::from_le_bytes(data.get(0..8)?.try_into().ok()?);
+        let pid = u32::from_le_bytes(data.get(16..20)?.try_into().ok()?);
+        if event.opcode == 2 {
+            return Some(KernelRecord::ImageUnload { base, pid });
+        }
         return Some(KernelRecord::Image {
-            base: u64::from_le_bytes(data.get(0..8)?.try_into().ok()?),
+            base,
             size: u64::from_le_bytes(data.get(8..16)?.try_into().ok()?),
-            pid: u32::from_le_bytes(data.get(16..20)?.try_into().ok()?),
+            pid,
             path: String::from_utf16_lossy(&units),
         });
     }
@@ -134,6 +141,21 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn parses_image_unload() {
+        let mut bytes = vec![0u8; 56];
+        bytes[0..8].copy_from_slice(&0xfffff801_00000000u64.to_le_bytes());
+        bytes[8..16].copy_from_slice(&0x20000u64.to_le_bytes());
+        bytes.extend([0, 0]);
+        assert_eq!(
+            kernel_record(&event(IMAGE, 2, 3, &bytes)),
+            Some(KernelRecord::ImageUnload {
+                base: 0xfffff801_00000000,
+                pid: 0
+            })
+        );
     }
 
     #[test]

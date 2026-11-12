@@ -66,6 +66,7 @@ function surface(errors: boolean): SurfaceScan {
       : [{ offset: 120 * GIB, ms: 131 }],
     unreadable: errors ? [651 * GIB + 8192, 1720 * GIB + 4096] : [],
     failure: null,
+    outside_io: false,
   };
 }
 
@@ -77,7 +78,7 @@ function run(id: number, daysAgo: number, minutes: number, partial: Omit<TestRun
 /** An earlier read of the same disk that was stopped at 40%. */
 function stoppedSurface(): SurfaceScan {
   const scan = surface(false);
-  return { ...scan, to_bytes: scan.disk_bytes * 0.4, regions: regions([200], [], 410), worst: [] };
+  return { ...scan, to_bytes: scan.disk_bytes * 0.4, regions: regions([200], [], 410), worst: [], outside_io: true };
 }
 
 function runs(errors: boolean): TestRunDto[] {
@@ -116,6 +117,8 @@ function runs(errors: boolean): TestRunDto[] {
           exit_code: errors ? 3 : 0,
           result: errors ? "ProblemsFound" : "NoProblems",
           output: "Stage 1: Examining basic file system structure ...\r\nWindows has scanned the file system.",
+          dirty_before: false,
+          dirty_after: errors,
         },
       },
     }),
@@ -196,6 +199,8 @@ function dto(): TestsDto {
           }
         : null,
     bench_file_bytes: GIB,
+    bench_needed_bytes: GIB + GIB / 2,
+    boot_ms: now - 7 * DAY,
   };
 }
 
@@ -218,7 +223,7 @@ function startMemory(minutes: number): RunningTest {
       passes,
       error_count: 0,
     });
-    if (passes >= 14) finish({ id: 99, run: null, exit_code: null });
+    if (passes >= 14) finish({ id: 99, run: null, exit_code: null, ended: "Done" });
   }, 600);
   return running;
 }
@@ -229,7 +234,7 @@ function startBench(volume: string): RunningTest {
   timer = setInterval(() => {
     if (step < MODES.length) void emit("test-progress", { kind: "benchmark", mode: MODES[step] });
     step += 1;
-    if (step > MODES.length) finish({ id: 98, run: null, exit_code: null });
+    if (step > MODES.length) finish({ id: 98, run: null, exit_code: null, ended: "Done" });
   }, 900);
   return running;
 }
@@ -251,7 +256,7 @@ function startSurface(disk: number): RunningTest {
       bands: [blocks * 0.95, blocks * 0.04, blocks * 0.009, blocks * 0.001, 0, 0],
       unreadable_blocks: 0,
     });
-    if (at >= size) finish({ id: 97, run: null, exit_code: 0 });
+    if (at >= size) finish({ id: 97, run: null, exit_code: 0, ended: "Done" });
   }, 700);
   return running;
 }
@@ -316,11 +321,11 @@ export const handlers: Record<string, Handler> = {
   start_surface_scan: (args) => startSurface(args.disk as number),
   start_volume_check: (args) => {
     running = { kind: "VolumeCheck", subject: { Volume: args.volume as string }, started_ms: Date.now(), ends_ms: null };
-    timer = setInterval(() => finish({ id: 96, run: null, exit_code: 0 }), 2500);
+    timer = setInterval(() => finish({ id: 96, run: null, exit_code: 0, ended: "Done" }), 2500);
     return running;
   },
   stop_test: () => {
-    if (running) finish({ id: 95, run: null, exit_code: 0 });
+    if (running) finish({ id: 95, run: null, exit_code: 0, ended: running.kind === "VolumeCheck" ? "Cancelled" : "Done" });
     return null;
   },
   test_running: () => running,

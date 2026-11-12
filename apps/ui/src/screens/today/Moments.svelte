@@ -3,13 +3,11 @@
   import { t } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import type { DetailLevel } from "../../lib/types";
-  import type { Item } from "./day";
+  import { type Item, keyOfItem } from "./day";
   import EpisodeRow from "./EpisodeRow.svelte";
   import OccurrenceRow from "./OccurrenceRow.svelte";
 
   let { items, level }: { items: Item[]; level: DetailLevel } = $props();
-
-  const keyOf = (item: Item) => `${item.kind}-${item.start}`;
 </script>
 
 <Block title={t("ui.today.moments.title")}>
@@ -17,7 +15,7 @@
     <p class="empty">{t("ui.today.moments.none")}</p>
   {:else}
     <ul>
-      {#each items as item (keyOf(item))}
+      {#each items as item, i (keyOfItem(item, i))}
         <li>
           {#if item.kind === "occurrence"}
             <OccurrenceRow o={item.occurrence} {level} />

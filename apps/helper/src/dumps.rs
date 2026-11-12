@@ -3,8 +3,9 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
-use vestigium_collect::{DumpFile, app_dump_dir, crash_control, dump_file, list_dumps, wall_ms};
+use vestigium_collect::{DumpFile, crash_control, dump_file, list_dumps_one_level, wall_ms};
 use vestigium_core::{
     Analysis, DUMP_SCAN_VERSION, DumpKind, DumpRecord, DumpScan, Fault, fault_address,
     kernel_dump_kind,
@@ -16,6 +17,7 @@ use windows::Win32::System::Diagnostics::Debug::Extensions::{
 };
 use windows::core::{HSTRING, Interface, s};
 
+use crate::profile::{UserSid, app_dump_folder};
 use crate::{job, output};
 
 /// Most dumps one read looks at, newest first.
@@ -26,6 +28,10 @@ const FRAMES: usize = 64;
 /// Size of the header of a kernel dump.
 const KERNEL_HEADER: usize = 0x2000;
 const FILETIME_UNIX_DIFF_MS: i64 = 11_644_473_600_000;
+/// Longest the debugger engine may take to load one dump, in milliseconds.
+const WAIT_FOR_DUMP_MS: u32 = 60_000;
+/// Longest the whole scan may spend in the engine; later dumps keep their size and date only.
+const SCAN_CEILING: Duration = Duration::from_secs(600);
 
 /// What the first bytes of a kernel dump say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +45,7 @@ pub struct KernelHeader {
 
 /// Reads every dump in the folders Windows keeps them in and writes what each says to `out`;
 /// a dump the engine cannot read is kept with its size and date only.
-pub fn run(out: &Path) -> ExitCode {
+pub fn run(out: &Path, user: Option<&UserSid>) -> ExitCode {
     let Ok(mut file) = output::create(out, "dumps", "dumps") else {
         return ExitCode::from(job::REFUSED);
     };
@@ -48,14 +54,15 @@ pub fn run(out: &Path) -> ExitCode {
         std::env::remove_var("_NT_SYMBOL_PATH");
         std::env::remove_var("_NT_ALT_SYMBOL_PATH");
     }
-    let mut found = dump_files();
+    let mut found = dump_files(app_dump_folder(user));
     found.sort_by_key(|(f, _)| std::cmp::Reverse(f.file_ms));
     found.truncate(MOST_DUMPS);
+    let started = Instant::now();
     let scan = DumpScan {
         ts_ms: wall_ms(),
         dumps: found
             .into_iter()
-            .map(|(f, app)| read_dump(f, app))
+            .map(|(f, app)| read_dump(f, app, started.elapsed() < SCAN_CEILING))
             .collect(),
     };
     let mut bytes = vec![DUMP_SCAN_VERSION];
@@ -63,18 +70,15 @@ pub fn run(out: &Path) -> ExitCode {
         Ok(body) => bytes.extend(body),
         Err(_) => return ExitCode::from(job::WRITE_FAILED),
     }
-    if file
-        .write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .is_err()
-    {
+    if file.write_all(&bytes).is_err() || file.commit().is_err() {
         return ExitCode::from(job::WRITE_FAILED);
     }
     ExitCode::SUCCESS
 }
 
-/// The dump files Windows keeps, each with whether it is an app's.
-fn dump_files() -> Vec<(DumpFile, bool)> {
+/// The dump files Windows keeps, each with whether it is an app's; `app_dir` is the app crash
+/// dump folder of the account that asked.
+fn dump_files(app_dir: Option<PathBuf>) -> Vec<(DumpFile, bool)> {
     let mut files = Vec::new();
     if let Some(crash) = crash_control() {
         files.extend(dump_file(&crash.dump_file).map(|f| (f, false)));
@@ -86,7 +90,7 @@ fn dump_files() -> Vec<(DumpFile, bool)> {
             false,
         ));
     }
-    if let Some(dir) = app_dump_dir() {
+    if let Some(dir) = app_dir {
         files.extend(listed(&dir, true));
     }
     files
@@ -94,25 +98,15 @@ fn dump_files() -> Vec<(DumpFile, bool)> {
 
 /// The `.dmp` files of `dir` and of the folders right under it.
 fn listed(dir: &Path, app: bool) -> Vec<(DumpFile, bool)> {
-    let mut files: Vec<(DumpFile, bool)> = list_dumps(dir)
+    list_dumps_one_level(dir)
+        .map(|listing| listing.files)
         .unwrap_or_default()
         .into_iter()
         .map(|f| (f, app))
-        .collect();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for sub in entries.filter_map(Result::ok).filter(|e| e.path().is_dir()) {
-            files.extend(
-                list_dumps(&sub.path())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|f| (f, app)),
-            );
-        }
-    }
-    files
+        .collect()
 }
 
-fn read_dump(file: DumpFile, app: bool) -> DumpRecord {
+fn read_dump(file: DumpFile, app: bool, analyse: bool) -> DumpRecord {
     let path = file.path.to_string_lossy().into_owned();
     let mut head = vec![0u8; KERNEL_HEADER];
     let read = File::open(&file.path)
@@ -135,12 +129,15 @@ fn read_dump(file: DumpFile, app: bool) -> DumpRecord {
         kind,
         crash_ms,
         size_bytes: file.size_bytes,
-        analysis: analyze(&file.path, process),
+        analysis: analyse
+            .then(|| analyze(&file.path, process, WAIT_FOR_DUMP_MS))
+            .flatten(),
     }
 }
 
-/// Opens the dump with the debugger engine that ships with Windows, no symbols, no network.
-fn analyze(path: &Path, process: Option<String>) -> Option<Analysis> {
+/// Opens the dump with the debugger engine that ships with Windows, no symbols, no network;
+/// gives up after `wait_ms` waiting for the engine to load it.
+fn analyze(path: &Path, process: Option<String>, wait_ms: u32) -> Option<Analysis> {
     // SAFETY: plain engine calls on interfaces created here, one engine per dump; every buffer
     // outlives the call that fills it.
     unsafe {
@@ -155,7 +152,7 @@ fn analyze(path: &Path, process: Option<String>) -> Option<Analysis> {
             .OpenDumpFileWide(&HSTRING::from(path.as_os_str()), 0)
             .ok()?;
         let analysis = (|| {
-            control.WaitForEvent(DEBUG_WAIT_DEFAULT, u32::MAX).ok()?;
+            control.WaitForEvent(DEBUG_WAIT_DEFAULT, wait_ms).ok()?;
             let fault = fault_of(&control)?;
             let modules = modules_of(&symbols);
             let mut stack = Vec::new();
@@ -401,6 +398,79 @@ mod tests {
             file_name(r"\SystemRoot\system32\ntoskrnl.exe"),
             "ntoskrnl.exe"
         );
+    }
+
+    fn dump_folders() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let crash = dir.path().join("CrashDumps");
+        std::fs::create_dir_all(crash.join("Real")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Other")).unwrap();
+        std::fs::write(crash.join("Real").join("1.dmp"), b"x").unwrap();
+        std::fs::write(crash.join("Top.exe.1.dmp"), b"x").unwrap();
+        std::fs::write(dir.path().join("Other").join("2.dmp"), b"x").unwrap();
+        (dir, crash)
+    }
+
+    #[test]
+    fn listed_skips_a_junction_to_another_dump() {
+        let (dir, crash) = dump_folders();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(crash.join("Linked"))
+            .arg(dir.path().join("Other"))
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "could not make a junction");
+        let names: Vec<String> = listed(&crash, true)
+            .into_iter()
+            .map(|(f, _)| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.contains(&"2.dmp".to_string()), "{names:?}");
+        assert!(names.contains(&"1.dmp".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn listed_keeps_the_dumps_of_plain_folders() {
+        let (_dir, crash) = dump_folders();
+        let mut names: Vec<String> = listed(&crash, true)
+            .into_iter()
+            .map(|(f, _)| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["1.dmp", "Top.exe.1.dmp"]);
+    }
+
+    fn invented_dump(dir: &Path) -> DumpFile {
+        let path = dir.join("Invented.exe.1.dmp");
+        let mut bytes = b"MDMP".to_vec();
+        bytes.extend((0..4096u32).map(|i| (i % 251) as u8));
+        std::fs::write(&path, &bytes).unwrap();
+        DumpFile {
+            path,
+            file_ms: 1_000,
+            size_bytes: bytes.len() as u64,
+        }
+    }
+
+    #[test]
+    fn a_dump_past_the_scan_ceiling_keeps_its_size_and_date_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = read_dump(invented_dump(dir.path()), true, false);
+        assert!(record.analysis.is_none());
+        assert_eq!((record.size_bytes, record.file_ms), (4100, 1_000));
+        assert_eq!(record.kind, DumpKind::App);
+    }
+
+    // Loads the System32 debugger engine; run by hand with
+    // `cargo test -p vestigium-helper -- --ignored a_truncated_dump`.
+    #[test]
+    #[ignore = "loads the debugger engine"]
+    fn a_truncated_dump_is_kept_without_analysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let dump = invented_dump(dir.path());
+        let started = Instant::now();
+        assert!(analyze(&dump.path, None, 5_000).is_none());
+        assert!(started.elapsed() < Duration::from_secs(30));
     }
 
     #[test]

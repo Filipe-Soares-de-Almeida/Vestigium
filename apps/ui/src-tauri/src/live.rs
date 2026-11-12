@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -9,6 +9,29 @@ use crate::agent::UiError;
 
 /// How often the live screen asks for the latest second.
 pub const LIVE_PERIOD: Duration = Duration::from_secs(1);
+
+/// The one running live stream: its id and the sender whose drop ends it.
+#[derive(Default)]
+pub struct LiveSlot {
+    current: Option<(u64, Sender<()>)>,
+    last_id: u64,
+}
+
+impl LiveSlot {
+    /// Makes `stop` the current stream, ending the one before it; returns the new stream's id.
+    pub fn replace(&mut self, stop: Sender<()>) -> u64 {
+        self.last_id = self.last_id.wrapping_add(1);
+        self.current = Some((self.last_id, stop));
+        self.last_id
+    }
+
+    /// Ends the stream `id` if it is still the current one; a stale id does nothing.
+    pub fn stop(&mut self, id: u64) {
+        if self.current.as_ref().is_some_and(|(held, _)| *held == id) {
+            self.current = None;
+        }
+    }
+}
 
 /// What the live screen receives, in order.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -23,6 +46,17 @@ pub enum LiveMessage {
     },
     /// The watcher stopped answering; nothing follows.
     Stopped,
+    /// The watcher is running but did not answer in time; nothing follows.
+    Silent,
+}
+
+/// What ends the stream when a request fails: silence from a running watcher, or a stop.
+fn ending(err: &UiError) -> LiveMessage {
+    if err.is_silent() {
+        LiveMessage::Silent
+    } else {
+        LiveMessage::Stopped
+    }
 }
 
 /// One second of the live chart: the reading, the state of the PC and of each lane.
@@ -53,10 +87,10 @@ impl LivePoint {
             ..reading
         };
         let open = |kind: fn(&EpisodeKind) -> bool| pressure.iter().any(kind);
-        let alone = |only: Reading, open: bool| pc_state(Some(&only), open);
+        let alone = |only: Reading, open: bool| pc_state(Some(&only), open, false);
         LivePoint {
             reading,
-            state: pc_state(Some(&reading), !pressure.is_empty()),
+            state: pc_state(Some(&reading), !pressure.is_empty(), false),
             lanes: Lanes {
                 cpu: alone(
                     Reading {
@@ -107,7 +141,11 @@ pub fn run_live(
 ) {
     let (readings, pressure) = match call(&Request::Recent) {
         Ok(Response::Recent { readings, pressure }) => (readings, pressure),
-        _ => {
+        Err(err) => {
+            send(ending(&err));
+            return;
+        }
+        Ok(_) => {
             send(LiveMessage::Stopped);
             return;
         }
@@ -129,7 +167,11 @@ pub fn run_live(
     loop {
         let frame = match call(&Request::Now) {
             Ok(Response::Now(frame)) => frame,
-            _ => {
+            Err(err) => {
+                send(ending(&err));
+                return;
+            }
+            Ok(_) => {
                 send(LiveMessage::Stopped);
                 return;
             }
@@ -154,6 +196,7 @@ mod tests {
     use std::sync::mpsc;
 
     use vestigium_core::{EpisodeKind, PressureSpan, Sample};
+    use vestigium_ipc::IpcError;
 
     use super::*;
 
@@ -163,13 +206,13 @@ mod tests {
             cpu_pct: 20.0,
             dpc_pct: 0.2,
             isr_pct: 0.1,
-            perf_limit_pct: 100.0,
-            proc_perf_pct: 100.0,
+            perf_limit_pct: Some(100.0),
+            proc_perf_pct: Some(100.0),
             mem_total_bytes: 16 << 30,
             mem_avail_bytes: 8 << 30,
             commit_bytes: 8 << 30,
             commit_limit_bytes: 32 << 30,
-            hard_faults_per_s: 0.0,
+            hard_faults_per_s: Some(0.0),
             gpu_pct: None,
             probe_max_lag_ms: 1.0,
             sampler_lag_ms: 1.0,
@@ -207,6 +250,94 @@ mod tests {
         assert_eq!(sent.len(), 3);
         assert!(matches!(sent[0], LiveMessage::Recent { .. }));
         assert!(matches!(sent[2], LiveMessage::Now { point: None, .. }));
+    }
+
+    fn timed_out() -> UiError {
+        UiError::Ipc(IpcError::Io(std::io::ErrorKind::TimedOut.into()))
+    }
+
+    #[test]
+    fn a_watcher_that_stops_answering_ends_the_stream_as_silent() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+        let mut asked = 0;
+
+        run_live(
+            |request| {
+                asked += 1;
+                if asked > 2 {
+                    return Err(timed_out());
+                }
+                agent(request)
+            },
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert!(matches!(sent.last(), Some(LiveMessage::Silent)));
+    }
+
+    #[test]
+    fn a_silent_first_request_ends_the_stream_as_silent() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+
+        run_live(
+            |_| Err(timed_out()),
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(sent, [LiveMessage::Silent]);
+    }
+
+    #[test]
+    fn a_gone_watcher_ends_the_stream_as_stopped() {
+        let (_keep, stop) = mpsc::channel();
+        let mut sent = Vec::new();
+
+        run_live(
+            |_| Err(UiError::AgentStopped),
+            |message| {
+                sent.push(message);
+                true
+            },
+            &stop,
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(sent, [LiveMessage::Stopped]);
+    }
+
+    #[test]
+    fn slot_stop_for_an_old_stream_keeps_the_new_one() {
+        let mut slot = LiveSlot::default();
+        let (a_tx, a_rx) = mpsc::channel::<()>();
+        let (b_tx, b_rx) = mpsc::channel::<()>();
+
+        let a = slot.replace(a_tx);
+        let b = slot.replace(b_tx);
+        slot.stop(a);
+
+        assert_ne!(a, b);
+        assert!(matches!(
+            a_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(matches!(b_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        slot.stop(b);
+        assert!(matches!(
+            b_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
     }
 
     #[test]

@@ -1,20 +1,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
-use vestigium_core::health::{SCAN_VERSION, ScanResult, Subject};
-use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, disk_subject};
+use vestigium_core::health::{SCAN_VERSION, SCAN_VERSION_V1, ScanResult, ScanResultV1, Subject};
+use vestigium_core::hwtest::{TEST_RUN_VERSION, TestRun, TestRunV1, TestRunV2, disk_subject};
 use vestigium_core::{
-    Applier, CAPTURE_VERSION, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION, DeepCapture, DumpDeletion,
-    DumpScan, ProbeHiccup, TWEAK_PLAN_VERSION, TweakResults,
+    Applier, CAPTURE_VERSION, CAPTURE_VERSION_MIN, DUMP_DELETION_VERSION, DUMP_SCAN_VERSION,
+    DeepCapture, DumpDeletion, DumpScan, ProbeHiccup, SettingStore, TWEAK_INTENT_VERSION,
+    TWEAK_PLAN_VERSION, TweakChange, TweakIntent, TweakJournal, TweakResults, backed_by_journal,
+    settle_interrupted,
 };
 use vestigium_store::Store;
 
 /// Stores the finished capture files of `dir` and deletes them; returns the ids in name order.
-/// A file that does not decode is kept, since the helper writes it only when its capture ends.
+/// A file that does not decode is kept until it has sat unchanged for 30 days.
 pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -> Vec<i64> {
+    // A stop file a helper never read is an empty leftover; the listing removes it once stale.
+    let _ = numbered_files(dir, "stop");
     let mut ids = Vec::new();
     for path in numbered_files(dir, "capture") {
         let Some(mut capture) = read_capture(&path) else {
+            discard_if_stale(&path);
             continue;
         };
         capture.hiccups.extend(
@@ -23,6 +29,7 @@ pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -
                 .filter(|h| (capture.start_ms..=capture.end_ms).contains(&h.ts_ms))
                 .copied(),
         );
+        capture.fit_to_ceiling();
         let Ok(id) = store.insert_capture(&capture) else {
             continue;
         };
@@ -36,7 +43,8 @@ pub fn import_captures(dir: &Path, hiccups: &[ProbeHiccup], store: &mut Store) -
 pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "scan") {
-        let Some(scan) = read_versioned::<ScanResult>(&path, SCAN_VERSION) else {
+        let Some(scan) = read_scan(&path) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(id) = store.insert_scan(&scan) else {
@@ -48,12 +56,26 @@ pub fn import_scans(dir: &Path, store: &mut Store) -> Vec<i64> {
     ids
 }
 
+/// What importing the dump results of a folder found.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DumpImport {
+    /// The dumps stored or refreshed.
+    pub ids: Vec<i64>,
+    /// The dumps marked as deleted.
+    pub deleted: u32,
+    /// The paths the helper refused to delete.
+    pub refused: u32,
+    /// The paths the helper allowed but could not delete.
+    pub failed: u32,
+}
+
 /// Stores the dump reads of `dir` and applies its deletion results, deleting both files and the
-/// lists they answer; returns the dumps stored and how many were marked as deleted.
-pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
+/// lists they answer.
+pub fn import_dumps(dir: &Path, store: &mut Store) -> DumpImport {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "dumps") {
         let Some(scan) = read_versioned::<DumpScan>(&path, DUMP_SCAN_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(stored) = store.upsert_dumps(&scan.dumps, scan.ts_ms) else {
@@ -62,9 +84,10 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
         ids.extend(stored);
         let _ = fs::remove_file(&path);
     }
-    let mut deleted = 0;
+    let (mut deleted, mut refused, mut failed) = (0, 0, 0);
     for path in numbered_files(dir, "deleted") {
         let Some(done) = read_versioned::<DumpDeletion>(&path, DUMP_DELETION_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
         let Ok(present) = store.present_dumps() else {
@@ -83,23 +106,101 @@ pub fn import_dumps(dir: &Path, store: &mut Store) -> (Vec<i64>, u32) {
             continue;
         };
         deleted += marked as u32;
+        refused += done.refused.len() as u32;
+        failed += done.failed.len() as u32;
         let _ = fs::remove_file(path.with_extension("delete"));
         let _ = fs::remove_file(&path);
     }
-    (ids, deleted)
+    DumpImport {
+        ids,
+        deleted,
+        refused,
+        failed,
+    }
 }
 
-/// Stores the tweak results of `dir` in the history and deletes them with their plans; returns
-/// the ids of the changes in the order read.
-pub fn import_tweaks(dir: &Path, store: &mut Store) -> Vec<i64> {
+/// How long a helper's intent may sit without a result before the helper counts as stopped; far
+/// longer than the few seconds the writes after it take.
+const INTERRUPTED_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// The changes of `results` the journal backs, since any process of the user can write a result
+/// file; `Err` when the journal cannot be read now.
+fn backed<'a>(
+    results: &'a TweakResults,
+    journal: &impl TweakJournal,
+) -> Result<Vec<&'a TweakChange>, String> {
+    let mut kept = Vec::new();
+    for change in &results.changes {
+        if backed_by_journal(change, journal)? {
+            kept.push(change);
+        }
+    }
+    Ok(kept)
+}
+
+/// Stores the journaled changes of the tweak results of `dir` and deletes the files, then settles
+/// each old intent with no result against Windows; returns the ids stored, in order.
+pub fn import_tweaks(
+    dir: &Path,
+    store: &mut Store,
+    settings: &mut impl SettingStore,
+    journal: &impl TweakJournal,
+) -> Vec<i64> {
     let mut ids = Vec::new();
     for path in numbered_files(dir, "tweaked") {
         let Some(results) = read_versioned::<TweakResults>(&path, TWEAK_PLAN_VERSION) else {
+            discard_if_stale(&path);
             continue;
         };
-        let stored: Result<Vec<i64>, _> = results
-            .changes
-            .iter()
+        let Ok(kept) = backed(&results, journal) else {
+            continue;
+        };
+        let stored: Result<Vec<i64>, _> = kept
+            .into_iter()
+            .map(|change| store.record_tweak_change(change, results.ts_ms, Applier::Elevated))
+            .collect();
+        let Ok(stored) = stored else {
+            continue;
+        };
+        ids.extend(stored);
+        let _ = fs::remove_file(path.with_extension("intent"));
+        let _ = fs::remove_file(path.with_extension("plan"));
+        let _ = fs::remove_file(&path);
+    }
+    ids.extend(settle_intents(dir, store, settings, journal));
+    ids
+}
+
+/// Records what became of each intent whose helper left no result: the file is old, no `.tweaked`
+/// of the same number exists, and the settings are read as Windows holds them now.
+fn settle_intents(
+    dir: &Path,
+    store: &mut Store,
+    settings: &mut impl SettingStore,
+    journal: &impl TweakJournal,
+) -> Vec<i64> {
+    let now = SystemTime::now();
+    let mut ids = Vec::new();
+    for path in numbered_files(dir, "intent") {
+        let old = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|age| age >= INTERRUPTED_AFTER)
+            });
+        if !old || path.with_extension("tweaked").exists() {
+            continue;
+        }
+        let Some(intent) = read_versioned::<TweakIntent>(&path, TWEAK_INTENT_VERSION) else {
+            discard_if_stale(&path);
+            continue;
+        };
+        let results = settle_interrupted(&intent, settings);
+        let Ok(kept) = backed(&results, journal) else {
+            continue;
+        };
+        let stored: Result<Vec<i64>, _> = kept
+            .into_iter()
             .map(|change| store.record_tweak_change(change, results.ts_ms, Applier::Elevated))
             .collect();
         let Ok(stored) = stored else {
@@ -130,9 +231,11 @@ pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
     for extension in TEST_FILES {
         for path in numbered_files(dir, extension) {
             if fs::metadata(&path).map_or(true, |m| m.len() > MAX_TEST_FILE) {
+                discard_if_stale(&path);
                 continue;
             }
-            let Some(mut run) = read_versioned::<TestRun>(&path, TEST_RUN_VERSION) else {
+            let Some(mut run) = read_test_run(&path) else {
+                discard_if_stale(&path);
                 continue;
             };
             if let Subject::Disk(name) = &run.subject
@@ -152,19 +255,66 @@ pub fn import_tests(dir: &Path, store: &mut Store) -> Vec<i64> {
     ids
 }
 
-/// The files named `<digits>.<extension>`, in name order.
+/// How long an empty result, or the temporary file of one, may sit unchanged before it counts as
+/// what a helper that died left behind; longer than any job, the deep capture's 24 hours included.
+const LEFTOVER_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// The files named `<digits>.<extension>`, in name order. An empty one, or a `<digits>.<extension>.tmp`,
+/// untouched for `LEFTOVER_AFTER` is deleted instead of listed.
 fn numbered_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
-        .map(|entry| entry.path())
-        .filter(|path| is_numbered(path, extension))
-        .collect();
+    let now = SystemTime::now();
+    let temporary = format!("{extension}.tmp");
+    let mut files = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        if is_numbered(&path, &temporary) {
+            if is_left_over(&entry, now, false) {
+                let _ = fs::remove_file(&path);
+            }
+        } else if is_numbered(&path, extension) {
+            if is_left_over(&entry, now, true) {
+                let _ = fs::remove_file(&path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
     files.sort();
     files
+}
+
+/// Whether the file has not changed for `LEFTOVER_AFTER` and, when `only_empty`, holds nothing.
+fn is_left_over(entry: &fs::DirEntry, now: SystemTime, only_empty: bool) -> bool {
+    let Ok(meta) = entry.metadata() else {
+        return false;
+    };
+    (!only_empty || meta.len() == 0) && unchanged_for(&meta, now, LEFTOVER_AFTER)
+}
+
+/// Whether the file's last change is at least `span` before `now`.
+fn unchanged_for(meta: &fs::Metadata, now: SystemTime, span: Duration) -> bool {
+    meta.modified()
+        .ok()
+        .and_then(|at| now.duration_since(at).ok())
+        .is_some_and(|age| age >= span)
+}
+
+/// How long a result file the monitor cannot read may sit unchanged before it is deleted.
+const UNREADABLE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Deletes a result file that could not be read once it has not changed for `UNREADABLE_AFTER`.
+fn discard_if_stale(path: &Path) {
+    let stale = fs::metadata(path)
+        .is_ok_and(|meta| unchanged_for(&meta, SystemTime::now(), UNREADABLE_AFTER));
+    if stale {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn is_numbered(path: &Path, extension: &str) -> bool {
@@ -175,8 +325,27 @@ fn is_numbered(path: &Path, extension: &str) -> bool {
     digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// A capture file of any format version still read.
 fn read_capture(path: &Path) -> Option<DeepCapture> {
-    read_versioned(path, CAPTURE_VERSION)
+    let bytes = fs::read(path).ok()?;
+    let (&version, body) = bytes.split_first()?;
+    if !(CAPTURE_VERSION_MIN..=CAPTURE_VERSION).contains(&version) {
+        return None;
+    }
+    postcard::from_bytes(body).ok()
+}
+
+/// A test file of the current layout, or of version 2 or 1, which lack what later versions added.
+fn read_test_run(path: &Path) -> Option<TestRun> {
+    read_versioned::<TestRun>(path, TEST_RUN_VERSION)
+        .or_else(|| read_versioned::<TestRunV2>(path, 2).map(TestRun::from))
+        .or_else(|| read_versioned::<TestRunV1>(path, 1).map(TestRun::from))
+}
+
+/// A health scan file of the current layout or the one before it.
+fn read_scan(path: &Path) -> Option<ScanResult> {
+    read_versioned::<ScanResult>(path, SCAN_VERSION)
+        .or_else(|| read_versioned::<ScanResultV1>(path, SCAN_VERSION_V1).map(ScanResult::from))
 }
 
 /// A file written as one version byte and a postcard body; `None` for another version.
@@ -214,6 +383,67 @@ mod tests {
         let mut bytes = vec![CAPTURE_VERSION];
         bytes.extend(postcard::to_allocvec(capture).unwrap());
         fs::write(dir.join(name), bytes).unwrap();
+    }
+
+    /// Windows settings held in memory; a setting not listed cannot be read.
+    #[derive(Default)]
+    struct Held(Vec<(vestigium_core::Setting, vestigium_core::Value)>);
+
+    impl SettingStore for Held {
+        fn read(&mut self, setting: &vestigium_core::Setting) -> Option<vestigium_core::Value> {
+            self.0
+                .iter()
+                .find(|(s, _)| s == setting)
+                .map(|(_, v)| v.clone())
+        }
+
+        fn write(
+            &mut self,
+            _: &vestigium_core::Setting,
+            _: &vestigium_core::Value,
+        ) -> Result<(), u32> {
+            panic!("the importer only reads Windows settings");
+        }
+    }
+
+    /// A journal held in memory; ids count from 1, and `unreadable` makes every lookup fail.
+    #[derive(Default)]
+    struct Journal {
+        entries: Vec<vestigium_core::JournalEntry>,
+        unreadable: bool,
+    }
+
+    impl TweakJournal for Journal {
+        fn entry(&self, id: u64) -> Result<Option<vestigium_core::JournalEntry>, String> {
+            if self.unreadable {
+                return Err("denied".into());
+            }
+            let at = usize::try_from(id).ok().and_then(|id| id.checked_sub(1));
+            Ok(at.and_then(|at| self.entries.get(at)).cloned())
+        }
+
+        fn record(&mut self, _: &vestigium_core::JournalEntry) -> Result<u64, String> {
+            panic!("the importer only reads the journal");
+        }
+    }
+
+    /// A journal whose entry 1 is the Mpo tweak taking its setting from absent to 5.
+    fn journal_of_mpo() -> Journal {
+        use vestigium_core::{IntentSetting, JournalEntry, TweakId, Value};
+        Journal {
+            entries: vec![JournalEntry {
+                ts_ms: 1,
+                tweak: TweakId::Mpo,
+                subject: None,
+                undoes: None,
+                settings: vec![IntentSetting {
+                    setting: TweakId::Mpo.settings()[0].clone(),
+                    before: Some(Value::Absent),
+                    to: Value::Dword(5),
+                }],
+            }],
+            unreadable: false,
+        }
     }
 
     fn store(dir: &Path) -> Store {
@@ -265,12 +495,33 @@ mod tests {
     }
 
     #[test]
+    fn import_reads_a_file_of_the_first_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        fs::create_dir(&captures).unwrap();
+        let mut bytes = vec![CAPTURE_VERSION_MIN];
+        bytes.extend(postcard::to_allocvec(&capture(1_000, 2_000)).unwrap());
+        fs::write(captures.join("1.capture"), bytes).unwrap();
+        let mut store = store(dir.path());
+
+        let ids = import_captures(&captures, &[], &mut store);
+
+        assert_eq!(ids.len(), 1);
+        assert!(!captures.join("1.capture").exists());
+    }
+
+    #[test]
     fn import_keeps_unreadable_files() {
         let dir = tempfile::tempdir().unwrap();
         let captures = dir.path().join("captures");
         fs::create_dir(&captures).unwrap();
         fs::write(captures.join("1.capture"), b"").unwrap();
         fs::write(captures.join("2.capture"), [CAPTURE_VERSION + 1, 0, 1, 2]).unwrap();
+        fs::write(
+            captures.join("4.capture"),
+            [CAPTURE_VERSION_MIN - 1, 0, 1, 2],
+        )
+        .unwrap();
         fs::write(captures.join("3.capture"), [CAPTURE_VERSION, 0xff, 0xff]).unwrap();
         let mut store = store(dir.path());
 
@@ -278,7 +529,7 @@ mod tests {
 
         assert!(ids.is_empty());
         assert!(store.captures(i64::MIN, i64::MAX).unwrap().is_empty());
-        for name in ["1.capture", "2.capture", "3.capture"] {
+        for name in ["1.capture", "2.capture", "3.capture", "4.capture"] {
             assert!(captures.join(name).exists(), "{name} may still be written");
         }
     }
@@ -306,6 +557,31 @@ mod tests {
     }
 
     #[test]
+    fn import_keeps_a_stored_capture_within_the_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        fs::create_dir(&captures).unwrap();
+        let mut big = capture(1_000, 2_000);
+        big.longest = (0..700_000u32)
+            .map(|i| vestigium_core::LongRoutine {
+                ts_ms: 1_000 + i64::from(i % 1_000),
+                core: 0,
+                module: "busy.sys".into(),
+                kind: vestigium_core::RoutineKind::Dpc,
+                us: 1_000 + i,
+            })
+            .collect();
+        write_capture(&captures, "1.capture", &big);
+        let mut store = store(dir.path());
+
+        let ids = import_captures(&captures, &[], &mut store);
+
+        let stored = store.capture(ids[0]).unwrap().unwrap();
+        assert!(stored.size_estimate() <= vestigium_core::CAPTURE_BYTES_MAX);
+        assert_eq!(stored.longest[0].us, 1_000 + 699_999);
+    }
+
+    #[test]
     fn import_twice_is_one_row() {
         let dir = tempfile::tempdir().unwrap();
         let captures = dir.path().join("captures");
@@ -325,6 +601,22 @@ mod tests {
         let mut bytes = vec![version];
         bytes.extend(postcard::to_allocvec(value).unwrap());
         fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn a_scan_file_of_the_first_layout_is_still_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let scans = dir.path().join("scans");
+        fs::create_dir(&scans).unwrap();
+        let old = ScanResultV1 {
+            ts_ms: 40,
+            boot: None,
+        };
+        write_versioned(&scans.join("1.scan"), SCAN_VERSION_V1, &old);
+
+        assert_eq!(import_scans(&scans, &mut store), vec![1]);
+        assert_eq!(store.last_scan().unwrap(), Some(ScanResult::from(old)));
     }
 
     #[test]
@@ -352,11 +644,11 @@ mod tests {
         );
         let mut store = store(dir.path());
 
-        let (ids, deleted) = import_dumps(&dumps, &mut store);
-        assert_eq!((ids.len(), deleted), (1, 0));
+        let first = import_dumps(&dumps, &mut store);
+        assert_eq!((first.ids.len(), first.deleted), (1, 0));
         assert_eq!(
             import_dumps(&dumps, &mut store),
-            (Vec::new(), 0),
+            DumpImport::default(),
             "the file is gone"
         );
 
@@ -367,11 +659,19 @@ mod tests {
             &DumpDeletion {
                 ts_ms: 20,
                 deleted: vec![r"c:\windows\minidump\1.DMP".into()],
-                refused: Vec::new(),
-                failed: Vec::new(),
+                refused: vec!["a".into(), "b".into()],
+                failed: vec!["c".into()],
             },
         );
-        assert_eq!(import_dumps(&dumps, &mut store), (Vec::new(), 1));
+        assert_eq!(
+            import_dumps(&dumps, &mut store),
+            DumpImport {
+                ids: Vec::new(),
+                deleted: 1,
+                refused: 2,
+                failed: 1,
+            }
+        );
         assert!(store.present_dumps().unwrap().is_empty());
         assert!(
             !dumps.join("20.delete").exists(),
@@ -399,6 +699,7 @@ mod tests {
                 error: None,
             }],
             restore_point: Some(vestigium_core::RestorePoint::Created),
+            journal: Some(1),
         };
         fs::write(tweaks.join("30.plan"), [TWEAK_PLAN_VERSION]).unwrap();
         write_versioned(
@@ -410,12 +711,297 @@ mod tests {
             },
         );
 
-        assert_eq!(import_tweaks(&tweaks, &mut store), vec![1]);
-        assert!(import_tweaks(&tweaks, &mut store).is_empty());
+        assert_eq!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
+            vec![1]
+        );
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
         assert!(!tweaks.join("30.plan").exists() && !tweaks.join("30.tweaked").exists());
         let rows = store.tweaks_in_place().unwrap();
         assert_eq!(rows[0].change, change);
         assert_eq!(rows[0].applier, Applier::Elevated);
+    }
+
+    #[test]
+    fn a_result_file_that_survives_its_delete_is_not_stored_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let captures = dir.path().join("captures");
+        let scans = dir.path().join("scans");
+        let tweaks = dir.path().join("tweaks");
+        for folder in [&captures, &scans, &tweaks] {
+            fs::create_dir(folder).unwrap();
+        }
+        let scan = vestigium_core::health::ScanResult {
+            ts_ms: 70,
+            boot: None,
+        };
+        let mpo = vestigium_core::TweakId::Mpo;
+        let results = TweakResults {
+            ts_ms: 80,
+            changes: vec![vestigium_core::TweakChange {
+                tweak: mpo,
+                subject: None,
+                undo_of: None,
+                results: vec![vestigium_core::SettingResult {
+                    change: vestigium_core::SettingChange {
+                        setting: mpo.settings()[0].clone(),
+                        from: vestigium_core::Value::Absent,
+                        to: vestigium_core::Value::Dword(5),
+                    },
+                    error: Some(5),
+                }],
+                restore_point: None,
+                journal: None,
+            }],
+        };
+        let write_all = || {
+            write_capture(&captures, "1.capture", &capture(1_000, 2_000));
+            write_versioned(&scans.join("2.scan"), SCAN_VERSION, &scan);
+            write_versioned(&tweaks.join("3.tweaked"), TWEAK_PLAN_VERSION, &results);
+        };
+
+        write_all();
+        let first = (
+            import_captures(&captures, &[], &mut store),
+            import_scans(&scans, &mut store),
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
+        );
+        write_all();
+        let second = (
+            import_captures(&captures, &[], &mut store),
+            import_scans(&scans, &mut store),
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()),
+        );
+
+        assert_eq!(second, first, "the stored rows answer for the copies");
+        assert_eq!(store.captures(i64::MIN, i64::MAX).unwrap().len(), 1);
+        assert_eq!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().len(), 1);
+        assert!(!captures.join("1.capture").exists());
+        assert!(!scans.join("2.scan").exists() && !tweaks.join("3.tweaked").exists());
+    }
+
+    fn age(path: &Path, by: Duration) {
+        let file = fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(SystemTime::now() - by).unwrap();
+    }
+
+    fn intent_of_mpo(ts_ms: i64) -> TweakIntent {
+        use vestigium_core::{IntentItem, IntentSetting, TweakId, Value};
+        TweakIntent {
+            ts_ms,
+            items: vec![IntentItem {
+                tweak: TweakId::Mpo,
+                subject: None,
+                undo_of: None,
+                journal: Some(1),
+                settings: vec![IntentSetting {
+                    setting: TweakId::Mpo.settings()[0].clone(),
+                    before: Some(Value::Absent),
+                    to: Value::Dword(5),
+                }],
+            }],
+        }
+    }
+
+    /// An intent of the Mpo tweak and the plan it came from, an hour old.
+    fn left_behind(tweaks: &Path, name: &str, ts_ms: i64) {
+        fs::write(tweaks.join(format!("{name}.plan")), [TWEAK_PLAN_VERSION]).unwrap();
+        let intent = tweaks.join(format!("{name}.intent"));
+        write_versioned(&intent, TWEAK_INTENT_VERSION, &intent_of_mpo(ts_ms));
+        age(&intent, Duration::from_secs(3600));
+    }
+
+    fn mpo_now(value: vestigium_core::Value) -> Held {
+        Held(vec![(
+            vestigium_core::TweakId::Mpo.settings()[0].clone(),
+            value,
+        )])
+    }
+
+    #[test]
+    fn an_old_intent_with_no_result_is_settled_against_windows() {
+        use vestigium_core::{
+            ERROR_INTERRUPTED_UNCHANGED, ERROR_INTERRUPTED_UNKNOWN, ERROR_INTERRUPTED_WRITTEN,
+            Value,
+        };
+        let cases = [
+            (Value::Dword(5), ERROR_INTERRUPTED_WRITTEN, true),
+            (Value::Absent, ERROR_INTERRUPTED_UNCHANGED, false),
+            (Value::Dword(9), ERROR_INTERRUPTED_UNKNOWN, false),
+        ];
+        for (now, error, undoable) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = store(dir.path());
+            let tweaks = dir.path().join("tweaks");
+            fs::create_dir(&tweaks).unwrap();
+            left_behind(&tweaks, "50", 5_000);
+
+            let ids = import_tweaks(
+                &tweaks,
+                &mut store,
+                &mut mpo_now(now.clone()),
+                &journal_of_mpo(),
+            );
+
+            assert_eq!(ids.len(), 1, "{now:?}");
+            let rows = store.tweak_changes(i64::MIN, i64::MAX).unwrap();
+            assert_eq!(rows[0].applied_ms, 5_000);
+            assert_eq!(rows[0].applier, Applier::Elevated);
+            assert_eq!(rows[0].change.results[0].error, Some(error), "{now:?}");
+            assert_eq!(rows[0].change.written().len(), usize::from(undoable));
+            assert_eq!(
+                rows[0].change.restore_point,
+                Some(vestigium_core::RestorePoint::Unconfirmed)
+            );
+            assert!(!tweaks.join("50.intent").exists() && !tweaks.join("50.plan").exists());
+            assert!(
+                import_tweaks(&tweaks, &mut store, &mut mpo_now(now), &journal_of_mpo()).is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn a_fresh_intent_is_left_for_a_helper_that_may_be_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        left_behind(&tweaks, "50", 5_000);
+        age(&tweaks.join("50.intent"), Duration::from_secs(60));
+
+        let ids = import_tweaks(
+            &tweaks,
+            &mut store,
+            &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
+        );
+
+        assert!(ids.is_empty());
+        assert!(tweaks.join("50.intent").exists() && tweaks.join("50.plan").exists());
+    }
+
+    #[test]
+    fn an_intent_with_a_result_is_never_settled() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        left_behind(&tweaks, "50", 5_000);
+        let unreadable = tweaks.join("50.tweaked");
+        fs::write(&unreadable, [TWEAK_PLAN_VERSION, 0xff]).unwrap();
+
+        let ids = import_tweaks(
+            &tweaks,
+            &mut store,
+            &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
+        );
+
+        assert!(
+            ids.is_empty(),
+            "the helper wrote a result; it is not ours to guess"
+        );
+        assert!(tweaks.join("50.intent").exists());
+    }
+
+    #[test]
+    fn an_intent_is_cleaned_up_with_its_imported_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        left_behind(&tweaks, "50", 5_000);
+        write_versioned(
+            &tweaks.join("50.tweaked"),
+            TWEAK_PLAN_VERSION,
+            &TweakResults {
+                ts_ms: 5_001,
+                changes: Vec::new(),
+            },
+        );
+
+        import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(!tweaks.join("50.tweaked").exists());
+        assert!(!tweaks.join("50.intent").exists() && !tweaks.join("50.plan").exists());
+    }
+
+    #[test]
+    fn an_unreadable_intent_stays_and_is_never_imported_as_a_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        fs::write(tweaks.join("50.intent"), [TWEAK_INTENT_VERSION + 1, 1, 2]).unwrap();
+        age(&tweaks.join("50.intent"), Duration::from_secs(3600));
+        write_versioned(
+            &tweaks.join("51.tweaked.intent"),
+            TWEAK_INTENT_VERSION,
+            &intent_of_mpo(1),
+        );
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(ids.is_empty());
+        assert!(tweaks.join("50.intent").exists());
+        assert!(tweaks.join("51.tweaked.intent").exists());
+    }
+
+    #[test]
+    fn an_old_empty_result_is_a_leftover_and_a_fresh_one_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        fs::write(tweaks.join("30.tweaked"), b"").unwrap();
+        fs::write(tweaks.join("31.tweaked"), b"").unwrap();
+        fs::write(tweaks.join("32.tweaked"), [TWEAK_PLAN_VERSION, 0xff, 0xff]).unwrap();
+        age(
+            &tweaks.join("30.tweaked"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+        age(
+            &tweaks.join("32.tweaked"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
+
+        assert!(!tweaks.join("30.tweaked").exists(), "old and empty goes");
+        assert!(
+            tweaks.join("31.tweaked").exists(),
+            "a helper may be running"
+        );
+        assert!(
+            tweaks.join("32.tweaked").exists(),
+            "an unreadable file stays"
+        );
+    }
+
+    #[test]
+    fn an_old_temporary_result_is_deleted_and_never_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        fs::write(tweaks.join("40.tweaked.tmp"), [TWEAK_PLAN_VERSION, 1]).unwrap();
+        fs::write(tweaks.join("41.tweaked.tmp"), [TWEAK_PLAN_VERSION, 1]).unwrap();
+        age(
+            &tweaks.join("40.tweaked.tmp"),
+            LEFTOVER_AFTER + Duration::from_secs(60),
+        );
+
+        assert!(
+            import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo()).is_empty()
+        );
+
+        assert!(!tweaks.join("40.tweaked.tmp").exists());
+        assert!(tweaks.join("41.tweaked.tmp").exists());
     }
 
     #[test]
@@ -474,6 +1060,108 @@ mod tests {
     }
 
     #[test]
+    fn a_volume_check_file_of_layout_version_one_is_imported() {
+        use vestigium_core::hwtest::{Outcome, TestDataV1, TestRunV1, VolumeCheckV1, VolumeResult};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        let old = TestRunV1 {
+            subject: Subject::Volume(r"D:\".into()),
+            started_ms: 10,
+            ended_ms: 20,
+            outcome: Outcome::Clean,
+            data: TestDataV1::VolumeCheck(VolumeCheckV1 {
+                volume: r"D:\".into(),
+                exit_code: Some(0),
+                result: VolumeResult::NoProblems,
+                output: String::new(),
+            }),
+        };
+        write_versioned(&tests.join("60.chkdsk"), 1, &old);
+        assert_eq!(import_tests(&tests, &mut store).len(), 1);
+        assert!(!tests.join("60.chkdsk").exists());
+        assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_surface_file_of_layout_version_two_is_imported() {
+        use vestigium_core::hwtest::{Outcome, SurfaceScanV2, TestDataV2, TestRunV2};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tests = dir.path().join("tests");
+        fs::create_dir(&tests).unwrap();
+        let old = TestRunV2 {
+            subject: Subject::Disk("1 D:".into()),
+            started_ms: 10,
+            ended_ms: 20,
+            outcome: Outcome::Clean,
+            data: TestDataV2::DiskSurface(SurfaceScanV2 {
+                disk: 1,
+                media: vestigium_core::Media::Hdd,
+                disk_bytes: 1 << 30,
+                sector_bytes: 512,
+                from_bytes: 0,
+                to_bytes: 1 << 30,
+                bands: [0; vestigium_core::hwtest::BANDS],
+                unreadable_blocks: 0,
+                regions: Vec::new(),
+                worst: Vec::new(),
+                unreadable: Vec::new(),
+                failure: None,
+            }),
+        };
+        write_versioned(&tests.join("61.surface"), 2, &old);
+        assert_eq!(import_tests(&tests, &mut store).len(), 1);
+        assert!(!tests.join("61.surface").exists());
+        assert_eq!(store.test_runs(0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_unreadable_result_file_is_deleted_after_thirty_days() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let captures = dir.path().join("captures");
+        let scans = dir.path().join("scans");
+        let tests = dir.path().join("tests");
+        for folder in [&captures, &scans, &tests] {
+            fs::create_dir(folder).unwrap();
+        }
+        let bad = [0xffu8, 0xff, 0xff];
+        let day = Duration::from_secs(24 * 60 * 60);
+        for (folder, name) in [
+            (&captures, "1.capture"),
+            (&captures, "2.capture"),
+            (&scans, "3.scan"),
+            (&tests, "4.test"),
+        ] {
+            fs::write(folder.join(name), bad).unwrap();
+        }
+        let mut big = vec![TEST_RUN_VERSION];
+        big.resize(MAX_TEST_FILE as usize + 1, 0);
+        fs::write(tests.join("5.test"), big).unwrap();
+        for (folder, name, days) in [
+            (&captures, "1.capture", 31),
+            (&captures, "2.capture", 29),
+            (&scans, "3.scan", 31),
+            (&tests, "4.test", 29),
+            (&tests, "5.test", 31),
+        ] {
+            age(&folder.join(name), day * days);
+        }
+
+        import_captures(&captures, &[], &mut store);
+        import_scans(&scans, &mut store);
+        import_tests(&tests, &mut store);
+
+        assert!(!captures.join("1.capture").exists(), "31 days old goes");
+        assert!(captures.join("2.capture").exists(), "29 days old stays");
+        assert!(!scans.join("3.scan").exists());
+        assert!(tests.join("4.test").exists());
+        assert!(!tests.join("5.test").exists(), "too large and old goes");
+    }
+
+    #[test]
     fn a_test_file_too_large_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = store(dir.path());
@@ -484,5 +1172,186 @@ mod tests {
         fs::write(tests.join("50.test"), bytes).unwrap();
         assert!(import_tests(&tests, &mut store).is_empty());
         assert!(tests.join("50.test").exists());
+    }
+
+    /// A change of the AppDumps tweak as a process of the user could forge it, with no journal entry.
+    fn forged_app_dumps_change(journal: Option<u64>) -> vestigium_core::TweakChange {
+        use vestigium_core::{SettingChange, SettingResult, TweakId, Value};
+        let count = TweakId::AppDumps.settings()[2].clone();
+        vestigium_core::TweakChange {
+            tweak: TweakId::AppDumps,
+            subject: None,
+            undo_of: None,
+            results: vec![SettingResult {
+                change: SettingChange {
+                    setting: count,
+                    from: Value::Dword(u32::MAX),
+                    to: Value::Dword(25),
+                },
+                error: None,
+            }],
+            restore_point: Some(vestigium_core::RestorePoint::Created),
+            journal,
+        }
+    }
+
+    fn drop_results(tweaks: &Path, name: &str, changes: Vec<vestigium_core::TweakChange>) {
+        write_versioned(
+            &tweaks.join(format!("{name}.tweaked")),
+            TWEAK_PLAN_VERSION,
+            &TweakResults { ts_ms: 30, changes },
+        );
+    }
+
+    #[test]
+    fn a_forged_result_is_not_imported_as_elevated_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        drop_results(&tweaks, "1", vec![forged_app_dumps_change(None)]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(ids.is_empty());
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
+        assert!(store.tweaks_in_place().unwrap().is_empty());
+        assert!(
+            !tweaks.join("1.tweaked").exists(),
+            "the forged file is removed"
+        );
+    }
+
+    #[test]
+    fn a_result_naming_an_entry_the_journal_does_not_hold_is_not_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mut elsewhere = forged_app_dumps_change(Some(1));
+        drop_results(&tweaks, "1", vec![elsewhere.clone()]);
+        elsewhere.journal = Some(77);
+        drop_results(&tweaks, "2", vec![elsewhere]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert!(
+            ids.is_empty(),
+            "entry 1 is another tweak's, entry 77 is not there"
+        );
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_result_that_wrote_other_values_than_its_entry_is_not_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mpo = vestigium_core::TweakId::Mpo;
+        let mut change = vestigium_core::TweakChange {
+            tweak: mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![vestigium_core::SettingResult {
+                change: vestigium_core::SettingChange {
+                    setting: mpo.settings()[0].clone(),
+                    from: vestigium_core::Value::Absent,
+                    to: vestigium_core::Value::Dword(200),
+                },
+                error: None,
+            }],
+            restore_point: None,
+            journal: Some(1),
+        };
+        drop_results(&tweaks, "1", vec![change.clone()]);
+        change.results[0].change.to = vestigium_core::Value::Dword(5);
+        drop_results(&tweaks, "2", vec![change]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert_eq!(ids.len(), 1, "only the change the entry describes is kept");
+    }
+
+    #[test]
+    fn a_refused_change_needs_no_entry_but_a_forged_success_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mut refused = forged_app_dumps_change(None);
+        refused.results[0].error = Some(5);
+        let mut undoing = forged_app_dumps_change(None);
+        undoing.undo_of = Some(1);
+        undoing.results.clear();
+        drop_results(&tweaks, "1", vec![refused, undoing]);
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+
+        assert_eq!(
+            ids.len(),
+            1,
+            "a refusal writes nothing; an empty undo would hide a row"
+        );
+    }
+
+    #[test]
+    fn a_journal_that_cannot_be_read_leaves_the_result_for_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        let mpo = vestigium_core::TweakId::Mpo;
+        let change = vestigium_core::TweakChange {
+            tweak: mpo,
+            subject: None,
+            undo_of: None,
+            results: vec![vestigium_core::SettingResult {
+                change: vestigium_core::SettingChange {
+                    setting: mpo.settings()[0].clone(),
+                    from: vestigium_core::Value::Absent,
+                    to: vestigium_core::Value::Dword(5),
+                },
+                error: None,
+            }],
+            restore_point: None,
+            journal: Some(1),
+        };
+        drop_results(&tweaks, "1", vec![change]);
+        let mut shut = journal_of_mpo();
+        shut.unreadable = true;
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &shut);
+        assert!(ids.is_empty());
+        assert!(tweaks.join("1.tweaked").exists(), "kept to try again");
+
+        let ids = import_tweaks(&tweaks, &mut store, &mut Held::default(), &journal_of_mpo());
+        assert_eq!(ids.len(), 1);
+        assert!(!tweaks.join("1.tweaked").exists());
+    }
+
+    #[test]
+    fn a_forged_intent_is_not_settled_into_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(dir.path());
+        let tweaks = dir.path().join("tweaks");
+        fs::create_dir(&tweaks).unwrap();
+        left_behind(&tweaks, "50", 5_000);
+        let mut forged = intent_of_mpo(5_000);
+        forged.items[0].journal = None;
+        let path = tweaks.join("50.intent");
+        fs::remove_file(&path).unwrap();
+        write_versioned(&path, TWEAK_INTENT_VERSION, &forged);
+        age(&path, Duration::from_secs(3600));
+
+        let ids = import_tweaks(
+            &tweaks,
+            &mut store,
+            &mut mpo_now(vestigium_core::Value::Dword(5)),
+            &journal_of_mpo(),
+        );
+
+        assert!(ids.is_empty());
+        assert!(store.tweak_changes(i64::MIN, i64::MAX).unwrap().is_empty());
     }
 }

@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use vestigium_core::{
-    CoreLoad, DiskLoad, MinuteSample, ProcessSample, ProcessSampleV1, ProcessTop, ProcessTopV1,
-    Sample, SampleV1, summarize_minute,
+    CoreLoad, DiskLoad, DiskLoadV2, HistoryReset, MinuteSample, ProcessSample, ProcessSampleV1,
+    ProcessTop, ProcessTopV1, Sample, SampleV1, SampleV2, summarize_minute,
 };
 use vestigium_store::{
-    Batcher, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
+    Batcher, CarryOver, SCHEMA_VERSION, Segment, Series, Store, StoreError, decode, encode,
 };
 
 fn sample(ts_ms: i64) -> Sample {
@@ -14,13 +14,13 @@ fn sample(ts_ms: i64) -> Sample {
         cpu_pct: 12.5,
         dpc_pct: 0.4,
         isr_pct: 0.1,
-        perf_limit_pct: 0.0,
-        proc_perf_pct: 98.0,
+        perf_limit_pct: Some(0.0),
+        proc_perf_pct: Some(98.0),
         mem_total_bytes: 32 << 30,
         mem_avail_bytes: 8 << 30,
         commit_bytes: 12 << 30,
         commit_limit_bytes: 40 << 30,
-        hard_faults_per_s: 3.0,
+        hard_faults_per_s: Some(3.0),
         gpu_pct: Some(7.0),
         probe_max_lag_ms: 0.7,
         sampler_lag_ms: 1.2,
@@ -35,9 +35,9 @@ fn sample(ts_ms: i64) -> Sample {
         disks: vec![DiskLoad {
             name: "0 C:".to_string(),
             active_pct: 3.0,
-            latency_ms: 0.8,
-            queue_len: 0.0,
-            bytes_per_s: 120_000.0,
+            latency_ms: Some(0.8),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(120_000.0),
         }],
     }
 }
@@ -57,6 +57,19 @@ fn top(ts_ms: i64) -> ProcessTop {
     }
 }
 
+fn old_disks(disks: &[DiskLoad]) -> Vec<DiskLoadV2> {
+    disks
+        .iter()
+        .map(|d| DiskLoadV2 {
+            name: d.name.clone(),
+            active_pct: d.active_pct,
+            latency_ms: d.latency_ms.unwrap(),
+            queue_len: d.queue_len.unwrap(),
+            bytes_per_s: d.bytes_per_s.unwrap(),
+        })
+        .collect()
+}
+
 fn sample_v1(ts_ms: i64) -> SampleV1 {
     let current = sample(ts_ms);
     SampleV1 {
@@ -64,16 +77,38 @@ fn sample_v1(ts_ms: i64) -> SampleV1 {
         cpu_pct: current.cpu_pct,
         dpc_pct: current.dpc_pct,
         isr_pct: current.isr_pct,
-        perf_limit_pct: current.perf_limit_pct,
-        proc_perf_pct: current.proc_perf_pct,
+        perf_limit_pct: current.perf_limit_pct.unwrap(),
+        proc_perf_pct: current.proc_perf_pct.unwrap(),
         mem_avail_bytes: current.mem_avail_bytes,
         commit_bytes: current.commit_bytes,
         commit_limit_bytes: current.commit_limit_bytes,
-        hard_faults_per_s: current.hard_faults_per_s,
+        hard_faults_per_s: current.hard_faults_per_s.unwrap(),
         probe_max_lag_ms: current.probe_max_lag_ms,
         sampler_lag_ms: current.sampler_lag_ms,
         cores: current.cores,
-        disks: current.disks,
+        disks: old_disks(&current.disks),
+    }
+}
+
+fn sample_v2(ts_ms: i64) -> SampleV2 {
+    let current = sample(ts_ms);
+    SampleV2 {
+        ts_ms,
+        cpu_pct: current.cpu_pct,
+        dpc_pct: current.dpc_pct,
+        isr_pct: current.isr_pct,
+        perf_limit_pct: current.perf_limit_pct.unwrap(),
+        proc_perf_pct: current.proc_perf_pct.unwrap(),
+        mem_total_bytes: current.mem_total_bytes,
+        mem_avail_bytes: current.mem_avail_bytes,
+        commit_bytes: current.commit_bytes,
+        commit_limit_bytes: current.commit_limit_bytes,
+        hard_faults_per_s: current.hard_faults_per_s.unwrap(),
+        gpu_pct: current.gpu_pct,
+        probe_max_lag_ms: current.probe_max_lag_ms,
+        sampler_lag_ms: current.sampler_lag_ms,
+        cores: current.cores,
+        disks: old_disks(&current.disks),
     }
 }
 
@@ -147,6 +182,137 @@ fn reopen_keeps_version() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
 }
 
+/// Bytes that are not a database: no SQLite header, a size of a few pages.
+fn garbage() -> Vec<u8> {
+    (0..4096u32)
+        .map(|n| (n.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+fn corrupt_siblings(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".corrupt-"))
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_file_that_is_not_a_database_is_set_aside_and_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let bytes = garbage();
+    std::fs::write(&path, &bytes).unwrap();
+    std::fs::write(dir.path().join("vestigium.db-wal"), b"wal").unwrap();
+    std::fs::write(dir.path().join("vestigium.db-shm"), b"shm").unwrap();
+
+    let (store, aside) = Store::open_recovering(&path).unwrap();
+
+    let aside = aside.expect("the damaged file is named");
+    assert_eq!(aside.carried, CarryOver::default());
+    let aside = aside.path;
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(store.journal_mode().unwrap(), "wal");
+    assert_eq!(aside.parent(), Some(dir.path()));
+    assert!(
+        aside
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("vestigium.db.corrupt-")
+    );
+    assert_eq!(std::fs::read(&aside).unwrap(), bytes);
+    let wal = std::path::PathBuf::from(format!("{}-wal", aside.display()));
+    let shm = std::path::PathBuf::from(format!("{}-shm", aside.display()));
+    assert_eq!(std::fs::read(wal).unwrap(), b"wal");
+    assert_eq!(std::fs::read(shm).unwrap(), b"shm");
+    assert_eq!(corrupt_siblings(dir.path()).len(), 3);
+}
+
+#[test]
+fn a_damaged_file_that_cannot_be_renamed_stays_where_it_is() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    let bytes = garbage();
+    std::fs::write(&path, &bytes).unwrap();
+    // Open for reading and writing but not for deleting, as a reader that holds the file does.
+    let _holder = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x3)
+        .open(&path)
+        .unwrap();
+
+    let err = Store::open_recovering(&path).expect_err("the rename is refused");
+
+    assert!(matches!(err, StoreError::Sqlite(_)));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_file_with_a_valid_magic_and_a_broken_header_is_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes[16..40].fill(0xFF);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let (store, aside) = Store::open_recovering(&path).unwrap();
+
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(std::fs::read(aside.unwrap().path).unwrap(), bytes);
+}
+
+#[test]
+fn a_healthy_file_is_opened_without_setting_anything_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+
+    let (_, aside) = Store::open_recovering(&path).unwrap();
+
+    assert_eq!(aside, None);
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_newer_schema_is_not_taken_for_damage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    {
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.pragma_update(None, "user_version", 99).unwrap();
+    }
+
+    let err = Store::open_recovering(&path).expect_err("newer schema must be refused");
+
+    assert!(matches!(err, StoreError::NewerSchema { found: 99, .. }));
+    assert!(corrupt_siblings(dir.path()).is_empty());
+}
+
+#[test]
+fn a_locked_file_is_not_taken_for_damage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    // A rollback-journal file under an exclusive lock refuses even a read.
+    let holder = rusqlite::Connection::open(&path).unwrap();
+    holder
+        .execute_batch("CREATE TABLE t (x); BEGIN EXCLUSIVE")
+        .unwrap();
+
+    let result = Store::open_recovering(&path);
+
+    assert!(matches!(result, Err(StoreError::Sqlite(_))));
+    assert!(corrupt_siblings(dir.path()).is_empty());
+    holder.execute_batch("ROLLBACK").unwrap();
+    assert!(Store::open(&path).is_ok());
+}
+
 #[test]
 fn newer_schema_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -208,6 +374,64 @@ fn segments_query_returns_overlaps() {
 
     let spans: Vec<(i64, i64)> = found.iter().map(|s| (s.start_ms, s.end_ms)).collect();
     assert_eq!(spans, vec![(10, 20), (20, 30)]);
+}
+
+#[test]
+fn a_segment_that_began_before_the_range_and_ends_inside_it_is_returned() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let hour = 3_600_000;
+    store
+        .append(&[
+            segment(10 * hour, 10 * hour + 300_000),
+            segment(20 * hour, 20 * hour + 300_000),
+            segment(30 * hour, 30 * hour + 300_000),
+        ])
+        .unwrap();
+
+    let found = store
+        .segments(Series::Samples, 20 * hour + 200_000, 40 * hour)
+        .unwrap();
+
+    let starts: Vec<i64> = found.iter().map(|s| s.start_ms).collect();
+    assert_eq!(starts, vec![20 * hour, 30 * hour]);
+}
+
+#[test]
+fn a_segment_longer_than_the_span_bound_is_missed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let hour = 3_600_000;
+    store.append(&[segment(0, 5 * hour)]).unwrap();
+
+    assert_eq!(
+        store.segments(Series::Samples, hour + 1, 6 * hour).unwrap(),
+        Vec::new()
+    );
+    assert_eq!(
+        store
+            .segments(Series::Samples, hour, 6 * hour)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn reading_the_whole_range_returns_every_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    store
+        .append(&[
+            segment(i64::MIN / 2, 0),
+            segment(0, 10),
+            segment(10, i64::MAX / 2),
+        ])
+        .unwrap();
+
+    let found = store.segments(Series::Samples, i64::MIN, i64::MAX).unwrap();
+
+    assert_eq!(found.len(), 3);
 }
 
 #[test]
@@ -370,6 +594,47 @@ fn v1_segments_read_as_current_types() {
 }
 
 #[test]
+fn a_version_2_segment_reads_with_every_counter_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    store
+        .append(&[Segment {
+            series: Series::SamplesV2,
+            start_ms: 1_000,
+            end_ms: 2_000,
+            data: encode(&[sample_v2(1_000), sample_v2(2_000)]),
+        }])
+        .unwrap();
+
+    let samples = store.samples(0, 10_000).unwrap();
+
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0], sample(1_000));
+    assert_eq!(samples[1].disks[0].latency_ms, Some(0.8));
+    assert_eq!(samples[1].gpu_pct, Some(7.0));
+}
+
+#[test]
+fn samples_with_absent_counters_round_trip_through_a_segment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let mut bare = sample(5_000);
+    bare.perf_limit_pct = None;
+    bare.proc_perf_pct = None;
+    bare.hard_faults_per_s = None;
+    bare.disks[0].latency_ms = None;
+    bare.disks[0].queue_len = None;
+    bare.disks[0].bytes_per_s = None;
+    let mut batcher = Batcher::new(Duration::from_secs(3600));
+    batcher.push_sample(bare.clone());
+    store.append(&batcher.take_final()).unwrap();
+
+    let samples = store.samples(0, 10_000).unwrap();
+
+    assert_eq!(samples, vec![bare]);
+}
+
+#[test]
 fn samples_merge_versions_in_time_order() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
@@ -428,4 +693,165 @@ fn duplicate_minutes_are_merged() {
 
     assert_eq!(minutes.len(), 1);
     assert_eq!((minutes[0].ts_ms, minutes[0].samples), (60_000, 50));
+}
+
+#[test]
+fn batch_is_due_when_the_clock_steps_back() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    batcher.push_sample(sample(10_000_000));
+
+    assert!(batcher.due(0));
+    assert!(batcher.due(299_999));
+}
+
+/// A sample of a 16-core machine with several disks, as large as a real one gets.
+fn wide_sample(ts_ms: i64) -> Sample {
+    let mut wide = sample(ts_ms);
+    wide.cores = vec![wide.cores[0].clone(); 16];
+    wide.disks = (0..6)
+        .map(|n| DiskLoad {
+            name: format!("{n} D:"),
+            ..wide.disks[0].clone()
+        })
+        .collect();
+    wide
+}
+
+#[test]
+fn a_huge_buffer_is_split_into_decodable_segments() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    for n in 0..60_000 {
+        batcher.push_sample(wide_sample(n * 1_000));
+    }
+
+    let segments = batcher.take();
+
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 60_000);
+    assert!(
+        segments
+            .iter()
+            .filter(|s| s.series == Series::Samples)
+            .count()
+            > 1
+    );
+}
+
+#[test]
+fn segments_of_stamps_out_of_order_cover_their_range() {
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    batcher.push_sample(sample(9_000));
+    batcher.push_sample(sample(2_000));
+
+    let segments = batcher.take();
+
+    let samples = segments
+        .iter()
+        .find(|s| s.series == Series::Samples)
+        .unwrap();
+    assert_eq!((samples.start_ms, samples.end_ms), (2_000, 9_000));
+}
+
+/// Largest gap between the first and last stamp of every segment of a series.
+fn widest_span(segments: &[Segment], series: Series) -> i64 {
+    segments
+        .iter()
+        .filter(|s| s.series == series)
+        .map(|s| s.end_ms - s.start_ms)
+        .max()
+        .unwrap()
+}
+
+#[test]
+fn a_segment_never_spans_more_than_an_hour() {
+    let hour = 3_600_000;
+    let mut batcher = Batcher::new(Duration::from_secs(3 * 3_600));
+    for n in 0..1_080 {
+        batcher.push_sample(sample(n * 10_000));
+    }
+
+    let segments = batcher.take();
+
+    assert!(widest_span(&segments, Series::Samples) <= hour);
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 1_080);
+}
+
+#[test]
+fn stamps_a_clock_jump_scattered_still_make_segments_within_an_hour() {
+    let hour = 3_600_000;
+    let mut batcher = Batcher::new(Duration::from_secs(300));
+    for ts in [0, 1_000, 30 * hour, 30 * hour + 1_000, 2_000, 3_000] {
+        batcher.push_sample(sample(ts));
+    }
+
+    let segments = batcher.take();
+
+    assert!(widest_span(&segments, Series::Samples) <= hour);
+    let mut total = 0;
+    for segment in segments.iter().filter(|s| s.series == Series::Samples) {
+        total += decode::<Sample>(&segment.data).unwrap().len();
+    }
+    assert_eq!(total, 6);
+}
+
+fn reset() -> HistoryReset {
+    HistoryReset {
+        file: "vestigium.db.corrupt-1790000000000".to_string(),
+        at_ms: 1_790_000_000_000,
+        tweaks: true,
+        settings: false,
+        machine: true,
+    }
+}
+
+#[test]
+fn a_history_set_aside_is_remembered_for_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    {
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(store.history_reset().unwrap(), None);
+        store.set_history_reset(&reset()).unwrap();
+    }
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.history_reset().unwrap(), Some(reset()));
+}
+
+#[test]
+fn the_note_of_a_set_aside_history_does_not_change_the_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
+    let before = store.settings().unwrap();
+
+    store.set_history_reset(&reset()).unwrap();
+
+    assert_eq!(store.settings().unwrap(), before);
+    assert!(store.settings_notes().unwrap().is_empty());
+}
+
+#[test]
+fn an_unreadable_note_of_a_set_aside_history_reads_as_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vestigium.db");
+    drop(Store::open(&path).unwrap());
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO setting (key, value) VALUES ('history_reset', 'not json')",
+            [],
+        )
+        .unwrap();
+
+    let store = Store::open(&path).unwrap();
+
+    assert_eq!(store.history_reset().unwrap(), None);
 }

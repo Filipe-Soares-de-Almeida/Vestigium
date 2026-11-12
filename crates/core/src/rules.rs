@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::dump::HARDWARE_STOPS;
 use crate::episode::MEMORY_HIGH_PCT;
+use crate::postmortem::POSTMORTEM_BEFORE_MS;
 use crate::process::per_program;
 use crate::{
-    CrashKind, DiskLoad, EventMeaning, Media, ProcessSample, ProcessTop, RoutineKind, Sample,
-    Trigger, WinEvent, Window, classify,
+    CrashKind, DiskLoad, EventMeaning, Media, OccurrenceKind, ProcessSample, ProcessTop,
+    RoutineKind, Sample, Trigger, WinEvent, Window, classify,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -14,6 +16,11 @@ pub enum Confidence {
     Low,
     Medium,
     High,
+}
+
+impl Confidence {
+    /// Every variant, in declaration order.
+    pub const ALL: [Confidence; 3] = [Confidence::Low, Confidence::Medium, Confidence::High];
 }
 
 /// A value the rules read; percentages run 0 to 100.
@@ -30,6 +37,23 @@ pub enum Metric {
     PerfLimitPct,
     PrivateBytes,
     IoBytesPerS,
+}
+
+impl Metric {
+    /// Every variant, in declaration order.
+    pub const ALL: [Metric; 11] = [
+        Metric::DiskLatencyMs,
+        Metric::DiskQueue,
+        Metric::DiskActivePct,
+        Metric::MemAvailPct,
+        Metric::HardFaultsPerS,
+        Metric::CpuPct,
+        Metric::CoreDpcIsrPct,
+        Metric::GpuPct,
+        Metric::PerfLimitPct,
+        Metric::PrivateBytes,
+        Metric::IoBytesPerS,
+    ];
 }
 
 /// Where a rule crosses for each metric; see `crosses_down` for the direction.
@@ -99,6 +123,8 @@ pub enum Cause {
     },
     /// Windows logged a fatal hardware error before the fall.
     HardwareFault,
+    /// The window holds no readings, so nothing could be weighed.
+    NotMeasured,
 }
 
 /// A value from the window that backs a suspect; the words come from the UI.
@@ -190,6 +216,8 @@ pub enum NextStep {
     RunMemTest86,
     /// Let Windows repair the file system; Vestigium only checks it.
     RepairVolume,
+    /// Open the crash dump, which says what Windows blamed.
+    ReadCrashDump,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -200,25 +228,57 @@ pub struct Suspect {
     pub next_steps: Vec<NextStep>,
 }
 
-/// The span the rules look at first: from the first trigger's start to its end.
+/// The span the rules look at first: the gravest triggers' earliest start to their latest end.
 #[derive(Clone, Copy, Debug)]
 struct Focus {
     start: i64,
     end: i64,
+    /// How far before `start` Windows events still count as the cause.
+    event_lead_ms: i64,
 }
 
+/// How long before the focus starts and after it ends a cause is still looked for.
+const SCAN_BEFORE_MS: i64 = 10_000;
+const SCAN_AFTER_MS: i64 = 5_000;
+
 impl Focus {
+    fn scan_from(self) -> i64 {
+        self.start - SCAN_BEFORE_MS
+    }
+
+    fn scan_to(self) -> i64 {
+        self.end + SCAN_AFTER_MS
+    }
+
+    fn event_scan_from(self) -> i64 {
+        self.start - self.event_lead_ms
+    }
+
     fn of(triggers: &[Trigger], window: &Window) -> Focus {
-        triggers.iter().min_by_key(|t| t.start_ms()).map_or(
-            Focus {
+        let rank = |t: &Trigger| OccurrenceKind::of(t).rank();
+        let Some(gravest) = triggers.iter().map(rank).max() else {
+            return Focus {
                 start: window.from_ms,
                 end: window.from_ms,
+                event_lead_ms: SCAN_BEFORE_MS,
+            };
+        };
+        let group = triggers.iter().filter(|t| rank(t) == gravest);
+        // A fall stops the evidence at the last second, so what Windows logged minutes before it counts.
+        let fall = group.clone().any(|t| matches!(t, Trigger::Crash { .. }));
+        Focus {
+            event_lead_ms: if fall {
+                POSTMORTEM_BEFORE_MS
+            } else {
+                SCAN_BEFORE_MS
             },
-            |first| Focus {
-                start: first.start_ms(),
-                end: first.end_ms(),
-            },
-        )
+            start: group
+                .clone()
+                .map(Trigger::start_ms)
+                .min()
+                .unwrap_or(window.from_ms),
+            end: group.map(Trigger::end_ms).max().unwrap_or(window.from_ms),
+        }
     }
 }
 
@@ -240,7 +300,8 @@ pub fn suspects(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         .iter()
         .filter_map(|rule| rule(focus, window))
         .collect();
-    found.extend(app(triggers, window));
+    let system_cause = !found.is_empty();
+    found.extend(app(triggers, window, system_cause));
     found.extend(crash(triggers, window));
     if found.is_empty() {
         found.push(unclear(window));
@@ -256,33 +317,58 @@ const STORAGE_EVENTS: &[EventMeaning] = &[
     EventMeaning::PagingError,
 ];
 
-fn storage_reset(_: Focus, window: &Window) -> Option<Suspect> {
-    let mut evidence = events_meaning(window, STORAGE_EVENTS);
+fn storage_reset(focus: Focus, window: &Window) -> Option<Suspect> {
+    let (from, to) = (focus.event_scan_from(), focus.scan_to());
+    let mut evidence = events_between(window, STORAGE_EVENTS, from, to);
     if evidence.is_empty() {
         return None;
     }
-    let worst = worst_disk(&window.samples, |d| d.latency_ms);
+    let worst = worst_disk(between(&window.samples, from, to), |d| d.latency_ms);
     if let Some((ts_ms, disk, value)) = &worst {
         evidence.push(metric(*ts_ms, Metric::DiskLatencyMs, *value, Some(disk)));
     }
+    let slow = worst
+        .filter(|(_, _, value)| *value > threshold(Metric::DiskLatencyMs))
+        .map(|(_, disk, _)| disk);
     Some(Suspect {
-        cause: Cause::Storage {
-            disk: worst
-                .filter(|(_, _, value)| *value > threshold(Metric::DiskLatencyMs))
-                .map(|(_, disk, _)| disk),
+        confidence: if slow.is_some() {
+            Confidence::High
+        } else {
+            Confidence::Medium
         },
-        confidence: Confidence::High,
+        cause: Cause::Storage { disk: slow },
+        next_steps: storage_steps(&evidence),
         evidence,
-        next_steps: vec![
-            NextStep::UpdateStorageDriver,
-            NextStep::CheckDiskCable,
-            NextStep::RunDiskTest,
-        ],
     })
 }
 
+/// Steps for the gravest disk event kept: a bad block or paging error, then a reset, then a retry.
+fn storage_steps(evidence: &[Evidence]) -> Vec<NextStep> {
+    let has = |wanted: &[EventMeaning]| {
+        evidence.iter().any(|e| match e {
+            Evidence::Event { meaning, .. } => wanted.contains(meaning),
+            _ => false,
+        })
+    };
+    if has(&[EventMeaning::DiskBadBlock, EventMeaning::PagingError]) {
+        vec![NextStep::BackUpNow, NextStep::RunDiskTest]
+    } else if has(&[EventMeaning::StorageReset]) {
+        vec![
+            NextStep::UpdateStorageDriver,
+            NextStep::CheckDiskCable,
+            NextStep::RunDiskTest,
+        ]
+    } else {
+        vec![
+            NextStep::RunDiskTest,
+            NextStep::CheckDiskCable,
+            NextStep::UpdateStorageDriver,
+        ]
+    }
+}
+
 fn disk_latency(focus: Focus, window: &Window) -> Option<Suspect> {
-    let samples = between(&window.samples, focus.start - 10_000, focus.end + 5_000);
+    let samples = between(&window.samples, focus.scan_from(), focus.scan_to());
     let latency = worst_disk(samples.iter().copied(), |d| d.latency_ms)
         .filter(|(_, _, v)| *v > threshold(Metric::DiskLatencyMs));
     let queue = worst_disk(samples.iter().copied(), |d| d.queue_len)
@@ -313,7 +399,7 @@ fn disk_latency(focus: Focus, window: &Window) -> Option<Suspect> {
     if let Some((ts_ms, value)) = active {
         evidence.push(metric(ts_ms, Metric::DiskActivePct, value, Some(&disk)));
     }
-    let tops = tops_or_all(window, focus.start - 10_000, focus.end + 5_000);
+    let tops = tops_or_all(window, focus.scan_from(), focus.scan_to());
     let busiest = ranked(&tops, Metric::IoBytesPerS, Summary::Mean)
         .into_iter()
         .next();
@@ -353,7 +439,7 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
     let faults = samples
         .iter()
         .filter(|s| avail_pct(s, total).is_some_and(|pct| pct < 100.0 - MEMORY_HIGH_PCT))
-        .map(|s| (s.ts_ms, s.hard_faults_per_s))
+        .filter_map(|s| s.hard_faults_per_s.map(|v| (s.ts_ms, v)))
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, v)| *v >= threshold(Metric::HardFaultsPerS));
     if avail.is_none() && faults.is_none() {
@@ -366,8 +452,8 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
     if let Some((ts_ms, value)) = faults {
         evidence.push(metric(ts_ms, Metric::HardFaultsPerS, value, None));
     }
-    let all: Vec<&ProcessTop> = window.tops.iter().collect();
-    let biggest = ranked(&all, Metric::PrivateBytes, Summary::Max)
+    let before = tops_or_all(window, focus.start - 30_000, focus.start);
+    let biggest = ranked(&before, Metric::PrivateBytes, Summary::Max)
         .into_iter()
         .next();
     if let Some(p) = &biggest {
@@ -384,8 +470,7 @@ fn memory(focus: Focus, window: &Window) -> Option<Suspect> {
 }
 
 fn cpu(focus: Focus, window: &Window) -> Option<Suspect> {
-    let from = focus.start - 10_000;
-    let to = focus.end + 5_000;
+    let (from, to) = (focus.scan_from(), focus.scan_to());
     let mut saturated_ms = 0;
     let mut peak: Option<(i64, f32)> = None;
     for (i, s) in window.samples.iter().enumerate() {
@@ -485,14 +570,14 @@ fn dpc_isr(focus: Focus, window: &Window) -> Option<Suspect> {
     })
 }
 
-fn gpu_driver(_: Focus, window: &Window) -> Option<Suspect> {
-    let mut evidence = events_meaning(window, &[EventMeaning::DisplayReset]);
+fn gpu_driver(focus: Focus, window: &Window) -> Option<Suspect> {
+    let (from, to) = (focus.event_scan_from(), focus.scan_to());
+    let mut evidence = events_between(window, &[EventMeaning::DisplayReset], from, to);
     if evidence.is_empty() {
         return None;
     }
-    let gpu = window
-        .samples
-        .iter()
+    let gpu = between(&window.samples, from, to)
+        .into_iter()
         .filter_map(|s| s.gpu_pct.map(|v| (s.ts_ms, v)))
         .max_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((ts_ms, value)) = gpu {
@@ -509,7 +594,7 @@ fn gpu_driver(_: Focus, window: &Window) -> Option<Suspect> {
 fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     let limit = between(&window.samples, focus.start - 30_000, focus.start)
         .iter()
-        .map(|s| (s.ts_ms, s.perf_limit_pct))
+        .filter_map(|s| s.perf_limit_pct.map(|v| (s.ts_ms, v)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(_, v)| *v < threshold(Metric::PerfLimitPct));
     let mut evidence = events_meaning(window, &[EventMeaning::CpuFirmwareLimit]);
@@ -532,7 +617,9 @@ fn throttling(focus: Focus, window: &Window) -> Option<Suspect> {
     })
 }
 
-fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
+/// A hung app is High when its own CPU or I/O shows inside the hang or no system rule matched,
+/// unless two or more apps hung together, which makes each Medium.
+fn app(triggers: &[Trigger], window: &Window, system_cause: bool) -> Vec<Suspect> {
     if triggers.iter().any(|t| matches!(t, Trigger::Freeze { .. })) {
         return Vec::new();
     }
@@ -548,25 +635,22 @@ fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         else {
             continue;
         };
-        if named
-            .iter()
-            .any(|s| matches!(&s.cause, Cause::App { name: n } if n == name))
-        {
-            continue;
-        }
         let mut evidence = vec![Evidence::Hang {
             name: name.clone(),
             duration_ms: end_ms - start_ms,
         }];
+        let mut own_load = false;
         for m in [Metric::CpuPct, Metric::IoBytesPerS] {
             let own = window
                 .tops
                 .iter()
+                .filter(|t| (*start_ms..=*end_ms).contains(&t.ts_ms))
                 .flat_map(|t| &t.entries)
                 .filter(|p| p.pid == *pid)
                 .map(|p| process_value(p, m))
                 .max_by(f64::total_cmp);
             if let Some(value) = own {
+                own_load |= value > 0.0;
                 evidence.push(Evidence::Process {
                     pid: *pid,
                     name: name.clone(),
@@ -575,12 +659,27 @@ fn app(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
                 });
             }
         }
-        named.push(Suspect {
+        let suspect = Suspect {
             cause: Cause::App { name: name.clone() },
-            confidence: Confidence::High,
+            confidence: if own_load || !system_cause {
+                Confidence::High
+            } else {
+                Confidence::Medium
+            },
             evidence,
             next_steps: vec![NextStep::ReportToAppVendor],
-        });
+        };
+        match named.iter_mut().find(|s| s.cause == suspect.cause) {
+            Some(kept) if kept.confidence < suspect.confidence => *kept = suspect,
+            Some(_) => {}
+            None => named.push(suspect),
+        }
+    }
+    // Several windows hung together say little about which one is to blame.
+    if named.len() >= 2 {
+        for suspect in &mut named {
+            suspect.confidence = Confidence::Medium;
+        }
     }
     named
 }
@@ -611,7 +710,14 @@ fn crash(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
         CrashKind::BlueScreen { code, .. } => (
             Cause::BlueScreen { code },
             Confidence::High,
-            vec![NextStep::UpdateDriver],
+            if HARDWARE_STOPS.contains(&code) {
+                vec![
+                    NextStep::CheckHardwareStability,
+                    NextStep::RunMemoryDiagnostic,
+                ]
+            } else {
+                vec![NextStep::ReadCrashDump]
+            },
         ),
         CrashKind::PowerButton => (
             Cause::Unresponsive,
@@ -650,8 +756,16 @@ fn crash(triggers: &[Trigger], window: &Window) -> Vec<Suspect> {
     found
 }
 
-/// The ordinary signals, to show that nothing crossed.
+/// The ordinary signals, to show that nothing crossed; the GPU and disk activity when they were high.
 fn unclear(window: &Window) -> Suspect {
+    if window.samples.is_empty() {
+        return Suspect {
+            cause: Cause::NotMeasured,
+            confidence: Confidence::Low,
+            evidence: Vec::new(),
+            next_steps: vec![NextStep::EnableSensitiveMode, NextStep::DeepCapture],
+        };
+    }
     let peak = |value: fn(&Sample) -> f32| {
         window
             .samples
@@ -675,6 +789,20 @@ fn unclear(window: &Window) -> Suspect {
     if let Some((ts_ms, disk, value)) = worst_disk(&window.samples, |d| d.latency_ms) {
         evidence.push(metric(ts_ms, Metric::DiskLatencyMs, value, Some(&disk)));
     }
+    let gpu = window
+        .samples
+        .iter()
+        .filter_map(|s| s.gpu_pct.map(|v| (s.ts_ms, v)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(_, v)| *v >= threshold(Metric::GpuPct));
+    if let Some((ts_ms, value)) = gpu {
+        evidence.push(metric(ts_ms, Metric::GpuPct, value, None));
+    }
+    let busy_disk = worst_disk(&window.samples, |d| Some(d.active_pct))
+        .filter(|(_, _, v)| *v >= threshold(Metric::DiskActivePct));
+    if let Some((ts_ms, disk, value)) = busy_disk {
+        evidence.push(metric(ts_ms, Metric::DiskActivePct, value, Some(&disk)));
+    }
     Suspect {
         cause: Cause::Unclear,
         confidence: Confidence::Low,
@@ -695,9 +823,20 @@ fn metric(ts_ms: i64, metric: Metric, value: f32, subject: Option<&str>) -> Evid
 
 /// Curated events of these kinds, judged again by provider and id rather than by the stored meaning.
 fn events_meaning(window: &Window, meanings: &[EventMeaning]) -> Vec<Evidence> {
+    events_between(window, meanings, i64::MIN, i64::MAX)
+}
+
+/// The same, limited to events from `from_ms` to `to_ms`.
+fn events_between(
+    window: &Window,
+    meanings: &[EventMeaning],
+    from_ms: i64,
+    to_ms: i64,
+) -> Vec<Evidence> {
     window
         .events
         .iter()
+        .filter(|e| (from_ms..=to_ms).contains(&e.ts_ms))
         .filter_map(|e| {
             curated_meaning(e)
                 .filter(|m| meanings.contains(m))
@@ -723,16 +862,18 @@ fn between(samples: &[Sample], from_ms: i64, to_ms: i64) -> Vec<&Sample> {
         .collect()
 }
 
-/// The highest disk value across the samples, with when and on which disk.
+/// The highest disk value across the samples, with when and on which disk; a disk whose counter
+/// could not be read is left out.
 pub(crate) fn worst_disk<'a>(
     samples: impl IntoIterator<Item = &'a Sample>,
-    value: fn(&DiskLoad) -> f32,
+    value: fn(&DiskLoad) -> Option<f32>,
 ) -> Option<(i64, String, f32)> {
     samples
         .into_iter()
         .flat_map(|s| s.disks.iter().map(move |d| (s.ts_ms, d)))
-        .max_by(|a, b| value(a.1).total_cmp(&value(b.1)))
-        .map(|(ts_ms, d)| (ts_ms, d.name.clone(), value(d)))
+        .filter_map(|(ts_ms, d)| value(d).map(|v| (ts_ms, d, v)))
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(ts_ms, d, v)| (ts_ms, d.name.clone(), v))
 }
 
 pub(crate) fn avail_pct(sample: &Sample, machine_total: u64) -> Option<f32> {
@@ -783,30 +924,30 @@ enum Summary {
 
 /// Processes by the mean or the peak of `metric` across the rankings, heaviest first.
 fn ranked(tops: &[&ProcessTop], metric: Metric, summary: Summary) -> Vec<Evidence> {
-    let mut load: HashMap<u32, (String, f64)> = HashMap::new();
+    let mut load: HashMap<(u32, &str), f64> = HashMap::new();
     for p in tops.iter().flat_map(|t| &t.entries) {
         let value = process_value(p, metric);
-        let entry = load.entry(p.pid).or_insert((p.name.clone(), 0.0));
-        entry.1 = match summary {
-            Summary::Mean => entry.1 + value,
-            Summary::Max => entry.1.max(value),
+        let entry = load.entry((p.pid, p.name.as_str())).or_insert(0.0);
+        *entry = match summary {
+            Summary::Mean => *entry + value,
+            Summary::Max => entry.max(value),
         };
     }
     let count = tops.len().max(1) as f64;
-    let mut ranked: Vec<(u32, String, f64)> = load
+    let mut ranked: Vec<(u32, &str, f64)> = load
         .into_iter()
-        .map(|(pid, (name, value))| match summary {
+        .map(|((pid, name), value)| match summary {
             Summary::Mean => (pid, name, value / count),
             Summary::Max => (pid, name, value),
         })
         .filter(|(_, _, value)| *value > 0.0)
         .collect();
-    ranked.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)));
+    ranked.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(b.1)));
     ranked
         .into_iter()
         .map(|(pid, name, value)| Evidence::Process {
             pid,
-            name,
+            name: name.to_string(),
             metric,
             value,
         })

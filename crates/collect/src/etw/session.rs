@@ -1,12 +1,10 @@
 use std::mem::offset_of;
-use std::path::Path;
 
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Diagnostics::Etw::{
     CONTROLTRACE_HANDLE, ControlTraceW, EVENT_TRACE_CONTROL, EVENT_TRACE_CONTROL_QUERY,
-    EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_FILE_MODE_SEQUENTIAL, EVENT_TRACE_FLAG,
-    EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, EVENT_TRACE_SYSTEM_LOGGER_MODE,
-    StartTraceW, WNODE_FLAG_TRACED_GUID,
+    EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_FLAG, EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE,
+    EVENT_TRACE_SYSTEM_LOGGER_MODE, StartTraceW, WNODE_FLAG_TRACED_GUID,
 };
 use windows::core::{GUID, PCWSTR};
 
@@ -14,6 +12,8 @@ use crate::CollectError;
 
 /// The deep capture's kernel session; one name, so a leftover one is found and stopped.
 pub const DEEP_CAPTURE_SESSION: &str = "Vestigium Deep Capture";
+/// The named mutex that exists while a helper runs a deep capture.
+pub const DEEP_CAPTURE_LOCK: &str = r"Global\Vestigium.DeepCapture";
 pub const DEEP_CAPTURE_GUID: GUID = GUID::from_u128(0x5e0c7a1d_4b2f_4c8e_9a63_d1f27b4e08c5);
 
 /// 64 KB buffers, all allocated when the session starts.
@@ -49,11 +49,10 @@ impl KernelSession {
         name: &str,
         guid: GUID,
         flags: EVENT_TRACE_FLAG,
-        etl: Option<&Path>,
     ) -> Result<KernelSession, CollectError> {
         let wide = wide(name);
         let mut handle = CONTROLTRACE_HANDLE::default();
-        let mut props = properties(guid, flags, etl);
+        let mut props = properties(guid, flags);
         // SAFETY: props is a zeroed, sized EVENT_TRACE_PROPERTIES followed by its name and file buffers.
         let mut status =
             unsafe { StartTraceW(&mut handle, PCWSTR(wide.as_ptr()), &mut props.props) };
@@ -63,7 +62,7 @@ impl KernelSession {
                 name,
                 EVENT_TRACE_CONTROL_STOP,
             );
-            props = properties(guid, flags, etl);
+            props = properties(guid, flags);
             // SAFETY: as above, with fresh properties.
             status = unsafe { StartTraceW(&mut handle, PCWSTR(wide.as_ptr()), &mut props.props) };
         }
@@ -99,7 +98,27 @@ impl Drop for KernelSession {
     }
 }
 
-fn properties(guid: GUID, flags: EVENT_TRACE_FLAG, etl: Option<&Path>) -> Box<Properties> {
+/// Whether a session called `name` exists, asked without elevation.
+pub fn session_exists(name: &str) -> bool {
+    control(
+        CONTROLTRACE_HANDLE::default(),
+        name,
+        EVENT_TRACE_CONTROL_QUERY,
+    )
+    .is_ok()
+}
+
+/// Stops the session called `name`; `false` when there is none or the caller may not stop it.
+pub fn stop_session(name: &str) -> bool {
+    control(
+        CONTROLTRACE_HANDLE::default(),
+        name,
+        EVENT_TRACE_CONTROL_STOP,
+    )
+    .is_ok()
+}
+
+fn properties(guid: GUID, flags: EVENT_TRACE_FLAG) -> Box<Properties> {
     // SAFETY: Properties is plain data; all-zero is its documented starting state.
     let mut p: Box<Properties> = Box::new(unsafe { std::mem::zeroed() });
     p.props.Wnode.BufferSize = size_of::<Properties>() as u32;
@@ -114,14 +133,6 @@ fn properties(guid: GUID, flags: EVENT_TRACE_FLAG, etl: Option<&Path>) -> Box<Pr
     p.props.LogFileMode = EVENT_TRACE_SYSTEM_LOGGER_MODE | EVENT_TRACE_REAL_TIME_MODE;
     p.props.EnableFlags = flags;
     p.props.LoggerNameOffset = offset_of!(Properties, name) as u32;
-    if let Some(path) = etl {
-        let text = path.to_string_lossy().replace('/', "\\");
-        p.props.LogFileMode |= EVENT_TRACE_FILE_MODE_SEQUENTIAL;
-        p.props.LogFileNameOffset = offset_of!(Properties, file) as u32;
-        for (slot, unit) in p.file.iter_mut().take(259).zip(text.encode_utf16()) {
-            *slot = unit;
-        }
-    }
     p
 }
 
@@ -131,7 +142,7 @@ fn control(
     code: EVENT_TRACE_CONTROL,
 ) -> Result<SessionStats, CollectError> {
     let wide = wide(name);
-    let mut props = properties(GUID::zeroed(), EVENT_TRACE_FLAG(0), None);
+    let mut props = properties(GUID::zeroed(), EVENT_TRACE_FLAG(0));
     // SAFETY: props is sized for the name and file buffers that follow it.
     let status = unsafe { ControlTraceW(handle, PCWSTR(wide.as_ptr()), &mut props.props, code) };
     win32(status)?;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -15,13 +15,20 @@ use crate::{CollectError, HighResTimer, unbiased_ms, wall_ms};
 #[derive(Debug)]
 pub struct ProbeConfig {
     period_us: AtomicU32,
+    dropped: AtomicU64,
 }
 
 impl ProbeConfig {
     pub fn new(period: Duration) -> Arc<ProbeConfig> {
         Arc::new(ProbeConfig {
             period_us: AtomicU32::new(micros(period)),
+            dropped: AtomicU64::new(0),
         })
+    }
+
+    /// Ticks the probe dropped because the queue to the sampler was full.
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
     }
 
     /// Takes effect from the probe's next tick.
@@ -42,7 +49,7 @@ fn micros(period: Duration) -> u32 {
 pub fn spawn_probe(
     config: Arc<ProbeConfig>,
     gate: Arc<RunGate>,
-    tx: Sender<ProbeTick>,
+    tx: SyncSender<ProbeTick>,
 ) -> Result<JoinHandle<()>, CollectError> {
     let timer = HighResTimer::new()?;
     let handle = thread::Builder::new()
@@ -62,10 +69,59 @@ pub fn spawn_probe(
                     wall_ms: wall_ms(),
                     lag_ms: lag as f32,
                 };
-                if tx.send(tick).is_err() {
+                if !offer(&tx, tick, &config) {
                     return;
                 }
             }
         })?;
     Ok(handle)
+}
+
+/// Queues a tick without ever blocking the probe; a full queue drops it and counts it. False
+/// once the sampler is gone.
+fn offer(tx: &SyncSender<ProbeTick>, tick: ProbeTick, config: &ProbeConfig) -> bool {
+    match tx.try_send(tick) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_)) => {
+            config.dropped.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        Err(TrySendError::Disconnected(_)) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::*;
+
+    fn tick(wall_ms: i64) -> ProbeTick {
+        ProbeTick {
+            wall_ms,
+            lag_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn a_full_queue_drops_and_counts_ticks_instead_of_blocking() {
+        let config = ProbeConfig::new(Duration::from_millis(100));
+        let (tx, rx) = mpsc::sync_channel(2);
+
+        for at in 0..5 {
+            assert!(offer(&tx, tick(at), &config));
+        }
+
+        assert_eq!(config.dropped(), 3);
+        assert_eq!(rx.try_iter().map(|t| t.wall_ms).collect::<Vec<_>>(), [0, 1]);
+    }
+
+    #[test]
+    fn a_gone_sampler_ends_the_probe() {
+        let config = ProbeConfig::new(Duration::from_millis(100));
+        let (tx, rx) = mpsc::sync_channel(2);
+        drop(rx);
+
+        assert!(!offer(&tx, tick(0), &config));
+    }
 }

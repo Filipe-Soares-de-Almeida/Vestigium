@@ -8,13 +8,13 @@ fn sample(ts_ms: i64) -> Sample {
         cpu_pct: 20.0,
         dpc_pct: 0.5,
         isr_pct: 0.1,
-        perf_limit_pct: 100.0,
-        proc_perf_pct: 99.0,
+        perf_limit_pct: Some(100.0),
+        proc_perf_pct: Some(99.0),
         mem_total_bytes: 16 << 30,
         mem_avail_bytes: 12 << 30,
         commit_bytes: 6 << 30,
         commit_limit_bytes: 32 << 30,
-        hard_faults_per_s: 0.0,
+        hard_faults_per_s: Some(0.0),
         gpu_pct: Some(10.0),
         probe_max_lag_ms: 1.5,
         sampler_lag_ms: 1.0,
@@ -27,9 +27,9 @@ fn disk(name: &str, active_pct: f32, latency_ms: f32) -> DiskLoad {
     DiskLoad {
         name: name.to_string(),
         active_pct,
-        latency_ms,
-        queue_len: 0.0,
-        bytes_per_s: 0.0,
+        latency_ms: Some(latency_ms),
+        queue_len: Some(0.0),
+        bytes_per_s: Some(0.0),
     }
 }
 
@@ -43,6 +43,17 @@ fn reading(cpu_pct: f32, mem_used_pct: f32, disk_active_pct: f32, gpu_pct: f32) 
         gpu_pct: Some(gpu_pct),
         probe_lag_ms: 1.0,
     }
+}
+
+#[test]
+fn reading_of_a_sample_ignores_a_latency_that_was_not_read() {
+    let mut bare = sample(5_000);
+    bare.disks.iter_mut().for_each(|d| d.latency_ms = None);
+
+    let reading = Reading::of_sample(&bare);
+
+    assert_eq!(reading.disk_active_pct, 70.0);
+    assert_eq!(reading.disk_latency_ms, 0.0);
 }
 
 #[test]
@@ -163,7 +174,7 @@ fn peak_keeps_the_higher_value_of_each() {
 
 #[test]
 fn minute_state_follows_the_load_rule() {
-    let state = |r: Reading| pc_state(Some(&r), false);
+    let state = |r: Reading| pc_state(Some(&r), false, false);
 
     assert_eq!(state(reading(BUSY_ABOVE, 30.0, 5.0, 0.0)), PcState::Calm);
     assert_eq!(state(reading(39.0, 30.0, 5.0, 0.0)), PcState::Busy);
@@ -176,7 +187,7 @@ fn minute_state_follows_the_load_rule() {
 
 #[test]
 fn full_load_without_an_episode_is_busy() {
-    let state = |r: Reading| pc_state(Some(&r), false);
+    let state = |r: Reading| pc_state(Some(&r), false, false);
 
     assert_eq!(state(reading(100.0, 30.0, 5.0, 0.0)), PcState::Busy);
     assert_eq!(state(reading(5.0, 30.0, 100.0, 0.0)), PcState::Busy);
@@ -187,13 +198,26 @@ fn full_load_without_an_episode_is_busy() {
 fn episode_minutes_are_under_pressure() {
     let calm = reading(5.0, 30.0, 5.0, 0.0);
 
-    assert_eq!(pc_state(Some(&calm), true), PcState::Pressure);
+    assert_eq!(pc_state(Some(&calm), true, false), PcState::Pressure);
 }
 
 #[test]
-fn a_span_without_readings_is_suspended() {
-    assert_eq!(pc_state(None, false), PcState::Suspended);
-    assert_eq!(pc_state(None, true), PcState::Suspended);
+fn a_span_without_readings_inside_a_recorded_absence_is_suspended() {
+    assert_eq!(pc_state(None, false, true), PcState::Suspended);
+    assert_eq!(pc_state(None, true, true), PcState::Suspended);
+}
+
+#[test]
+fn a_span_without_readings_and_without_a_recorded_absence_is_no_reading() {
+    assert_eq!(pc_state(None, false, false), PcState::NoReading);
+    assert_eq!(pc_state(None, true, false), PcState::NoReading);
+}
+
+#[test]
+fn a_reading_is_never_no_reading_whatever_the_absence() {
+    let calm = reading(5.0, 30.0, 5.0, 0.0);
+
+    assert_eq!(pc_state(Some(&calm), false, true), PcState::Calm);
 }
 
 #[test]

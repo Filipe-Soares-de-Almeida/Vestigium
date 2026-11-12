@@ -34,7 +34,19 @@ export class NowStream {
   readonly view = $derived(this.#frozen ?? this.live);
   readonly paused = $derived(this.#frozen !== null);
   readonly watching = $derived(app.running && !app.paused);
-  readonly error = $derived(this.failure ?? (this.live.ended ? STOPPED : null));
+  /** The watcher is running but not answering: the screen keeps the last values, marked as old. */
+  readonly quiet = $derived(app.silent || (this.live.silent && this.watching));
+  readonly error = $derived(this.quiet ? null : (this.failure ?? (this.live.ended ? STOPPED : null)));
+  /** What the screen shows: live parts, the last values under a notice, why there are none, or a failure. */
+  readonly stage = $derived<"idle" | "quiet" | "error" | "loading" | "live">(
+    this.quiet ? "quiet" : !this.watching ? "idle" : this.error !== null ? "error" : !this.live.started ? "loading" : "live",
+  );
+  /** Whether any value arrived before the watcher went quiet. */
+  readonly hasData = $derived(this.view.points.length > 0 || this.view.frame !== null);
+  /** When the last value arrived; the last answer of the watcher when none did. */
+  readonly lastAt = $derived(
+    this.view.nowMs > 0 ? this.view.nowMs : (this.view.point?.reading.ts_ms ?? app.answeredAt),
+  );
 
   constructor() {
     $effect(() => {
@@ -63,9 +75,16 @@ export class NowStream {
       });
     });
 
-    // The watcher stopped answering: ask the shell again so its banner shows at once.
+    // The watcher stopped answering: ask the shell again so its status shows at once. A silent
+    // watcher that answers the status again gets a new stream.
     $effect(() => {
-      if (this.live.ended) void untrack(() => app.refresh());
+      if (!this.live.ended) return;
+      const silent = this.live.silent;
+      void untrack(() =>
+        app.refresh().then(() => {
+          if (silent && this.live.silent && app.running) this.#attempt++;
+        }),
+      );
     });
   }
 

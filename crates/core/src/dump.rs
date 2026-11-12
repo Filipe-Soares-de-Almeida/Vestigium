@@ -26,6 +26,16 @@ pub enum DumpKind {
     App,
 }
 
+impl DumpKind {
+    /// Every variant, in declaration order.
+    pub const ALL: [DumpKind; 4] = [
+        DumpKind::KernelMini,
+        DumpKind::KernelMemory,
+        DumpKind::LiveKernel,
+        DumpKind::App,
+    ];
+}
+
 /// What went wrong, as the dump records it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fault {
@@ -111,7 +121,7 @@ const FAULT_PARAM: [(u32, usize); 11] = [
 ];
 
 /// Stop codes that mean the hardware itself reported a fatal error.
-const HARDWARE_STOPS: [u32; 2] = [0x0000_0124, 0x0000_009C];
+pub(crate) const HARDWARE_STOPS: [u32; 2] = [0x0000_0124, 0x0000_009C];
 
 /// Windows' own libraries in an app: a crash inside one is rarely theirs.
 const APP_SYSTEM_IMAGES: [&str; 14] = [

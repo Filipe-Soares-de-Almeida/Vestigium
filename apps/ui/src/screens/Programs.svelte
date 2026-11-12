@@ -3,6 +3,7 @@
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
   import SelectField from "../components/SelectField.svelte";
+  import SilentNote from "../components/SilentNote.svelte";
   import TextField from "../components/TextField.svelte";
   import { app } from "../lib/app.svelte";
   import { formatPercent } from "../lib/format";
@@ -10,7 +11,8 @@
   import { relatedLinks } from "../lib/related.svelte";
   import { here, href } from "../lib/router.svelte";
   import { formatBytes, formatRate } from "./now/lanes";
-  import { type ProgramSort, sortPrograms } from "./now/sort";
+  import { type ProgramSort, visiblePrograms } from "./now/sort";
+  import { silentNotice } from "./now/silent";
   import { NowStream } from "./now/stream.svelte";
 
   /** Rows the table shows at most, after the filter and the sort. */
@@ -22,17 +24,16 @@
   let sort = $state<ProgramSort>("cpu");
   let query = $state("");
 
-  const ranked = $derived(sortPrograms(programs?.entries ?? [], sort).slice(0, SHOWN));
-  const rows = $derived.by(() => {
-    const needle = query.trim().toLowerCase();
-    return needle ? ranked.filter((p) => p.name.toLowerCase().includes(needle)) : ranked;
-  });
+  const found = $derived(visiblePrograms(programs?.entries ?? [], sort, query, SHOWN));
+  const rows = $derived(found.rows);
   const options = $derived([
     { value: "cpu", text: t("ui.now.top.cpu") },
     { value: "memory", text: t("ui.now.top.memory") },
     { value: "disk", text: t("ui.now.top.disk") },
   ]);
   const last = $derived(stream.view.frame?.latest ?? null);
+  /** The monitor does not answer: the list keeps the last values, faded, under a notice. */
+  const quiet = $derived(stream.stage === "quiet");
 
   relatedLinks(() => [
     { label: t("ui.related.live_now"), href: href.activity("now") },
@@ -40,21 +41,25 @@
   ]);
 </script>
 
-{#if !stream.watching}
+{#if stream.stage === "idle"}
   <PageHead
     title={t("ui.item.programs")}
     sub={t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}
   />
-{:else if stream.error !== null}
+{:else if stream.stage === "error"}
   <PageHead title={t("ui.item.programs")} />
   <ErrorView error={stream.error} onretry={() => stream.retry()} />
-{:else if !stream.live.started}
+{:else if stream.stage === "loading"}
   <PageHead title={t("ui.item.programs")} />
   <Loading />
 {:else}
   <PageHead
     title={t("ui.item.programs")}
-    sub={programs ? t("ui.now.all.sub", { total, shown: ranked.length }) : t("ui.now.top.waiting")}
+    sub={quiet
+      ? t("ui.now.lede.silent")
+      : programs
+        ? t("ui.now.all.sub", { total, shown: Math.min(total, SHOWN) })
+        : t("ui.now.top.waiting")}
   />
   <div class="tools">
     <div class="filter">
@@ -66,7 +71,8 @@
     </label>
     {#if stream.paused}<span class="paused">{t("ui.now.all.paused")}</span>{/if}
   </div>
-  <div class="wide">
+  {#if quiet}<SilentNote text={silentNotice("top", stream.hasData, stream.lastAt)} />{/if}
+  <div class="wide" class:veiled={quiet}>
     <table class="tbl">
       <thead>
         <tr>
@@ -87,12 +93,16 @@
             <td class="num">{formatRate(row.read_bps + row.write_bps)}</td>
           </tr>
         {:else}
-          <tr><td colspan="4" class="empty-cell">{t(programs ? "ui.now.all.none" : "ui.now.top.waiting")}</td></tr>
+          {#if !quiet}
+            <tr><td colspan="4" class="empty-cell">{t(programs ? "ui.now.all.none" : "ui.now.top.waiting")}</td></tr>
+          {/if}
         {/each}
       </tbody>
     </table>
   </div>
-  <p class="note">{t("ui.now.all.count", { shown: rows.length, total: ranked.length })}</p>
+  {#if !(quiet && programs === null)}
+    <p class="note" class:veiled={quiet}>{t("ui.now.all.count", { shown: rows.length, total: found.matched })}</p>
+  {/if}
 {/if}
 
 <style>

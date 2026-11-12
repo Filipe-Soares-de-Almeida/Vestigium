@@ -1,4 +1,5 @@
-# Builds the per-user installer, with the watcher, the elevated helper and PresentMon beside the window.
+# Builds the per-machine installer (Program Files, administrator permission to install), with the watcher,
+# the elevated helper and PresentMon beside the window.
 # Usage: powershell -ExecutionPolicy Bypass -File tools/bundle.ps1
 $ErrorActionPreference = 'Stop'
 

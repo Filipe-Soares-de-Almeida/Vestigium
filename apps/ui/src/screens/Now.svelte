@@ -12,13 +12,15 @@
   import LastOccurrence from "./now/LastOccurrence.svelte";
   import { busiestDisk } from "./now/lanes";
   import { momentKey, sentence } from "./now/sentence";
+  import { silentNotice } from "./now/silent";
   import { NowStream } from "./now/stream.svelte";
   import TenMinutes from "./now/TenMinutes.svelte";
   import TopPrograms from "./now/TopPrograms.svelte";
 
   const stream = new NowStream();
   const view = $derived(stream.view);
-  const live = stream.live;
+  /** The monitor does not answer: the blocks keep the last values, faded, each under its notice. */
+  const quiet = $derived(stream.stage === "quiet");
   /** What the polite live region last said. */
   let said = $state("");
 
@@ -54,30 +56,39 @@
   });
 </script>
 
-{#if !stream.watching}
+{#if stream.stage === "idle"}
   <PageHead
     title={t("ui.now.title")}
     sub={t(app.paused ? "ui.now.lede.paused" : app.stopped ? "ui.now.lede.stopped" : "ui.now.lede.unreachable")}
   />
-{:else if stream.error !== null}
+{:else if stream.stage === "error"}
   <PageHead title={t("ui.now.title")} />
   <ErrorView error={stream.error} onretry={() => stream.retry()} />
-{:else if !live.started}
+{:else if stream.stage === "loading"}
   <PageHead title={t("ui.now.title")} />
   <Loading />
 {:else}
-  <PageHead title={t("ui.now.title")} sub={lede} />
+  <PageHead title={t("ui.now.title")} sub={quiet ? t("ui.now.lede.silent") : lede} />
   <TenMinutes
     points={view.points}
     disk={busiestDisk(view.frame?.sample?.disks ?? [])}
     paused={stream.paused}
+    notice={quiet ? silentNotice("chart", stream.hasData, stream.lastAt) : undefined}
     onsay={(text) => (said = text)}
   />
   <p class="sr" aria-live="polite">{said}</p>
   <div class="cols2">
-    <TopPrograms top={view.frame?.top ?? null} programs={view.frame?.programs ?? null} />
+    <TopPrograms
+      top={view.frame?.top ?? null}
+      programs={view.frame?.programs ?? null}
+      notice={quiet ? silentNotice("top", stream.hasData, stream.lastAt) : undefined}
+    />
     <div>
-      <HungWindows hung={view.hung} nowMs={view.nowMs} />
+      <HungWindows
+        hung={view.hung}
+        nowMs={view.nowMs}
+        notice={quiet ? silentNotice("hung", stream.hasData, stream.lastAt) : undefined}
+      />
       <LastOccurrence latest={view.frame?.latest ?? null} {since} />
     </div>
   </div>

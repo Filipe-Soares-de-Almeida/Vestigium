@@ -1,19 +1,28 @@
 use serde::{Deserialize, Serialize};
 
 use crate::health::{DelayKind, Finding, FindingKind, HealthFact, Subject, is_security};
+use crate::hwtest::{TestRun, caused_by_test};
 use crate::{
     Cause, Episode, EpisodeKind, EventMeaning, OccurrenceKind, OccurrenceSummary, SHUTTING_DOWN,
     WinEvent, power_loss_detail,
 };
 
-/// Layout of the `TweakChange` BLOB written today.
-pub const TWEAK_CHANGE_VERSION: u8 = 1;
+/// Layout of the `TweakChange` BLOB written today; version 1 had no scheme in `Setting::PowerAc`
+/// and version 2 no journal entry.
+pub const TWEAK_CHANGE_VERSION: u8 = 3;
 /// A hibernation file this big is worth giving back when the system drive runs short.
 pub const BIG_HIBERFILE: u64 = 1 << 30;
 
 const DAY_MS: i64 = 24 * 60 * 60_000;
 /// Longest span "did it help?" compares before and after a change.
 const HELPED_DAYS: i64 = 7;
+const HOUR_MS: i64 = 60 * 60_000;
+/// Fewest events, in both windows together, that a comparison needs.
+pub const HELPED_MIN_EVENTS: u32 = 5;
+/// Fewest hours the monitor must have sampled in each window.
+pub const HELPED_MIN_HOURS: u32 = 12;
+/// How many times larger one rate must be than the other to be called different.
+const HELPED_RATIO: i64 = 2;
 /// FILETIME counts 100 ns from 1601; Unix milliseconds count from 1970.
 const FILETIME_UNIX_MS: i64 = 11_644_473_600_000;
 
@@ -191,10 +200,12 @@ pub enum Setting {
     Service {
         name: String,
     },
-    /// A plugged-in value of the active power scheme.
+    /// A plugged-in value of a power scheme: `scheme` when known, the active one when `None`.
     PowerAc {
         subgroup: Guid,
         setting: Guid,
+        #[serde(default)]
+        scheme: Option<Guid>,
     },
     ActiveScheme,
     /// Whether Windows keeps a hibernation file.
@@ -240,6 +251,20 @@ impl Setting {
         }
     }
 
+    /// The setting with the scheme of a plugged-in power value left out, as the catalog lists it.
+    fn without_scheme(&self) -> Setting {
+        match self {
+            Setting::PowerAc {
+                subgroup, setting, ..
+            } => Setting::PowerAc {
+                subgroup: *subgroup,
+                setting: *setting,
+                scheme: None,
+            },
+            other => other.clone(),
+        }
+    }
+
     /// Who may write it: the watcher as the signed-in user, or the elevated helper.
     pub fn applier(&self) -> Applier {
         match self {
@@ -270,12 +295,15 @@ impl Setting {
     /// Whether a value has the shape this setting holds, so that restoring it stays in its domain.
     pub fn fits(&self, value: &Value) -> bool {
         match (self, value) {
-            (Setting::Dword { .. }, Value::Dword(_) | Value::Absent)
+            (Setting::Dword { .. }, Value::Absent)
             | (Setting::Key { .. }, Value::Present | Value::Absent)
             | (Setting::PowerAc { .. }, Value::Index(_))
             | (Setting::ActiveScheme, Value::Scheme(_))
             | (Setting::Hibernation, Value::On(_))
             | (Setting::StartupApproval { .. }, Value::Absent) => true,
+            (Setting::Dword { name, .. }, Value::Dword(v)) => {
+                dword_range(name).is_some_and(|range| range.contains(v))
+            }
             (Setting::Service { .. }, Value::Service { start, .. }) => (2..=4).contains(start),
             (Setting::StartupApproval { .. }, Value::Bytes(b)) => b.len() == 12 && b[0] < 8,
             _ => false,
@@ -283,10 +311,33 @@ impl Setting {
     }
 }
 
+/// The values a DWORD of the catalog takes, wide enough for anything a person may have set by hand.
+/// HiberbootEnabled, the Game DVR flags: 0 or 1. DumpType: 0 custom, 1 mini, 2 full. CrashDumpEnabled:
+/// 0 to 7 (none, complete, kernel, small, automatic). HwSchMode: 1 off, 2 on. DumpCount has no
+/// documented maximum and OverlayTestMode is undocumented, so each gets a generous cap.
+fn dword_range(name: &str) -> Option<std::ops::RangeInclusive<u32>> {
+    Some(match name {
+        "HiberbootEnabled"
+        | "AppCaptureEnabled"
+        | "HistoricalCaptureEnabled"
+        | "GameDVR_Enabled" => 0..=1,
+        "DumpType" | "HwSchMode" => 0..=2,
+        "CrashDumpEnabled" => 0..=7,
+        "OverlayTestMode" => 0..=255,
+        "DumpCount" => 0..=10_000,
+        _ => return None,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Applier {
     User,
     Elevated,
+}
+
+impl Applier {
+    /// Every variant, in declaration order.
+    pub const ALL: [Applier; 2] = [Applier::User, Applier::Elevated];
 }
 
 /// When a change starts to count.
@@ -296,6 +347,16 @@ pub enum Takes {
     NextShutdown,
     NextSignIn,
     Restart,
+}
+
+impl Takes {
+    /// Every variant, in declaration order.
+    pub const ALL: [Takes; 4] = [
+        Takes::Now,
+        Takes::NextShutdown,
+        Takes::NextSignIn,
+        Takes::Restart,
+    ];
 }
 
 impl TweakId {
@@ -320,10 +381,12 @@ impl TweakId {
             TweakId::PcieAspm => vec![Setting::PowerAc {
                 subgroup: SUB_PCIEXPRESS,
                 setting: PCIE_ASPM,
+                scheme: None,
             }],
             TweakId::UsbSuspend => vec![Setting::PowerAc {
                 subgroup: SUB_USB,
                 setting: USB_SELECTIVE_SUSPEND,
+                scheme: None,
             }],
             TweakId::SysMain => vec![Setting::service("SysMain")],
             TweakId::WindowsSearch => vec![Setting::service("WSearch")],
@@ -400,6 +463,8 @@ pub struct CaptureCauses {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TweakInputs {
     pub now_ms: i64,
+    /// Oldest time the occurrences, episodes and events below reach back to.
+    pub evidence_from_ms: i64,
     /// What each setting holds, read without elevation; a setting missing here could not be read.
     pub values: Vec<(Setting, Value)>,
     pub startup: Vec<StartupEntry>,
@@ -416,6 +481,18 @@ pub struct TweakInputs {
     pub episodes: Vec<Episode>,
     pub captures: Vec<CaptureCauses>,
     pub events: Vec<WinEvent>,
+    /// Hardware test runs over the same span, whose load is not evidence for a tweak.
+    pub tests: Vec<TestRun>,
+    /// Time the monitor sampled, by minute, over the same span.
+    pub covered: Vec<Covered>,
+}
+
+/// How much of one wall-clock minute the monitor sampled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Covered {
+    /// Start of the minute, Unix epoch milliseconds.
+    pub minute_ms: i64,
+    pub ms: u32,
 }
 
 /// One thing Vestigium observed that backs a tweak; the UI words it.
@@ -672,11 +749,17 @@ fn slow_startup(entry: &StartupEntry, inputs: &TweakInputs) -> Vec<Signal> {
         .collect()
 }
 
-/// Two names of one program: equal, or one holding the other when that one has four letters or more.
+/// Two names of one program: equal once reduced to lowercase letters and digits, without `.exe`.
 fn same_app(a: &str, b: &str) -> bool {
-    let a = a.trim_end_matches(".exe");
-    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-    short.len() >= 4 && long.contains(short)
+    let reduce = |name: &str| {
+        name.to_lowercase()
+            .trim_end_matches(".exe")
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+    };
+    let (a, b) = (reduce(a), reduce(b));
+    !a.is_empty() && a == b
 }
 
 fn since(inputs: &TweakInputs, days: i64) -> i64 {
@@ -765,6 +848,13 @@ fn is_search(e: &Episode) -> bool {
 
 fn on_system_disk(inputs: &TweakInputs, e: &Episode) -> bool {
     matches!(&e.kind, EpisodeKind::DiskBusy { disk } if inputs.system_disk.as_ref() == Some(disk))
+}
+
+/// Busy-disk episodes on the system disk that no Vestigium test caused.
+fn system_disk_episodes(inputs: &TweakInputs, from: i64, to: i64) -> (u32, Option<String>) {
+    episodes(inputs, from, to, |e| {
+        on_system_disk(inputs, e) && !caused_by_test(e, &inputs.tests)
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -878,14 +968,16 @@ fn signals(tweak: TweakId, inputs: &TweakInputs) -> Vec<Signal> {
             let count = count_occurrences(inputs, since(inputs, 14), now, |o| {
                 matches!(o.cause, Cause::Driver { .. })
             });
-            if count >= 2 {
+            let modules = capture_drivers(inputs, 14, &[Bus::Storage, Bus::Network]);
+            // Driver time without a storage or network module in a capture is no evidence.
+            if count >= 2 && !modules.is_empty() {
                 out.push(Signal::DpcIsrStalls { count });
             }
-            out.extend(capture_drivers(inputs, 14, &[Bus::Storage, Bus::Network]));
+            out.extend(modules);
         }
         TweakId::UsbSuspend => out.extend(capture_drivers(inputs, 14, &[Bus::Usb])),
         TweakId::SysMain => {
-            let (count, culprit) = episodes(inputs, week, now, |e| on_system_disk(inputs, e));
+            let (count, culprit) = system_disk_episodes(inputs, week, now);
             if has_finding(inputs, FindingKind::WindowsOnHdd) && count >= 2 {
                 out.push(Signal::Finding(FindingKind::WindowsOnHdd));
                 out.push(Signal::DiskBusy { count, culprit });
@@ -983,22 +1075,90 @@ fn signals(tweak: TweakId, inputs: &TweakInputs) -> Vec<Signal> {
     out
 }
 
-/// The same signal counted in equal spans before and after a change, at most a week each.
+/// What the counts before and after a change say, once the time watched on each side is weighed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HelpedVerdict {
+    /// Fewer events in both windows together than a comparison needs.
+    NotEnoughEvents,
+    /// One window was monitored for less time than a comparison needs.
+    NotEnoughTime,
+    Fewer,
+    More,
+    Same,
+}
+
+impl HelpedVerdict {
+    /// Every variant, in declaration order.
+    pub const ALL: [HelpedVerdict; 5] = [
+        HelpedVerdict::NotEnoughEvents,
+        HelpedVerdict::NotEnoughTime,
+        HelpedVerdict::Fewer,
+        HelpedVerdict::More,
+        HelpedVerdict::Same,
+    ];
+}
+
+/// The same signal counted in equal spans before and after a change, at most a week each, with the
+/// time the monitor sampled in each span and what that says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Helped {
     pub days: u32,
     pub before: u32,
     pub after: u32,
+    /// Milliseconds sampled in the span before the change.
+    pub before_ms: i64,
+    pub after_ms: i64,
+    pub verdict: HelpedVerdict,
+    /// The least events and the least monitored hours behind a verdict.
+    pub min_events: u32,
+    pub min_hours: u32,
+}
+
+/// Milliseconds sampled in `[from, to)`; a minute counts in the span its start falls in.
+fn monitored_ms(inputs: &TweakInputs, from: i64, to: i64) -> i64 {
+    inputs
+        .covered
+        .iter()
+        .filter(|c| c.minute_ms >= from && c.minute_ms < to)
+        .map(|c| i64::from(c.ms))
+        .sum()
+}
+
+/// Compares events per monitored hour; needs enough time on each side and enough events overall.
+fn judge(before: u32, before_ms: i64, after: u32, after_ms: i64) -> HelpedVerdict {
+    let least_ms = i64::from(HELPED_MIN_HOURS) * HOUR_MS;
+    if before_ms < least_ms || after_ms < least_ms {
+        return HelpedVerdict::NotEnoughTime;
+    }
+    if before + after < HELPED_MIN_EVENTS {
+        return HelpedVerdict::NotEnoughEvents;
+    }
+    // before / before_ms against after / after_ms, cross-multiplied so nothing rounds.
+    let (before_rate, after_rate) = (
+        i128::from(before) * i128::from(after_ms),
+        i128::from(after) * i128::from(before_ms),
+    );
+    let ratio = i128::from(HELPED_RATIO);
+    if before_rate >= after_rate * ratio {
+        HelpedVerdict::Fewer
+    } else if after_rate >= before_rate * ratio {
+        HelpedVerdict::More
+    } else {
+        HelpedVerdict::Same
+    }
 }
 
 /// Whether a change helped, by the signal that backs its tweak; `None` for a tweak with nothing to
-/// count or a change less than a day old.
+/// count, a change less than a day old, or a before window that starts earlier than the evidence.
 pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<Helped> {
     let days = ((inputs.now_ms - applied_ms) / DAY_MS).min(HELPED_DAYS);
     if days < 1 {
         return None;
     }
     let span = days * DAY_MS;
+    if applied_ms - span < inputs.evidence_from_ms {
+        return None;
+    }
     let count = |from: i64, to: i64| -> Option<u32> {
         Some(match tweak {
             TweakId::FastStartup => unfinished_shutdowns(inputs, from, to),
@@ -1007,7 +1167,7 @@ pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<H
             | TweakId::UsbSuspend
             | TweakId::GameDvr
             | TweakId::Mpo => stutters(inputs, from, to),
-            TweakId::SysMain => episodes(inputs, from, to, |e| on_system_disk(inputs, e)).0,
+            TweakId::SysMain => system_disk_episodes(inputs, from, to).0,
             TweakId::WindowsSearch => episodes(inputs, from, to, is_search).0,
             TweakId::GpuScheduling => events(inputs, from, to, EventMeaning::DisplayReset),
             TweakId::Hibernation | TweakId::StartupApp | TweakId::AppDumps | TweakId::CrashDump => {
@@ -1015,10 +1175,21 @@ pub fn helped(tweak: TweakId, applied_ms: i64, inputs: &TweakInputs) -> Option<H
             }
         })
     };
+    let (before, after) = (
+        count(applied_ms - span, applied_ms)?,
+        count(applied_ms, applied_ms + span)?,
+    );
+    let before_ms = monitored_ms(inputs, applied_ms - span, applied_ms);
+    let after_ms = monitored_ms(inputs, applied_ms, applied_ms + span);
     Some(Helped {
         days: days as u32,
-        before: count(applied_ms - span, applied_ms)?,
-        after: count(applied_ms, applied_ms + span)?,
+        before,
+        after,
+        before_ms,
+        after_ms,
+        verdict: judge(before, before_ms, after, after_ms),
+        min_events: HELPED_MIN_EVENTS,
+        min_hours: HELPED_MIN_HOURS,
     })
 }
 
@@ -1056,21 +1227,54 @@ pub struct TweakChange {
     pub undo_of: Option<i64>,
     pub results: Vec<SettingResult>,
     pub restore_point: Option<RestorePoint>,
+    /// The journal entry the helper recorded for this change before it wrote anything; `None` for
+    /// a change of the user's own, one refused before any write, and one made before the journal.
+    pub journal: Option<u64>,
 }
 
 impl TweakChange {
     pub fn succeeded(&self) -> bool {
-        self.results.iter().all(|r| r.error.is_none())
+        self.results
+            .iter()
+            .all(|r| r.error.is_none() || r.error == Some(ERROR_INTERRUPTED_WRITTEN))
+    }
+
+    /// The changes Windows holds or may hold, which an undo puts back: the writes that succeeded,
+    /// those found in place after an interrupted helper and those that failed with
+    /// `ERROR_MAY_HAVE_CHANGED`, leaving out what did not move.
+    pub fn written(&self) -> Vec<SettingChange> {
+        self.results
+            .iter()
+            .filter(|r| {
+                r.error.is_none()
+                    || r.error == Some(ERROR_MAY_HAVE_CHANGED)
+                    || r.error == Some(ERROR_INTERRUPTED_WRITTEN)
+            })
+            .filter(|r| r.change.from != r.change.to)
+            .map(|r| r.change.clone())
+            .collect()
     }
 }
 
 /// Layout of the `TweakPlan` the window writes and the `TweakResults` the helper writes today.
-pub const TWEAK_PLAN_VERSION: u8 = 1;
+pub const TWEAK_PLAN_VERSION: u8 = 2;
 /// Most settings one item may change.
 const MOST_CHANGES: usize = 8;
 /// Win32 errors a change records when it is not written.
 pub const ERROR_UNREADABLE: u32 = 1168;
 pub const ERROR_CHANGED_SINCE: u32 = 13;
+/// A write failed and putting the old value back failed too, so the setting may hold either.
+pub const ERROR_MAY_HAVE_CHANGED: u32 = 0x2000_0001;
+/// The helper stopped before it reported, and Windows holds the value it was to write.
+pub const ERROR_INTERRUPTED_WRITTEN: u32 = 0x2000_0002;
+/// The helper stopped before it reported, and Windows still holds the value from before.
+pub const ERROR_INTERRUPTED_UNCHANGED: u32 = 0x2000_0003;
+/// The helper stopped before it reported, and Windows holds neither value, or it cannot be read.
+pub const ERROR_INTERRUPTED_UNKNOWN: u32 = 0x2000_0004;
+/// A restore point Windows logged as created and then dropped: it is not in the list.
+pub const ERROR_RESTORE_DROPPED: u32 = 0x2000_0005;
+/// Layout of the `TweakIntent` the helper writes before its first change.
+pub const TWEAK_INTENT_VERSION: u8 = 2;
 
 /// One tweak to apply or undo, as the window asks for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1079,6 +1283,9 @@ pub struct PlanItem {
     pub subject: Option<String>,
     /// The history row this item undoes; its changes then carry the values to put back.
     pub undo_of: Option<i64>,
+    /// The journal entry of the change this item undoes; `None` for an undo of a change made
+    /// before the journal existed.
+    pub undo_journal: Option<u64>,
     pub changes: Vec<SettingChange>,
 }
 
@@ -1111,7 +1318,7 @@ pub fn check_item(item: &PlanItem, applier: Applier) -> Result<(), String> {
                 item.subject.as_deref() == Some(name.as_str())
             }
             (TweakId::StartupApp, _) => false,
-            _ => catalog.contains(setting),
+            _ => catalog.contains(&setting.without_scheme()),
         };
         if !belongs {
             return Err(format!("{setting:?} is not part of {:?}", item.tweak));
@@ -1142,36 +1349,191 @@ pub trait SettingStore {
     fn write(&mut self, setting: &Setting, value: &Value) -> Result<(), u32>;
 }
 
+/// Whether any setting an undo would put back now holds something other than what was written
+/// or what it held before; a setting that cannot be read is left to the undo itself to refuse.
+pub fn changed_outside(written: &[SettingChange], store: &mut impl SettingStore) -> bool {
+    written.iter().any(|change| {
+        store
+            .read(&change.setting)
+            .is_some_and(|now| !same_state(&now, &change.to) && !same_state(&now, &change.from))
+    })
+}
+
+/// Whether two readings of a setting are the same state; a service's running flag is left out,
+/// since it is still moving right after a start or a stop.
+pub(crate) fn same_state(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (
+            Value::Service { start, delayed, .. },
+            Value::Service {
+                start: other_start,
+                delayed: other_delayed,
+                ..
+            },
+        ) => start == other_start && delayed == other_delayed,
+        _ => a == b,
+    }
+}
+
+/// The setting a change acts on: a plugged-in power value being applied is pinned to the scheme
+/// active now, so its undo goes back to that scheme; every other setting is as the change names it.
+fn target_of(
+    change: &SettingChange,
+    undoing: bool,
+    store: &mut impl SettingStore,
+) -> Option<Setting> {
+    match &change.setting {
+        Setting::PowerAc {
+            subgroup, setting, ..
+        } if !undoing => match store.read(&Setting::ActiveScheme) {
+            Some(Value::Scheme(scheme)) => Some(Setting::PowerAc {
+                subgroup: *subgroup,
+                setting: *setting,
+                scheme: Some(scheme),
+            }),
+            _ => None,
+        },
+        other => Some(other.clone()),
+    }
+}
+
+/// What the helper recorded before its first change: for every item it will carry out, each
+/// setting with the value read and the value it is to write.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TweakIntent {
+    pub ts_ms: i64,
+    pub items: Vec<IntentItem>,
+}
+
+/// One item of a `TweakIntent`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentItem {
+    pub tweak: TweakId,
+    pub subject: Option<String>,
+    pub undo_of: Option<i64>,
+    /// The journal entry recorded for this item before the intent.
+    pub journal: Option<u64>,
+    pub settings: Vec<IntentSetting>,
+}
+
+/// One setting of an `IntentItem`, as the change will act on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentSetting {
+    pub setting: Setting,
+    /// What the setting held when the intent was recorded; `None` when it could not be read.
+    pub before: Option<Value>,
+    pub to: Value,
+}
+
+/// Reads every setting the checked `items` will write, to record before the first write.
+pub fn intent_of(items: &[&PlanItem], store: &mut impl SettingStore, ts_ms: i64) -> TweakIntent {
+    let items = items
+        .iter()
+        .map(|item| IntentItem {
+            tweak: item.tweak,
+            subject: item.subject.clone(),
+            undo_of: item.undo_of,
+            journal: None,
+            settings: item
+                .changes
+                .iter()
+                .map(|change| {
+                    let target = target_of(change, item.undo_of.is_some(), store);
+                    IntentSetting {
+                        before: target.as_ref().and_then(|setting| store.read(setting)),
+                        setting: target.unwrap_or_else(|| change.setting.clone()),
+                        to: change.to.clone(),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    TweakIntent { ts_ms, items }
+}
+
+/// What an intent with no result left in Windows: each setting is found written, found as it was
+/// or found otherwise, and recorded as such; the restore point is not known.
+pub fn settle_interrupted(intent: &TweakIntent, store: &mut impl SettingStore) -> TweakResults {
+    let changes = intent
+        .items
+        .iter()
+        .map(|item| TweakChange {
+            tweak: item.tweak,
+            subject: item.subject.clone(),
+            undo_of: item.undo_of,
+            journal: item.journal,
+            results: item
+                .settings
+                .iter()
+                .map(|planned| settle_setting(planned, store))
+                .collect(),
+            restore_point: Some(RestorePoint::Unconfirmed),
+        })
+        .collect();
+    TweakResults {
+        ts_ms: intent.ts_ms,
+        changes,
+    }
+}
+
+fn settle_setting(planned: &IntentSetting, store: &mut impl SettingStore) -> SettingResult {
+    let now = store.read(&planned.setting);
+    let held = |value: &Value| now.as_ref().is_some_and(|now| same_state(now, value));
+    let error = match &planned.before {
+        _ if now.is_none() => ERROR_INTERRUPTED_UNKNOWN,
+        Some(before) if held(before) => ERROR_INTERRUPTED_UNCHANGED,
+        Some(_) if held(&planned.to) => ERROR_INTERRUPTED_WRITTEN,
+        _ => ERROR_INTERRUPTED_UNKNOWN,
+    };
+    SettingResult {
+        change: SettingChange {
+            setting: planned.setting.clone(),
+            from: planned.before.clone().unwrap_or(Value::Absent),
+            to: planned.to.clone(),
+        },
+        error: Some(error),
+    }
+}
+
 /// Carries out one checked item: each setting is read again, written only when the tweak still
 /// leads to the value asked for, and recorded with what it really held. Stops at the first failure.
 pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange {
     let mut results = Vec::new();
     for change in &item.changes {
-        let Some(current) = store.read(&change.setting) else {
+        let target = target_of(change, item.undo_of.is_some(), store);
+        let current = target.as_ref().and_then(|setting| store.read(setting));
+        let (Some(target), Some(current)) = (target, current) else {
             results.push(SettingResult {
                 change: change.clone(),
                 error: Some(ERROR_UNREADABLE),
             });
             break;
         };
-        let leads_there = item.undo_of.is_some()
-            || current == change.to
-            || match (item.tweak, &change.to) {
-                (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
-                _ => {
-                    apply_value(item.tweak, &change.setting, &current).as_ref() == Some(&change.to)
+        let leads_there = if item.undo_of.is_some() {
+            same_state(&current, &change.from) || same_state(&current, &change.to)
+        } else {
+            current == change.to
+                || match (item.tweak, &change.to) {
+                    (TweakId::StartupApp, Value::Bytes(b)) => b[0] == 3,
+                    _ => apply_value(item.tweak, &target, &current).as_ref() == Some(&change.to),
                 }
-            };
+        };
         let error = if !leads_there {
             Some(ERROR_CHANGED_SINCE)
         } else if current == change.to {
             None
         } else {
-            store.write(&change.setting, &change.to).err()
+            match store.write(&target, &change.to) {
+                Err(code) => Some(code),
+                Ok(()) => store
+                    .read(&target)
+                    .is_none_or(|now| !same_state(&now, &change.to))
+                    .then_some(ERROR_MAY_HAVE_CHANGED),
+            }
         };
         results.push(SettingResult {
             change: SettingChange {
-                setting: change.setting.clone(),
+                setting: target,
                 from: current,
                 to: change.to.clone(),
             },
@@ -1187,5 +1549,6 @@ pub fn carry_out(item: &PlanItem, store: &mut impl SettingStore) -> TweakChange 
         undo_of: item.undo_of,
         results,
         restore_point: None,
+        journal: None,
     }
 }

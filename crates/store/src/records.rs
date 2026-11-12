@@ -1,73 +1,18 @@
 use rusqlite::{OptionalExtension, Row, params};
 use vestigium_core::{
-    Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap, GapReason,
-    LanguagePref, MachineInfo, Occurrence, OccurrenceKind, OccurrenceSummary, Retention, Settings,
-    Severity, ThemePref, WinEvent,
+    CURATED, Cause, Channel, ColorTheme, DetailLevel, Episode, EpisodeKind, EventMeaning, Gap,
+    HistoryReset, LanguagePref, MachineInfo, Occurrence, OccurrenceSummary, Retention, Settings,
+    ThemePref, WinEvent, classify,
 };
 
+use crate::codes::{
+    channel_from_code, gap_from_code, kind_code, kind_from_code, severity_code, severity_from_code,
+};
 use crate::{Store, StoreError, decode, encode};
 
-/// Layout of the `Occurrence` and `Episode` BLOBs written today.
-const RECORD_VERSION: i64 = 1;
-
-const KINDS: [OccurrenceKind; 5] = [
-    OccurrenceKind::Freeze,
-    OccurrenceKind::Stutter,
-    OccurrenceKind::AppHang,
-    OccurrenceKind::Reported,
-    OccurrenceKind::PostMortem,
-];
-const SEVERITIES: [Severity; 3] = [Severity::Light, Severity::Medium, Severity::Severe];
-const CHANNELS: [Channel; 2] = [Channel::System, Channel::Application];
-const REASONS: [GapReason; 4] = [
-    GapReason::Paused,
-    GapReason::Suspended,
-    GapReason::Stopped,
-    GapReason::Crashed,
-];
-/// Stored meaning codes are positions in this list plus one; new meanings go at the end.
-const MEANINGS: [EventMeaning; 15] = [
-    EventMeaning::StorageReset,
-    EventMeaning::DiskRetry,
-    EventMeaning::DiskBadBlock,
-    EventMeaning::PagingError,
-    EventMeaning::DisplayReset,
-    EventMeaning::HardwareError,
-    EventMeaning::PowerLoss,
-    EventMeaning::UnexpectedShutdown,
-    EventMeaning::BugCheck,
-    EventMeaning::CpuFirmwareLimit,
-    EventMeaning::LowVirtualMemory,
-    EventMeaning::AppHang,
-    EventMeaning::AppCrash,
-    EventMeaning::ServiceCrash,
-    EventMeaning::NoCrashDump,
-];
-
-fn code<T: PartialEq>(list: &[T], value: &T) -> i64 {
-    list.iter()
-        .position(|v| v == value)
-        .map_or(0, |i| i as i64 + 1)
-}
-
-fn from_code<T: Copy>(list: &[T], code: i64, what: &'static str) -> Result<T, StoreError> {
-    usize::try_from(code - 1)
-        .ok()
-        .and_then(|i| list.get(i).copied())
-        .ok_or(StoreError::UnknownCode { what, code })
-}
-
-pub(crate) fn channel_code(channel: Channel) -> i64 {
-    code(&CHANNELS, &channel)
-}
-
-pub(crate) fn meaning_code(meaning: EventMeaning) -> i64 {
-    code(&MEANINGS, &meaning)
-}
-
-pub(crate) fn gap_code(reason: GapReason) -> i64 {
-    code(&REASONS, &reason)
-}
+/// Layout of the `Occurrence` and `Episode` BLOBs written today, and the oldest one still read.
+const RECORD_VERSION: i64 = 4;
+const RECORD_VERSION_MIN: i64 = 1;
 
 fn episode_code(kind: &EpisodeKind) -> i64 {
     match kind {
@@ -84,19 +29,22 @@ const SETTING_LANGUAGE: &str = "language";
 const SETTING_THEME: &str = "theme";
 const SETTING_COLOR_THEME: &str = "color_theme";
 const SETTING_DETAIL_LEVEL: &str = "detail_level";
+const SETTING_HISTORY_RESET: &str = "history_reset";
 
 impl Store {
     /// Stores a finished occurrence on its own, right away; returns its id.
     pub fn insert_occurrence(&mut self, occurrence: &Occurrence) -> Result<i64, StoreError> {
+        let kind = kind_code(occurrence.kind);
+        let severity = severity_code(occurrence.severity);
         self.conn.execute(
             "INSERT INTO occurrence (version, kind, start_ms, end_ms, severity, cause, data)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 RECORD_VERSION,
-                code(&KINDS, &occurrence.kind),
+                kind,
                 occurrence.start_ms,
                 occurrence.end_ms,
-                code(&SEVERITIES, &occurrence.severity),
+                severity,
                 postcard::to_stdvec(&occurrence.cause())?,
                 encode(std::slice::from_ref(occurrence)),
             ],
@@ -158,6 +106,31 @@ impl Store {
         Ok(())
     }
 
+    /// Remembers a damaged history that was set aside, so a watcher that restarts before anyone
+    /// looked still reports it.
+    pub fn set_history_reset(&mut self, reset: &HistoryReset) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![SETTING_HISTORY_RESET, serde_json::to_string(reset)?],
+        )?;
+        Ok(())
+    }
+
+    /// The history set aside that `set_history_reset` remembered; a value that cannot be read
+    /// counts as none.
+    pub fn history_reset(&self) -> Result<Option<HistoryReset>, StoreError> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM setting WHERE key = ?1",
+                params![SETTING_HISTORY_RESET],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.and_then(|value| serde_json::from_str(&value).ok()))
+    }
+
     /// Occurrences that overlap `[from_ms, to_ms]`, oldest first.
     pub fn occurrences(
         &self,
@@ -183,10 +156,10 @@ impl Store {
             let (id, kind, start_ms, end_ms, severity, cause) = row?;
             found.push(OccurrenceSummary {
                 id,
-                kind: from_code(&KINDS, kind, "occurrence kind")?,
+                kind: kind_from_code(kind)?,
                 start_ms,
                 end_ms,
-                severity: from_code(&SEVERITIES, severity, "severity")?,
+                severity: severity_from_code(severity)?,
                 cause: postcard::from_bytes::<Cause>(&cause)?,
             });
         }
@@ -223,19 +196,56 @@ impl Store {
         Ok(found)
     }
 
-    /// Curated events logged in `[from_ms, to_ms]`, oldest first.
+    /// Curated events logged in `[from_ms, to_ms]`, oldest first, each meaning judged again by the
+    /// current rules; a stored event the rules no longer recognise is left out.
     pub fn events(&self, from_ms: i64, to_ms: i64) -> Result<Vec<WinEvent>, StoreError> {
-        let mut query = self.conn.prepare_cached(
-            "SELECT ts_ms, channel, provider, event_id, record_id, level, meaning, data_xml
-             FROM event WHERE ts_ms BETWEEN ?1 AND ?2 ORDER BY ts_ms, id",
-        )?;
+        self.events_matching(from_ms, to_ms, None)
+    }
+
+    /// The events `events` returns whose meaning is `wanted`; rows whose id no rule of that
+    /// meaning uses are skipped by the query itself.
+    pub fn events_with_meaning(
+        &self,
+        wanted: EventMeaning,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<WinEvent>, StoreError> {
+        self.events_matching(from_ms, to_ms, Some(wanted))
+    }
+
+    fn events_matching(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        wanted: Option<EventMeaning>,
+    ) -> Result<Vec<WinEvent>, StoreError> {
+        let ids = wanted.map(|wanted| {
+            CURATED
+                .iter()
+                .filter(|entry| entry.meaning == wanted)
+                .flat_map(|entry| entry.ids.iter().map(u16::to_string))
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        let filter = ids.map_or_else(String::new, |ids| format!("AND event_id IN ({ids}) "));
+        let mut query = self.conn.prepare_cached(&format!(
+            "SELECT ts_ms, channel, provider, event_id, record_id, level, data_xml
+             FROM event WHERE ts_ms BETWEEN ?1 AND ?2 {filter}ORDER BY ts_ms, id"
+        ))?;
         let rows = query.query_map(params![from_ms, to_ms], event_row)?;
         let mut found = Vec::new();
         for row in rows {
-            let (event, channel, meaning) = row?;
+            let (event, channel) = row?;
+            let channel = channel_from_code(channel)?;
+            let Some(meaning) = classify(channel, &event.provider, event.id) else {
+                continue;
+            };
+            if wanted.is_some_and(|wanted| wanted != meaning) {
+                continue;
+            }
             found.push(WinEvent {
-                channel: from_code(&CHANNELS, channel, "channel")?,
-                meaning: from_code(&MEANINGS, meaning, "event meaning")?,
+                channel,
+                meaning,
                 ..event
             });
         }
@@ -261,7 +271,7 @@ impl Store {
             found.push(Gap {
                 start_ms,
                 end_ms,
-                reason: from_code(&REASONS, reason, "gap reason")?,
+                reason: gap_from_code(reason)?,
             });
         }
         Ok(found)
@@ -276,8 +286,19 @@ impl Store {
             .optional()?)
     }
 
-    /// Stored settings; a key that is missing or unreadable takes its default.
+    /// Stored settings; a key that is missing or unreadable takes its default, and a retention
+    /// field that is unreadable or out of range takes its own default while the others stay.
     pub fn settings(&self) -> Result<Settings, StoreError> {
+        Ok(self.read_settings()?.0)
+    }
+
+    /// What `settings` had to replace by a default, one sentence each; empty when nothing was.
+    pub fn settings_notes(&self) -> Result<Vec<String>, StoreError> {
+        Ok(self.read_settings()?.1)
+    }
+
+    fn read_settings(&self) -> Result<(Settings, Vec<String>), StoreError> {
+        let mut notes = Vec::new();
         let mut query = self.conn.prepare_cached("SELECT key, value FROM setting")?;
         let rows = query.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -287,9 +308,7 @@ impl Store {
             let (key, value) = row?;
             match key.as_str() {
                 SETTING_RETENTION => {
-                    if let Ok(retention) = serde_json::from_str::<Retention>(&value) {
-                        settings.retention = retention;
-                    }
+                    settings.retention = retention_from(&value, &mut notes);
                 }
                 SETTING_LANGUAGE => {
                     if let Ok(language) = serde_json::from_str::<LanguagePref>(&value) {
@@ -314,10 +333,7 @@ impl Store {
                 _ => {}
             }
         }
-        if settings.validate().is_err() {
-            settings.retention = Retention::default();
-        }
-        Ok(settings)
+        Ok((settings, notes))
     }
 
     pub fn machine(&self) -> Result<Option<MachineInfo>, StoreError> {
@@ -331,7 +347,47 @@ impl Store {
     }
 }
 
-type EventRow = (WinEvent, i64, i64);
+/// The stored retention: each field that is a number the settings accept is kept, the others
+/// take their default and add a note.
+fn retention_from(value: &str, notes: &mut Vec<String>) -> Retention {
+    let default = Retention::default();
+    let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(value) else {
+        notes.push("the stored retention could not be read; the defaults are used".into());
+        return default;
+    };
+    let mut field = |name: &str, set: fn(&mut Retention, u32)| {
+        let accepted = |v: &u32| {
+            let mut retention = default;
+            set(&mut retention, *v);
+            let settings = Settings {
+                retention,
+                ..Settings::default()
+            };
+            settings.validate().is_ok()
+        };
+        let found = fields
+            .get(name)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(accepted);
+        if found.is_none() {
+            notes.push(format!(
+                "the stored retention {name} is missing or out of range; its default is used"
+            ));
+        }
+        found
+    };
+    let samples_hours = field("samples_hours", |r, v| r.samples_hours = v);
+    let minutes_days = field("minutes_days", |r, v| r.minutes_days = v);
+    let records_days = field("records_days", |r, v| r.records_days = v);
+    Retention {
+        samples_hours: samples_hours.unwrap_or(default.samples_hours),
+        minutes_days: minutes_days.unwrap_or(default.minutes_days),
+        records_days: records_days.unwrap_or(default.records_days),
+    }
+}
+
+type EventRow = (WinEvent, i64);
 
 fn event_row(row: &Row<'_>) -> rusqlite::Result<EventRow> {
     let event = WinEvent {
@@ -342,14 +398,14 @@ fn event_row(row: &Row<'_>) -> rusqlite::Result<EventRow> {
         record_id: row.get::<_, i64>(4)?.max(0) as u64,
         level: row.get(5)?,
         meaning: EventMeaning::StorageReset,
-        data_xml: row.get(7)?,
+        data_xml: row.get(6)?,
     };
-    Ok((event, row.get(1)?, row.get(6)?))
+    Ok((event, row.get(1)?))
 }
 
 /// Decodes a record BLOB of the given layout version.
 fn one<T: serde::de::DeserializeOwned>(version: i64, data: &[u8]) -> Result<T, StoreError> {
-    if version != RECORD_VERSION {
+    if !(RECORD_VERSION_MIN..=RECORD_VERSION).contains(&version) {
         return Err(StoreError::UnknownCode {
             what: "record version",
             code: version,

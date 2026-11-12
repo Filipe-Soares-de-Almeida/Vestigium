@@ -28,6 +28,8 @@ workspace = true
 features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
@@ -50,6 +52,7 @@ features = [
 ]
 
 [dev-dependencies]
+vestigium-ipc = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

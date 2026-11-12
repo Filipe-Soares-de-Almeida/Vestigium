@@ -8,9 +8,11 @@ mod dumps;
 mod etw;
 mod events;
 mod gpu;
+mod hash;
 mod health;
 mod hung;
 mod hwtest;
+mod journal;
 mod memory;
 mod pdh;
 mod presentmon;
@@ -24,13 +26,18 @@ pub use blackbox::{BlackboxRing, RING_RECORDS, RingContents};
 pub use boot::{BOOT_LOG, boot_report};
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
-pub use dumps::{CrashControl, DumpFile, app_dump_dir, crash_control, dump_file, list_dumps};
+pub use dumps::{
+    CrashControl, DumpFile, DumpListing, app_dump_dir, configured_dump_folder, crash_control,
+    dump_file, list_dumps, list_dumps_one_level, profile_image_path, subfolders,
+};
 pub use etw::{
-    DEEP_CAPTURE_GUID, DEEP_CAPTURE_SESSION, EventSink, IMAGE, KernelRecord, KernelSession,
-    PERF_INFO, RawEvent, SessionStats, kernel_record, spawn_consumer,
+    Consumed, DEEP_CAPTURE_GUID, DEEP_CAPTURE_LOCK, DEEP_CAPTURE_SESSION, EventSink, IMAGE,
+    KernelRecord, KernelSession, PERF_INFO, RawEvent, SessionStats, kernel_record, session_exists,
+    spawn_consumer, stop_session,
 };
 pub use events::{Classifier, Delivered, EventSubscription};
 pub use gpu::{GpuReading, gpu_usage};
+pub use hash::sha256_hex;
 pub use health::{
     HealthSource, WindowsHealth, antivirus, disk_bus, disk_health, disk_nvme, disk_size,
     file_system, page_files, system_drive, volume_drive, volumes,
@@ -38,7 +45,11 @@ pub use health::{
 pub use hung::hung_pids;
 pub use hwtest::{
     BenchTarget, LockedRegion, MemoryProgress, PatternRun, Words, benchmark,
-    memory_diagnostic_events, memory_test, run_patterns,
+    benchmark_with_timeout, disk_io_bytes, memory_diagnostic_events, memory_test, run_patterns,
+};
+pub use journal::{
+    Ace, AclReport, DiskFolder, FolderJournal, FolderProtection, JournalError, JournalFolder,
+    KnownJournal, WindowsProtection, journal_dir, judge, open_journal, report_of,
 };
 pub use memory::{MemoryInfo, logical_cpus, memory_info};
 pub use pdh::{PdhReading, PdhSampler};
@@ -48,7 +59,9 @@ pub use presentmon::{
 pub use probe::{ProbeConfig, spawn_probe};
 pub use process_info::{image_path, run_as, signature};
 pub use processes::ProcessSnapshotter;
-pub use timer::{HighResTimer, monotonic_ms, unbiased_ms, wall_ms};
+pub use timer::{
+    HighResTimer, Waited, Wake, interrupt_ms, local_hour_minute, monotonic_ms, unbiased_ms, wall_ms,
+};
 pub use tweaks::{
     RESTORE_CREATED, RESTORE_SKIPPED, RestoreEvent, WindowsSettings, exe_of, has_battery,
     hiberfile_bytes, monitor_count, read_setting, restore_event, restore_events, startup_entries,

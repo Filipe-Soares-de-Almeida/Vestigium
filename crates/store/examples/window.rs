@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let e = &mut disks[i];
         (e.1, e.2, e.3) = (
             e.1.max(d.active_pct),
-            e.2.max(d.latency_ms),
-            e.3.max(d.queue_len),
+            e.2.max(d.latency_ms.unwrap_or(0.0)),
+            e.3.max(d.queue_len.unwrap_or(0.0)),
         );
         (e.4, e.5) = (e.4 + f64::from(d.active_pct), e.5 + 1);
     }

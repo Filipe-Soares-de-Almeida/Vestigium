@@ -11,13 +11,13 @@ fn calm(ts_ms: i64) -> Sample {
         cpu_pct: 10.0,
         dpc_pct: 0.5,
         isr_pct: 0.1,
-        perf_limit_pct: 0.0,
-        proc_perf_pct: 99.0,
+        perf_limit_pct: Some(0.0),
+        proc_perf_pct: Some(99.0),
         mem_total_bytes: 16 * GIB,
         mem_avail_bytes: 8 * GIB,
         commit_bytes: 10 * GIB,
         commit_limit_bytes: 32 * GIB,
-        hard_faults_per_s: 2.0,
+        hard_faults_per_s: Some(2.0),
         gpu_pct: None,
         probe_max_lag_ms: 0.5,
         sampler_lag_ms: 1.0,
@@ -32,9 +32,9 @@ fn calm(ts_ms: i64) -> Sample {
         disks: vec![DiskLoad {
             name: "0 C:".to_string(),
             active_pct: 5.0,
-            latency_ms: 1.0,
-            queue_len: 0.0,
-            bytes_per_s: 1_000.0,
+            latency_ms: Some(1.0),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(1_000.0),
         }],
     }
 }
@@ -271,6 +271,21 @@ fn hints_are_not_pressure() {
 }
 
 #[test]
+fn a_disk_without_a_latency_reading_starts_no_hint() {
+    let unread = |ts_ms: i64| {
+        let mut sample = calm(ts_ms);
+        sample.disks[0].active_pct = 100.0;
+        sample.disks[0].latency_ms = None;
+        sample
+    };
+    let mut detector = EpisodeDetector::new();
+    feed(&mut detector, 0, 30, unread, false);
+    let ended = feed(&mut detector, 31, 40, calm, false);
+
+    assert!(ended.iter().all(|e| !e.kind.is_hint()));
+}
+
+#[test]
 fn close_all_ends_the_pressure() {
     let mut detector = EpisodeDetector::new();
     feed(&mut detector, 0, 130, memory_high, false);
@@ -287,7 +302,7 @@ fn open_pressure_follows_the_timeline_rule() {
             core.dpc_pct = 12.0;
         }
         sample.disks[0].active_pct = 100.0;
-        sample.disks[0].latency_ms = 150.0;
+        sample.disks[0].latency_ms = Some(150.0);
         sample
     };
     let mut detector = EpisodeDetector::new();

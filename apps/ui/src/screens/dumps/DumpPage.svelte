@@ -12,7 +12,7 @@
   import { toast } from "../../lib/toast.svelte";
   import type { DetailLevel } from "../../lib/types";
   import { formatBytes } from "../occurrence/format";
-  import { at, culpritView, type Entry, fileName, hex, isRead, said, steps, stopName, stopSentence, title } from "./words";
+  import { at, culpritView, type Entry, fileName, hex, isRead, partialDeleteText, said, steps, stopName, stopSentence, title } from "./words";
 
   let { entry, level }: { entry: Entry; level: DetailLevel } = $props();
 
@@ -50,6 +50,8 @@
     const freed = await dumps.remove();
     if (freed === null) {
       toast.show(t(dumps.deleting === "declined" ? "ui.dumps.delete.declined" : "ui.dumps.delete.failed"));
+    } else if (freed.count < freed.asked) {
+      toast.show(partialDeleteText(freed));
     } else {
       toast.show(t("ui.dumps.delete.toast", { size: formatBytes(freed.bytes) }));
     }

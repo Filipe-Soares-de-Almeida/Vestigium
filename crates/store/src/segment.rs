@@ -7,8 +7,13 @@ use crate::StoreError;
 const FORMAT_POSTCARD: u8 = 1;
 const FORMAT_DEFLATE: u8 = 2;
 const DEFLATE_LEVEL: u8 = 6;
-/// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory.
-const MAX_INFLATED: usize = 16 << 20;
+/// Largest decompressed segment accepted, so a corrupt BLOB cannot ask for unbounded memory;
+/// well above what a record the watcher writes can reach.
+const MAX_INFLATED: usize = 64 << 20;
+
+/// Longest stretch from the first to the last stamp of a stored segment: reads skip rows that
+/// began earlier than this before their range, so a longer segment would be missed.
+pub(crate) const MAX_SEGMENT_SPAN_MS: i64 = 60 * 60_000;
 
 /// Which kind of item a segment holds; an item whose layout changes gets a new code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,9 +23,11 @@ pub enum Series {
     SamplesV1 = 1,
     /// `ProcessTopV1`, from before per-process GPU was recorded.
     ProcessesV1 = 2,
-    Samples = 3,
+    /// `SampleV2`, from before a performance counter could be absent.
+    SamplesV2 = 3,
     Processes = 4,
     Minutes = 5,
+    Samples = 6,
 }
 
 /// One batch of items of one series, stored as one row.

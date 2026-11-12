@@ -1,8 +1,9 @@
 // A simulated live stream for the Now screen.
-// URL: ?now=calm|busy|pressure|hung|stops&last=none, plus the base mock's link, history and fail.
+// URL: ?now=calm|busy|pressure|hung|stops|mute&last=none, plus the base mock's link, history and fail.
 import type { Channel } from "@tauri-apps/api/core";
 
 import type {
+  Episode,
   EpisodeKind,
   Lanes,
   LiveMessage,
@@ -16,7 +17,7 @@ import type {
 } from "../../lib/types";
 import type { Handler } from "../mock";
 
-type Scenario = "calm" | "busy" | "pressure" | "hung" | "stops";
+type Scenario = "calm" | "busy" | "pressure" | "hung" | "stops" | "mute";
 
 const query = new URLSearchParams(location.search);
 const scenario = (query.get("now") ?? "calm") as Scenario;
@@ -50,11 +51,12 @@ const HEAVY: Record<Scenario, Target> = {
   calm: CALM,
   hung: CALM,
   stops: CALM,
+  mute: CALM,
   busy: { cpu: 62, memory: 61, disk: 12, gpu: 8, latency: 2.2 },
   pressure: { cpu: 98, memory: 66, disk: 9, gpu: 7, latency: 2.6 },
 };
 /** How many seconds before now the heavy stretch began. */
-const HEAVY_FOR_S: Record<Scenario, number> = { calm: 0, hung: 0, stops: 0, busy: 200, pressure: 150 };
+const HEAVY_FOR_S: Record<Scenario, number> = { calm: 0, hung: 0, stops: 0, mute: 0, busy: 200, pressure: 150 };
 
 function clamp(value: number): number {
   return Math.min(100, Math.max(0, value));
@@ -189,6 +191,20 @@ const latest: OccurrenceSummary | null =
         cause: { Storage: { disk: "0 C:" } },
       };
 
+/** Two disk episodes of one program that start in the same millisecond. */
+function sameStartEpisodes(): Episode[] {
+  const start = new Date().setHours(0, 30, 0, 0);
+  const culprit = { pid: 2208, name: "Indexer.exe", value: 61 };
+  return ["0 C:", "1 D:"].map((disk) => ({
+    kind: { DiskBusy: { disk } },
+    start_ms: start,
+    end_ms: start + 90_000,
+    peak: 100,
+    culprit,
+    truncated: false,
+  }));
+}
+
 function refuse(kind: UiError["kind"]): Promise<never> {
   return Promise.reject({ kind, message: `mock: ${kind}` } satisfies UiError);
 }
@@ -202,7 +218,10 @@ export const handlers: Record<string, Handler> = {
     run_as: { CurrentUser: { elevated: false } },
     signature: { Valid: { signer: "Example Software Inc." } },
   }),
-  program_marks: () => ({ occurrences: [], episodes: [] }),
+  program_marks: () => ({
+    occurrences: [],
+    episodes: query.get("same-start") === "1" ? sameStartEpisodes() : [],
+  }),
   // Ten minutes of rankings every 5 s, with a busy stretch in the middle.
   program_recent: () =>
     Array.from({ length: 120 }, (_, i) => ({
@@ -236,8 +255,10 @@ export const handlers: Record<string, Handler> = {
     const tick = () => {
       ticks++;
       const now = Date.now();
-      if (scenario === "stops" && ticks > 4) {
-        send({ kind: "stopped" });
+      if ((scenario === "stops" || scenario === "mute") && ticks > 4) {
+        // A mute watcher answers nothing in time; the status call says so too.
+        if (scenario === "mute") (window as unknown as { __mute: boolean }).__mute = true;
+        send({ kind: scenario === "mute" ? "silent" : "stopped" });
         if (timer) clearInterval(timer);
         timer = null;
         return;
@@ -283,7 +304,7 @@ export const handlers: Record<string, Handler> = {
     };
     setTimeout(tick, 60);
     timer = setInterval(tick, 1000);
-    return null;
+    return counts.starts;
   },
   live_stop: () => {
     if (timer) clearInterval(timer);

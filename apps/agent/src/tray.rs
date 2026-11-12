@@ -3,16 +3,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use vestigium_brand::Badge;
-use vestigium_collect::wall_ms;
+use vestigium_collect::{interrupt_ms, local_hour_minute, wall_ms};
 use vestigium_core::{ColorTheme, GateState, RecentState};
 use vestigium_i18n::{Catalog, Lang};
-use vestigium_ipc::TrayState;
+use vestigium_ipc::{AgentStatus, MonitorSource, MonitorState, TrayState};
 
 use crate::app::{Shared, lock, set_paused};
 use crate::icon::Taskbar;
-use crate::{autostart, icon, shutdown};
+use crate::{autostart, icon, monitor, shutdown};
+
+/// The longest tooltip Windows shows, in characters.
+const TOOLTIP_MAX: usize = 127;
 
 /// What the message loop does after a menu click.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,10 +42,18 @@ pub struct Tray {
     shown: Cell<Option<Shown>>,
 }
 
+#[derive(Default)]
 struct Texts {
     watching: String,
     paused: String,
     sensitive: String,
+    /// Templates with `{time}`, and `{source}` for the partial one.
+    no_reading: String,
+    partial: String,
+    unverified: String,
+    /// The name of each source, in `MonitorSource` order, and the name of several, with `{count}`.
+    sources: [String; 5],
+    several: String,
     /// Templates with a `{count}` of the last 24 h.
     attention: String,
     problem: String,
@@ -59,6 +70,18 @@ impl Texts {
             watching: catalog.get("tray.tooltip.watching").to_string(),
             paused: catalog.get("tray.tooltip.paused").to_string(),
             sensitive: catalog.get("tray.tooltip.sensitive").to_string(),
+            no_reading: catalog.get("tray.tooltip.no_reading").to_string(),
+            partial: catalog.get("tray.tooltip.degraded").to_string(),
+            unverified: catalog.get("tray.tooltip.unverified").to_string(),
+            sources: [
+                "ui.monitor.source.memory",
+                "ui.monitor.source.cpu",
+                "ui.monitor.source.counters",
+                "ui.monitor.source.processes",
+                "ui.monitor.source.timer",
+            ]
+            .map(|key| catalog.get(key).to_string()),
+            several: catalog.get("ui.monitor.source.several").to_string(),
             attention: catalog.get("tray.tooltip.attention").to_string(),
             problem: catalog.get("tray.tooltip.problem").to_string(),
             health: catalog.get("tray.tooltip.health").to_string(),
@@ -68,24 +91,132 @@ impl Texts {
         }
     }
 
-    fn tooltip(&self, now: Shown) -> String {
-        let mut tooltip = if now.paused {
-            self.paused.clone()
-        } else if now.sensitive {
-            self.sensitive.clone()
-        } else {
-            match now.recent {
-                Level::Normal => self.watching.clone(),
-                Level::Attention(n) => self.attention.replace("{count}", &n.to_string()),
-                Level::Health(n) => self.health.replace("{count}", &n.to_string()),
-                Level::Problem(n) => self.problem.replace("{count}", &n.to_string()),
+    fn level(&self, level: Level) -> String {
+        match level {
+            Level::Normal => self.watching.clone(),
+            Level::Attention(n) => self.attention.replace("{count}", &n.to_string()),
+            Level::Health(n) => self.health.replace("{count}", &n.to_string()),
+            Level::Problem(n) => self.problem.replace("{count}", &n.to_string()),
+        }
+    }
+
+    /// The lines of the tooltip, most important first: what the monitor says, then the last 24 h.
+    fn lines(&self, now: Shown) -> Vec<String> {
+        if now.paused {
+            return vec![self.paused.clone()];
+        }
+        if now.sensitive {
+            return vec![self.sensitive.clone()];
+        }
+        let mut lines = Vec::new();
+        match now.monitor {
+            Monitor::Reading => lines.push(self.level(now.recent)),
+            Monitor::NoReading { since_min } => {
+                lines.push(self.no_reading.replace("{time}", &clock(since_min)));
             }
-        };
-        if now.suggest_capture {
+            Monitor::Partial {
+                first,
+                count,
+                since_min,
+            } => {
+                let source = if count > 1 {
+                    self.several.replace("{count}", &count.to_string())
+                } else {
+                    self.sources[first as usize].clone()
+                };
+                lines.push(
+                    self.partial
+                        .replace("{source}", &source)
+                        .replace("{time}", &clock(since_min)),
+                );
+            }
+            Monitor::Unverified { since_min } => {
+                let unverified = self.unverified.replace("{time}", &clock(since_min));
+                if now.recent != Level::Normal {
+                    lines.push(self.level(now.recent));
+                }
+                lines.push(unverified);
+            }
+        }
+        if matches!(
+            now.monitor,
+            Monitor::NoReading { .. } | Monitor::Partial { .. }
+        ) && now.recent != Level::Normal
+        {
+            lines.push(self.level(now.recent));
+        }
+        lines
+    }
+
+    /// The lines that fit in what Windows shows; the capture hint goes first when there is no room.
+    fn tooltip(&self, now: Shown) -> String {
+        let mut lines = self.lines(now);
+        if now.suggest_capture && !now.paused {
+            lines.push(self.suggest_capture.clone());
+        }
+        let mut tooltip = lines.remove(0);
+        for line in lines {
+            if tooltip.chars().count() + 1 + line.chars().count() > TOOLTIP_MAX {
+                break;
+            }
             tooltip.push('\n');
-            tooltip.push_str(&self.suggest_capture);
+            tooltip.push_str(&line);
         }
         tooltip
+    }
+}
+
+/// Hour and minute of a minute counted from the epoch, on the local clock.
+fn clock(minutes: i64) -> String {
+    local_hour_minute(minutes.saturating_mul(60_000)).map_or_else(String::new, |(hour, minute)| {
+        format!("{hour:02}:{minute:02}")
+    })
+}
+
+/// What the monitor says about itself, as the icon and tooltip show it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Monitor {
+    #[default]
+    Reading,
+    /// Minutes since the epoch, so a tooltip that shows hours and minutes never redraws for less.
+    NoReading {
+        since_min: i64,
+    },
+    Partial {
+        first: MonitorSource,
+        count: usize,
+        since_min: i64,
+    },
+    Unverified {
+        since_min: i64,
+    },
+}
+
+impl Monitor {
+    fn of(status: &AgentStatus, now_ms: i64) -> Monitor {
+        let view = monitor::view(status, now_ms);
+        let minute = |ms: i64| ms.div_euclid(60_000);
+        match view.state {
+            MonitorState::NoReading => Monitor::NoReading {
+                since_min: minute(view.no_reading_since_ms.unwrap_or(now_ms)),
+            },
+            MonitorState::Degraded if !view.failing.is_empty() => Monitor::Partial {
+                first: view.failing[0].source,
+                count: view.failing.len(),
+                since_min: minute(
+                    view.failing
+                        .iter()
+                        .map(|f| f.since_ms)
+                        .min()
+                        .unwrap_or(now_ms),
+                ),
+            },
+            _ => monitor::unverified_since(status, now_ms)
+                .filter(|_| !status.paused && !status.suspended)
+                .map_or(Monitor::Reading, |since| Monitor::Unverified {
+                    since_min: minute(since),
+                }),
+        }
     }
 }
 
@@ -96,23 +227,28 @@ struct Shown {
     sensitive: bool,
     suggest_capture: bool,
     recent: Level,
+    monitor: Monitor,
     theme: ColorTheme,
     taskbar: Taskbar,
 }
 
 impl Shown {
-    /// One badge, in the order the tooltip follows: paused, sensitive mode, then the last 24 h.
+    /// One badge, in the order the tooltip follows: paused, sensitive mode, a monitor that does not
+    /// read, then the last 24 h, and last a health check that has not finished.
     fn badge(self) -> Badge {
         if self.paused {
-            Badge::Paused
-        } else if self.sensitive {
-            Badge::Sensitive
-        } else {
-            match self.recent {
-                Level::Normal => Badge::None,
-                Level::Attention(_) | Level::Health(_) => Badge::Attention,
-                Level::Problem(_) => Badge::Problem,
-            }
+            return Badge::Paused;
+        }
+        if self.sensitive {
+            return Badge::Sensitive;
+        }
+        match (self.monitor, self.recent) {
+            (Monitor::NoReading { .. }, _) => Badge::NoReading,
+            (Monitor::Partial { .. }, _) => Badge::Partial,
+            (_, Level::Problem(_)) => Badge::Problem,
+            (_, Level::Attention(_) | Level::Health(_)) => Badge::Attention,
+            (Monitor::Unverified { .. }, Level::Normal) => Badge::Unverified,
+            (_, Level::Normal) => Badge::None,
         }
     }
 
@@ -231,7 +367,9 @@ impl Tray {
         } else if id == self.pause.id() {
             set_paused(shared, shared.gate.state() == GateState::Running, None);
         } else if id == self.sensitive.id() {
-            shared.sensitive.set(self.sensitive.is_checked(), wall_ms());
+            shared
+                .sensitive
+                .set(self.sensitive.is_checked(), interrupt_ms());
         } else if id == self.autostart.id() {
             let _ = if self.autostart.is_checked() {
                 autostart::enable(&self.exe)
@@ -251,25 +389,20 @@ impl Tray {
         if shutdown::display_changed() {
             self.taskbar.set(Taskbar::read());
         }
+        let (suggest_capture, recent, theme, monitor) = read_shared(shared);
         let now = Shown {
             paused: shared.gate.state() == GateState::Paused,
             sensitive: shared.sensitive.is_on(),
-            suggest_capture: lock(&shared.status).suggest_capture,
-            recent: Level::of(&lock(&shared.recent)),
-            theme: lock(&shared.settings).color_theme,
+            suggest_capture,
+            recent,
+            monitor,
+            theme,
             taskbar: self.taskbar.get(),
         };
-        let before = self.shown.replace(Some(now));
-        if before == Some(now) {
+        let text = self.text.borrow();
+        if !show(&self.icon, &self.shown, now, &text) {
             return;
         }
-        if before.map(Shown::look) != Some(now.look()) {
-            let _ = self
-                .icon
-                .set_icon(Some(icon::tray(now.badge(), now.theme, now.taskbar)));
-        }
-        let text = self.text.borrow();
-        let _ = self.icon.set_tooltip(Some(&text.tooltip(now)));
         self.pause.set_text(if now.paused {
             &text.resume
         } else {
@@ -279,12 +412,69 @@ impl Tray {
     }
 }
 
+/// What the notification area accepts: a new icon and a new tooltip.
+trait Face {
+    fn set_icon(&self, icon: Icon) -> Result<(), String>;
+    fn set_tooltip(&self, text: &str) -> Result<(), String>;
+}
+
+impl Face for TrayIcon {
+    fn set_icon(&self, icon: Icon) -> Result<(), String> {
+        TrayIcon::set_icon(self, Some(icon)).map_err(|err| err.to_string())
+    }
+
+    fn set_tooltip(&self, text: &str) -> Result<(), String> {
+        TrayIcon::set_tooltip(self, Some(text)).map_err(|err| err.to_string())
+    }
+}
+
+/// Draws `now` on the icon and tooltip and records it in `shown` only when the shell took both.
+/// Returns false when `now` is already shown.
+fn show(face: &impl Face, shown: &Cell<Option<Shown>>, now: Shown, text: &Texts) -> bool {
+    let before = shown.get();
+    if before == Some(now) {
+        return false;
+    }
+    let icon_ok = before.map(Shown::look) == Some(now.look())
+        || face
+            .set_icon(icon::tray(now.badge(), now.theme, now.taskbar))
+            .is_ok();
+    if icon_ok && face.set_tooltip(&text.tooltip(now)).is_ok() {
+        shown.set(Some(now));
+    }
+    true
+}
+
+/// Reads what the icon shows from the shared state: the capture hint, the level, the theme and
+/// the monitor's own state. One lock is held at a time.
+pub(crate) fn read_shared(shared: &Shared) -> (bool, Level, ColorTheme, Monitor) {
+    let status = lock(&shared.status).clone();
+    let recent = Level::of(&lock(&shared.recent));
+    let theme = lock(&shared.settings).color_theme;
+    (
+        status.suggest_capture,
+        recent,
+        theme,
+        Monitor::of(&status, wall_ms()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use vestigium_brand::Badge;
     use vestigium_core::{ColorTheme, RecentState};
 
-    use super::{Level, Shown, Texts};
+    use std::cell::{Cell, RefCell};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use tray_icon::Icon;
+    use vestigium_ipc::MonitorSource;
+
+    use super::{Face, Level, Monitor, Shown, Texts, clock, read_shared, show};
+    use crate::app::lock;
+    use crate::app::tests::{both_finish, shared};
     use crate::icon::Taskbar;
 
     fn shown(paused: bool, sensitive: bool, recent: Level) -> Shown {
@@ -293,6 +483,7 @@ mod tests {
             sensitive,
             suggest_capture: false,
             recent,
+            monitor: Monitor::Reading,
             theme: ColorTheme::Red,
             taskbar: Taskbar {
                 dark: true,
@@ -319,6 +510,205 @@ mod tests {
         );
     }
 
+    const MIN: i64 = 29_000_000;
+
+    fn with(monitor: Monitor, recent: Level) -> Shown {
+        Shown {
+            monitor,
+            ..shown(false, false, recent)
+        }
+    }
+
+    fn monitor_texts() -> Texts {
+        Texts {
+            no_reading: "no reading since {time}".to_string(),
+            partial: "partial: {source} since {time}".to_string(),
+            unverified: "unverified since {time}".to_string(),
+            sources: ["memory", "cpu", "counters", "processes", "timer"].map(String::from),
+            several: "{count} sources".to_string(),
+            ..texts()
+        }
+    }
+
+    #[test]
+    fn no_reading_outranks_the_24_hour_level() {
+        let none = Monitor::NoReading { since_min: MIN };
+        let partial = Monitor::Partial {
+            first: MonitorSource::Counters,
+            count: 1,
+            since_min: MIN,
+        };
+
+        assert_eq!(with(none, Level::Problem(2)).badge(), Badge::NoReading);
+        assert_eq!(with(none, Level::Normal).badge(), Badge::NoReading);
+        assert_eq!(with(partial, Level::Problem(2)).badge(), Badge::Partial);
+        assert_eq!(
+            Shown {
+                paused: true,
+                ..with(none, Level::Normal)
+            }
+            .badge(),
+            Badge::Paused
+        );
+        assert_eq!(
+            Shown {
+                sensitive: true,
+                ..with(none, Level::Normal)
+            }
+            .badge(),
+            Badge::Sensitive
+        );
+    }
+
+    #[test]
+    fn an_unverified_health_check_shows_only_when_nothing_else_asks_for_a_badge() {
+        let unverified = Monitor::Unverified { since_min: MIN };
+
+        assert_eq!(with(unverified, Level::Normal).badge(), Badge::Unverified);
+        assert_eq!(with(unverified, Level::Problem(1)).badge(), Badge::Problem);
+        assert_eq!(
+            with(unverified, Level::Attention(1)).badge(),
+            Badge::Attention
+        );
+    }
+
+    #[test]
+    fn the_tooltip_names_the_monitor_state_and_keeps_the_24_hour_level() {
+        let text = monitor_texts();
+        let time = clock(MIN);
+        let none = Monitor::NoReading { since_min: MIN };
+        let partial = Monitor::Partial {
+            first: MonitorSource::Counters,
+            count: 1,
+            since_min: MIN,
+        };
+        let several = Monitor::Partial {
+            first: MonitorSource::Memory,
+            count: 3,
+            since_min: MIN,
+        };
+        let unverified = Monitor::Unverified { since_min: MIN };
+
+        assert_eq!(
+            text.tooltip(with(none, Level::Normal)),
+            format!("no reading since {time}")
+        );
+        assert_eq!(
+            text.tooltip(with(none, Level::Problem(2))),
+            format!(
+                "no reading since {time}
+severe 2"
+            )
+        );
+        assert_eq!(
+            text.tooltip(with(partial, Level::Normal)),
+            format!("partial: counters since {time}")
+        );
+        assert_eq!(
+            text.tooltip(with(several, Level::Normal)),
+            format!("partial: 3 sources since {time}")
+        );
+        assert_eq!(
+            text.tooltip(with(unverified, Level::Normal)),
+            format!("unverified since {time}")
+        );
+        assert_eq!(
+            text.tooltip(with(unverified, Level::Attention(4))),
+            format!(
+                "slow 4
+unverified since {time}"
+            )
+        );
+    }
+
+    #[test]
+    fn every_monitor_text_exists_in_both_languages_and_fits_a_tooltip() {
+        use vestigium_i18n::{Catalog, Lang};
+
+        for lang in [Lang::En, Lang::PtBr] {
+            let text = Texts::load(&Catalog::load(lang));
+            let all = [
+                &text.no_reading,
+                &text.partial,
+                &text.unverified,
+                &text.several,
+            ]
+            .into_iter()
+            .chain(&text.sources);
+            for line in all {
+                assert!(
+                    !line.starts_with("tray.") && !line.starts_with("ui."),
+                    "{line}"
+                );
+            }
+            let longest = Shown {
+                suggest_capture: false,
+                ..with(
+                    Monitor::Partial {
+                        first: MonitorSource::Counters,
+                        count: 1,
+                        since_min: MIN,
+                    },
+                    Level::Normal,
+                )
+            };
+            assert!(text.tooltip(longest).chars().count() <= 127);
+        }
+    }
+
+    #[test]
+    fn the_tooltip_leaves_out_lines_that_do_not_fit() {
+        let text = Texts {
+            no_reading: "x".repeat(100),
+            suggest_capture: "y".repeat(40),
+            ..monitor_texts()
+        };
+        let now = Shown {
+            suggest_capture: true,
+            ..with(Monitor::NoReading { since_min: MIN }, Level::Normal)
+        };
+
+        assert_eq!(text.tooltip(now), "x".repeat(100));
+    }
+
+    #[test]
+    fn the_monitor_face_follows_the_status() {
+        use vestigium_ipc::{AgentStatus, SourceFailure};
+
+        let now = 10_000_000;
+        let mut status = AgentStatus {
+            started_at_ms: now - 600_000,
+            last_sample_ms: Some(now - 1_000),
+            ..AgentStatus::default()
+        };
+        assert_eq!(Monitor::of(&status, now), Monitor::Reading);
+
+        status.monitor.failing.push(SourceFailure {
+            source: MonitorSource::Memory,
+            since_ms: now - 120_000,
+            error: "x".to_string(),
+        });
+        assert_eq!(
+            Monitor::of(&status, now),
+            Monitor::Partial {
+                first: MonitorSource::Memory,
+                count: 1,
+                since_min: (now - 120_000) / 60_000
+            }
+        );
+
+        status.last_sample_ms = Some(now - 30_000);
+        assert_eq!(
+            Monitor::of(&status, now),
+            Monitor::NoReading {
+                since_min: (now - 30_000) / 60_000
+            }
+        );
+
+        status.paused = true;
+        assert_eq!(Monitor::of(&status, now), Monitor::Reading);
+    }
+
     #[test]
     fn the_tooltip_adds_a_line_when_a_capture_is_suggested() {
         let text = Texts {
@@ -329,8 +719,7 @@ mod tests {
             problem: "severe {count}".to_string(),
             health: "health {count}".to_string(),
             suggest_capture: "look into it".to_string(),
-            pause: String::new(),
-            resume: String::new(),
+            ..Texts::default()
         };
         let quiet = shown(false, true, Level::Normal);
         let suggesting = Shown {
@@ -381,6 +770,123 @@ mod tests {
             }),
             Level::Attention(3),
             "slowdowns speak first"
+        );
+    }
+
+    #[test]
+    fn tray_state_read_never_deadlocks_with_a_recent_then_status_writer() {
+        let shared = Arc::new(shared());
+        let reading = Arc::clone(&shared);
+        let writing = Arc::clone(&shared);
+
+        both_finish(
+            move || {
+                for _ in 0..3_000 {
+                    read_shared(&reading);
+                }
+            },
+            move || {
+                for _ in 0..300 {
+                    let recent = lock(&writing.recent);
+                    thread::sleep(Duration::from_millis(1));
+                    let status = lock(&writing.status);
+                    drop((recent, status));
+                }
+            },
+        );
+    }
+
+    /// A notification area that rejects the first `reject_icons` icons and `reject_tooltips` tooltips.
+    #[derive(Default)]
+    struct Fake {
+        reject_icons: Cell<u32>,
+        reject_tooltips: Cell<u32>,
+        icons: Cell<u32>,
+        tooltips: RefCell<Vec<String>>,
+    }
+
+    impl Face for Fake {
+        fn set_icon(&self, _icon: Icon) -> Result<(), String> {
+            self.icons.set(self.icons.get() + 1);
+            take_rejection(&self.reject_icons)
+        }
+
+        fn set_tooltip(&self, text: &str) -> Result<(), String> {
+            self.tooltips.borrow_mut().push(text.to_string());
+            take_rejection(&self.reject_tooltips)
+        }
+    }
+
+    fn take_rejection(left: &Cell<u32>) -> Result<(), String> {
+        if left.get() == 0 {
+            return Ok(());
+        }
+        left.set(left.get() - 1);
+        Err("the shell refused".to_string())
+    }
+
+    fn texts() -> Texts {
+        Texts {
+            watching: "watching".to_string(),
+            paused: "paused".to_string(),
+            sensitive: "closely".to_string(),
+            attention: "slow {count}".to_string(),
+            problem: "severe {count}".to_string(),
+            health: "health {count}".to_string(),
+            suggest_capture: "look".to_string(),
+            ..Texts::default()
+        }
+    }
+
+    #[test]
+    fn a_rejected_icon_update_is_retried_on_the_next_refresh() {
+        let face = Fake::default();
+        face.reject_icons.set(1);
+        let shown_now = Cell::new(None);
+        let now = shown(false, false, Level::Problem(1));
+
+        assert!(show(&face, &shown_now, now, &texts()));
+        assert_eq!(shown_now.get(), None);
+        assert!(show(&face, &shown_now, now, &texts()));
+
+        assert_eq!(face.icons.get(), 2);
+        assert_eq!(shown_now.get(), Some(now));
+        assert!(
+            !show(&face, &shown_now, now, &texts()),
+            "an accepted state is not drawn again"
+        );
+        assert_eq!(face.icons.get(), 2);
+    }
+
+    #[test]
+    fn a_rejected_tooltip_update_is_retried() {
+        let face = Fake::default();
+        face.reject_tooltips.set(1);
+        let shown_now = Cell::new(None);
+        let now = shown(false, false, Level::Normal);
+
+        show(&face, &shown_now, now, &texts());
+        assert_eq!(shown_now.get(), None);
+        show(&face, &shown_now, now, &texts());
+
+        assert_eq!(face.tooltips.borrow().len(), 2);
+        assert_eq!(shown_now.get(), Some(now));
+    }
+
+    #[test]
+    fn a_count_change_updates_the_tooltip_without_redrawing_the_icon() {
+        let face = Fake::default();
+        let shown_now = Cell::new(None);
+        let first = shown(false, false, Level::Attention(2));
+        let second = shown(false, false, Level::Attention(3));
+
+        show(&face, &shown_now, first, &texts());
+        show(&face, &shown_now, second, &texts());
+
+        assert_eq!(face.icons.get(), 1);
+        assert_eq!(
+            face.tooltips.borrow().last().map(String::as_str),
+            Some("slow 3")
         );
     }
 }

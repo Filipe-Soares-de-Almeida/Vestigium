@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -8,15 +8,17 @@ use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
 use vestigium_core::{Episode, ProgramPoint, Settings};
-use vestigium_ipc::{Request, Response};
+use vestigium_ipc::{Request, Response, current_user_sid};
 
 use vestigium_store::CaptureSummary;
 
 use crate::agent::{AgentLink, Link, SettingsDto, UiError, refused};
 use crate::capture::{
-    CAPTURE_MINUTES, CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, ScanFinished,
-    capture_file, delete_dumps_args, dump_scan_args, dumps_file, helper_args, launch_elevated,
-    scan_args, scan_file, sibling_helper,
+    CAPTURE_GRACE, CAPTURE_MARGIN, CAPTURE_MINUTES, CancelClock, CaptureFinished, CaptureRun,
+    CaptureStop, DeleteFinished, DumpScanFinished, Ended, HELPER_UNAVAILABLE, SCAN_CEILING,
+    ScanFinished, TEST_GRACE, Waited, capture_elsewhere, capture_end, capture_file,
+    delete_dumps_args, dump_scan_args, dumps_file, helper_args, launch_elevated, scan_args,
+    scan_file, sibling_helper, test_end, wait_result,
 };
 use crate::history::{
     CaptureDto, CrashControlDto, DumpsDto, EpisodeDetailDto, HealthDto, History, MarksDto,
@@ -25,21 +27,29 @@ use crate::history::{
 use crate::hwtests::{
     DiskDetailDto, RUNS_SHOWN_MS, RunningTest, TestFinished, TestProgress, TestsDto, disk_list,
     disk_scan_args, letter_of, memory_diagnostic_exe, memory_now, read_progress, run_benchmark,
-    run_memory_test, scan_under_way, tests_file, volume_check_args, volume_list, write_versioned,
+    run_memory_test, scan_under_way, stop_file_of, tests_file, volume_check_args, volume_list,
+    write_versioned,
 };
-use crate::live::{LIVE_PERIOD, LiveMessage, run_live};
+use crate::live::{LIVE_PERIOD, LiveMessage, LiveSlot, run_live};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 use vestigium_core::health::Subject;
-use vestigium_core::hwtest::{BENCH_FILE_BYTES, QUICK_MINUTES, TestKind, TestRun};
+use vestigium_core::hwtest::{
+    BENCH_FILE_BYTES, BENCH_FREE_MARGIN_BYTES, QUICK_MINUTES, TestKind, TestRun, bench_has_room,
+};
 
 /// What every command works with: the database, the pipe and the live stream.
 pub struct AppState {
     history: Arc<Mutex<History>>,
     link: Arc<Link>,
-    /// Dropping it ends the live stream.
-    live_stop: Mutex<Option<Sender<()>>>,
+    /// The running live stream; dropping its sender ends it.
+    live: Mutex<LiveSlot>,
     /// The deep capture this window started, until its helper exits.
     capture_run: Arc<Mutex<Option<CaptureRun>>>,
+    /// How to stop that capture: the flag its wait watches and the file its helper polls.
+    capture_stop: Arc<Mutex<Option<CaptureStop>>>,
+    /// Set to stop waiting for a health scan or a dump read in progress.
+    scan_cancel: Arc<AtomicBool>,
+    dump_cancel: Arc<AtomicBool>,
     /// The hardware test this window started, until it ends.
     test: Arc<Mutex<Option<RunningTest>>>,
     /// The thread of a test that runs in this window, which closing the window waits for.
@@ -51,8 +61,11 @@ impl Default for AppState {
         AppState {
             history: Arc::new(Mutex::new(History::new(History::default_path()))),
             link: Arc::new(Link::new(Link::sibling_agent())),
-            live_stop: Mutex::new(None),
+            live: Mutex::new(LiveSlot::default()),
             capture_run: Arc::new(Mutex::new(None)),
+            capture_stop: Arc::new(Mutex::new(None)),
+            scan_cancel: Arc::new(AtomicBool::new(false)),
+            dump_cancel: Arc::new(AtomicBool::new(false)),
             test: Arc::new(Mutex::new(None)),
             test_thread: Arc::new(Mutex::new(None)),
         }
@@ -69,8 +82,8 @@ fn recent(link: &Link, to_ms: i64, now_ms: i64) -> Recent {
     if to_ms < now_ms - RECENT_MS {
         return Recent::default();
     }
-    match link.call(&Request::Recent) {
-        Ok(Response::Recent { readings, pressure }) => Recent {
+    match link.try_call(&Request::Recent) {
+        Some(Ok(Response::Recent { readings, pressure })) => Recent {
             readings,
             pressure: pressure
                 .iter()
@@ -131,14 +144,15 @@ pub async fn episode_detail(
     .await
 }
 
-/// Streams the last ten minutes, then one second a second; replaces any running stream.
+/// Streams the last ten minutes, then one second a second; replaces any running stream and
+/// returns the id that stops this one.
 #[tauri::command]
 pub fn live_start(
     state: State<'_, AppState>,
     on_frame: Channel<LiveMessage>,
-) -> Result<(), UiError> {
+) -> Result<u64, UiError> {
     let (stop_tx, stop_rx) = mpsc::channel();
-    *lock(&state.live_stop) = Some(stop_tx);
+    let id = lock(&state.live).replace(stop_tx);
     let link = state.link.clone();
     std::thread::Builder::new()
         .name("live".to_string())
@@ -150,13 +164,14 @@ pub fn live_start(
                 LIVE_PERIOD,
             )
         })
-        .map(drop)
+        .map(|_| id)
         .map_err(|err| UiError::Failed(err.to_string()))
 }
 
+/// Ends the live stream `id`; does nothing when a newer stream has replaced it.
 #[tauri::command]
-pub fn live_stop(state: State<'_, AppState>) {
-    lock(&state.live_stop).take();
+pub fn live_stop(state: State<'_, AppState>, id: u64) {
+    lock(&state.live).stop(id);
 }
 
 #[tauri::command]
@@ -238,14 +253,14 @@ pub async fn start_capture(
     }
     let link = state.link.clone();
     let slot = state.capture_run.clone();
+    let stop_slot = state.capture_stop.clone();
     blocking(move || {
-        if lock(&slot).is_some() {
-            return Err(UiError::Failed("a deep capture is already running".into()));
-        }
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-        let helper = sibling_helper()
-            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+        if lock(&slot).is_some() || capture_elsewhere(Some(&db), now_ms()).is_some() {
+            return Err(UiError::CaptureRunning);
+        }
+        let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
         let started_ms = now_ms();
         let out = capture_file(&db, started_ms)
             .ok_or_else(|| UiError::Failed("no data folder".into()))?;
@@ -257,29 +272,82 @@ pub async fn start_capture(
             Err(err) => return Err(err),
         }
         let process = launch_elevated(&helper, &helper_args(minutes, &out))?;
-        let run = CaptureRun {
-            started_ms,
-            ends_ms: started_ms + minutes as i64 * 60_000,
-        };
+        let run = CaptureRun::started_here(started_ms, minutes);
         *lock(&slot) = Some(run);
+        let stop = CaptureStop::new(out.with_extension("stop"));
+        *lock(&stop_slot) = Some(stop.clone());
         std::thread::spawn(move || {
-            let exit_code = process.wait();
+            let ceiling = Duration::from_secs(minutes * 60) + CAPTURE_MARGIN;
+            let asked = || stop.asked.load(Ordering::Acquire);
+            let waited = process.wait(Some(ceiling), &asked, CAPTURE_GRACE);
+            let (exit_code, ended) = capture_end(waited, asked());
+            let _ = std::fs::remove_file(&stop.file);
             let ids = match link.call(&Request::ImportResults) {
                 Ok(Response::Imported { captures, .. }) => captures,
                 _ => Vec::new(),
             };
             *lock(&slot) = None;
-            let _ = app.emit("capture-finished", CaptureFinished { ids, exit_code });
+            *lock(&stop_slot) = None;
+            let _ = app.emit(
+                "capture-finished",
+                CaptureFinished {
+                    ids,
+                    exit_code,
+                    ended,
+                },
+            );
         });
         Ok(run)
     })
     .await
 }
 
-/// The deep capture this window started, while its helper runs.
+/// The deep capture under way: the one this window started, or one another window or account
+/// started, as far as the helper's lock and its temporary result tell.
 #[tauri::command]
-pub fn capture_run(state: State<'_, AppState>) -> Option<CaptureRun> {
-    *lock(&state.capture_run)
+pub async fn capture_run(state: State<'_, AppState>) -> Result<Option<CaptureRun>, UiError> {
+    let own = *lock(&state.capture_run);
+    if own.is_some() {
+        return Ok(own);
+    }
+    blocking(move || {
+        Ok(capture_elsewhere(
+            History::default_path().as_deref(),
+            now_ms(),
+        ))
+    })
+    .await
+}
+
+/// Tells the helper of the deep capture under way to stop and keep nothing; the window stops
+/// waiting for it after a few seconds whether or not it has exited.
+#[tauri::command]
+pub fn cancel_capture(state: State<'_, AppState>) -> Result<(), UiError> {
+    let stop = lock(&state.capture_stop).clone();
+    match stop {
+        Some(stop) => stop.ask().map_err(|err| UiError::Failed(err.to_string())),
+        None => Err(UiError::Failed("no capture is running".into())),
+    }
+}
+
+/// Which helper read a cancel stops waiting for.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HelperRead {
+    Scan,
+    Dumps,
+}
+
+/// Makes the window stop waiting for a health scan or a dump read in progress; the read command
+/// then answers `Cancelled`. The helper is not told: it ends by its own limits and the watcher
+/// imports whatever it still writes.
+#[tauri::command]
+pub fn cancel_helper_read(state: State<'_, AppState>, read: HelperRead) {
+    let flag = match read {
+        HelperRead::Scan => &state.scan_cancel,
+        HelperRead::Dumps => &state.dump_cancel,
+    };
+    flag.store(true, Ordering::Release);
 }
 
 /// Asks the watcher to store every finished capture it has not stored yet; returns their ids.
@@ -304,17 +372,19 @@ pub async fn health(state: State<'_, AppState>) -> Result<HealthDto, UiError> {
 #[tauri::command]
 pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiError> {
     let link = state.link.clone();
+    let cancel = state.scan_cancel.clone();
+    cancel.store(false, Ordering::Release);
     blocking(move || {
         let db = History::default_path()
             .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-        let helper = sibling_helper()
-            .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+        let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
         let out =
             scan_file(&db, now_ms()).ok_or_else(|| UiError::Failed("no data folder".into()))?;
         if let Some(folder) = out.parent() {
             std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
         }
-        let exit_code = launch_elevated(&helper, &scan_args(&out))?.wait();
+        let process = launch_elevated(&helper, &scan_args(&out))?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &cancel)?;
         let scans = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { scans, .. }) => scans,
             _ => Vec::new(),
@@ -345,9 +415,15 @@ pub async fn dumps(state: State<'_, AppState>) -> Result<DumpsDto, UiError> {
 #[tauri::command]
 pub async fn start_dump_scan(state: State<'_, AppState>) -> Result<DumpScanFinished, UiError> {
     let link = state.link.clone();
+    let cancel = state.dump_cancel.clone();
+    cancel.store(false, Ordering::Release);
     blocking(move || {
         let (helper, out) = helper_and_file("dumps")?;
-        let exit_code = launch_elevated(&helper, &dump_scan_args(&out))?.wait();
+        let process = launch_elevated(
+            &helper,
+            &dump_scan_args(&out, current_user_sid().ok().as_deref()),
+        )?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &cancel)?;
         let dumps = match link.call(&Request::ImportResults) {
             Ok(Response::Imported { dumps, .. }) => dumps,
             _ => Vec::new(),
@@ -369,18 +445,34 @@ pub async fn delete_dumps(
         if paths.is_empty() {
             return Ok(DeleteFinished {
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 exit_code: None,
             });
         }
         let (helper, list) = helper_and_file("delete")?;
         std::fs::write(&list, paths.join("\r\n"))
             .map_err(|err| UiError::Failed(err.to_string()))?;
-        let exit_code = launch_elevated(&helper, &delete_dumps_args(&list))?.wait();
-        let deleted = match link.call(&Request::ImportResults) {
-            Ok(Response::Imported { deleted, .. }) => deleted,
-            _ => 0,
+        let process = launch_elevated(
+            &helper,
+            &delete_dumps_args(&list, current_user_sid().ok().as_deref()),
+        )?;
+        let exit_code = wait_result(&process, SCAN_CEILING, &AtomicBool::new(false))?;
+        let (deleted, refused, failed) = match link.call(&Request::ImportResults) {
+            Ok(Response::Imported {
+                deleted,
+                refused,
+                failed,
+                ..
+            }) => (deleted, refused, failed),
+            _ => (0, 0, 0),
         };
-        Ok(DeleteFinished { deleted, exit_code })
+        Ok(DeleteFinished {
+            deleted,
+            refused,
+            failed,
+            exit_code,
+        })
     })
     .await
 }
@@ -389,8 +481,7 @@ pub async fn delete_dumps(
 fn helper_and_file(extension: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), UiError> {
     let db = History::default_path()
         .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-    let helper = sibling_helper()
-        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
     let file = dumps_file(&db, now_ms(), extension)
         .ok_or_else(|| UiError::Failed("no data folder".into()))?;
     if let Some(folder) = file.parent() {
@@ -438,6 +529,8 @@ pub async fn tests(state: State<'_, AppState>) -> Result<TestsDto, UiError> {
             running: lock(&running).clone(),
             scan: tests_dir().and_then(|dir| scan_under_way(&dir, now)),
             bench_file_bytes: BENCH_FILE_BYTES,
+            bench_needed_bytes: BENCH_FILE_BYTES + BENCH_FREE_MARGIN_BYTES,
+            boot_ms: now - vestigium_collect::interrupt_ms(),
         })
     })
     .await
@@ -541,6 +634,11 @@ pub async fn start_benchmark(
         .into_iter()
         .find(|v| v.root.eq_ignore_ascii_case(&volume))
         .ok_or_else(|| UiError::Failed(format!("{volume} is not a fixed volume")))?;
+    if !bench_has_room(found.free_bytes, BENCH_FILE_BYTES) {
+        return Err(UiError::Failed(format!(
+            "{volume} has too little free space for the speed test"
+        )));
+    }
     start_in_window(
         app,
         &state,
@@ -584,12 +682,14 @@ fn start_in_window(
                         id,
                         run: Some(run),
                         exit_code: None,
+                        ended: Ended::Done,
                     }
                 }
                 Err(_) => TestFinished {
                     id: None,
                     run: None,
                     exit_code: None,
+                    ended: Ended::Done,
                 },
             };
             *lock(&worker_slot) = None;
@@ -672,16 +772,22 @@ pub async fn start_surface_scan(
                 return Err(err);
             }
         };
+        let asked = running.stop.clone();
         std::thread::spawn(move || {
             let progress = out.with_extension("progress");
-            let exit_code = loop {
+            let mut clock = CancelClock::new(TEST_GRACE);
+            let waited = loop {
                 if let Some(code) = process.exited_within(2_000) {
-                    break code;
+                    break Waited::Exited(code);
                 }
                 if let Some(p) = read_progress(&progress) {
                     let _ = app.emit("test-progress", TestProgress::Surface(p));
                 }
+                if clock.expired(asked.load(Ordering::Acquire)) {
+                    break Waited::Abandoned;
+                }
             };
+            let (exit_code, ended) = test_end(waited, asked.load(Ordering::Acquire));
             let id = imported_test(&link);
             *lock(&slot) = None;
             let _ = app.emit(
@@ -690,6 +796,7 @@ pub async fn start_surface_scan(
                     id,
                     run: None,
                     exit_code,
+                    ended,
                 },
             );
         });
@@ -715,7 +822,7 @@ pub async fn start_volume_check(
             TestKind::VolumeCheck,
             Subject::Volume(format!("{letter}:\\")),
             None,
-            None,
+            Some(out.with_extension("stop")),
         )?;
         let process = match launch_elevated(&helper, &volume_check_args(letter, &out)) {
             Ok(process) => process,
@@ -724,8 +831,11 @@ pub async fn start_volume_check(
                 return Err(err);
             }
         };
+        let asked = running.stop.clone();
         std::thread::spawn(move || {
-            let exit_code = process.wait();
+            let requested = || asked.load(Ordering::Acquire);
+            let waited = process.wait(None, &requested, TEST_GRACE);
+            let (exit_code, ended) = test_end(waited, requested());
             let id = imported_test(&link);
             *lock(&slot) = None;
             let _ = app.emit(
@@ -734,6 +844,7 @@ pub async fn start_volume_check(
                     id,
                     run: None,
                     exit_code,
+                    ended,
                 },
             );
         });
@@ -746,8 +857,7 @@ pub async fn start_volume_check(
 fn helper_and_test_file(extension: &str) -> Result<(PathBuf, PathBuf), UiError> {
     let db = History::default_path()
         .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
-    let helper = sibling_helper()
-        .ok_or_else(|| UiError::Failed("the helper is not next to the window".into()))?;
+    let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
     let file = tests_file(&db, now_ms(), extension)
         .ok_or_else(|| UiError::Failed("no data folder".into()))?;
     if let Some(folder) = file.parent() {
@@ -765,7 +875,7 @@ pub fn stop_test(state: State<'_, AppState>, scan: Option<String>) -> Result<(),
     }
     let stem = scan.filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
     match (stem, tests_dir()) {
-        (Some(stem), Some(dir)) => std::fs::write(dir.join(format!("{stem}.stop")), b"")
+        (Some(stem), Some(dir)) => std::fs::write(stop_file_of(&dir, &stem), b"")
             .map_err(|err| UiError::Failed(err.to_string())),
         _ => Err(UiError::Failed("no test is running".into())),
     }
@@ -825,11 +935,12 @@ pub async fn apply_tweaks(
     let (history, link) = (state.history.clone(), state.link.clone());
     blocking(move || {
         crate::tweaks::apply(
-            &mut lock(&history),
+            &history,
             &link,
             &picks,
             without_restore_point,
             now_ms(),
+            crate::tweaks::run_helper,
         )
     })
     .await
@@ -845,11 +956,13 @@ pub async fn undo_tweak(
     let (history, link) = (state.history.clone(), state.link.clone());
     blocking(move || {
         crate::tweaks::undo_change(
-            &mut lock(&history),
+            &history,
             &link,
+            &vestigium_collect::KnownJournal::new(),
             id,
             without_restore_point,
             now_ms(),
+            crate::tweaks::run_helper,
         )
     })
     .await
@@ -865,4 +978,42 @@ async fn blocking<T: Send + 'static>(
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn recent_is_empty_when_the_watcher_does_not_answer() {
+        let (link, release) = crate::agent::mute::link();
+        let now = now_ms();
+        let started = Instant::now();
+
+        let found = recent(&link, now, now);
+
+        assert_eq!(found, Recent::default());
+        assert!(started.elapsed() < Duration::from_secs(7));
+        drop(release);
+    }
+
+    #[test]
+    fn a_busy_link_gives_an_empty_recent_at_once() {
+        let (link, release) = crate::agent::mute::link();
+        let link = Arc::new(link);
+        let slow = link.clone();
+        let busy = std::thread::spawn(move || slow.call(&Request::Status));
+        std::thread::sleep(Duration::from_millis(500));
+        let now = now_ms();
+        let started = Instant::now();
+
+        let found = recent(&link, now, now);
+
+        assert_eq!(found, Recent::default());
+        assert!(started.elapsed() < Duration::from_millis(200));
+        let _ = busy.join();
+        drop(release);
+    }
 }

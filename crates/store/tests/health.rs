@@ -1,7 +1,8 @@
 use vestigium_core::Retention;
 use vestigium_core::health::{
-    BootReport, BootTime, Concern, DiskHealth, Finding, FindingChange, FindingKind, HealthFact,
-    Measure, Reference, ScanResult, SmartAttribute, Subject,
+    BootReport, BootReportV1, BootTime, Concern, DiskHealth, Finding, FindingChange, FindingKind,
+    HealthFact, Measure, Reference, SCAN_VERSION_V1, ScanResult, ScanResultV1, SmartAttribute,
+    Subject,
 };
 use vestigium_store::{SCHEMA_VERSION, Store};
 
@@ -34,8 +35,56 @@ fn scan(ts_ms: i64, boot_ms: u32) -> ScanResult {
                 post_boot_ms: boot_ms / 2,
             }],
             delays: Vec::new(),
+            skipped: 0,
         }),
     }
+}
+
+#[test]
+fn a_version_1_scan_row_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(store(&dir));
+    let old = ScanResultV1 {
+        ts_ms: DAY,
+        boot: Some(BootReportV1 {
+            boots: vec![BootTime {
+                ts_ms: DAY,
+                boot_ms: 80_000,
+                main_path_ms: 40_000,
+                post_boot_ms: 40_000,
+            }],
+            delays: Vec::new(),
+        }),
+    };
+    // A segment BLOB: the postcard format byte, then the postcard bytes of the one item.
+    let mut data = vec![1u8];
+    data.extend(postcard::to_stdvec(&vec![&old]).unwrap());
+    rusqlite::Connection::open(dir.path().join("vestigium.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO scan (version, ts_ms, data) VALUES (?1, ?2, ?3)",
+            rusqlite::params![i64::from(SCAN_VERSION_V1), old.ts_ms, data],
+        )
+        .unwrap();
+
+    let loaded = store(&dir).last_scan().unwrap().unwrap();
+
+    assert_eq!(loaded.ts_ms, DAY);
+    let boot = loaded.boot.unwrap();
+    assert_eq!(boot.boots.len(), 1);
+    assert_eq!(boot.skipped, 0);
+}
+
+#[test]
+fn the_count_of_skipped_boot_events_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+    let mut with_skips = scan(DAY, 90_000);
+    with_skips.boot.as_mut().unwrap().skipped = 3;
+
+    store.insert_scan(&with_skips).unwrap();
+
+    assert_eq!(store.last_scan().unwrap(), Some(with_skips));
 }
 
 #[test]
@@ -198,6 +247,12 @@ fn migration_from_v3_adds_findings_and_scans() {
             "CREATE TABLE gap (id INTEGER PRIMARY KEY, start_ms INTEGER NOT NULL,
                  end_ms INTEGER NOT NULL, reason INTEGER NOT NULL);
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
+             CREATE TABLE event (id INTEGER PRIMARY KEY, provider TEXT NOT NULL,
+                 meaning INTEGER NOT NULL);
+             CREATE TABLE segment (id INTEGER PRIMARY KEY, series INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 3;",
         )
         .unwrap();
@@ -284,4 +339,22 @@ fn smart_readings_follow_the_records_retention() {
 
     assert_eq!(report.smart_readings, 2, "both attributes of the old day");
     assert_eq!(store.smart_history("0 C:", 5, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn the_same_scan_stored_twice_is_one_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(&dir);
+
+    let first = store.insert_scan(&scan(DAY, 90_000)).unwrap();
+    let again = store.insert_scan(&scan(DAY, 90_000)).unwrap();
+    let other = store.insert_scan(&scan(2 * DAY, 80_000)).unwrap();
+
+    assert_eq!(again, first);
+    assert_ne!(other, first);
+    let count: i64 = rusqlite::Connection::open(dir.path().join("vestigium.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM scan", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
 }

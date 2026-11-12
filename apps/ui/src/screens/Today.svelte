@@ -11,6 +11,7 @@
   import { lang, t } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
   import { href } from "../lib/router.svelte";
+  import { pollWhileShown } from "../lib/visibility";
   import { buildDay, type Day, dayStart, rangeStart, worstOf } from "./today/day";
   import Days from "./today/Days.svelte";
   import HealthCard from "./today/HealthCard.svelte";
@@ -58,7 +59,7 @@
         marks(rangeStart(now), now),
       ]);
       empty = line.history === "empty";
-      day = buildDay(now, line, found);
+      day = buildDay(now, line, found, app.paused || app.stopped);
       error = null;
     } catch (err) {
       if (day === null) error = err;
@@ -74,17 +75,7 @@
   $effect(() => {
     if (app.history !== "ready") return;
     untrack(() => void load());
-    const timer = setInterval(() => {
-      if (!document.hidden) void load();
-    }, REFRESH_MS);
-    const onvisible = () => {
-      if (!document.hidden && day && Date.now() - day.now >= REFRESH_MS) void load();
-    };
-    document.addEventListener("visibilitychange", onvisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onvisible);
-    };
+    return pollWhileShown(load, REFRESH_MS);
   });
 </script>
 

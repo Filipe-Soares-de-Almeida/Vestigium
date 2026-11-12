@@ -15,7 +15,8 @@ import type {
 } from "../../lib/types";
 import { formatBytes, formatDayShort, formatMs, sameDay } from "../occurrence/format";
 import { lineFor, type Line, type Texts } from "../occurrence/report";
-import type { Check } from "./areas";
+import type { PassState } from "../../lib/monitor";
+import type { Check, Mark } from "./areas";
 
 // The words of the health page, built from typed findings at the reader's detail level.
 
@@ -24,8 +25,8 @@ type Args = Record<string, string | number>;
 const k = (key: string, args?: Args) => t(`ui.health.${key}`, args);
 const kn = (key: string, count: number, args?: Args) => tn(`ui.health.${key}`, count, args);
 
-/** The text of `key.<concern>` when the catalog has one, else of `key`. */
-function byConcern(key: string, concern: Concern, args?: Args): string {
+/** The text of `key.<variant>` when the catalog has one, else of `key`. */
+function byConcern(key: string, concern: Concern | "Hot", args?: Args): string {
   const specific = `ui.health.${key}.${concern}`;
   const text = t(specific, args);
   return text === specific ? k(key, args) : text;
@@ -58,11 +59,21 @@ export function when(ms: number): string {
   return sameDay(ms, Date.now()) ? k("today_at", { time: formatTime(ms) }) : formatDayShort(ms);
 }
 
+/** An NVMe disk that only ran hot: its one next step is the cooling check. */
+function ranHot(f: FindingDto): boolean {
+  return (
+    f.kind === "DiskSmart" &&
+    f.concern === "Attention" &&
+    f.next_steps.length === 1 &&
+    f.next_steps[0] === "CheckCooling"
+  );
+}
+
 export function findingTitle(f: FindingDto, level: DetailLevel): string {
   const subject = subjectName(f.subject);
   return level === "Technical"
     ? k(`kind.${f.kind}.tech`, { subject })
-    : byConcern(`kind.${f.kind}.title`, f.concern, { subject });
+    : byConcern(`kind.${f.kind}.title`, ranHot(f) ? "Hot" : f.concern, { subject });
 }
 
 export function findingView(f: FindingDto, level: DetailLevel): FindingView {
@@ -70,7 +81,10 @@ export function findingView(f: FindingDto, level: DetailLevel): FindingView {
   return {
     title: findingTitle(f, level),
     since: k("since", { when: when(f.opened_ms) }),
-    why: level === "Technical" ? k(`kind.${f.kind}.rule`) : byConcern(`kind.${f.kind}.why`, f.concern),
+    why:
+      level === "Technical"
+        ? k(`kind.${f.kind}.rule`)
+        : byConcern(`kind.${f.kind}.why`, ranHot(f) ? "Hot" : f.concern),
     value: valueText(f.kind, f.value),
     reference: referenceText(f.kind, f.reference),
     evidence: evidenceTexts(f).map((texts) => lineFor(level, texts)),
@@ -281,9 +295,35 @@ function delayTexts(d: BootDelay): Texts {
   };
 }
 
-/** The line of a kind that has no open finding. */
-export function checkText(check: Check): string {
-  return check.mark === "Unknown" ? k(`check.${check.kind}.Unknown`) : k(`check.${check.kind}`);
+/** The line of a kind that has no open finding; `pass` says since when a stale check was not verified. */
+export function checkText(check: Check, pass: PassState | null = null): string {
+  if (check.mark === "Ok") return k(`check.${check.kind}`);
+  if (check.why === "silent") return k("check.silent");
+  if (check.why === "stale") return pass?.since != null ? k("check.unread_since", { time: when(pass.since) }) : k("check.unread");
+  if (check.why === "unread") return k("check.unread");
+  return k(`check.${check.kind}.Unknown`);
+}
+
+/** What stands in for "no alerts" when the checks behind it are not current, or `null` when they are. */
+export function notCurrent(pass: PassState | null): { line: string; kind: "silent" | "unverified" } | null {
+  if (pass?.silent) return { line: k("area.silent"), kind: "silent" };
+  if (pass?.stale) return { line: pass.since != null ? k("area.unverified", { time: when(pass.since) }) : k("area.unread"), kind: "unverified" };
+  return pass && pass.unread.length ? { line: k("area.unread"), kind: "unverified" } : null;
+}
+
+/** The word beside the mark of an area or a check. */
+export function markWord(mark: Mark, why: Check["why"] = null): string {
+  if (mark === "Unknown" && why === "silent") return t("ui.status.silent");
+  if (mark === "Unknown" && (why === "stale" || why === "unread")) return t("ui.status.unverified");
+  return k(`mark.${mark}`);
+}
+
+/** The line under an area that is unknown: since when it was not verified, or why not. */
+export function areaUnknownText(why: Check["why"], pass: PassState | null): string {
+  if (why === "silent") return k("area.silent");
+  if (why === "stale") return pass?.since != null ? k("area.unverified", { time: when(pass.since) }) : k("area.unread");
+  if (why === "unread") return k("area.unread");
+  return k("area.unknown");
 }
 
 /** One part of the page's opening sentence; bold parts carry the news. */
@@ -292,7 +332,7 @@ export interface Part {
   bold: boolean;
 }
 
-export function lede(dto: HealthDto, level: DetailLevel, checks: number): Part[] {
+export function lede(dto: HealthDto, level: DetailLevel, checks: number, pass: PassState | null = null): Part[] {
   const critical = dto.open.filter((f) => f.concern === "Critical");
   const attention = dto.open.length - critical.length;
   if (level === "Technical") {
@@ -309,6 +349,24 @@ export function lede(dto: HealthDto, level: DetailLevel, checks: number): Part[]
       { text: `${k("lede.calm")} `, bold: false },
       { text: kn("lede.attention", attention), bold: true },
       { text: k("lede.rest"), bold: false },
+    ];
+  }
+  if (pass?.silent) {
+    return [
+      { text: k("lede.silent"), bold: true },
+      { text: ` ${k("lede.silent.rest")}`, bold: false },
+    ];
+  }
+  if (pass?.stale) {
+    return [
+      { text: k("lede.unverified", { time: pass.since != null ? when(pass.since) : "" }).trim(), bold: true },
+      { text: ` ${k("lede.unverified.rest")}`, bold: false },
+    ];
+  }
+  if (pass && pass.unread.length) {
+    return [
+      { text: k("lede.partial"), bold: true },
+      { text: ` ${k("lede.partial.rest")}`, bold: false },
     ];
   }
   if (dto.last_scan_ms === null) {

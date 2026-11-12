@@ -73,6 +73,13 @@ pub struct SurfaceScan {
     pub unreadable: Vec<u64>,
     /// Why the scan could not run or stopped short, when it did.
     pub failure: Option<String>,
+    /// Other programs used the disk during the scan, so slow reads may not be the disk's fault.
+    pub outside_io: bool,
+}
+
+/// Whether a disk moved clearly more bytes than the `ours` a test read or wrote on it, as `all`.
+pub fn outside_traffic(all: u64, ours: u64) -> bool {
+    all > ours + (ours / 10).max(16 << 20)
 }
 
 impl SurfaceScan {
@@ -126,6 +133,7 @@ impl SurfaceAggregator {
                 worst: Vec::new(),
                 unreadable: Vec::new(),
                 failure: None,
+                outside_io: false,
             },
         }
     }
@@ -158,6 +166,11 @@ impl SurfaceAggregator {
             .extend(sectors.iter().take(room).copied());
     }
 
+    /// Records whether other programs used the disk during the scan.
+    pub fn set_outside_io(&mut self, outside: bool) {
+        self.scan.outside_io = outside;
+    }
+
     pub fn progress(&self, ts_ms: i64, at_bytes: u64) -> SurfaceProgress {
         SurfaceProgress {
             disk: self.scan.disk,
@@ -186,6 +199,7 @@ pub fn combined_surface(runs: &[SurfaceScan]) -> Option<SurfaceScan> {
             break;
         }
         combined.from_bytes = earlier.from_bytes;
+        combined.outside_io |= earlier.outside_io;
         for (band, count) in combined.bands.iter_mut().zip(earlier.bands) {
             *band += count;
         }
@@ -206,6 +220,13 @@ pub fn combined_surface(runs: &[SurfaceScan]) -> Option<SurfaceScan> {
 
 /// Size of the benchmark's temporary file.
 pub const BENCH_FILE_BYTES: u64 = 1 << 30;
+/// Free space the benchmark leaves on the volume beyond its file.
+pub const BENCH_FREE_MARGIN_BYTES: u64 = 512 << 20;
+
+/// Whether a volume with `free_bytes` free can hold a benchmark file of `file_bytes` and the margin.
+pub fn bench_has_room(free_bytes: u64, file_bytes: u64) -> bool {
+    free_bytes >= file_bytes.saturating_add(BENCH_FREE_MARGIN_BYTES)
+}
 /// Longest a benchmark mode runs.
 pub const BENCH_SECONDS: f64 = 5.0;
 
@@ -216,6 +237,11 @@ pub enum Bus {
     Nvme,
     Usb,
     Other,
+}
+
+impl Bus {
+    /// Every variant, in declaration order.
+    pub const ALL: [Bus; 4] = [Bus::Sata, Bus::Nvme, Bus::Usb, Bus::Other];
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -355,6 +381,15 @@ pub enum VolumeResult {
     CouldNotCheck,
 }
 
+impl VolumeResult {
+    /// Every variant, in declaration order.
+    pub const ALL: [VolumeResult; 3] = [
+        VolumeResult::NoProblems,
+        VolumeResult::ProblemsFound,
+        VolumeResult::CouldNotCheck,
+    ];
+}
+
 /// What an online file system check of one volume found.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VolumeCheck {
@@ -364,14 +399,19 @@ pub struct VolumeCheck {
     pub result: VolumeResult,
     /// chkdsk's own text, in the console code page and language, for the technical level.
     pub output: String,
+    /// Whether the volume was marked for a full check before the run; `None` when it could not be asked.
+    pub dirty_before: Option<bool>,
+    /// The same after the run: `true` while `dirty_before` is `false` means the check marked it.
+    pub dirty_after: Option<bool>,
 }
 
-/// `chkdsk /scan` exit codes: 0 and 2 clean; 1, 5 and 13 problems found. 3 and any other code may
-/// mean "could not check", so they count as problems only on a dirty volume.
+/// `chkdsk /scan` exit codes: 0 and 2 clean; 1, 5 and 13 problems found; 3 always could not check.
+/// Any other code counts as problems only on a dirty volume.
 pub fn volume_result(exit_code: u32, dirty: bool) -> VolumeResult {
     match exit_code {
         0 | 2 => VolumeResult::NoProblems,
         1 | 5 | 13 => VolumeResult::ProblemsFound,
+        3 => VolumeResult::CouldNotCheck,
         _ if dirty => VolumeResult::ProblemsFound,
         _ => VolumeResult::CouldNotCheck,
     }

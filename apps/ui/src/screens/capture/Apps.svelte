@@ -1,17 +1,20 @@
 <script lang="ts">
   import RowCard from "../../components/RowCard.svelte";
   import RowList from "../../components/RowList.svelte";
+  import StatusMark from "../../components/StatusMark.svelte";
   import { formatNumber } from "../../lib/format";
   import { t } from "../../lib/i18n.svelte";
   import type { AppFrames, DetailLevel } from "../../lib/types";
-  import { type AppLine, frameText } from "./words";
+  import { hitchesOften, OFTEN_PCT } from "./model";
+  import { type AppLine, frameText, shareNumber } from "./words";
 
   let {
     rows,
     quiet,
+    often,
     all,
     level,
-  }: { rows: AppLine[]; quiet: string | null; all: AppFrames[]; level: DetailLevel } = $props();
+  }: { rows: AppLine[]; quiet: string | null; often: string[]; all: AppFrames[]; level: DetailLevel } = $props();
 </script>
 
 {#if level === "Technical"}
@@ -26,11 +29,13 @@
         <th scope="col" class="num">p99</th>
         <th scope="col" class="num">{t("ui.captures.col.worst")}</th>
         <th scope="col" class="num">{t("ui.captures.col.late")}</th>
+        <th scope="col" class="num">%</th>
+        <th scope="col">{t("ui.captures.apps.col.state")}</th>
       </tr>
     </thead>
     <tbody>
       {#each all as app (app.pid)}
-        <tr>
+        <tr class:often={hitchesOften(app)}>
           <td class="nm" title={app.name}>{app.name}</td>
           <td class="num">{app.pid}</td>
           <td class="num">{formatNumber(app.frames)}</td>
@@ -38,6 +43,12 @@
           <td class="num">{frameText(app.p99_ms)}</td>
           <td class="num">{frameText(app.worst_ms)}</td>
           <td class="num">{formatNumber(app.hitches)}</td>
+          <td class="num">{shareNumber(app)}</td>
+          <td>
+            {#if hitchesOften(app)}
+              <StatusMark kind="attention" word={t("ui.captures.apps.over", { limit: OFTEN_PCT })} />
+            {/if}
+          </td>
         </tr>
       {/each}
     </tbody>
@@ -53,7 +64,14 @@
           icon="app"
           title={level === "Detailed" ? `${row.name} · ${row.exe}` : row.name}
           sub={row.detail ? `${row.summary} ${row.detail}` : row.summary}
-        />
+        >
+          {#snippet right()}
+            <span class="share">{row.share}</span>
+            {#if row.often}
+              <StatusMark kind="attention" word={t("ui.captures.apps.over", { limit: OFTEN_PCT })} />
+            {/if}
+          {/snippet}
+        </RowCard>
       {/each}
     </RowList>
   {:else}
@@ -63,3 +81,14 @@
     <p class="note">{quiet}</p>
   {/if}
 {/if}
+{#each often as line, i (i)}
+  <p class="note">{line}</p>
+{/each}
+
+<style>
+  .share {
+    color: var(--ink2);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+</style>

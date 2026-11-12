@@ -25,9 +25,10 @@ export const STATE_TOKEN: Record<PcState, string> = {
   busy: "busy",
   pressure: "press",
   suspended: "susp",
+  no_reading: "susp",
 };
 
-const RANK: Record<PcState, number> = { suspended: 0, calm: 1, busy: 2, pressure: 3 };
+const RANK: Record<PcState, number> = { no_reading: 0, suspended: 0, calm: 1, busy: 2, pressure: 3 };
 
 /** The lane that weighs most: the strongest state, then the highest value. */
 export function heaviest(point: LivePoint): LaneKey {

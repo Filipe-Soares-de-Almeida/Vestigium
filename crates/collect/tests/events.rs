@@ -71,7 +71,7 @@ fn receive(rx: &Receiver<Delivered>, count: usize) -> Vec<Delivered> {
 #[ignore]
 fn subscription_delivers_a_reported_event() {
     let id = fresh_id();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let _subscription = EventSubscription::start_with_query(&query(id), None, test_meaning, tx)
         .expect("subscribing needs no elevation");
 
@@ -85,7 +85,12 @@ fn subscription_delivers_a_reported_event() {
     assert_eq!(event.id, id);
     assert_eq!(event.meaning, EventMeaning::AppCrash);
     assert!(event.data_xml.contains("first"), "{}", event.data_xml);
-    assert!(got[0].bookmark_xml.contains("BookmarkList"));
+    assert!(
+        got[0]
+            .bookmark_xml
+            .as_deref()
+            .is_some_and(|xml| xml.contains("BookmarkList"))
+    );
 }
 
 #[test]
@@ -94,7 +99,7 @@ fn bookmark_resumes_after_the_last_event() {
     let id = fresh_id().wrapping_add(1);
     report(id, "older");
     report(id, "newer");
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let subscription =
         EventSubscription::start_with_query(&query(id), None, test_meaning, tx).unwrap();
     let both = receive(&rx, 2);
@@ -105,10 +110,10 @@ fn bookmark_resumes_after_the_last_event() {
         "the two reported events were not both delivered"
     );
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(64);
     let _resumed = EventSubscription::start_with_query(
         &query(id),
-        Some(&both[0].bookmark_xml),
+        both[0].bookmark_xml.as_deref(),
         test_meaning,
         tx,
     )
@@ -117,4 +122,15 @@ fn bookmark_resumes_after_the_last_event() {
 
     assert_eq!(after.len(), 1, "resuming replays only what came after");
     assert_eq!(after[0].event.record_id, both[1].event.record_id);
+}
+
+#[test]
+#[ignore]
+fn a_refused_bookmark_starts_the_backfill_instead() {
+    let (tx, _rx) = mpsc::sync_channel(64);
+
+    let subscription =
+        EventSubscription::start(Some("not a bookmark"), Duration::from_secs(60), tx);
+
+    assert!(subscription.is_ok(), "{:?}", subscription.err());
 }

@@ -3,7 +3,8 @@ use std::io::Read;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use windows::Win32::Security::Cryptography::{BCRYPT_SHA256_ALG_HANDLE, BCryptHash};
+use vestigium_collect::sha256_hex;
+
 use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 /// The PresentMon console the helper runs, beside its own executable.
@@ -30,7 +31,7 @@ fn check(path: &Path, expected: &str) -> Result<Pinned, String> {
         .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    let found = hex(&sha256(&bytes)?);
+    let found = sha256_hex(&bytes)?;
     if found != expected {
         return Err(format!(
             "{} has SHA-256 {found}, not the pinned {expected}",
@@ -43,32 +44,9 @@ fn check(path: &Path, expected: &str) -> Result<Pinned, String> {
     })
 }
 
-fn sha256(bytes: &[u8]) -> Result<[u8; 32], String> {
-    let mut out = [0u8; 32];
-    // SAFETY: the SHA-256 pseudo-handle needs no setup; input and output are live slices.
-    let status = unsafe { BCryptHash(BCRYPT_SHA256_ALG_HANDLE, None, bytes, &mut out) };
-    if status.is_ok() {
-        Ok(out)
-    } else {
-        Err(format!("BCryptHash failed: {:#x}", status.0))
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sha256_matches_a_known_digest() {
-        assert_eq!(
-            hex(&sha256(b"abc").unwrap()),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-    }
 
     #[test]
     fn refuses_presentmon_with_wrong_hash() {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import HelperLine from "../../components/HelperLine.svelte";
   import Icon from "../../components/Icon.svelte";
   import { app } from "../../lib/app.svelte";
   import { captures } from "../../lib/capture.svelte";
@@ -28,6 +29,8 @@
   const customValid = $derived(custom !== null && custom >= MIN_MINUTES && custom <= MAX_MINUTES);
   const minutes = $derived(choice === "custom" ? custom : choice);
   const ready = $derived(choice !== "custom" || customValid);
+  /** A capture runs, here or elsewhere: the form stays, and Start waits for it to end. */
+  const running = $derived(captures.run !== null);
 
   function pickCustom(): void {
     choice = "custom";
@@ -51,6 +54,7 @@
 </script>
 
 <section class="start" aria-label={t("ui.captures.start.title")}>
+  <HelperLine job="capture" />
   {#if context}
     <p class="p context" tabindex="-1" use:focusHere>{context}</p>
   {/if}
@@ -124,12 +128,19 @@
   </ul>
 
   <div class="acts">
-    <button type="button" class="btn accent" disabled={!app.running || !ready}
-      onclick={() => minutes !== null && captures.begin(minutes)}
+    <button
+      type="button"
+      class="btn accent"
+      disabled={!app.running || !ready}
+      aria-disabled={!app.running || !ready || running}
+      aria-describedby={running ? "start-blocked" : undefined}
+      onclick={() => !running && minutes !== null && captures.begin(minutes)}
     >
       <Icon name="start" />{t("ui.captures.start.button")}
     </button>
-    {#if !app.running}
+    {#if running}
+      <span class="muted" id="start-blocked">{t("ui.captures.start.blocked")}</span>
+    {:else if !app.running}
       <span class="muted">{t("ui.captures.start.needs_watcher")}</span>
     {/if}
   </div>

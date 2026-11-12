@@ -1,12 +1,15 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use vestigium_collect::{
-    BenchTarget, LockedRegion, Words, benchmark, memory_diagnostic_events, memory_test,
-    run_patterns,
+    BenchTarget, LockedRegion, Words, benchmark, benchmark_with_timeout, memory_diagnostic_events,
+    memory_test, run_patterns,
 };
 use vestigium_core::hwtest::{
-    BenchMode, Bus, ERRORS_KEPT, Outcome, PATTERNS, Pattern, QUICK_CHUNK, TestData,
+    BENCH_FILE_BYTES, BenchMode, Bus, ERRORS_KEPT, Outcome, PATTERNS, Pattern, QUICK_CHUNK,
+    TestData,
 };
 use vestigium_core::{EventMeaning, Media};
 
@@ -141,6 +144,81 @@ fn benchmark_measures_every_mode_and_leaves_no_file() {
 }
 
 #[test]
+fn benchmark_refuses_a_file_larger_than_the_free_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = BenchTarget {
+        dir: dir.path().to_path_buf(),
+        volume: "C:\\".into(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    let stop = AtomicBool::new(false);
+    let mut seen = Vec::new();
+    let run = benchmark(&target, 1 << 60, 0.2, &stop, &mut |mode| seen.push(mode));
+    assert_eq!(run.outcome, Outcome::Failed);
+    let TestData::DiskBenchmark(bench) = run.data else {
+        panic!("a benchmark");
+    };
+    assert!(bench.failure.is_some_and(|f| f.contains("free space")));
+    assert_eq!((bench.written_bytes, seen.len()), (0, 0));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn benchmark_removes_leftover_files_of_earlier_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = ["vestigium-bench-1.tmp", "vestigium-bench-4294967295.tmp"];
+    let other = [
+        "vestigium-bench-.tmp",
+        "vestigium-bench-x1.tmp",
+        "vestigium-bench-1.tmp.bak",
+        "notes.tmp",
+    ];
+    for name in old.iter().chain(&other) {
+        std::fs::write(dir.path().join(name), b"leftover").unwrap();
+    }
+    let target = BenchTarget {
+        dir: dir.path().to_path_buf(),
+        volume: "C:\\".into(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    let stop = AtomicBool::new(false);
+    let _ = benchmark(&target, 1 << 60, 0.2, &stop, &mut |_| {});
+    for name in old {
+        assert!(!dir.path().join(name).exists(), "{name} stays");
+    }
+    for name in other {
+        assert!(dir.path().join(name).exists(), "{name} is not ours");
+    }
+}
+
+/// Forces the I/O timeout so the cancel path runs; meant for a run under Application Verifier
+/// (Basics, Heaps and Memory enabled for the test executable), where a buffer freed while I/O
+/// is pending is reported. Run it with `cargo test -p vestigium-collect --test hwtest -- --ignored
+/// benchmark_waits_for_cancelled_io`.
+#[test]
+#[ignore = "meant for a run under Application Verifier"]
+fn benchmark_waits_for_cancelled_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = BenchTarget {
+        dir: dir.path().to_path_buf(),
+        volume: "C:\\".into(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    for _ in 0..20 {
+        let stop = AtomicBool::new(false);
+        let run = benchmark_with_timeout(&target, 256 << 20, 0.2, 1, &stop, &mut |_| {});
+        assert!(matches!(run.outcome, Outcome::Clean | Outcome::Failed));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
 fn memory_diagnostic_events_read_without_elevation() {
     let events = memory_diagnostic_events().expect("the System log answers");
     assert!(
@@ -160,4 +238,95 @@ fn disk_and_volume_facts_read_without_elevation() {
     );
     let disk = vestigium_collect::volume_drive(&system).expect("the system volume has a disk");
     assert!(vestigium_collect::disk_size(disk).is_some_and(|b| b > 1 << 30));
+}
+
+/// A small NTFS volume on a virtual disk, detached and deleted when dropped.
+struct SmallVolume {
+    vhd: PathBuf,
+    letter: char,
+}
+
+impl SmallVolume {
+    fn diskpart(script: &str, folder: &Path) -> bool {
+        let file = folder.join("diskpart.txt");
+        std::fs::write(&file, script).unwrap();
+        Command::new("diskpart.exe")
+            .arg("/s")
+            .arg(&file)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    fn new(folder: &Path, megabytes: u32, letter: char) -> SmallVolume {
+        let vhd = folder.join("small.vhd");
+        let script = format!(
+            "create vdisk file=\"{v}\" maximum={megabytes} type=fixed
+select vdisk file=\"{v}\"
+             attach vdisk
+create partition primary
+format fs=ntfs quick label=VBENCH
+             assign letter={letter}
+",
+            v = vhd.display()
+        );
+        let volume = SmallVolume { vhd, letter };
+        assert!(Self::diskpart(&script, folder), "diskpart made the volume");
+        volume
+    }
+
+    fn root(&self) -> PathBuf {
+        PathBuf::from(format!("{}:\\", self.letter))
+    }
+}
+
+impl Drop for SmallVolume {
+    fn drop(&mut self) {
+        let folder = self.vhd.parent().unwrap().to_path_buf();
+        let script = format!(
+            "select vdisk file=\"{}\"
+detach vdisk
+",
+            self.vhd.display()
+        );
+        let _ = Self::diskpart(&script, &folder);
+        let _ = std::fs::remove_file(&self.vhd);
+    }
+}
+
+/// Elevated: makes a 900 MiB volume, so it is ignored by default. Run it as administrator with
+/// `cargo test -p vestigium-collect --test hwtest -- --ignored benchmark_refuses_a_volume_without_room`.
+#[test]
+#[ignore = "needs elevation and creates a 900 MiB virtual disk"]
+fn benchmark_refuses_a_volume_without_room() {
+    let folder = tempfile::tempdir().unwrap();
+    let letter = ('H'..='Z')
+        .rev()
+        .find(|c| !Path::new(&format!("{c}:\\")).exists())
+        .expect("a free drive letter");
+    let volume = SmallVolume::new(folder.path(), 900, letter);
+    let target = BenchTarget {
+        dir: volume.root(),
+        volume: volume.root().display().to_string(),
+        disk: None,
+        bus: Bus::Other,
+        media: Media::Unknown,
+    };
+    let stop = AtomicBool::new(false);
+    let run = benchmark(&target, BENCH_FILE_BYTES, 0.2, &stop, &mut |_| {});
+    assert_eq!(run.outcome, Outcome::Failed);
+    let TestData::DiskBenchmark(bench) = run.data else {
+        panic!("a benchmark");
+    };
+    assert!(bench.failure.is_some_and(|f| f.contains("free space")));
+    assert_eq!(bench.written_bytes, 0);
+    let left = std::fs::read_dir(volume.root())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("vestigium-bench")
+        })
+        .count();
+    assert_eq!(left, 0);
 }

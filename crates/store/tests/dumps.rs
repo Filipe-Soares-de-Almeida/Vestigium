@@ -40,9 +40,17 @@ fn migrates_v4_to_v5() {
             "CREATE TABLE gap (id INTEGER PRIMARY KEY, start_ms INTEGER NOT NULL,
                  end_ms INTEGER NOT NULL, reason INTEGER NOT NULL);
              INSERT INTO gap (start_ms, end_ms, reason) VALUES (10, 20, 1);
+             CREATE TABLE event (id INTEGER PRIMARY KEY, provider TEXT NOT NULL,
+                 meaning INTEGER NOT NULL);
+             CREATE TABLE segment (id INTEGER PRIMARY KEY, series INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
              CREATE TABLE finding (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
                  opened_ms INTEGER NOT NULL, updated_ms INTEGER NOT NULL, closed_ms INTEGER,
                  data BLOB NOT NULL);
+             CREATE TABLE capture (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, data BLOB NOT NULL);
+             CREATE TABLE scan (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
+                 ts_ms INTEGER NOT NULL, data BLOB NOT NULL);
              PRAGMA user_version = 4;",
         )
         .unwrap();

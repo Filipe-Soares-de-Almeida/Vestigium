@@ -1,7 +1,7 @@
 // What the window's Rust side sends, in the shapes serde writes: unit variants as strings,
 // variants with fields as `{ Variant: { ... } }`, a missing value as `null`.
 
-export type PcState = "calm" | "busy" | "pressure" | "suspended";
+export type PcState = "calm" | "busy" | "pressure" | "suspended" | "no_reading";
 export type HistoryState = "ready" | "empty";
 export type Resolution = "seconds" | "minutes";
 
@@ -42,9 +42,9 @@ export interface CoreLoad {
 export interface DiskLoad {
   name: string;
   active_pct: number;
-  latency_ms: number;
-  queue_len: number;
-  bytes_per_s: number;
+  latency_ms: number | null;
+  queue_len: number | null;
+  bytes_per_s: number | null;
 }
 
 export interface Sample {
@@ -52,13 +52,13 @@ export interface Sample {
   cpu_pct: number;
   dpc_pct: number;
   isr_pct: number;
-  perf_limit_pct: number;
-  proc_perf_pct: number;
+  perf_limit_pct: number | null;
+  proc_perf_pct: number | null;
   mem_total_bytes: number;
   mem_avail_bytes: number;
   commit_bytes: number;
   commit_limit_bytes: number;
-  hard_faults_per_s: number;
+  hard_faults_per_s: number | null;
   gpu_pct: number | null;
   probe_max_lag_ms: number;
   sampler_lag_ms: number;
@@ -90,8 +90,8 @@ export type Severity = "Light" | "Medium" | "Severe";
 export type OccurrenceKind = "Freeze" | "Stutter" | "AppHang" | "Reported" | "PostMortem";
 export type Confidence = "Low" | "Medium" | "High";
 export type Channel = "System" | "Application";
-export type HangOutcome = "Recovered" | "Closed";
-export type GapReason = "Paused" | "Suspended" | "Stopped" | "Crashed";
+export type HangOutcome = "Recovered" | "Closed" | "StillHung";
+export type GapReason = "Paused" | "Suspended" | "Stopped" | "Crashed" | "ClockChanged" | "NotSaved";
 export type Media = "Ssd" | "Hdd" | "Unknown";
 
 export type Metric =
@@ -149,7 +149,8 @@ export type NextStep =
   | "MoveWindowsToSsd"
   | "RunMemoryDiagnostic"
   | "RunMemTest86"
-  | "RepairVolume";
+  | "RepairVolume"
+  | "ReadCrashDump";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -167,7 +168,8 @@ export type Cause =
   | "Unresponsive"
   | "SleepTransition"
   | { PowerCut: { no_dump: boolean } }
-  | "HardwareFault";
+  | "HardwareFault"
+  | "NotMeasured";
 
 /** How the PC went down, from what Windows logged on the next boot. */
 export type CrashKind =
@@ -290,7 +292,9 @@ export type FactKind =
   | { Busiest: { metric: Metric; name: string; value: number } }
   | { Gap: { reason: GapReason } }
   | "LastWatched"
-  | { WentDown: { kind: CrashKind } };
+  | { WentDown: { kind: CrashKind } }
+  | { EventsDropped: { count: number } }
+  | { AppStillHung: { name: string } };
 
 export interface Fact {
   at_ms: number;
@@ -372,7 +376,6 @@ export interface MarksDto {
   episodes: Episode[];
   /** For each episode, in order: whether a Vestigium test most likely caused it. */
   by_test: boolean[];
-  events: WinEvent[];
   gaps: Gap[];
   tests: TestSpan[];
 }
@@ -392,12 +395,60 @@ export interface AgentStatus {
   suggest_capture: boolean;
   /** The watcher's own share of the whole machine over the last minute, 0 to 100. */
   cpu_pct?: number | null;
+  /** The machine went to sleep and has not woken up again. */
+  suspended: boolean;
+  /** How the watching itself is going. */
+  monitor: MonitorStatus;
+}
+
+/** Reading, reading with a failing source, or no sample for a while with nothing paused. */
+export type MonitorState = "watching" | "degraded" | "no_reading";
+
+export type MonitorSource = "memory" | "cpu" | "counters" | "processes" | "timer";
+
+export interface SourceFailure {
+  source: MonitorSource;
+  since_ms: number;
+  error: string;
+}
+
+export interface MonitorStatus {
+  state: MonitorState;
+  /** Sources failing now, each with its error; empty when all read. */
+  failing: SourceFailure[];
+  /** The last sample (or the last start or resume when newer), while there is no reading. */
+  no_reading_since_ms: number | null;
+  /** When watching last started or resumed. */
+  resumed_ms: number | null;
+  /** When the latest health pass was asked for, and when one last finished. */
+  health_attempt_ms: number | null;
+  health_ok_ms: number | null;
+  /** Finding kinds the latest finished pass could not read. */
+  health_unread: FindingKind[];
+  /** A damaged history file the watcher set aside, while that file is still in the data folder. */
+  history_reset: HistoryReset | null;
+}
+
+/** What the watcher did when the history file was damaged at start. */
+export interface HistoryReset {
+  /** Name of the file set aside, without its folder. */
+  file: string;
+  /** When the history was replaced, Unix milliseconds. */
+  at_ms: number;
+  /** Whether the tweak changes, the settings and the facts about this PC were copied into the new history. */
+  tweaks: boolean;
+  settings: boolean;
+  machine: boolean;
 }
 
 export type AgentLink =
   | ({ link: "running" } & AgentStatus)
   | { link: "stopped" }
-  | { link: "mismatch" };
+  | { link: "mismatch" }
+  /** The watcher owns the pipe but did not answer within `seconds`. */
+  | { link: "silent"; seconds: number }
+  /** Another command holds the connection, so nothing is known yet. */
+  | { link: "busy" };
 
 export interface Retention {
   samples_hours: number;
@@ -456,7 +507,9 @@ export interface LivePoint {
 export type LiveMessage =
   | { kind: "recent"; points: LivePoint[] }
   | { kind: "now"; point: LivePoint | null; frame: NowFrame }
-  | { kind: "stopped" };
+  | { kind: "stopped" }
+  /** The watcher is running but did not answer in time. */
+  | { kind: "silent" };
 
 export type UiErrorKind =
   | "agent_stopped"
@@ -466,7 +519,11 @@ export type UiErrorKind =
   | "store"
   | "ipc"
   | "failed"
-  | "declined";
+  | "declined"
+  | "changed_since"
+  | "helper_timed_out"
+  | "cancelled"
+  | "capture_running";
 
 /** What a failed command rejects with; the window words it from `kind`. */
 export interface UiError {
@@ -522,7 +579,7 @@ export interface ProbeHiccup {
 }
 
 /** Whether a part of the capture was measured, or why not. */
-export type CaptureSource = "Ok" | { Unavailable: string };
+export type CaptureSource = "Ok" | { Unavailable: string } | { Partial: { covered_secs: number; reason: string } };
 
 export interface CaptureSummary {
   id: number;
@@ -544,6 +601,8 @@ export interface CaptureDto {
   hitches: FrameHitch[];
   hiccups: ProbeHiccup[];
   findings: Suspect[];
+  /** What the stored capture holds, before the page trims it. */
+  kept: { calls: number; hitches: number };
 }
 
 /** What a deep capture that covered an occurrence adds to it. */
@@ -554,16 +613,22 @@ export interface CaptureNote {
   suspects: Suspect[];
 }
 
-/** A deep capture under way. */
+/** A deep capture under way, as far as the window knows: one another window or account started has no known end. */
 export interface CaptureRun {
-  started_ms: number;
-  ends_ms: number;
+  started_ms: number | null;
+  ends_ms: number | null;
+  /** This window started it and can stop it. */
+  own: boolean;
 }
 
-/** Sent as the `capture-finished` event when the helper exits. */
+/** How a wait for the helper ended: it finished, the person cancelled, it was still running at its limit, or it refused because a capture was running. */
+export type Ended = "Done" | "Cancelled" | "TimedOut" | "Refused";
+
+/** Sent as the `capture-finished` event when the helper exits or the window stops waiting for it. */
 export interface CaptureFinished {
   ids: number[];
   exit_code: number | null;
+  ended: Ended;
 }
 
 /** How much a health finding asks for attention. */
@@ -653,6 +718,8 @@ export interface BootDelay {
 export interface BootReport {
   boots: BootTime[];
   delays: BootDelay[];
+  /** Boot log events that could not be read, and so are missing from the report. */
+  skipped: number;
 }
 
 export type HealthFact =
@@ -773,6 +840,10 @@ export interface DumpScanFinished {
 /** What deleting dumps returned once the helper exited. */
 export interface DeleteFinished {
   deleted: number;
+  /** Paths the helper refused to delete. */
+  refused: number;
+  /** Paths the helper allowed but could not delete. */
+  failed: number;
   exit_code: number | null;
 }
 
@@ -800,7 +871,7 @@ export type TweakSetting =
   | { Dword: { hive: Hive; key: string; name: string } }
   | { Key: { hive: Hive; key: string } }
   | { Service: { name: string } }
-  | { PowerAc: { subgroup: string; setting: string } }
+  | { PowerAc: { subgroup: string; setting: string; scheme: string | null } }
   | "ActiveScheme"
   | "Hibernation"
   | { StartupApproval: { hive: Hive; list: StartupList; name: string } };
@@ -883,13 +954,25 @@ export interface TweakChange {
   undo_of: number | null;
   results: SettingResult[];
   restore_point: RestorePoint | null;
+  /** The helper's journal entry for this change; null for the user's own and for older changes. */
+  journal: number | null;
 }
 
-/** The same signal counted in equal spans before and after a change. */
+/** What the counts before and after a change say once the time watched on each side is weighed. */
+export type HelpedVerdict = "NotEnoughEvents" | "NotEnoughTime" | "Fewer" | "More" | "Same";
+
+/** The same signal counted in equal spans before and after a change, with the time sampled in each. */
 export interface Helped {
   days: number;
   before: number;
   after: number;
+  /** Milliseconds the monitor sampled in the span before the change. */
+  before_ms: number;
+  after_ms: number;
+  verdict: HelpedVerdict;
+  /** The least events and the least monitored hours behind a verdict. */
+  min_events: number;
+  min_hours: number;
 }
 
 /** One change in the history; `outside` means Windows now holds something else. */
@@ -1038,6 +1121,8 @@ export interface SurfaceScan {
   worst: SlowBlock[];
   unreadable: number[];
   failure: string | null;
+  /** Other programs used the disk during the scan, so slow reads may not be the disk's fault. */
+  outside_io: boolean;
 }
 
 export type Bus = "Sata" | "Nvme" | "Usb" | "Other";
@@ -1071,6 +1156,10 @@ export interface VolumeCheck {
   result: VolumeResult;
   /** chkdsk's own text, for the technical level. */
   output: string;
+  /** Whether the volume was marked for a full check before the run; null when it could not be asked. */
+  dirty_before: boolean | null;
+  /** The same after the run. */
+  dirty_after: boolean | null;
 }
 
 export type TestData =
@@ -1187,6 +1276,10 @@ export interface TestsDto {
   running: RunningTest | null;
   scan: ScanUnderWay | null;
   bench_file_bytes: number;
+  /** Free bytes a volume needs before the speed test starts. */
+  bench_needed_bytes: number;
+  /** When this Windows session began (wall clock); a repair queued by a check runs at the next boot. */
+  boot_ms: number;
 }
 
 /** SMART or NVMe detail read on request: reading an idle HDD spins it up. */
@@ -1206,4 +1299,5 @@ export interface TestFinished {
   id: number | null;
   run: TestRun | null;
   exit_code: number | null;
+  ended: Ended;
 }

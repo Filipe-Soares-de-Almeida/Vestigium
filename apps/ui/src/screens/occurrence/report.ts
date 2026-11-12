@@ -3,6 +3,7 @@ import { formatClock, formatDuration, formatNumber, formatPercent, formatTime } 
 import { t, tn } from "../../lib/i18n.svelte";
 import type {
   Cause,
+  Confidence,
   CrashKind,
   DetailLevel,
   Evidence,
@@ -25,6 +26,7 @@ import {
   formatStamp,
   sameDay,
 } from "./format";
+import { coveredLine } from "../capture/words";
 import { causeName as shortCause } from "../today/text";
 
 // The words of a report, built from its typed facts and evidence at the reader's detail level.
@@ -46,7 +48,8 @@ export type CauseKind =
   | "Unresponsive"
   | "SleepTransition"
   | "PowerCut"
-  | "HardwareFault";
+  | "HardwareFault"
+  | "NotMeasured";
 
 /** One statement in the forms the detail levels pick from: plain words, the numbers, the counters. */
 export interface Texts {
@@ -130,6 +133,7 @@ const ICON: Record<CauseKind, IconName> = {
   SleepTransition: "power",
   PowerCut: "power",
   HardwareFault: "chip",
+  NotMeasured: "chip",
 };
 
 /** Metrics that cross by falling below their threshold. */
@@ -402,11 +406,33 @@ function suspectView(s: Suspect, o: Occurrence, level: DetailLevel): SuspectView
   };
 }
 
-function summaryOf(cause: Cause): string {
-  if (typeof cause === "string") return k(`summary.${cause}`);
+/** Causes that name a mechanism: below High they are worded as a possibility, not a fact. */
+const MECHANISM: readonly CauseKind[] = ["Driver", "DriverModule", "Frames", "Throttling", "Cpu", "Memory"];
+
+/** Whether a sentence for this cause must say it "may" be so at this confidence. */
+export function isHedged(kind: CauseKind, confidence: Confidence): boolean {
+  return confidence !== "High" && MECHANISM.includes(kind);
+}
+
+/** The gravest disk event among the evidence: a bad block or paging error, then a reset, then a retry. */
+export function storageMeaning(evidence: Evidence[]): "media" | "reset" | "retry" {
+  const meanings = evidence.flatMap((e) => ("Event" in e ? [e.Event.meaning] : []));
+  if (meanings.some((m) => m === "DiskBadBlock" || m === "PagingError")) return "media";
+  if (meanings.includes("DiskRetry") && !meanings.includes("StorageReset")) return "retry";
+  return "reset";
+}
+
+function summaryOf(cause: Cause, confidence: Confidence, evidence: Evidence[]): string {
+  const maybe = isHedged(causeKind(cause), confidence) ? ".maybe" : "";
+  if (typeof cause === "string") return k(`summary.${cause}${maybe}`);
   if ("Storage" in cause) {
     const disk = cause.Storage.disk;
-    return k("summary.Storage", { disk: disk ? k("disk_the", { disk: diskName(disk) }) : k("disk_any") });
+    const meaning = storageMeaning(evidence);
+    const hedge = confidence === "High" ? "" : ".medium";
+    const key = meaning === "reset" ? `summary.Storage${hedge}` : `summary.Storage.${meaning}${hedge}`;
+    // The reset sentence names "the disk C:"; the others follow the word "disk" and take the bare name.
+    const named = meaning === "reset" ? (disk ? k("disk_the", { disk: diskName(disk) }) : k("disk_any")) : disk ? diskName(disk) : "";
+    return k(key, { disk: named });
   }
   if ("DiskIo" in cause) {
     const { disk, hdd, process } = cause.DiskIo;
@@ -420,22 +446,22 @@ function summaryOf(cause: Cause): string {
   }
   if ("Memory" in cause) {
     const process = cause.Memory.process;
-    return [k("summary.Memory"), process ? k("summary.Memory.who", { app: appName(process) }) : ""]
+    return [k(`summary.Memory${maybe}`), process ? k("summary.Memory.who", { app: appName(process) }) : ""]
       .filter(Boolean)
       .join(" ");
   }
   if ("Cpu" in cause) {
     const apps = cause.Cpu.processes.map(appName);
-    return [k("summary.Cpu"), apps.length ? kn("summary.Cpu.who", apps.length, { apps: formatList(apps) }) : ""]
+    return [k(`summary.Cpu${maybe}`), apps.length ? kn("summary.Cpu.who", apps.length, { apps: formatList(apps) }) : ""]
       .filter(Boolean)
       .join(" ");
   }
-  if ("Driver" in cause) return k("summary.Driver");
+  if ("Driver" in cause) return k(`summary.Driver${maybe}`);
   if ("DriverModule" in cause) {
     const { module, intermediary } = cause.DriverModule;
-    return k(intermediary ? "summary.DriverModule.intermediary" : "summary.DriverModule", { module });
+    return k(intermediary ? "summary.DriverModule.intermediary" : `summary.DriverModule${maybe}`, { module });
   }
-  if ("Frames" in cause) return k("summary.Frames", { app: appName(cause.Frames.app) });
+  if ("Frames" in cause) return k(`summary.Frames${maybe}`, { app: appName(cause.Frames.app) });
   if ("BlueScreen" in cause) return k("summary.BlueScreen", { code: bugcheck(cause.BlueScreen.code) });
   if ("PowerCut" in cause) {
     return [k("summary.PowerCut"), cause.PowerCut.no_dump ? k("summary.PowerCut.no_dump") : ""]
@@ -451,12 +477,23 @@ function noteOf(suspects: Suspect[]): string | null {
   return k(suspects.some((s) => causeKind(s.cause) === "Driver") ? "note.Driver" : "note.default");
 }
 
-/** Every suspect's next steps, main suspect first, each once; the deep capture is the note instead. */
-export function stepsOf(suspects: Suspect[]): Step[] {
+/**
+ * Every suspect's next steps, main suspect first, each once; the deep capture is the note instead.
+ * A blue screen's own steps give way to `fromDump`, the steps of its dump once that is read.
+ */
+export function stepsOf(suspects: Suspect[], fromDump: Step[] | null = null): Step[] {
   const steps: Step[] = [];
   for (const s of suspects) {
+    if (fromDump && causeKind(s.cause) === "BlueScreen") {
+      for (const step of fromDump) {
+        const key = `dump:${step.key}`;
+        if (!steps.some((known) => known.key === key)) steps.push({ key, text: step.text });
+      }
+      continue;
+    }
     const app = typeof s.cause !== "string" && "App" in s.cause ? s.cause.App.name : null;
     const driver = typeof s.cause !== "string" && "DriverModule" in s.cause ? s.cause.DriverModule.module : null;
+    const disk = typeof s.cause !== "string" && "Storage" in s.cause ? s.cause.Storage.disk : null;
     for (const step of s.next_steps) {
       if (step === "DeepCapture") continue;
       const key =
@@ -467,8 +504,11 @@ export function stepsOf(suspects: Suspect[]): Step[] {
             : step;
       if (steps.some((known) => known.key === key)) continue;
       // A fall names no driver, so its update step speaks of drivers in general.
-      const any = step === "UpdateDriver" && !driver ? ".any" : "";
-      steps.push({ key, text: k(`step.${step}${any}`, { app: app ? appName(app) : "", driver: driver ?? "" }) });
+      const any = (step === "UpdateDriver" && !driver) || (step === "BackUpNow" && !disk) ? ".any" : "";
+      steps.push({
+        key,
+        text: k(`step.${step}${any}`, { app: app ? appName(app) : "", driver: driver ?? "", disk: disk ? diskName(disk) : "" }),
+      });
     }
   }
   return steps;
@@ -481,8 +521,8 @@ function factTexts(kind: FactKind): Texts {
   if ("FreezeStarted" in kind) {
     const ms = kind.FreezeStarted.duration_ms;
     return {
-      plain: k("fact.FreezeStarted"),
-      figures: k("fact.FreezeStarted.figures", { duration: formatDuration(ms) }),
+      plain: k("fact.FreezeStarted", { duration: formatDuration(ms) }),
+      figures: null,
       tech: k("fact.FreezeStarted.tech", { lag: formatMs(ms) }),
     };
   }
@@ -503,6 +543,7 @@ function factTexts(kind: FactKind): Texts {
   if ("AppClosedWhileHung" in kind) {
     return plain(k("fact.AppClosedWhileHung", { app: appName(kind.AppClosedWhileHung.name) }));
   }
+  if ("AppStillHung" in kind) return plain(k("fact.AppStillHung", { app: appName(kind.AppStillHung.name) }));
   if ("Event" in kind) {
     const { meaning, provider, id } = kind.Event;
     return { plain: k("fact.Event", { event: k(`event.${meaning}`) }), figures: null, tech: k("fact.Event.tech", { provider, id: String(id) }) };
@@ -544,6 +585,7 @@ function factTexts(kind: FactKind): Texts {
           : k("fact.WentDown.tech", { kind: crash }),
     };
   }
+  if ("EventsDropped" in kind) return plain(k("fact.EventsDropped", { count: formatNumber(kind.EventsDropped.count) }));
   return plain(k(`fact.gap.${kind.Gap.reason}`));
 }
 
@@ -634,7 +676,7 @@ function figureOf(o: Occurrence): { value: string; caption: string } {
   return { value: formatDuration(span.end_ms - span.start_ms), caption: k("figure.duration") };
 }
 
-export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView {
+export function buildReport(dto: OccurrenceDto, level: DetailLevel, fromDump: Step[] | null = null): ReportView {
   const [first, ...rest] = dto.suspects;
   const main = first ?? { cause: "Unclear", confidence: "Low", evidence: [], next_steps: [] };
   const figure = figureOf(dto);
@@ -656,9 +698,9 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
     cause: causeKind(main.cause),
     main: suspectView(main, dto, level),
     others: rest.map((s) => suspectView(s, dto, level)),
-    summary: summaryOf(main.cause),
+    summary: summaryOf(main.cause, main.confidence, main.evidence),
     note: noteOf(dto.suspects),
-    steps: stepsOf(dto.suspects),
+    steps: stepsOf(dto.suspects, fromDump),
     facts: dto.facts.map((f) => ({
       time: formatClock(f.at_ms),
       datetime: new Date(f.at_ms).toISOString(),
@@ -669,7 +711,7 @@ export function buildReport(dto: OccurrenceDto, level: DetailLevel): ReportView 
 }
 
 /** The report as Markdown, plain words with the counters beside them, for a forum or an issue. */
-export function reportMarkdown(dto: OccurrenceDto): string {
+export function reportMarkdown(dto: OccurrenceDto, fromDump: Step[] | null = null): string {
   const lines: string[] = [];
   const figure = figureOf(dto);
   const kind = k(`class.${dto.kind}.${dto.severity}`);
@@ -678,9 +720,21 @@ export function reportMarkdown(dto: OccurrenceDto): string {
   if (dto.sensitive) head.push(k("sensitive"));
   lines.push(`## ${headline(dto, "Simple")}`, "", head.join(" · "), "");
   const main = dto.suspects[0];
-  if (main) lines.push(summaryOf(main.cause), "");
-  const note = noteOf(dto.suspects);
-  if (note) lines.push(`> ${note}`, "");
+  const fall = crashOf(dto) ? ".PostMortem" : "";
+  if (main) {
+    lines.push(`**${k("cause.title")}** (${k(`confidence.${main.confidence}`)})`, "");
+    lines.push(summaryOf(main.cause, main.confidence, main.evidence), "");
+  }
+  const notes: string[] = [];
+  if (dto.truncated) notes.push(k(`chart.truncated${fall}`));
+  if (!fall && dto.window.samples.length > 0 && freezes(dto).length > 0) notes.push(k("md.blank"));
+  if (dto.tests.length) notes.push(k("during_test", { test: k(`test.${dto.tests[0].kind}`) }));
+  if (dto.capture) notes.push(coveredLine(dto.capture));
+  else {
+    const suggestion = noteOf(dto.suspects);
+    if (suggestion) notes.push(suggestion);
+  }
+  for (const note of notes) lines.push(`> ${note}`, "");
 
   lines.push(`### ${k("md.suspects")}`, "");
   dto.suspects.forEach((s, i) => {
@@ -709,7 +763,7 @@ export function reportMarkdown(dto: OccurrenceDto): string {
   }
 
   lines.push("", `### ${k("md.steps")}`, "");
-  const steps = stepsOf(dto.suspects);
+  const steps = stepsOf(dto.suspects, fromDump);
   if (steps.length) for (const step of steps) lines.push(`- ${step.text}`);
   else lines.push(k("todo.none"));
   lines.push("", `_${k("md.footer")}_`);

@@ -2,8 +2,8 @@ mod common;
 
 use common::{T, event, process, quiet_window, tweak};
 use vestigium_core::{
-    Cause, Confidence, EventMeaning, Evidence, HangOutcome, Metric, NextStep, ProcessTop, Sample,
-    Suspect, Trigger, Window, suspects,
+    Cause, Confidence, CrashKind, EventMeaning, Evidence, HangOutcome, Metric, NextStep,
+    ProcessTop, Sample, Suspect, Trigger, Window, suspects,
 };
 
 type Case = (Vec<Trigger>, Window);
@@ -28,14 +28,14 @@ fn storage_case() -> Case {
         129,
         EventMeaning::StorageReset,
     ));
-    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = 400.0);
+    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = Some(400.0));
     (vec![freeze(2)], window)
 }
 
 fn disk_case() -> Case {
     let mut window = quiet_window();
     tweak(&mut window, -5, -1, |s| {
-        s.disks[1].latency_ms = 450.0;
+        s.disks[1].latency_ms = Some(450.0);
         s.disks[1].active_pct = 99.0;
     });
     (vec![freeze(2)], window)
@@ -80,7 +80,7 @@ fn gpu_case() -> Case {
 
 fn throttling_case() -> Case {
     let mut window = quiet_window();
-    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 20.0);
+    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = Some(20.0));
     (vec![freeze(2)], window)
 }
 
@@ -152,7 +152,7 @@ fn disk_latency_matches() {
 #[test]
 fn disk_latency_stays_quiet() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -5, -1, |s| s.disks[1].latency_ms = 150.0);
+    tweak(&mut window, -5, -1, |s| s.disks[1].latency_ms = Some(150.0));
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| matches!(c, Cause::DiskIo { .. })).is_none());
 }
@@ -170,6 +170,56 @@ fn memory_matches() {
 }
 
 #[test]
+fn memory_culprit_is_the_biggest_before_the_trigger() {
+    let (triggers, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T - 20_000,
+        entries: vec![process(30, "editor.exe", 5.0, 6, 0.0)],
+    });
+    window.tops.push(ProcessTop {
+        ts_ms: T + 20_000,
+        entries: vec![process(31, "renderer.exe", 5.0, 9, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
+    assert_eq!(
+        memory.cause,
+        Cause::Memory {
+            process: Some("editor.exe".to_string())
+        }
+    );
+}
+
+#[test]
+fn two_processes_that_reuse_a_pid_are_ranked_apart() {
+    let (triggers, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T - 25_000,
+        entries: vec![process(4242, "first.exe", 5.0, 6, 0.0)],
+    });
+    window.tops.push(ProcessTop {
+        ts_ms: T - 10_000,
+        entries: vec![process(4242, "second.exe", 5.0, 9, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
+
+    assert_eq!(
+        memory.cause,
+        Cause::Memory {
+            process: Some("second.exe".to_string())
+        }
+    );
+    assert!(memory.evidence.iter().any(|e| matches!(
+        e,
+        Evidence::Process { pid: 4242, name, value, .. }
+            if name == "second.exe" && *value == (9 * common::GIB) as f64
+    )));
+}
+
+#[test]
 fn memory_stays_quiet() {
     let (triggers, mut window) = quiet_case();
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = 2 * common::GIB);
@@ -180,7 +230,9 @@ fn memory_stays_quiet() {
 #[test]
 fn hard_faults_with_memory_to_spare_are_not_memory() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    tweak(&mut window, -10, -10, |s| {
+        s.hard_faults_per_s = Some(5_000.0)
+    });
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| matches!(c, Cause::Memory { .. })).is_none());
 }
@@ -190,7 +242,9 @@ fn hard_faults_with_memory_high_are_memory() {
     let (triggers, mut window) = quiet_case();
     let total = window.machine.mem_total_bytes;
     tweak(&mut window, -20, 0, |s| s.mem_avail_bytes = total / 10);
-    tweak(&mut window, -10, -10, |s| s.hard_faults_per_s = 5_000.0);
+    tweak(&mut window, -10, -10, |s| {
+        s.hard_faults_per_s = Some(5_000.0)
+    });
     let found = suspects(&triggers, &window);
     let memory = find(&found, |c| matches!(c, Cause::Memory { .. })).expect("memory");
     assert!(memory.evidence.iter().any(|e| matches!(
@@ -323,9 +377,35 @@ fn throttling_matches() {
 }
 
 #[test]
+fn a_sample_without_throttling_counters_never_suspects_throttling() {
+    let (triggers, mut window) = throttling_case();
+    tweak(&mut window, -10, -5, |s| {
+        s.perf_limit_pct = None;
+        s.proc_perf_pct = None;
+    });
+
+    let found = suspects(&triggers, &window);
+
+    assert!(find(&found, |c| *c == Cause::Throttling).is_none());
+}
+
+#[test]
+fn a_disk_without_a_latency_reading_is_never_the_slow_one() {
+    let (triggers, mut window) = disk_case();
+    tweak(&mut window, -5, -1, |s| {
+        s.disks[1].latency_ms = None;
+        s.disks[1].queue_len = None;
+    });
+
+    let found = suspects(&triggers, &window);
+
+    assert!(find(&found, |c| matches!(c, Cause::DiskIo { .. })).is_none());
+}
+
+#[test]
 fn throttling_stays_quiet() {
     let (triggers, mut window) = quiet_case();
-    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = 97.0);
+    tweak(&mut window, -10, -5, |s| s.perf_limit_pct = Some(97.0));
     let found = suspects(&triggers, &window);
     assert!(find(&found, |c| *c == Cause::Throttling).is_none());
 }
@@ -345,6 +425,110 @@ fn app_matches() {
     }));
 }
 
+fn hung_pid_99(window_case: Case) -> Case {
+    let (_, window) = window_case;
+    let hang = Trigger::AppHang {
+        pid: 99,
+        name: "stuck.exe".to_string(),
+        start_ms: T,
+        end_ms: T + 9_000,
+        outcome: HangOutcome::Recovered,
+    };
+    (vec![hang], window)
+}
+
+fn app_confidence(found: &[Suspect]) -> Confidence {
+    find(found, |c| matches!(c, Cause::App { .. }))
+        .expect("app")
+        .confidence
+}
+
+#[test]
+fn a_hung_app_absent_from_the_tops_does_not_outrank_memory() {
+    let found = run(&hung_pid_99(memory_case()));
+    assert!(matches!(found[0].cause, Cause::Memory { .. }));
+    assert_eq!(app_confidence(&found), Confidence::Medium);
+}
+
+#[test]
+fn a_hung_app_with_its_own_load_stays_high() {
+    let (triggers, mut window) = hung_pid_99(memory_case());
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![process(99, "stuck.exe", 40.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    assert!(matches!(found[0].cause, Cause::App { .. }));
+    assert_eq!(app_confidence(&found), Confidence::High);
+}
+
+fn hang(pid: u32, name: &str) -> Trigger {
+    Trigger::AppHang {
+        pid,
+        name: name.to_string(),
+        start_ms: T,
+        end_ms: T + 9_000,
+        outcome: HangOutcome::Recovered,
+    }
+}
+
+#[test]
+fn two_hung_apps_in_one_group_are_both_medium() {
+    let (_, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![
+            process(98, "first.exe", 40.0, 1, 0.0),
+            process(99, "second.exe", 35.0, 1, 0.0),
+        ],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let triggers = vec![hang(98, "first.exe"), hang(99, "second.exe")];
+    let found = suspects(&triggers, &window);
+
+    assert!(matches!(found[0].cause, Cause::Memory { .. }));
+    let apps: Vec<&Suspect> = found
+        .iter()
+        .filter(|s| matches!(s.cause, Cause::App { .. }))
+        .collect();
+    assert_eq!(apps.len(), 2);
+    assert!(apps.iter().all(|s| s.confidence == Confidence::Medium));
+}
+
+#[test]
+fn one_app_hung_twice_keeps_its_best_confidence() {
+    let (_, mut window) = memory_case();
+    window.tops.push(ProcessTop {
+        ts_ms: T + 4_000,
+        entries: vec![process(100, "stuck.exe", 40.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let triggers = vec![hang(99, "stuck.exe"), hang(100, "stuck.exe")];
+    let found = suspects(&triggers, &window);
+
+    assert_eq!(
+        found
+            .iter()
+            .filter(|s| matches!(s.cause, Cause::App { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(app_confidence(&found), Confidence::High);
+}
+
+#[test]
+fn load_outside_the_hang_does_not_make_a_hung_app_high() {
+    let (triggers, mut window) = hung_pid_99(memory_case());
+    window.tops.push(ProcessTop {
+        ts_ms: T - 10_000,
+        entries: vec![process(99, "stuck.exe", 90.0, 1, 0.0)],
+    });
+    window.tops.sort_by_key(|t| t.ts_ms);
+    let found = suspects(&triggers, &window);
+    assert_eq!(app_confidence(&found), Confidence::Medium);
+}
+
 #[test]
 fn app_stays_quiet() {
     let (mut triggers, window) = app_case();
@@ -360,6 +544,87 @@ fn unclear_when_nothing_matches_suggests_sensitive_mode() {
     assert_eq!(found[0].cause, Cause::Unclear);
     assert!(found[0].next_steps.contains(&NextStep::EnableSensitiveMode));
     assert!(!found[0].evidence.is_empty(), "the ordinary signals");
+}
+
+#[test]
+fn an_empty_window_is_not_measured() {
+    let window = Window {
+        samples: vec![],
+        ..quiet_window()
+    };
+    let found = suspects(&[freeze(2)], &window);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cause, Cause::NotMeasured);
+    assert!(found[0].next_steps.contains(&NextStep::EnableSensitiveMode));
+}
+
+#[test]
+fn high_gpu_and_disk_activity_are_listed_when_nothing_matches() {
+    let mut window = quiet_window();
+    tweak(&mut window, -5, 5, |s| {
+        s.gpu_pct = Some(100.0);
+        s.disks[0].active_pct = 100.0;
+    });
+    let found = suspects(&[freeze(2)], &window);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].cause, Cause::Unclear);
+    let listed = |wanted: Metric| {
+        found[0]
+            .evidence
+            .iter()
+            .any(|e| matches!(e, Evidence::Metric { metric, .. } if *metric == wanted))
+    };
+    assert!(listed(Metric::GpuPct));
+    assert!(listed(Metric::DiskActivePct));
+}
+
+#[test]
+fn ordinary_gpu_and_disk_activity_stay_unlisted() {
+    let found = run(&quiet_case());
+    assert!(found[0].evidence.iter().all(|e| !matches!(
+        e,
+        Evidence::Metric {
+            metric: Metric::GpuPct | Metric::DiskActivePct,
+            ..
+        }
+    )));
+}
+
+fn blue_screen(code: u32) -> Vec<NextStep> {
+    let crash = Trigger::Crash {
+        last_ms: T,
+        down_ms: T + 5_000,
+        kind: CrashKind::BlueScreen {
+            code,
+            params: [0; 4],
+        },
+    };
+    let found = suspects(&[crash], &quiet_window());
+    let screen = find(&found, |c| matches!(c, Cause::BlueScreen { .. })).expect("blue screen");
+    screen.next_steps.clone()
+}
+
+#[test]
+fn a_hardware_stop_code_asks_for_hardware_checks() {
+    assert_eq!(
+        blue_screen(0x124),
+        [
+            NextStep::CheckHardwareStability,
+            NextStep::RunMemoryDiagnostic
+        ]
+    );
+    assert_eq!(
+        blue_screen(0x9C),
+        [
+            NextStep::CheckHardwareStability,
+            NextStep::RunMemoryDiagnostic
+        ]
+    );
+}
+
+#[test]
+fn another_stop_code_points_to_the_dump() {
+    assert_eq!(blue_screen(0x50), [NextStep::ReadCrashDump]);
 }
 
 #[test]
@@ -401,4 +666,162 @@ fn suspects_sort_by_confidence() {
             (Confidence::Low, Cause::Driver { .. }),
         ]
     ));
+}
+
+#[test]
+fn an_earlier_reported_event_does_not_move_the_focus() {
+    let (_, window) = cpu_case();
+    let reported = Trigger::Reported {
+        event: event(T - 20_000, "stornvme", 153, EventMeaning::DiskRetry),
+    };
+    let found = suspects(&[reported, freeze(2)], &window);
+    let first = found.first().expect("a suspect");
+    assert!(
+        matches!(first.cause, Cause::Cpu { .. }),
+        "{:?}",
+        first.cause
+    );
+}
+
+fn storage_of(found: &[Suspect]) -> Option<&Suspect> {
+    find(found, |c| matches!(c, Cause::Storage { .. }))
+}
+
+#[test]
+fn a_disk_event_far_from_the_freeze_is_not_a_cause() {
+    let (triggers, mut window) = cpu_case();
+    window
+        .events
+        .push(event(T - 40_000, "disk", 153, EventMeaning::DiskRetry));
+    let found = suspects(&triggers, &window);
+    assert!(storage_of(&found).is_none());
+    assert!(matches!(found[0].cause, Cause::Cpu { .. }));
+}
+
+#[test]
+fn a_disk_event_in_the_span_with_normal_reads_is_medium() {
+    let (triggers, mut window) = quiet_case();
+    window.events.push(event(
+        T - 2_000,
+        "stornvme",
+        129,
+        EventMeaning::StorageReset,
+    ));
+    let found = suspects(&triggers, &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.cause, Cause::Storage { disk: None });
+    assert_eq!(storage.confidence, Confidence::Medium);
+}
+
+#[test]
+fn slow_reads_outside_the_span_do_not_raise_a_disk_event() {
+    let (triggers, mut window) = quiet_case();
+    window.events.push(event(
+        T - 2_000,
+        "stornvme",
+        129,
+        EventMeaning::StorageReset,
+    ));
+    tweak(&mut window, -40, -40, |s| {
+        s.disks[0].latency_ms = Some(400.0)
+    });
+    let found = suspects(&triggers, &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.confidence, Confidence::Medium);
+}
+
+fn storage_steps(events: &[(i64, u16, EventMeaning)]) -> Vec<NextStep> {
+    let (triggers, mut window) = quiet_case();
+    for (ts, id, meaning) in events {
+        let provider = if *meaning == EventMeaning::StorageReset {
+            "stornvme"
+        } else {
+            "disk"
+        };
+        window.events.push(event(*ts, provider, *id, *meaning));
+    }
+    tweak(&mut window, -2, 1, |s| s.disks[0].latency_ms = Some(400.0));
+    let found = suspects(&triggers, &window);
+    storage_of(&found).expect("storage").next_steps.clone()
+}
+
+#[test]
+fn a_bad_block_asks_for_a_surface_test_first() {
+    let steps = storage_steps(&[(T - 2_000, 7, EventMeaning::DiskBadBlock)]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+}
+
+#[test]
+fn a_paging_error_asks_for_a_surface_test_first() {
+    let steps = storage_steps(&[(T - 2_000, 51, EventMeaning::PagingError)]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+}
+
+#[test]
+fn a_retry_checks_the_disk_before_the_cable_and_driver() {
+    let steps = storage_steps(&[(T - 2_000, 153, EventMeaning::DiskRetry)]);
+    assert_eq!(
+        steps,
+        [
+            NextStep::RunDiskTest,
+            NextStep::CheckDiskCable,
+            NextStep::UpdateStorageDriver
+        ]
+    );
+}
+
+#[test]
+fn a_reset_keeps_the_driver_cable_and_test_steps() {
+    let steps = storage_steps(&[(T - 2_000, 129, EventMeaning::StorageReset)]);
+    assert_eq!(
+        steps,
+        [
+            NextStep::UpdateStorageDriver,
+            NextStep::CheckDiskCable,
+            NextStep::RunDiskTest
+        ]
+    );
+}
+
+#[test]
+fn the_gravest_event_picks_the_steps() {
+    let steps = storage_steps(&[
+        (T - 3_000, 153, EventMeaning::DiskRetry),
+        (T - 2_000, 129, EventMeaning::StorageReset),
+        (T - 1_000, 7, EventMeaning::DiskBadBlock),
+    ]);
+    assert_eq!(steps, [NextStep::BackUpNow, NextStep::RunDiskTest]);
+    let steps = storage_steps(&[
+        (T - 3_000, 153, EventMeaning::DiskRetry),
+        (T - 2_000, 129, EventMeaning::StorageReset),
+    ]);
+    assert_eq!(steps[0], NextStep::UpdateStorageDriver);
+}
+
+#[test]
+fn a_reported_event_alone_keeps_its_cause() {
+    let reset = event(T, "stornvme", 129, EventMeaning::StorageReset);
+    let reported = Trigger::Reported {
+        event: reset.clone(),
+    };
+    let mut window = quiet_window();
+    window.events.push(reset);
+    tweak(&mut window, -2, 2, |s| s.disks[0].latency_ms = Some(400.0));
+    let found = suspects(&[reported], &window);
+    let storage = storage_of(&found).expect("storage");
+    assert_eq!(storage.confidence, Confidence::High);
+}
+
+#[test]
+fn a_display_reset_far_from_the_freeze_is_not_a_cause() {
+    let (triggers, mut window) = cpu_case();
+    window.events.push(event(
+        T + 28_000,
+        "Display",
+        4101,
+        EventMeaning::DisplayReset,
+    ));
+    let found = suspects(&triggers, &window);
+    assert!(find(&found, |c| *c == Cause::GpuDriver).is_none());
+    assert!(matches!(found[0].cause, Cause::Cpu { .. }));
 }

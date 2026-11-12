@@ -4,6 +4,8 @@ import { t } from "./i18n.svelte";
 import { applySettings } from "./prefs";
 import { toast } from "./toast.svelte";
 import type { AgentLink, HistoryState, Settings, SettingsDto } from "./types";
+import { pollWhileShown } from "./visibility";
+import { unverifiedSince } from "./monitor";
 
 const POLL_MS = 5000;
 const PROBE_MS = 60_000;
@@ -20,7 +22,13 @@ class App {
   starting = $state(false);
   startError = $state<unknown>(null);
 
+  /** When the watcher last answered, Unix milliseconds; the time the window opened until it does. */
+  answeredAt = $state(Date.now());
+
   #languageSet = false;
+  /** The refresh under way, so polls and clicks never ask twice at once; `#queued` asks once more after it. */
+  #refreshing: Promise<void> | null = null;
+  #queued = false;
 
   // Flags the screens read; each one changes only when its value does.
   loading = $derived(this.failure === null && (this.link === null || this.history === null));
@@ -31,31 +39,37 @@ class App {
   stopped = $derived(this.link?.link === "stopped");
   /** A watcher answers on the pipe but not as this window expects. */
   unreachable = $derived(this.link?.link === "mismatch");
+  /** The watcher owns the pipe but did not answer in time; the history on disk still reads. */
+  silent = $derived(this.link?.link === "silent");
   /** Sensitive mode saw stutters worth a deep capture. */
   suggestCapture = $derived(this.link?.link === "running" && this.link.suggest_capture);
+  /** The watcher's account of its own watching; `null` unless it runs. */
+  monitor = $derived(this.link?.link === "running" ? this.link.monitor : null);
+  /** When the watcher started, Unix milliseconds; now while it does not run. */
+  started = $derived(this.link?.link === "running" ? this.link.started_at_ms : Date.now());
+  /** The last thing that went wrong in the watcher, for the technical level. */
+  lastError = $derived(this.link?.link === "running" ? this.link.last_error : null);
+  /** The watcher runs but has produced no sample for a while, and nothing is paused or asleep. */
+  noReading = $derived(this.monitor?.state === "no_reading");
+  /** Samples come, but some data source fails. */
+  degraded = $derived(this.monitor?.state === "degraded");
+  /** Since when the health check has not finished, once that has lasted long enough; the poll refreshes it. */
+  unverified = $derived(
+    this.link?.link === "running" && !this.paused && !this.link.suspended ? unverifiedSince(this.link, Date.now()) : null,
+  );
   /** Settings and pause can change only while the watcher runs. */
   editable = $derived(this.settings?.editable ?? false);
 
   /** Loads everything, then keeps the watcher's state current; returns the function that stops it. */
   start(): () => void {
     void this.load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void this.refresh();
-    }, POLL_MS);
-    const onvisible = () => {
-      if (!document.hidden) void this.refresh();
-    };
-    document.addEventListener("visibilitychange", onvisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onvisible);
-    };
+    return pollWhileShown(() => this.refresh(), POLL_MS);
   }
 
   async load(): Promise<void> {
     this.failure = null;
-    let [link, history] = await Promise.allSettled([agentStatus(), probeHistory()]);
-    if (link.status === "fulfilled") this.link = link.value;
+    let [link, history] = await Promise.allSettled([askStatus(), probeHistory()]);
+    if (link.status === "fulfilled" && link.value !== null) this.#take(link.value);
     // A history from an older version is unreadable until the watcher updates it: start the watcher if it
     // is stopped, then ask again for a few seconds while it does.
     let started = false;
@@ -70,6 +84,7 @@ class App {
     }
     try {
       if (link.status === "rejected") throw link.reason;
+      if (link.value === null) throw new Error("the watcher is busy");
       if (history.status === "rejected") throw history.reason;
       this.history = history.value;
       // With no history at all this is the first launch, so monitoring starts without waiting for a click.
@@ -80,14 +95,43 @@ class App {
     }
   }
 
-  /** Asks the watcher again; settings are reloaded when it started, stopped or came back. */
-  async refresh(): Promise<void> {
+  /**
+   * Asks the watcher again; settings are reloaded when it started, stopped, went silent or came back.
+   * A call while one is under way waits for it and then asks once more, so what it returns is current.
+   */
+  refresh(): Promise<void> {
+    if (this.link === null) return Promise.resolve();
+    if (this.#refreshing) {
+      this.#queued = true;
+      return this.#refreshing;
+    }
+    this.#refreshing = (async () => {
+      try {
+        do {
+          this.#queued = false;
+          await this.#ask();
+        } while (this.#queued);
+      } finally {
+        this.#refreshing = null;
+      }
+    })();
+    return this.#refreshing;
+  }
+
+  #take(link: AgentLink): void {
+    this.link = link;
+    if (link.link === "running") this.answeredAt = Date.now();
+  }
+
+  async #ask(): Promise<void> {
     if (this.link === null) return;
     try {
       const before = this.link.link;
-      this.link = await agentStatus();
+      const next = await askStatus();
+      if (next === null) return;
+      this.#take(next);
       if (this.history === "empty") this.history = await probeHistory();
-      if (this.link.link !== before) await this.loadSettings();
+      if (next.link !== before) await this.loadSettings();
     } catch {
       // The next poll asks again; the window keeps what it last knew.
     }
@@ -128,13 +172,22 @@ class App {
     try {
       this.settings = await settings();
     } catch (error) {
-      if (this.link?.link !== "mismatch") throw error;
+      if (this.link?.link !== "mismatch" && this.link?.link !== "silent") throw error;
       this.settings = null;
       return;
     }
     applySettings(this.settings.settings, { language: !this.#languageSet });
     this.#languageSet = true;
   }
+}
+
+/** The watcher's state; one more try when another command held the connection, `null` if it still does. */
+async function askStatus(): Promise<AgentLink | null> {
+  const first = await agentStatus();
+  if (first.link !== "busy") return first;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const second = await agentStatus();
+  return second.link === "busy" ? null : second;
 }
 
 /** Whether the store holds any history at all, read from a one-point timeline. */

@@ -2,8 +2,8 @@ mod common;
 
 use common::{GIB, T, event, quiet_window, tweak};
 use vestigium_core::{
-    Cause, Confidence, CrashKind, EventMeaning, FactKind, OccurrenceKind, POSTMORTEM_REACH_MS,
-    PowerLossDetail, Severity, WinEvent, Window, postmortem,
+    Cause, Confidence, CrashKind, EventMeaning, FactKind, OccurrenceKind, POSTMORTEM_BEFORE_MS,
+    POSTMORTEM_REACH_MS, PowerLossDetail, Severity, WinEvent, Window, postmortem,
 };
 
 /// What was stored up to the last second before the fall at T.
@@ -150,6 +150,46 @@ fn a_fatal_hardware_error_before_the_fall_comes_first() {
 
     assert_eq!(found.suspects[0].cause, Cause::HardwareFault);
     assert_eq!(found.suspects[0].confidence, Confidence::High);
+}
+
+#[test]
+fn disk_and_display_events_minutes_before_the_fall_name_their_suspects() {
+    let mut window = before_fall();
+    window
+        .events
+        .push(event(T - 90_000, "disk", 153, EventMeaning::DiskRetry));
+    window.events.push(event(
+        T - 60_000,
+        "Display",
+        4101,
+        EventMeaning::DisplayReset,
+    ));
+
+    let found = postmortem(window, T, T + 1_000, CrashKind::NoTrace, next_boot()).unwrap();
+
+    let causes: Vec<&Cause> = found.suspects.iter().map(|s| &s.cause).collect();
+    assert!(causes.iter().any(|c| matches!(c, Cause::Storage { .. })));
+    assert!(causes.contains(&&Cause::GpuDriver));
+}
+
+#[test]
+fn events_older_than_the_stored_window_name_no_suspect() {
+    let mut window = before_fall();
+    window.events.push(event(
+        T - POSTMORTEM_BEFORE_MS - 1_000,
+        "disk",
+        153,
+        EventMeaning::DiskRetry,
+    ));
+
+    let found = postmortem(window, T, T + 1_000, CrashKind::NoTrace, next_boot()).unwrap();
+
+    assert!(
+        found
+            .suspects
+            .iter()
+            .all(|s| !matches!(s.cause, Cause::Storage { .. }))
+    );
 }
 
 #[test]

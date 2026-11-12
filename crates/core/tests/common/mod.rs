@@ -15,13 +15,13 @@ pub fn calm(ts_ms: i64) -> Sample {
         cpu_pct: 12.0,
         dpc_pct: 0.5,
         isr_pct: 0.1,
-        perf_limit_pct: 100.0,
-        proc_perf_pct: 99.0,
+        perf_limit_pct: Some(100.0),
+        proc_perf_pct: Some(99.0),
         mem_total_bytes: 16 * GIB,
         mem_avail_bytes: 8 * GIB,
         commit_bytes: 10 * GIB,
         commit_limit_bytes: 32 * GIB,
-        hard_faults_per_s: 3.0,
+        hard_faults_per_s: Some(3.0),
         gpu_pct: Some(4.0),
         probe_max_lag_ms: 0.5,
         sampler_lag_ms: 1.0,
@@ -41,9 +41,9 @@ pub fn disk(name: &str, active_pct: f32, latency_ms: f32, queue_len: f32) -> Dis
     DiskLoad {
         name: name.to_string(),
         active_pct,
-        latency_ms,
-        queue_len,
-        bytes_per_s: 1_000.0,
+        latency_ms: Some(latency_ms),
+        queue_len: Some(queue_len),
+        bytes_per_s: Some(1_000.0),
     }
 }
 

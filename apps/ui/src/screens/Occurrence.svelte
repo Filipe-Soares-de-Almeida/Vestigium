@@ -21,7 +21,7 @@
   import { copyText } from "./occurrence/browser";
   import { chartView } from "./occurrence/chart";
   import { coveredLine } from "./capture/words";
-  import { culpritView, dumpOfFall, fileName, hex } from "./dumps/words";
+  import { culpritView, dumpOfFall, fileName, hex, steps as dumpSteps } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
   import { buildReport, type Line, reportMarkdown } from "./occurrence/report";
   import TechTables from "./occurrence/TechTables.svelte";
@@ -34,8 +34,6 @@
   let failure = $state<unknown>(null);
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
-  const view = $derived(dto ? buildReport(dto, level) : null);
-  const chart = $derived(dto && view ? chartView(dto, level, view.cause) : null);
   /** A fall keeps only what came before it, and its chart says so. */
   const fall = $derived(dto?.kind === "PostMortem" ? ".PostMortem" : "");
   /** The dump Windows wrote for a blue screen, once the dumps are read. */
@@ -44,6 +42,11 @@
     if (!crash || typeof crash.kind !== "object" || !dumps.dto) return null;
     return dumpOfFall(dumps.dto, crash.down_ms, crash.kind.BlueScreen.code);
   });
+
+  /** What to do about a blue screen once its dump is read: the dump's own steps. */
+  const readSteps = $derived(fallDump && fallDump.analyzed_ms !== null ? dumpSteps(fallDump) : null);
+  const view = $derived(dto ? buildReport(dto, level, readSteps) : null);
+  const chart = $derived(dto && view ? chartView(dto, level, view.cause) : null);
 
   const MARK: Record<string, StatusKind> = { freeze: "critical", press: "overload", busy: "attention" };
   /** The tables of processes and Windows events; open from the start at the technical level. */
@@ -97,7 +100,7 @@
 
   async function copy(): Promise<void> {
     if (!dto) return;
-    const copied = await copyText(reportMarkdown(dto));
+    const copied = await copyText(reportMarkdown(dto, readSteps));
     toast.show(t(copied ? "ui.occurrence.toast.copied" : "ui.occurrence.toast.copy_failed"));
   }
 </script>

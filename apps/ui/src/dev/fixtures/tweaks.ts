@@ -1,4 +1,4 @@
-// Tweaks page data. URL: ?tweaks=some|none|applied (default some) &restore=off|skipped &tweak-ms=<wait>
+// Tweaks page data. URL: ?tweaks=some|none|applied|interrupted-all|interrupted-none|interrupted-unknown|interrupted-mixed|interrupted-doubt (default some) &restore=off|failed|dropped|unconfirmed|skipped &restore-after=<attempt that succeeds> &tweak-ms=<wait>
 // Every name, path and value here is invented; nothing was read from a real PC.
 import type {
   Advice,
@@ -17,6 +17,7 @@ import type { Handler } from "../mock";
 
 const query = new URLSearchParams(location.search);
 const DAY = 24 * 60 * 60_000;
+const HOUR = 60 * 60_000;
 const now = Date.now();
 
 const LM = "LocalMachine" as const;
@@ -38,6 +39,10 @@ const localDumps = String.raw`SOFTWARE\Microsoft\Windows\Windows Error Reporting
 const approval = (hive: typeof LM | typeof CU, name: string): TweakSetting => ({
   StartupApproval: { hive, list: "Run", name },
 });
+/** Codes the watcher records for a setting after the helper stopped: found written, as before, or neither. */
+const WRITTEN = 0x2000_0002;
+const UNCHANGED = 0x2000_0003;
+const UNKNOWN = 0x2000_0004;
 const disabled: TweakValue = { Bytes: [3, 0, 0, 0, 0, 80, 140, 120, 18, 77, 219, 1] };
 
 function advice(
@@ -89,7 +94,7 @@ const ALL: Advice[] = [
   advice("PcieAspm", {
     changes: [
       change(
-        { PowerAc: { subgroup: "501a4d13-42af-4429-9fd1-a8218c268e20", setting: "ee12f906-d277-404b-b6da-e5fa1a576df5" } },
+        { PowerAc: { subgroup: "501a4d13-42af-4429-9fd1-a8218c268e20", setting: "ee12f906-d277-404b-b6da-e5fa1a576df5", scheme: null } },
         { Index: 1 },
         { Index: 0 },
       ),
@@ -99,7 +104,7 @@ const ALL: Advice[] = [
   advice("UsbSuspend", {
     changes: [
       change(
-        { PowerAc: { subgroup: "2a737441-1930-4402-8d77-b2bebba308a3", setting: "48e6b7a6-50f5-4782-a5d4-53bb8f07e226" } },
+        { PowerAc: { subgroup: "2a737441-1930-4402-8d77-b2bebba308a3", setting: "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", scheme: null } },
         { Index: 1 },
         { Index: 0 },
       ),
@@ -151,6 +156,7 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
       history: [],
     };
   }
+  if (level.startsWith("interrupted-")) return interrupted(level.slice("interrupted-".length));
   if (level === "applied") {
     const [first, dvrAdvice] = ALL;
     const row = (id: number, a: Advice, days: number, undone: number | null): TweakRow => ({
@@ -164,8 +170,18 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
         undo_of: null,
         results: a.changes.map((c) => ({ change: c, error: null })),
         restore_point: a.applier === "Elevated" ? { Reused: { at_ms: now - (days + 1) * DAY } } : null,
+        journal: a.applier === "Elevated" ? id : null,
       },
-      helped: { days: Math.min(days, 7), before: 9, after: 2 },
+      helped: {
+        days: Math.min(days, 7),
+        before: 9,
+        after: 2,
+        before_ms: 160 * HOUR,
+        after_ms: 150 * HOUR,
+        verdict: "Fewer",
+        min_events: 5,
+        min_hours: 12,
+      },
       outside: false,
     });
     return {
@@ -176,6 +192,39 @@ function initial(): { advice: Advice[]; history: TweakRow[] } {
   return { advice: ALL, history: [] };
 }
 
+/** What the watcher found each of the three dump settings holding, per outcome of the stopped helper. */
+const FOUND: Record<string, number[]> = {
+  all: [WRITTEN, WRITTEN, WRITTEN],
+  none: [UNCHANGED, UNCHANGED, UNCHANGED],
+  unknown: [UNKNOWN, UNKNOWN, UNKNOWN],
+  mixed: [WRITTEN, UNCHANGED, UNKNOWN],
+  doubt: [UNCHANGED, UNKNOWN, UNKNOWN],
+};
+
+/** The dump tweak after a helper that stopped before it reported, with what was found in Windows. */
+function interrupted(outcome: string): { advice: Advice[]; history: TweakRow[] } {
+  const dumps = ALL.find((a) => a.tweak === "AppDumps")!;
+  const found = FOUND[outcome] ?? FOUND.mixed;
+  const row: TweakRow = {
+    id: 1,
+    applied_ms: now - 2 * HOUR,
+    undone_ms: null,
+    applier: "Elevated",
+    change: {
+      tweak: dumps.tweak,
+      subject: null,
+      undo_of: null,
+      results: dumps.changes.map((c, i) => ({ change: c, error: found[i] })),
+      restore_point: "Unconfirmed",
+      journal: 1,
+    },
+    helped: null,
+    outside: false,
+  };
+  const advice = found.every((e) => e === WRITTEN) ? settledBy(dumps) : dumps;
+  return { advice: ALL.map((a) => (a === dumps ? advice : a)), history: [row] };
+}
+
 /** The advice once its changes are written: nothing left to change, the new values in place. */
 function settledBy(a: Advice): Advice {
   return { ...a, status: "AlreadySet", changes: [], current: a.changes.map((c) => ({ setting: c.setting, value: c.to })) };
@@ -184,22 +233,32 @@ function settledBy(a: Advice): Advice {
 let state = initial();
 let nextId = 10;
 
+/** Attempts at a restore point so far; `?restore-after=2` lets the second one succeed. */
+let attempts = 0;
+
 function point(): RestorePoint {
   const restore = query.get("restore");
+  attempts += 1;
+  if (attempts >= Number(query.get("restore-after") ?? Infinity)) return "Created";
   if (restore === "off") return "Off";
+  if (restore === "failed") return { Failed: { error: 1460 } };
+  if (restore === "dropped") return { Failed: { error: 0x2000_0005 } };
+  if (restore === "unconfirmed") return "Unconfirmed";
   if (restore === "skipped") return { Reused: { at_ms: now - 20 * 3_600_000 } };
   return "Created";
 }
 
 function record(a: Advice, without: boolean, undoOf: number | null = null): TweakRow {
   const p = a.applier === "Elevated" ? point() : null;
-  const blocked = p === "Off" && !without;
+  const lacking = p === "Off" || p === "Unconfirmed" || (typeof p === "object" && p !== null && "Failed" in p);
+  const blocked = lacking && !without;
   const change: TweakChange = {
     tweak: a.tweak,
     subject: a.subject,
     undo_of: undoOf,
     results: (blocked ? a.changes.slice(0, 1) : a.changes).map((c) => ({ change: c, error: blocked ? 5 : null })),
     restore_point: p,
+    journal: a.applier === "Elevated" ? nextId : null,
   };
   return { id: nextId++, applied_ms: Date.now(), undone_ms: null, applier: a.applier, change, helped: null, outside: false };
 }
@@ -243,7 +302,9 @@ export const handlers: Record<string, Handler> = {
       change: {
         ...row.change,
         undo_of: id,
-        results: row.change.results.map((r) => ({ change: { ...r.change, from: r.change.to, to: r.change.from }, error: null })),
+        results: row.change.results
+          .filter((r) => r.error === null || r.error === WRITTEN)
+          .map((r) => ({ change: { ...r.change, from: r.change.to, to: r.change.from }, error: null })),
       },
       helped: null,
     };

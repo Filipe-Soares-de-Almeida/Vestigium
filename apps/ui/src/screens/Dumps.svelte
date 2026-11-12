@@ -4,6 +4,8 @@
   import Block from "../components/Block.svelte";
   import Checkbox from "../components/Checkbox.svelte";
   import ErrorView from "../components/ErrorView.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
+  import HelperLine from "../components/HelperLine.svelte";
   import Icon from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
   import PageHead from "../components/PageHead.svelte";
@@ -17,7 +19,7 @@
   import { relatedLinks } from "../lib/related.svelte";
   import { keyOf, tweaks } from "../lib/tweaks.svelte";
   import DumpPage from "./dumps/DumpPage.svelte";
-  import { at, type Entry, entries, fileName, type Group, GROUPS, isRead, lastRead, lede, present, setting, space, sub, title, TONE } from "./dumps/words";
+  import { at, type Entry, entries, fileName, type Group, GROUPS, isRead, lastRead, lede, partialDeleteText, present, setting, space, sub, title, TONE } from "./dumps/words";
   import { formatBytes } from "./occurrence/format";
 
   let { id, group }: { id: number | null; group: DumpGroup | null } = $props();
@@ -65,7 +67,7 @@
     if (freed === null) {
       toast.show(t(dumps.deleting === "declined" ? "ui.dumps.delete.declined" : "ui.dumps.delete.failed"));
     } else if (freed.count < freed.asked) {
-      toast.show(t("ui.dumps.delete.toast.partial", { count: freed.count, asked: freed.asked, size: formatBytes(freed.bytes) }));
+      toast.show(partialDeleteText(freed));
     } else {
       toast.show(t("ui.dumps.delete.toast", { size: formatBytes(freed.bytes) }));
     }
@@ -181,7 +183,11 @@
     <Block title={t("ui.dumps.read.title")}>
       {#if dumps.reading === "running"}
         <p class="p status" role="status"><span class="spin" aria-hidden="true"></span>{t("ui.dumps.read.running")}</p>
+        <div class="acts">
+          <button type="button" class="btn" onclick={() => void dumps.cancelRead()}>{t("ui.helper.cancel.dumps")}</button>
+        </div>
       {:else}
+        <HelperLine job="dumps" />
         {#if dumps.reading === "declined"}
           <p class="p" role="status"><b>{t("ui.dumps.read.declined.title")}</b> {t("ui.dumps.read.declined.body")}</p>
         {:else if dumps.reading === "failed"}
@@ -207,6 +213,7 @@
           <AdminPill />
         </div>
       {/if}
+      <HelperDialogs job="dumps" onretry={() => void dumps.read()} />
     </Block>
   </div>
 

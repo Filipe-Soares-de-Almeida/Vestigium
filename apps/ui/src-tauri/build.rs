@@ -18,6 +18,8 @@ const COMMANDS: &[&str] = &[
     "clear_history",
     "start_capture",
     "capture_run",
+    "cancel_capture",
+    "cancel_helper_read",
     "import_captures",
     "captures",
     "capture",

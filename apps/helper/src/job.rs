@@ -1,9 +1,15 @@
 use std::path::PathBuf;
 
+use crate::profile::UserSid;
+
 /// Exit code for a job the helper does not run.
 pub const REFUSED: u8 = 2;
 /// Exit code for a job that ran but could not write its result.
 pub const WRITE_FAILED: u8 = 3;
+/// Exit code for a deep capture refused because another one is running.
+pub const CAPTURE_RUNNING: u8 = 4;
+/// Exit code for a deep capture ended by its stop file; nothing was written.
+pub const CANCELLED: u8 = 5;
 pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 /// Physical drive numbers a disk scan accepts.
 pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;
@@ -11,20 +17,19 @@ pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;
 /// The closed list of jobs.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Job {
-    /// Traces DPC/ISR time per driver and frame times for `minutes`, into `out`; `etl` keeps the raw trace.
-    DeepCapture {
-        minutes: u64,
-        out: PathBuf,
-        etl: Option<PathBuf>,
-    },
+    /// Traces DPC/ISR time per driver and frame times for `minutes`, into `out`.
+    DeepCapture { minutes: u64, out: PathBuf },
     /// Reads the boot diagnostics, which need elevation, into `out`.
     HealthScan { out: PathBuf },
-    /// Reads what every crash dump Windows kept says, into `out`.
-    DumpScan { out: PathBuf },
-    /// Deletes the dumps a list file names, each checked again.
-    DeleteDumps { list: PathBuf },
+    /// Reads what every crash dump Windows kept says, into `out`; app dumps are those of `user`.
+    DumpScan { out: PathBuf, user: Option<UserSid> },
+    /// Deletes the dumps a list file names, each checked again; app dumps are those of `user`.
+    DeleteDumps {
+        list: PathBuf,
+        user: Option<UserSid>,
+    },
     /// Applies or undoes the tweaks a plan file names, each checked against the catalog.
-    Tweak { plan: PathBuf },
+    Tweak { plan: PathBuf, sha256: String },
     /// Reads physical drive `disk` from `from_mib` to its end, never writing, into `out`.
     DiskScan {
         disk: u32,
@@ -66,35 +71,42 @@ fn value<'a>(found: &[(&str, &'a str)], flag: &str) -> Option<&'a str> {
 /// The job these arguments name, or why they name none.
 pub fn parse(args: &[String]) -> Result<Job, String> {
     let (name, rest) = args.split_first().ok_or("no job")?;
-    if name == "health-scan" || name == "dump-scan" {
-        let [flag, out] = rest else {
-            return Err(format!("{name} takes --out <file> and nothing else"));
+    if name == "health-scan" {
+        return match rest {
+            [flag, out] if flag == "--out" => Ok(Job::HealthScan {
+                out: PathBuf::from(out),
+            }),
+            _ => Err("health-scan takes --out <file> and nothing else".to_string()),
         };
-        if flag != "--out" {
-            return Err(format!("{name} takes --out <file> and nothing else"));
-        }
-        let out = PathBuf::from(out);
-        return Ok(if name == "health-scan" {
-            Job::HealthScan { out }
-        } else {
-            Job::DumpScan { out }
+    }
+    if name == "dump-scan" {
+        let found = pairs(rest, &["--out", "--user-sid"])?;
+        return Ok(Job::DumpScan {
+            out: PathBuf::from(value(&found, "--out").ok_or("--out is required")?),
+            user: value(&found, "--user-sid")
+                .map(UserSid::parse)
+                .transpose()?,
         });
     }
     if name == "delete-dumps" {
-        return match rest {
-            [flag, list] if flag == "--list" => Ok(Job::DeleteDumps {
-                list: PathBuf::from(list),
-            }),
-            _ => Err("delete-dumps takes --list <file> and nothing else".to_string()),
-        };
+        let found = pairs(rest, &["--list", "--user-sid"])?;
+        return Ok(Job::DeleteDumps {
+            list: PathBuf::from(value(&found, "--list").ok_or("--list is required")?),
+            user: value(&found, "--user-sid")
+                .map(UserSid::parse)
+                .transpose()?,
+        });
     }
     if name == "tweak" {
-        return match rest {
-            [flag, plan] if flag == "--plan" => Ok(Job::Tweak {
-                plan: PathBuf::from(plan),
-            }),
-            _ => Err("tweak takes --plan <file> and nothing else".to_string()),
-        };
+        let found = pairs(rest, &["--plan", "--sha256"])?;
+        let sha256 = value(&found, "--sha256").ok_or("--sha256 is required")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("--sha256 takes 64 hexadecimal digits".to_string());
+        }
+        return Ok(Job::Tweak {
+            plan: PathBuf::from(value(&found, "--plan").ok_or("--plan is required")?),
+            sha256: sha256.to_ascii_lowercase(),
+        });
     }
     if name == "disk-scan" {
         let found = pairs(rest, &["--disk", "--out", "--from"])?;
@@ -125,7 +137,7 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
     if name != "deep-capture" {
         return Err(format!("unknown job {name}"));
     }
-    let (mut minutes, mut out, mut etl) = (None, None, None);
+    let (mut minutes, mut out) = (None, None);
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
         let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -134,7 +146,6 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
                 minutes = Some(value.parse::<u64>().map_err(|e| e.to_string())?)
             }
             "--out" if out.is_none() => out = Some(PathBuf::from(value)),
-            "--etl" if etl.is_none() => etl = Some(PathBuf::from(value)),
             other => return Err(format!("unexpected {other}")),
         }
     }
@@ -148,7 +159,6 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
     Ok(Job::DeepCapture {
         minutes,
         out: out.ok_or("--out is required")?,
-        etl,
     })
 }
 
@@ -167,7 +177,23 @@ mod tests {
         assert!(parse(&args(&["delete-dumps", "--list", "a", "--list", "b"])).is_err());
         assert!(parse(&args(&["tweak", "--list", "a"])).is_err());
         assert!(parse(&args(&["tweak", "--plan", "a", "--plan", "b"])).is_err());
+        assert!(parse(&args(&["tweak", "--plan", "a"])).is_err());
         assert!(parse(&args(&[])).is_err());
+    }
+
+    #[test]
+    fn tweak_takes_a_plan_and_its_hash() {
+        let hash = "AB".repeat(32);
+        assert_eq!(
+            parse(&args(&["tweak", "--plan", "a", "--sha256", &hash])),
+            Ok(Job::Tweak {
+                plan: PathBuf::from("a"),
+                sha256: "ab".repeat(32),
+            })
+        );
+        for bad in ["", "abc", &"zz".repeat(32), &"ab".repeat(33)] {
+            assert!(parse(&args(&["tweak", "--plan", "a", "--sha256", bad])).is_err());
+        }
     }
 
     #[test]
@@ -227,13 +253,54 @@ mod tests {
         assert_eq!(
             parse(&args(&["dump-scan", "--out", r"C:\a.dumps"])),
             Ok(Job::DumpScan {
-                out: PathBuf::from(r"C:\a.dumps")
+                out: PathBuf::from(r"C:\a.dumps"),
+                user: None
             })
         );
         for bad in [
             &["dump-scan"][..],
             &["dump-scan", "--out", "a", "--path", r"C:\Windows"],
             &["dump-scan", "--path", r"C:\Windows\MEMORY.DMP"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    const SID: &str = "S-1-5-21-1004336348-1177238915-682003330-1001";
+
+    #[test]
+    fn dump_jobs_take_the_user_who_asked() {
+        let user = Some(UserSid::parse(SID).unwrap());
+        assert_eq!(
+            parse(&args(&["dump-scan", "--user-sid", SID, "--out", "o"])),
+            Ok(Job::DumpScan {
+                out: PathBuf::from("o"),
+                user: user.clone()
+            })
+        );
+        assert_eq!(
+            parse(&args(&["delete-dumps", "--list", "l", "--user-sid", SID])),
+            Ok(Job::DeleteDumps {
+                list: PathBuf::from("l"),
+                user
+            })
+        );
+        for bad in [
+            &["dump-scan", "--out", "o", "--user-sid", "S-1-5-18"][..],
+            &["dump-scan", "--out", "o", "--user-sid", r"C:\Users\other"],
+            &[
+                "dump-scan",
+                "--out",
+                "o",
+                "--user-sid",
+                SID,
+                "--user-sid",
+                SID,
+            ],
+            &["dump-scan", "--user-sid", SID],
+            &["delete-dumps", "--list", "l", "--user-sid", ""],
+            &["delete-dumps", "--user-sid", SID],
+            &["delete-dumps", "--list", "l", "--path", r"C:\Users"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }
@@ -325,8 +392,21 @@ mod tests {
             Ok(Job::DeepCapture {
                 minutes: 5,
                 out: PathBuf::from(r"C:\a.capture"),
-                etl: None
             })
         );
+    }
+
+    #[test]
+    fn deep_capture_takes_no_trace_file() {
+        let bad = args(&[
+            "deep-capture",
+            "--minutes",
+            "5",
+            "--out",
+            r"C:\a.capture",
+            "--etl",
+            r"C:\a.etl",
+        ]);
+        assert_eq!(parse(&bad), Err("unexpected --etl".to_string()));
     }
 }

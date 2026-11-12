@@ -4,10 +4,10 @@ use serde::Serialize;
 use vestigium_core::health::{BootReport, Finding, Measure, Subject};
 use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
-    CaptureCauses, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning, Fault,
-    Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample, Reading,
-    Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit, heaviest,
-    pc_state, same_program, steady_only, usage,
+    CaptureCauses, Covered, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning,
+    Fault, Gap, MINUTE_MS, MachineInfo, Occurrence, OccurrenceSummary, PcState, ProcessSample,
+    Reading, Suspect, WinEvent, bug_check_event, capture_findings, capture_suspects, dump_culprit,
+    heaviest, pc_state, same_program, usage,
 };
 use vestigium_store::{CaptureSummary, DumpRow, FindingRecord, Store, StoreError, TweakChangeRow};
 
@@ -23,6 +23,8 @@ pub struct SmartPointDto {
 }
 
 /// How far back the health page lists the findings that closed.
+/// The longest window a change is compared over, on each side of it.
+const HELPED_SPAN_MS: i64 = 7 * 24 * 3_600_000;
 const CLOSED_SHOWN_MS: i64 = 30 * 24 * 3_600_000;
 /// How far back the dumps page lists the blue screens Windows reported.
 const REPORTS_SHOWN_MS: i64 = 365 * 24 * 3_600_000;
@@ -84,7 +86,7 @@ pub struct ProgramMarksDto {
     pub episodes: Vec<Episode>,
 }
 
-/// What the timeline marks: stalls, pressure, Windows events, holes in watching and tests.
+/// What the timeline marks: stalls, pressure, holes in watching and tests.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MarksDto {
     pub history: HistoryState,
@@ -92,7 +94,6 @@ pub struct MarksDto {
     pub episodes: Vec<Episode>,
     /// For each episode, in order: whether a Vestigium test most likely caused it.
     pub by_test: Vec<bool>,
-    pub events: Vec<WinEvent>,
     pub gaps: Vec<Gap>,
     pub tests: Vec<TestSpan>,
 }
@@ -340,6 +341,13 @@ pub struct DumpsDto {
     pub crash: Option<CrashControlDto>,
 }
 
+/// How many long driver calls and late frames the stored capture holds, before the page trims them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureKept {
+    pub calls: usize,
+    pub hitches: usize,
+}
+
 /// A stored deep capture with what it names.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CaptureDto {
@@ -347,6 +355,7 @@ pub struct CaptureDto {
     #[serde(flatten)]
     pub capture: DeepCapture,
     pub findings: Vec<Suspect>,
+    pub kept: CaptureKept,
 }
 
 /// The suspects a deep capture adds to an occurrence it covered.
@@ -367,6 +376,10 @@ pub struct TweakHistory {
     pub episodes: Vec<Episode>,
     pub captures: Vec<CaptureCauses>,
     pub events: Vec<WinEvent>,
+    /// Test runs over the evidence span.
+    pub tests: Vec<TestRun>,
+    /// Time sampled by minute, from a week before the oldest change shown.
+    pub covered: Vec<Covered>,
     pub machine: Option<MachineInfo>,
     /// Newest first: those of the shown span and every one still in place.
     pub changes: Vec<TweakChangeRow>,
@@ -422,6 +435,11 @@ impl History {
                 }
             }
             changes.sort_by_key(|r| std::cmp::Reverse((r.applied_ms, r.id)));
+            let covered_from = changes
+                .iter()
+                .map(|c| c.applied_ms - HELPED_SPAN_MS)
+                .min()
+                .map_or(now_ms, |oldest| oldest.max(from));
             Ok(TweakHistory {
                 findings: store
                     .open_findings()?
@@ -432,6 +450,18 @@ impl History {
                 episodes: store.episodes(from, now_ms)?,
                 captures,
                 events: store.events(from, now_ms)?,
+                tests: test_spans(store, from, now_ms)?
+                    .into_iter()
+                    .map(|(_, run)| run)
+                    .collect(),
+                covered: store
+                    .minutes(covered_from, now_ms)?
+                    .iter()
+                    .map(|m| Covered {
+                        minute_ms: m.ts_ms,
+                        ms: u32::from(m.samples.min(60)) * 1_000,
+                    })
+                    .collect(),
                 machine: store.machine()?,
                 changes,
             })
@@ -483,9 +513,10 @@ impl History {
                 .filter(|e| !e.kind.is_hint())
                 .map(|e| (e.start_ms, e.end_ms))
                 .collect();
-            Ok((readings, pressure))
+            let away = Away::read(store, start_ms, last_ms)?;
+            Ok((readings, pressure, away))
         })?;
-        let Some((mut readings, mut pressure)) = found else {
+        let Some((mut readings, mut pressure, away)) = found else {
             return Ok(TimelineDto {
                 history: HistoryState::Empty,
                 resolution,
@@ -499,7 +530,7 @@ impl History {
             history: HistoryState::Ready,
             resolution,
             step_ms,
-            columns: columns(&buckets, start_ms, step_ms, &pressure),
+            columns: columns(&buckets, start_ms, step_ms, &pressure, &away),
         })
     }
 
@@ -513,7 +544,6 @@ impl History {
                 occurrences: store.occurrences(from_ms, to_ms)?,
                 by_test: episodes.iter().map(|e| caused_by_test(e, &runs)).collect(),
                 episodes,
-                events: store.events(from_ms, to_ms)?,
                 gaps: store.gaps(from_ms, to_ms)?,
                 tests,
             })
@@ -523,7 +553,6 @@ impl History {
             occurrences: Vec::new(),
             episodes: Vec::new(),
             by_test: Vec::new(),
-            events: Vec::new(),
             gaps: Vec::new(),
             tests: Vec::new(),
         }))
@@ -560,7 +589,7 @@ impl History {
             let buckets = bucket(&readings, start_ms, window.to_ms + 1, SECOND_MS);
             OccurrenceDto {
                 id,
-                chart: columns(&buckets, start_ms, SECOND_MS, &[]),
+                chart: columns(&buckets, start_ms, SECOND_MS, &[], &Away::default()),
                 occurrence,
                 capture,
                 tests,
@@ -613,9 +642,10 @@ impl History {
                 .collect();
             let tops = store.tops(episode.start_ms, episode.end_ms)?;
             let occurrences = store.occurrences(episode.start_ms, episode.end_ms)?;
-            Ok((resolution, readings, pressure, tops, occurrences))
+            let away = Away::read(store, from_ms, last_ms)?;
+            Ok((resolution, readings, pressure, tops, occurrences, away))
         })?;
-        let Some((resolution, mut readings, mut pressure, tops, occurrences)) = found else {
+        let Some((resolution, mut readings, mut pressure, tops, occurrences, away)) = found else {
             return Ok(EpisodeDetailDto {
                 history: HistoryState::Empty,
                 resolution: Resolution::Seconds,
@@ -641,7 +671,7 @@ impl History {
             step_ms,
             from_ms,
             to_ms,
-            chart: columns(&buckets, start_ms, step_ms, &pressure),
+            chart: columns(&buckets, start_ms, step_ms, &pressure, &away),
             programs: heaviest(usage(&tops), EPISODE_PROGRAMS),
             occurrences,
         })
@@ -660,13 +690,14 @@ impl History {
 
     pub fn capture(&mut self, id: i64) -> Result<Option<CaptureDto>, StoreError> {
         let found = self.read(|store| store.capture(id))?;
-        Ok(found.flatten().map(|capture| {
-            let capture = steady_only(&capture);
-            CaptureDto {
-                id,
-                findings: capture_findings(&capture),
-                capture,
-            }
+        Ok(found.flatten().map(|capture| CaptureDto {
+            id,
+            findings: capture_findings(&capture),
+            kept: CaptureKept {
+                calls: capture.longest.len(),
+                hitches: capture.hitches.len(),
+            },
+            capture: capture.page_view(),
         }))
     }
 
@@ -703,7 +734,11 @@ impl History {
             Ok((
                 store.dumps(i64::MIN, i64::MAX)?,
                 store.dump_space()?,
-                store.events(now_ms - REPORTS_SHOWN_MS, now_ms)?,
+                store.events_with_meaning(
+                    EventMeaning::BugCheck,
+                    now_ms - REPORTS_SHOWN_MS,
+                    now_ms,
+                )?,
             ))
         })?;
         let Some((rows, space_bytes, events)) = read else {
@@ -711,7 +746,6 @@ impl History {
         };
         let mut reports: Vec<BugCheckDto> = events
             .iter()
-            .filter(|e| e.meaning == EventMeaning::BugCheck)
             .filter_map(|e| {
                 bug_check_event(&e.data_xml).map(|r| BugCheckDto {
                     ts_ms: e.ts_ms,
@@ -870,12 +904,40 @@ fn bucket(readings: &[Reading], start_ms: i64, end_ms: i64, step_ms: i64) -> Vec
     buckets
 }
 
-/// Columns for `buckets`; a bucket overlapping a span in `pressure` is under pressure.
+/// When the monitor was known to be away: the recorded absences, and the time before it began.
+#[derive(Default)]
+struct Away {
+    /// Where the oldest history stored begins; nothing before it was ever watched.
+    history_from_ms: Option<i64>,
+    gaps: Vec<Gap>,
+}
+
+impl Away {
+    fn read(store: &Store, from_ms: i64, to_ms: i64) -> Result<Away, StoreError> {
+        Ok(Away {
+            history_from_ms: store.first_segment_ms()?,
+            gaps: store.gaps(from_ms, to_ms)?,
+        })
+    }
+
+    /// Whether `[from_ms, to_ms)` lies before the history or touches a recorded absence.
+    fn overlaps(&self, from_ms: i64, to_ms: i64) -> bool {
+        self.history_from_ms.is_some_and(|first| to_ms <= first)
+            || self
+                .gaps
+                .iter()
+                .any(|gap| gap.start_ms < to_ms && gap.end_ms > from_ms)
+    }
+}
+
+/// Columns for `buckets`; a bucket overlapping a span in `pressure` is under pressure, and one
+/// with no reading is suspended when `away` explains it.
 fn columns(
     buckets: &[Option<Reading>],
     start_ms: i64,
     step_ms: i64,
     pressure: &[(i64, i64)],
+    away: &Away,
 ) -> Columns {
     let mut columns = Columns::default();
     for (at, reading) in buckets.iter().enumerate() {
@@ -895,7 +957,10 @@ fn columns(
             .push(reading.map(|r| r.disk_latency_ms));
         columns.gpu.push(reading.and_then(|r| r.gpu_pct));
         columns.probe_lag.push(reading.map(|r| r.probe_lag_ms));
-        columns.state.push(pc_state(reading.as_ref(), in_episode));
+        let explained = reading.is_none() && away.overlaps(from_ms, to_ms);
+        columns
+            .state
+            .push(pc_state(reading.as_ref(), in_episode, explained));
     }
     columns
 }
@@ -905,10 +970,10 @@ mod tests {
     use std::path::Path;
 
     use vestigium_core::{
-        Cause, Confidence, CoreLoad, DiskLoad, Evidence, MachineInfo, Metric, MinuteSample,
-        OccurrenceKind, ProcessTop, Sample, Severity, Suspect, Trigger, Window,
+        Cause, Confidence, CoreLoad, DiskLoad, Evidence, GapReason, MachineInfo, Metric,
+        MinuteSample, OccurrenceKind, ProcessTop, Sample, Severity, Suspect, Trigger, Window,
     };
-    use vestigium_store::{Segment, Series, encode};
+    use vestigium_store::{Batch, Segment, Series, encode};
 
     use super::*;
 
@@ -922,13 +987,13 @@ mod tests {
             cpu_pct,
             dpc_pct: 0.2,
             isr_pct: 0.1,
-            perf_limit_pct: 100.0,
-            proc_perf_pct: 100.0,
+            perf_limit_pct: Some(100.0),
+            proc_perf_pct: Some(100.0),
             mem_total_bytes: 16 << 30,
             mem_avail_bytes: 8 << 30,
             commit_bytes: 8 << 30,
             commit_limit_bytes: 32 << 30,
-            hard_faults_per_s: 0.0,
+            hard_faults_per_s: Some(0.0),
             gpu_pct: Some(2.0),
             probe_max_lag_ms: 1.0,
             sampler_lag_ms: 1.0,
@@ -943,9 +1008,9 @@ mod tests {
             disks: vec![DiskLoad {
                 name: "0 C:".to_string(),
                 active_pct: 4.0,
-                latency_ms: 1.0,
-                queue_len: 0.0,
-                bytes_per_s: 0.0,
+                latency_ms: Some(1.0),
+                queue_len: Some(0.0),
+                bytes_per_s: Some(0.0),
             }],
         }
     }
@@ -1032,9 +1097,107 @@ mod tests {
                 .iter()
                 .all(Option::is_none)
         );
-        assert_eq!(timeline.columns.state[90], PcState::Suspended);
+        assert_eq!(timeline.columns.state[90], PcState::NoReading);
         assert_eq!(cpu[120], Some(10.0));
         assert_eq!(timeline.columns.state[120], PcState::Calm);
+    }
+
+    #[test]
+    fn no_reading_without_a_gap_is_not_suspended() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let samples: Vec<Sample> = (0..60)
+            .chain(120..180)
+            .chain(240..300)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &samples);
+        // The hole from second 120 back to 60 is a recorded pause; the one after 180 is not.
+        store
+            .append_batch(&Batch {
+                gaps: vec![Gap {
+                    start_ms: DAY_START_MS + 60_000,
+                    end_ms: DAY_START_MS + 120_000,
+                    reason: GapReason::Paused,
+                }],
+                ..Batch::default()
+            })
+            .unwrap();
+
+        let timeline = history
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 300_000,
+                1_000,
+                &Recent::default(),
+            )
+            .unwrap();
+
+        let state = &timeline.columns.state;
+        assert_eq!(state[90], PcState::Suspended, "a recorded pause");
+        assert_eq!(state[210], PcState::NoReading, "a hole nobody explained");
+        assert_eq!(state[30], PcState::Calm);
+    }
+
+    #[test]
+    fn the_time_before_the_history_began_was_never_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let samples: Vec<Sample> = (60..120)
+            .map(|s| sample(DAY_START_MS + s * SECOND_MS, 10.0))
+            .collect();
+        write_samples(&mut store, &samples);
+
+        let timeline = history
+            .timeline(
+                DAY_START_MS,
+                DAY_START_MS + 120_000,
+                1_000,
+                &Recent::default(),
+            )
+            .unwrap();
+
+        assert_eq!(timeline.columns.state[10], PcState::Suspended);
+        assert_eq!(timeline.columns.state[90], PcState::Calm);
+    }
+
+    #[test]
+    fn tweak_history_counts_the_time_the_monitor_sampled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let now_ms = DAY_START_MS + 20 * 24 * HOUR_MS;
+        let applied_ms = now_ms - 10 * 24 * HOUR_MS;
+        let change = vestigium_core::TweakChange {
+            tweak: vestigium_core::TweakId::GameDvr,
+            subject: None,
+            undo_of: None,
+            results: Vec::new(),
+            restore_point: None,
+            journal: None,
+        };
+        store
+            .record_tweak_change(&change, applied_ms, vestigium_core::Applier::User)
+            .unwrap();
+        // Two hours around the change, then a stretch the watcher was not running.
+        let minutes: Vec<MinuteSample> = (-60..60)
+            .map(|m| minute(applied_ms + m * MINUTE_MS, 3.0))
+            .collect();
+        store
+            .append(&[Segment {
+                series: Series::Minutes,
+                start_ms: minutes[0].ts_ms,
+                end_ms: minutes[minutes.len() - 1].ts_ms,
+                data: encode(&minutes),
+            }])
+            .unwrap();
+
+        let found = history
+            .tweak_history(now_ms, 30 * 24 * HOUR_MS, 30 * 24 * HOUR_MS)
+            .unwrap();
+
+        let ms: u32 = found.covered.iter().map(|c| c.ms).sum();
+        assert_eq!(ms, 120 * 1_000, "one sample a minute in the stored minutes");
+        assert!(found.covered.iter().all(|c| c.minute_ms % MINUTE_MS == 0));
     }
 
     #[test]
@@ -1112,6 +1275,41 @@ mod tests {
         assert!(marks.occurrences.is_empty());
         assert_eq!(history.occurrence(1).unwrap(), None);
         assert!(!dir.path().join("vestigium.db").exists());
+    }
+
+    #[test]
+    fn marks_leave_out_the_event_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        store
+            .append_batch(&vestigium_store::Batch {
+                events: vec![WinEvent {
+                    ts_ms: DAY_START_MS + HOUR_MS,
+                    channel: vestigium_core::Channel::System,
+                    provider: "stornvme".to_string(),
+                    id: 129,
+                    record_id: 7,
+                    level: 3,
+                    meaning: EventMeaning::StorageReset,
+                    data_xml: "<EventData>device path</EventData>".to_string(),
+                }],
+                ..vestigium_store::Batch::default()
+            })
+            .unwrap();
+        store
+            .insert_occurrence(&freeze_at(DAY_START_MS + 2 * HOUR_MS))
+            .unwrap();
+
+        let marks = history
+            .marks(DAY_START_MS, DAY_START_MS + 24 * HOUR_MS)
+            .unwrap();
+
+        assert_eq!(marks.occurrences.len(), 1);
+        let json = serde_json::to_string(&marks).unwrap();
+        assert!(
+            !json.contains("data_xml") && !json.contains("device path"),
+            "{json}"
+        );
     }
 
     #[test]
@@ -1204,9 +1402,9 @@ mod tests {
         let disk = |name: &str, active_pct: f32, latency_ms: f32| DiskLoad {
             name: name.to_string(),
             active_pct,
-            latency_ms,
-            queue_len: 0.0,
-            bytes_per_s: 0.0,
+            latency_ms: Some(latency_ms),
+            queue_len: Some(0.0),
+            bytes_per_s: Some(0.0),
         };
         Sample {
             disks: vec![disk("0 C:", c_active, 2.0), disk("1 D:", d_active, 9.0)],
@@ -1318,6 +1516,96 @@ mod tests {
         assert_eq!(detail.chart.state[90], PcState::Pressure);
         assert_eq!(detail.programs[0].name, "download.exe");
         assert_eq!(detail.programs[0].read_bps, 40e6);
+    }
+
+    #[test]
+    fn capture_page_lists_a_bounded_view_of_a_stored_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let mut stored = vestigium_core::DeepCapture {
+            start_ms: DAY_START_MS,
+            end_ms: DAY_START_MS + 24 * HOUR_MS,
+            kernel: vestigium_core::CaptureSource::Ok,
+            frames: vestigium_core::CaptureSource::Ok,
+            lost_events: 0,
+            drivers: Vec::new(),
+            longest: Vec::new(),
+            apps: Vec::new(),
+            hitches: Vec::new(),
+            hiccups: Vec::new(),
+        };
+        stored.longest = (0..5_000u32)
+            .map(|i| vestigium_core::LongRoutine {
+                ts_ms: DAY_START_MS + i64::from(i) * 17_000,
+                core: 0,
+                module: format!("driver{}.sys", i % 3),
+                kind: vestigium_core::RoutineKind::Dpc,
+                us: 1_000 + i,
+            })
+            .collect();
+        let id = store.insert_capture(&stored).unwrap();
+
+        let dto = history.capture(id).unwrap().unwrap();
+
+        assert!(dto.capture.longest.len() <= vestigium_core::PAGE_LONGEST + 15);
+        assert_eq!(
+            dto.kept.calls, 5_000,
+            "the count is of what is stored, not of the page"
+        );
+        assert_eq!(dto.capture.longest[0].us, 1_000 + 4_999);
+        assert_eq!(store.capture(id).unwrap().unwrap().longest.len(), 5_000);
+    }
+
+    #[test]
+    fn capture_page_keeps_an_app_that_hitches_often_without_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let mut stored = vestigium_core::DeepCapture {
+            start_ms: DAY_START_MS,
+            end_ms: DAY_START_MS + 5 * 60_000,
+            kernel: vestigium_core::CaptureSource::Ok,
+            frames: vestigium_core::CaptureSource::Ok,
+            lost_events: 0,
+            drivers: Vec::new(),
+            longest: Vec::new(),
+            apps: Vec::new(),
+            hitches: Vec::new(),
+            hiccups: Vec::new(),
+        };
+        let app = |name: &str, pid: u32, hitches: u32| vestigium_core::AppFrames {
+            name: name.to_string(),
+            pid,
+            frames: 3_000,
+            median_ms: 7.0,
+            p99_ms: 40.0,
+            worst_ms: 900.0,
+            hitches,
+        };
+        stored.apps = vec![app("stutter.exe", 5, 240), app("steady.exe", 6, 2)];
+        let id = store.insert_capture(&stored).unwrap();
+
+        let dto = history.capture(id).unwrap().unwrap();
+
+        let names: Vec<&str> = dto.capture.apps.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["stutter.exe", "steady.exe"]);
+        assert!(dto.findings.is_empty());
+    }
+
+    #[test]
+    fn program_marks_reports_a_failed_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, mut history) = history(dir.path());
+        let start_ms = DAY_START_MS + HOUR_MS;
+        let id = store.insert_occurrence(&freeze_at(start_ms)).unwrap();
+        let path = dir.path().join("vestigium.db");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE occurrence SET data = x'ff' WHERE id = ?1", [id])
+            .unwrap();
+
+        let read = history.program_marks("game.exe", DAY_START_MS, DAY_START_MS + 24 * HOUR_MS);
+
+        assert!(read.is_err(), "an unreadable row must fail the read");
     }
 
     #[test]

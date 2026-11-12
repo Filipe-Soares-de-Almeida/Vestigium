@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
 
   import Icon, { type IconName } from "./Icon.svelte";
+  import SilentNote from "./SilentNote.svelte";
 
   let {
     title,
@@ -9,6 +10,8 @@
     first = false,
     tight = false,
     fill = false,
+    dim = false,
+    notice,
     actions,
     children,
   }: {
@@ -21,16 +24,21 @@
     tight?: boolean;
     /** The block takes the height of its column; its content decides how to use it. */
     fill?: boolean;
+    /** The content shows old values: it is faded and cannot be pointed at. */
+    dim?: boolean;
+    /** A line under the title saying why the values are old; it fades the content too. */
+    notice?: string;
     actions?: Snippet;
     children: Snippet;
   } = $props();
 </script>
 
-<section class="block" class:first class:tight class:fill>
+<section class="block" class:first class:tight class:fill class:dim={dim || notice !== undefined}>
   <header>
     <h2>{#if icon}<span class="ic"><Icon name={icon} /></span>{/if}{title}</h2>
     {#if actions}<div class="actions">{@render actions()}</div>{/if}
   </header>
+  {#if notice !== undefined}<SilentNote text={notice} />{/if}
   {@render children()}
 </section>
 
@@ -56,6 +64,11 @@
   .block.fill {
     display: flex;
     flex-direction: column;
+  }
+  .block.dim > :global(:not(header, .silent-note)) {
+    opacity: 0.45;
+    filter: saturate(0.4);
+    pointer-events: none;
   }
   header {
     display: flex;

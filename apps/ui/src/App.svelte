@@ -2,7 +2,10 @@
   import { onMount, tick, untrack } from "svelte";
 
   import Banner from "./components/Banner.svelte";
+  import CaptureStrip from "./components/CaptureStrip.svelte";
   import ErrorView from "./components/ErrorView.svelte";
+  import HistoryResetDialog from "./components/HistoryResetDialog.svelte";
+  import Lazy from "./components/Lazy.svelte";
   import Loading from "./components/Loading.svelte";
   import NavPane from "./components/NavPane.svelte";
   import Related from "./components/Related.svelte";
@@ -20,9 +23,7 @@
   import { today } from "./lib/today.svelte";
   import { updates } from "./lib/update.svelte";
   import Activity from "./screens/Activity.svelte";
-  import Capture from "./screens/Capture.svelte";
   import Captures from "./screens/Captures.svelte";
-  import Dumps from "./screens/Dumps.svelte";
   import Home from "./screens/Home.svelte";
   import { morph } from "./lib/morph.svelte";
   import Health from "./screens/Health.svelte";
@@ -35,7 +36,6 @@
   import PeriodPage from "./screens/PeriodPage.svelte";
   import Programs from "./screens/Programs.svelte";
   import Settings from "./screens/Settings.svelte";
-  import Tests from "./screens/Tests.svelte";
   import Tweaks from "./screens/Tweaks.svelte";
 
   let content: HTMLElement | undefined = $state();
@@ -138,6 +138,7 @@
                   <Loading />
                 {:else}
                   <Banner />
+                  <CaptureStrip />
                   {#key router.key}
                     <div class="screen">
                       {#if router.current.screen === "occurrence"}
@@ -157,17 +158,17 @@
                       {:else if router.current.screen === "history"}
                         <History month={router.current.month} scope={router.current.scope} day={router.current.day} />
                       {:else if router.current.screen === "capture"}
-                        <Capture id={router.current.id} />
+                        <Lazy load={() => import("./screens/Capture.svelte")} props={{ id: router.current.id }} />
                       {:else if router.current.screen === "captures"}
                         <Captures forOccurrence={router.current.forOccurrence} />
                       {:else if router.current.screen === "health"}
                         <Health area={router.current.area} />
                       {:else if router.current.screen === "dumps"}
-                        <Dumps id={router.current.id} group={router.current.group} />
+                        <Lazy load={() => import("./screens/Dumps.svelte")} props={{ id: router.current.id, group: router.current.group }} />
                       {:else if router.current.screen === "tweaks"}
                         <Tweaks key={router.current.key} group={router.current.group} />
                       {:else if router.current.screen === "tests"}
-                        <Tests device={router.current.device} />
+                        <Lazy load={() => import("./screens/Tests.svelte")} props={{ device: router.current.device }} />
                       {:else if router.current.screen === "settings"}
                         <Settings />
                       {:else if router.current.screen === "activity"}
@@ -188,6 +189,7 @@
 </div>
 <Toast />
 <UpdateDialog />
+<HistoryResetDialog />
 
 <style>
   .win {

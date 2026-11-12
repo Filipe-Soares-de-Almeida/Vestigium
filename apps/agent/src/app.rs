@@ -1,37 +1,52 @@
+use std::any::Any;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::PathBuf;
+use std::mem;
+use std::panic::{self, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use tray_icon::menu::MenuEvent;
-use vestigium_collect::{EventSubscription, ProbeConfig, WindowsSettings, spawn_probe, wall_ms};
+use vestigium_collect::{
+    EventSubscription, KnownJournal, ProbeConfig, Wake, WindowsHealth, WindowsSettings,
+    interrupt_ms, spawn_probe, wall_ms,
+};
 use vestigium_core::{
-    Applier, DEFAULT_PROBE_PERIOD, GateState, LanguagePref, PlanItem, PressureSpan, ProbeHiccup,
-    ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate, SENSITIVE_FOR, SettingStore,
-    Settings, Timing, carry_out, check_item,
+    Applier, DEFAULT_PROBE_PERIOD, GateState, HistoryReset, LanguagePref, PROGRAM_FRAMES_MAX,
+    PlanItem, PressureSpan, ProbeHiccup, ProgramRing, RING_MS, Reading, RecentState, Ring, RunGate,
+    SENSITIVE_FOR, SettingStore, Settings, Timing, carry_out, check_item,
 };
 use vestigium_i18n::{Catalog, Lang};
 use vestigium_ipc::{
     AgentStatus, ErrorCode, IpcError, NowFrame, PROTOCOL_VERSION, PipeServer, Request, Response,
-    current_user_sid, pipe_name,
+    current_user_sid, pipe_name, pipe_owner,
 };
-use vestigium_store::Store;
+use vestigium_store::{SetAside, Store};
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::HSTRING;
 
+use crate::clock::{steady_to_wall, wall_to_steady};
 use crate::import::{import_captures, import_dumps, import_scans, import_tests, import_tweaks};
+use crate::instance::Instance;
+use crate::orphan::release_orphaned_capture;
+use crate::readings::windows_source_set;
 use crate::sampler::{Wiring, run_sampler};
 use crate::sensitive::SensitiveMode;
+use crate::service::Epoch;
 use crate::tray::{Action, Level, Tray};
-use crate::{autostart, paths, power, shutdown};
+use crate::{autostart, monitor, paths, power, shutdown};
 
 /// How often the history is written to the database.
 const DEFAULT_FLUSH: Duration = Duration::from_secs(300);
 /// How long Exit and logoff wait for the last batch to be written.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+/// Probe ticks that wait for the sampler: about three minutes at the usual ten a second.
+const PROBE_QUEUE: usize = 2_048;
+/// Event Log events that wait for the sampler; the curated ones are far rarer than this.
+const EVENT_QUEUE: usize = 4_096;
 /// How far back the first run reads the curated Windows events.
 const EVENT_BACKFILL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Ten minutes of readings at 1 Hz, with room for late ticks.
@@ -77,6 +92,8 @@ impl Options {
 #[derive(Debug)]
 pub enum StartError {
     AlreadyRunning,
+    /// Another program owns the pipe name; its image, when it could be read.
+    PipeTaken(Option<PathBuf>),
     Failed(String),
 }
 
@@ -85,8 +102,11 @@ fn failed(err: impl std::fmt::Display) -> StartError {
 }
 
 /// What the pipe answers from and acts on, shared with the tray and the sampler.
+/// No code holds two of these mutexes at once.
 pub struct Shared {
     pub gate: Arc<RunGate>,
+    /// Here `paused_until_ms` is an instant of the steady clock; the status answer turns it into
+    /// the wall-clock instant the window shows.
     pub status: Arc<Mutex<AgentStatus>>,
     pub sensitive: Arc<SensitiveMode>,
     pub recent: Arc<Mutex<RecentState>>,
@@ -98,8 +118,9 @@ pub struct Shared {
     /// The pressure episodes of the last ten minutes, ended or under way.
     pub pressure: Arc<Mutex<Vec<PressureSpan>>>,
     pub settings: Arc<Mutex<Settings>>,
-    /// Set when the history was cleared; the sampler drops what it still holds in memory.
-    pub cleared: Arc<AtomicBool>,
+    /// Counts the clears of the history; the sampler drops what it holds in memory when it moves,
+    /// and the storage thread what was queued before it.
+    pub epoch: Arc<Epoch>,
     /// Late probe wakes of the last fifteen minutes, kept while sensitive mode is on.
     pub hiccups: Arc<Mutex<VecDeque<ProbeHiccup>>>,
     /// Where the helper leaves finished deep captures.
@@ -114,6 +135,8 @@ pub struct Shared {
     pub tests_dir: PathBuf,
     /// Set after a scan was stored; the sampler runs a health pass on its next tick.
     pub health_due: Arc<AtomicBool>,
+    /// Set when the pipe could not be bound again; the agent then exits.
+    pub pipe_lost: Arc<AtomicBool>,
     /// This executable, as the Start with Windows entry names it.
     pub exe: PathBuf,
 }
@@ -144,13 +167,19 @@ fn apply_user_tweak(
     }
 }
 
-/// Pauses or resumes watching; a pause with `until_ms` ends by itself at that time.
+/// Pauses or resumes watching; a pause with `until_ms`, a wall-clock instant, ends by itself
+/// when that much time has passed on the steady clock.
 pub fn set_paused(shared: &Shared, paused: bool, until_ms: Option<i64>) {
-    {
-        let mut status = lock(&shared.status);
-        status.paused = paused;
-        status.paused_until_ms = until_ms.filter(|_| paused);
+    let (wall, steady) = (wall_ms(), interrupt_ms());
+    // The status and the gate change under one guard, so they never disagree.
+    let mut status = lock(&shared.status);
+    status.paused = paused;
+    if !paused {
+        status.monitor.resumed_ms = Some(wall);
     }
+    status.paused_until_ms = until_ms
+        .filter(|_| paused)
+        .map(|end| wall_to_steady(end, wall, steady));
     shared.gate.set(if paused {
         GateState::Paused
     } else {
@@ -176,11 +205,19 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             ErrorCode::Protocol,
             format!("protocol {protocol} is not supported; this agent speaks {PROTOCOL_VERSION}"),
         ),
-        Request::Status => Response::Status(AgentStatus {
-            sensitive_until_ms: shared.sensitive.until_ms(),
-            state: Level::of(&lock(&shared.recent)).state(),
-            ..lock(&shared.status).clone()
-        }),
+        Request::Status => {
+            let state = Level::of(&lock(&shared.recent)).state();
+            let base = lock(&shared.status).clone();
+            let (wall, steady) = (wall_ms(), interrupt_ms());
+            let shown = |end: i64| steady_to_wall(end, wall, steady);
+            Response::Status(AgentStatus {
+                paused_until_ms: base.paused_until_ms.map(shown),
+                sensitive_until_ms: shared.sensitive.until_ms().map(shown),
+                state,
+                monitor: monitor::view(&base, wall),
+                ..base
+            })
+        }
         Request::Now => Response::Now(Box::new(lock(&shared.now).clone())),
         Request::Recent => {
             let since_ms = wall_ms() - RING_MS;
@@ -205,7 +242,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             Response::Done
         }
         Request::SetSensitive { on } => {
-            shared.sensitive.set(on, wall_ms());
+            shared.sensitive.set(on, interrupt_ms());
             shutdown::wake();
             Response::Done
         }
@@ -231,8 +268,7 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             let Some(store) = store else {
                 return error(ErrorCode::Failed, "the history database is not open");
             };
-            shared.cleared.store(true, Ordering::Release);
-            if let Err(err) = store.clear_history() {
+            if let Err(err) = shared.epoch.clear(|| store.clear_history()) {
                 return error(ErrorCode::Failed, err);
             }
             lock(&shared.readings).clear();
@@ -253,8 +289,13 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             if !scans.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
             }
-            let (dumps, deleted) = import_dumps(&shared.dumps_dir, store);
-            let tweaks = import_tweaks(&shared.tweaks_dir, store);
+            let dumps = import_dumps(&shared.dumps_dir, store);
+            let tweaks = import_tweaks(
+                &shared.tweaks_dir,
+                store,
+                &mut WindowsSettings,
+                &KnownJournal::new(),
+            );
             let tests = import_tests(&shared.tests_dir, store);
             if !tests.is_empty() {
                 shared.health_due.store(true, Ordering::Release);
@@ -262,8 +303,10 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
             Response::Imported {
                 captures,
                 scans,
-                dumps,
-                deleted,
+                dumps: dumps.ids,
+                deleted: dumps.deleted,
+                refused: dumps.refused,
+                failed: dumps.failed,
                 tweaks,
                 tests,
             }
@@ -289,10 +332,133 @@ pub fn handle(request: Request, shared: &Shared, store: Option<&mut Store>) -> R
     }
 }
 
+/// Binds that failed in a row before the agent gives up on its pipe.
+const PIPE_BIND_TRIES: u32 = 5;
+/// Pause before the pipe is bound again.
+const PIPE_RETRY_WAIT: Duration = Duration::from_secs(1);
+
+/// Why one run of the pipe ended.
+#[derive(Debug)]
+enum PipeFailure {
+    Bind(IpcError),
+    Serve(String),
+}
+
+/// The pipe's own connection to the history, opened again when a request finds it closed.
+struct SecondConnection {
+    db: PathBuf,
+    store: Option<Store>,
+    /// The results waiting from before the start are imported once, on the first open.
+    imported: bool,
+}
+
+impl SecondConnection {
+    fn new(db: PathBuf) -> SecondConnection {
+        SecondConnection {
+            db,
+            store: None,
+            imported: false,
+        }
+    }
+
+    /// The open connection; a closed one is opened now, once per call, and the first open also
+    /// imports the results that were waiting.
+    fn store(&mut self, shared: &Shared) -> Option<&mut Store> {
+        if self.store.is_none() {
+            match Store::open(&self.db) {
+                Ok(store) => self.store = Some(store),
+                Err(err) => lock(&shared.status).last_error = Some(err.to_string()),
+            }
+        }
+        let store = self.store.as_mut()?;
+        if !mem::replace(&mut self.imported, true) {
+            import_captures(&shared.captures_dir, &[], store);
+            import_scans(&shared.scans_dir, store);
+            import_dumps(&shared.dumps_dir, store);
+            import_tweaks(
+                &shared.tweaks_dir,
+                store,
+                &mut WindowsSettings,
+                &KnownJournal::new(),
+            );
+            import_tests(&shared.tests_dir, store);
+        }
+        Some(store)
+    }
+}
+
+/// True for the requests that write to the history through the pipe's own connection.
+fn needs_store(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::SetSettings(_)
+            | Request::ClearHistory
+            | Request::ImportResults
+            | Request::ApplyUserTweak { .. }
+    )
+}
+
+/// Answers a request, opening the pipe's connection first when the request needs it.
+fn serve(request: Request, shared: &Shared, second: &mut SecondConnection) -> Response {
+    let store = if needs_store(&request) {
+        second.store(shared)
+    } else {
+        None
+    };
+    handle(request, shared, store)
+}
+
+/// Runs the pipe until `run_once` returns `Ok`; a run that fails or panics is recorded and started
+/// again, and after five binds in a row that fail the agent is told to exit.
+fn keep_pipe_serving(
+    shared: &Shared,
+    wait: Duration,
+    mut run_once: impl FnMut() -> Result<(), PipeFailure>,
+) {
+    let mut failed_binds = 0;
+    loop {
+        let failure = match panic::catch_unwind(AssertUnwindSafe(&mut run_once)) {
+            Ok(Ok(())) => return,
+            Ok(Err(failure)) => failure,
+            Err(payload) => PipeFailure::Serve(panic_text(payload.as_ref())),
+        };
+        let reason = match failure {
+            PipeFailure::Bind(err) => {
+                failed_binds += 1;
+                err.to_string()
+            }
+            PipeFailure::Serve(reason) => {
+                failed_binds = 0;
+                reason
+            }
+        };
+        lock(&shared.status).last_error = Some(format!("the pipe stopped: {reason}"));
+        if failed_binds >= PIPE_BIND_TRIES {
+            shared.pipe_lost.store(true, Ordering::Relaxed);
+            shutdown::wake();
+            return;
+        }
+        thread::sleep(wait);
+    }
+}
+
+pub(crate) fn panic_text(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| text.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the pipe thread panicked".to_string())
+}
+
 /// Starts the agent and runs it until Exit or the end of the session.
 pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
-    let server = match PipeServer::bind(&pipe_name(&current_user_sid().map_err(failed)?)) {
-        Err(IpcError::AlreadyRunning) => return Err(StartError::AlreadyRunning),
+    let _instance = Instance::acquire()?;
+    let pipe = pipe_name(&current_user_sid().map_err(failed)?);
+    let server = match PipeServer::bind(&pipe) {
+        Err(IpcError::AlreadyRunning) => {
+            let this = std::env::current_exe().map_err(failed)?;
+            return Err(pipe_taken(pipe_owner(&pipe), &this));
+        }
         bound => bound.map_err(failed)?,
     };
     let data_dir = match options.data_dir {
@@ -300,7 +466,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         None => paths::data_dir().ok_or_else(|| failed("the LOCALAPPDATA folder is not set"))?,
     };
     let db = data_dir.join("vestigium.db");
-    let store = Store::open(&db).map_err(failed)?;
+    let (mut store, set_aside) = Store::open_recovering(&db).map_err(failed)?;
     let shared = Arc::new(Shared {
         gate: RunGate::new(),
         status: Arc::new(Mutex::new(AgentStatus {
@@ -314,10 +480,10 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         recent: Arc::new(Mutex::new(RecentState::default())),
         now: Arc::new(Mutex::new(NowFrame::default())),
         readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
-        programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
+        programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
         pressure: Arc::new(Mutex::new(Vec::new())),
         settings: Arc::new(Mutex::new(store.settings().unwrap_or_default())),
-        cleared: Arc::new(AtomicBool::new(false)),
+        epoch: Arc::new(Epoch::default()),
         hiccups: Arc::new(Mutex::new(VecDeque::new())),
         captures_dir: data_dir.join("captures"),
         scans_dir: data_dir.join("scans"),
@@ -325,8 +491,12 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         tweaks_dir: data_dir.join("tweaks"),
         tests_dir: data_dir.join("tests"),
         health_due: Arc::new(AtomicBool::new(false)),
+        pipe_lost: Arc::new(AtomicBool::new(false)),
         exe: std::env::current_exe().map_err(failed)?,
     });
+
+    report_history_reset(&mut store, &data_dir, set_aside.as_ref(), &shared.status);
+    report_setting_notes(&store, &shared.status);
 
     for dir in [
         &shared.captures_dir,
@@ -340,14 +510,19 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         }
     }
 
-    let (probe_tx, probe_rx) = mpsc::channel();
+    release_orphaned_capture();
+
+    let (probe_tx, probe_rx) = mpsc::sync_channel(PROBE_QUEUE);
+    // A few power notices come per sleep and none may be lost, so this queue has no limit.
     let (power_tx, power_rx) = mpsc::channel();
-    let (events_tx, events_rx) = mpsc::channel();
+    let wake = Arc::new(Wake::new().map_err(failed)?);
+    let (events_tx, events_rx) = mpsc::sync_channel(EVENT_QUEUE);
     // Without a readable bookmark the backfill runs again; stored events are not duplicated.
     let bookmark = store.bookmark_xml().ok().flatten();
-    let subscription = EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx)
-        .inspect_err(|err| lock(&shared.status).last_error = Some(err.to_string()))
-        .ok();
+    let subscription =
+        EventSubscription::start(bookmark.as_deref(), EVENT_BACKFILL, events_tx.clone())
+            .inspect_err(|err| lock(&shared.status).last_error = Some(err.to_string()))
+            .ok();
     spawn_probe(shared.sensitive.probe(), shared.gate.clone(), probe_tx).map_err(failed)?;
     let sampler = Arc::new(
         run_sampler(
@@ -358,8 +533,12 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 gate: shared.gate.clone(),
                 probe_rx,
                 power_rx,
+                wake: wake.clone(),
                 events_rx,
                 subscription,
+                resubscribe: Some(Box::new(move |bookmark| {
+                    EventSubscription::start(bookmark, EVENT_BACKFILL, events_tx.clone())
+                })),
                 sensitive: shared.sensitive.clone(),
                 status: shared.status.clone(),
                 recent: shared.recent.clone(),
@@ -369,40 +548,53 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
                 pressure: shared.pressure.clone(),
                 hiccups: shared.hiccups.clone(),
                 settings: shared.settings.clone(),
-                cleared: shared.cleared.clone(),
+                epoch: shared.epoch.clone(),
                 health_due: shared.health_due.clone(),
                 ring_path: Some(data_dir.join("blackbox.ring")),
+                source_set: windows_source_set(),
+                health: Box::new(WindowsHealth),
             },
         )
         .map_err(failed)?,
     );
     let stop = {
         let gate = shared.gate.clone();
+        let wake = wake.clone();
         move || {
             gate.set(GateState::Stopping);
+            wake.set();
             sampler.wait(STOP_TIMEOUT);
         }
     };
 
     {
         let shared = shared.clone();
+        let pipe = pipe.clone();
         // Settings are written through a connection of the pipe's own.
-        let mut settings_store = Store::open(&db).ok();
-        if let Some(store) = settings_store.as_mut() {
-            import_captures(&shared.captures_dir, &[], store);
-            import_scans(&shared.scans_dir, store);
-            import_dumps(&shared.dumps_dir, store);
-            import_tweaks(&shared.tweaks_dir, store);
-            import_tests(&shared.tests_dir, store);
-        }
+        let mut second = SecondConnection::new(db.clone());
+        second.store(&shared);
+        let mut first = Some(server);
         thread::Builder::new()
             .name("pipe".to_string())
             .spawn(move || {
-                server.serve(|request| handle(request, &shared, settings_store.as_mut()))
+                keep_pipe_serving(&shared, PIPE_RETRY_WAIT, || {
+                    let server = match first.take() {
+                        Some(ready) => ready,
+                        None => PipeServer::bind(&pipe).map_err(PipeFailure::Bind)?,
+                    };
+                    let ended = server.serve(|request| serve(request, &shared, &mut second));
+                    Err(PipeFailure::Serve(ended.err().map_or_else(
+                        || "the pipe closed".to_string(),
+                        |err| err.to_string(),
+                    )))
+                })
             })
             .map_err(failed)?;
     }
 
+    if let Err(err) = autostart::repair(&shared.exe) {
+        lock(&shared.status).last_error = Some(err.to_string());
+    }
     let lang = lang_for(lock(&shared.settings).language, system);
     let tray =
         Tray::new(&Catalog::load(lang), lang, &shared.exe, paths::ui_exe()).map_err(failed)?;
@@ -411,7 +603,7 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
         let stop = stop.clone();
         let window = shutdown::watch_session_end(move || stop()).map_err(failed)?;
         power::watch(window, move |event| {
-            let _ = power_tx.send(event);
+            power::announce(event, &power_tx, &wake, power::SUSPEND_WAIT);
         })
         .map_err(failed)?;
     }
@@ -420,6 +612,9 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
             if tray.on_menu(&event.id, &shared) == Action::Exit {
                 shutdown::quit();
             }
+        }
+        if shared.pipe_lost.load(Ordering::Relaxed) {
+            shutdown::quit();
         }
         let lang = lang_for(lock(&shared.settings).language, system);
         if lang != tray.lang() {
@@ -431,9 +626,40 @@ pub fn run(system: Lang, options: Options) -> Result<(), StartError> {
     Ok(())
 }
 
+/// What a held pipe name means once the per-user guard is ours: no watcher of this user runs in this
+/// session, so the owner is either this program in another session or a stranger.
+fn pipe_taken(owner: Option<PathBuf>, this: &Path) -> StartError {
+    match owner {
+        Some(owner) if same_program(&owner, this) => StartError::AlreadyRunning,
+        other => StartError::PipeTaken(other),
+    }
+}
+
+fn same_program(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+/// Says that another program holds the pipe name.
+pub fn show_pipe_taken(catalog: &Catalog, owner: Option<&Path>) {
+    let body = match owner {
+        Some(owner) => catalog.format(
+            "error.startup.pipe_taken",
+            &[("owner", &owner.to_string_lossy())],
+        ),
+        None => catalog.get("error.startup.pipe_taken_unknown").to_string(),
+    };
+    message_box(catalog, &body);
+}
+
 /// Shows why the agent could not start.
 pub fn show_error(catalog: &Catalog, reason: &str) {
-    let body = catalog.format("error.startup.body", &[("error", reason)]);
+    message_box(
+        catalog,
+        &catalog.format("error.startup.body", &[("error", reason)]),
+    );
+}
+
+fn message_box(catalog: &Catalog, body: &str) {
     // SAFETY: a modal box with two strings that outlive the call.
     unsafe {
         MessageBoxW(
@@ -449,10 +675,54 @@ pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Tells the status about a history file set aside: the one just renamed, or one an earlier start
+/// remembered while it is still in the data folder.
+fn report_history_reset(
+    store: &mut Store,
+    data_dir: &Path,
+    set_aside: Option<&SetAside>,
+    status: &Mutex<AgentStatus>,
+) {
+    let reset = match set_aside {
+        Some(aside) => {
+            let file = aside.path.file_name().map(|name| name.to_string_lossy());
+            let reset = file.map(|file| HistoryReset {
+                file: file.into_owned(),
+                at_ms: wall_ms(),
+                tweaks: aside.carried.tweaks,
+                settings: aside.carried.settings,
+                machine: aside.carried.machine,
+            });
+            if let Some(reset) = &reset {
+                let _ = store.set_history_reset(reset);
+                lock(status).last_error = Some(format!(
+                    "the history file was damaged and set aside as {}",
+                    reset.file
+                ));
+            }
+            reset
+        }
+        None => store.history_reset().ok().flatten().filter(|reset| {
+            !reset.file.contains(['/', '\\']) && data_dir.join(&reset.file).is_file()
+        }),
+    };
+    lock(status).monitor.history_reset = reset;
+}
+
+/// Tells the status what the stored settings had to replace by a default, when anything.
+fn report_setting_notes(store: &Store, status: &Mutex<AgentStatus>) {
+    let Ok(notes) = store.settings_notes() else {
+        return;
+    };
+    if !notes.is_empty() {
+        lock(status).last_error = Some(notes.join("; "));
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use vestigium_core::{EpisodeKind, HungWindow, Retention};
-    use vestigium_ipc::{PROTOCOL_VERSION, TrayState};
+    use vestigium_ipc::{MonitorState, PROTOCOL_VERSION, TrayState};
 
     use super::*;
 
@@ -495,6 +765,7 @@ mod tests {
             tweak: TweakId::GameDvr,
             subject: None,
             undo_of: None,
+            undo_journal: None,
             changes: dvr
                 .iter()
                 .map(|s| SettingChange {
@@ -557,7 +828,7 @@ mod tests {
         assert_eq!(options.flush, DEFAULT_FLUSH);
     }
 
-    fn shared() -> Shared {
+    pub(crate) fn shared() -> Shared {
         Shared {
             gate: RunGate::new(),
             status: Arc::new(Mutex::new(AgentStatus::default())),
@@ -565,10 +836,10 @@ mod tests {
             recent: Arc::new(Mutex::new(RecentState::default())),
             now: Arc::new(Mutex::new(NowFrame::default())),
             readings: Arc::new(Mutex::new(Ring::with_capacity(READINGS_KEPT))),
-            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS))),
+            programs: Arc::new(Mutex::new(ProgramRing::new(RING_MS, PROGRAM_FRAMES_MAX))),
             pressure: Arc::new(Mutex::new(Vec::new())),
             settings: Arc::new(Mutex::new(Settings::default())),
-            cleared: Arc::new(AtomicBool::new(false)),
+            epoch: Arc::new(Epoch::default()),
             hiccups: Arc::new(Mutex::new(VecDeque::new())),
             captures_dir: PathBuf::from("captures"),
             scans_dir: PathBuf::from("scans"),
@@ -576,8 +847,70 @@ mod tests {
             tweaks_dir: PathBuf::from("tweaks"),
             tests_dir: PathBuf::from("tests"),
             health_due: Arc::new(AtomicBool::new(false)),
+            pipe_lost: Arc::new(AtomicBool::new(false)),
             exe: PathBuf::from(r"C:\Program Files\Vestigium\Vestigium.exe"),
         }
+    }
+
+    #[test]
+    fn a_pipe_held_by_this_program_is_a_running_watcher() {
+        let this = Path::new(r"C:\Apps\Vestigium\Vestigium.exe");
+        let same = Path::new(r"c:\apps\vestigium\vestigium.exe");
+
+        assert!(matches!(
+            pipe_taken(Some(same.to_path_buf()), this),
+            StartError::AlreadyRunning
+        ));
+    }
+
+    #[test]
+    fn a_pipe_held_by_another_program_is_an_error() {
+        let this = Path::new(r"C:\Apps\Vestigium\Vestigium.exe");
+        let other = PathBuf::from(r"C:\Tools\other.exe");
+
+        assert!(matches!(
+            pipe_taken(Some(other.clone()), this),
+            StartError::PipeTaken(Some(found)) if found == other
+        ));
+        assert!(matches!(
+            pipe_taken(None, this),
+            StartError::PipeTaken(None)
+        ));
+    }
+
+    #[test]
+    fn pipe_thread_serves_again_after_a_failed_run() {
+        let shared = shared();
+        let mut runs = 0;
+
+        keep_pipe_serving(&shared, Duration::ZERO, || {
+            runs += 1;
+            match runs {
+                1 => Err(PipeFailure::Serve("the pipe broke".to_string())),
+                2 => panic!("a handler failed"),
+                _ => Ok(()),
+            }
+        });
+
+        assert_eq!(runs, 3);
+        let last_error = lock(&shared.status).last_error.clone().unwrap();
+        assert!(last_error.contains("a handler failed"), "{last_error}");
+        assert!(!shared.pipe_lost.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn pipe_thread_gives_up_after_repeated_bind_failures() {
+        let shared = shared();
+        let mut runs = 0;
+
+        keep_pipe_serving(&shared, Duration::ZERO, || {
+            runs += 1;
+            Err(PipeFailure::Bind(IpcError::AlreadyRunning))
+        });
+
+        assert_eq!(runs, PIPE_BIND_TRIES);
+        assert!(shared.pipe_lost.load(Ordering::Relaxed));
+        assert!(lock(&shared.status).last_error.is_some());
     }
 
     #[test]
@@ -612,7 +945,8 @@ mod tests {
     fn status_reflects_the_agent() {
         let shared = shared();
         lock(&shared.status).started_at_ms = 42;
-        shared.sensitive.set(true, 1_000);
+        let steady = interrupt_ms();
+        shared.sensitive.set(true, steady);
         *lock(&shared.recent) = RecentState {
             occurrences: 1,
             severe: 1,
@@ -625,8 +959,130 @@ mod tests {
         };
 
         assert_eq!(status.started_at_ms, 42);
-        assert_eq!(status.sensitive_until_ms, Some(1_000 + 30 * 60 * 1_000));
+        // Thirty minutes from now on the wall clock, whatever the clocks read.
+        let end = status.sensitive_until_ms.unwrap();
+        assert!((end - (wall_ms() + 30 * 60 * 1_000)).abs() < 2_000, "{end}");
         assert_eq!(status.state, TrayState::Problem);
+    }
+
+    fn status_of(shared: &Shared) -> AgentStatus {
+        let Response::Status(status) = handle(Request::Status, shared, None) else {
+            panic!("not a status");
+        };
+        status
+    }
+
+    #[test]
+    fn status_says_no_reading_when_the_last_sample_is_old() {
+        let shared = shared();
+        {
+            let mut status = lock(&shared.status);
+            status.started_at_ms = wall_ms() - 3_600_000;
+            status.last_sample_ms = Some(wall_ms() - 60_000);
+            status.last_error = Some("the counters closed".to_string());
+        }
+
+        let status = status_of(&shared);
+
+        assert_eq!(status.monitor.state, MonitorState::NoReading);
+        assert!(
+            status
+                .monitor
+                .no_reading_since_ms
+                .is_some_and(|at| at < wall_ms() - 59_000)
+        );
+
+        lock(&shared.status).last_sample_ms = Some(wall_ms());
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
+    }
+
+    #[test]
+    fn a_pause_or_a_suspend_is_not_no_reading() {
+        let shared = shared();
+        {
+            let mut status = lock(&shared.status);
+            status.started_at_ms = wall_ms() - 3_600_000;
+            status.last_sample_ms = Some(wall_ms() - 600_000);
+        }
+
+        set_paused(&shared, true, None);
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
+
+        set_paused(&shared, false, None);
+        assert_eq!(
+            status_of(&shared).monitor.state,
+            MonitorState::Watching,
+            "a resume gives the sampler a few seconds"
+        );
+
+        lock(&shared.status).monitor.resumed_ms = None;
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::NoReading);
+
+        lock(&shared.status).suspended = true;
+        assert_eq!(status_of(&shared).monitor.state, MonitorState::Watching);
+    }
+
+    #[test]
+    fn sensitive_mode_ignores_a_wall_clock_jump() {
+        let shared = shared();
+        handle(Request::SetSensitive { on: true }, &shared, None);
+
+        // The deadline is kept on the steady clock, thirty minutes ahead of it: a wall-clock
+        // step cannot reach it, and the mode ends when the steady clock gets there.
+        let end = shared.sensitive.until_ms().unwrap();
+        let steady = interrupt_ms();
+        assert!((end - (steady + 30 * 60 * 1_000)).abs() < 2_000, "{end}");
+        assert!(!shared.sensitive.expire(steady + 29 * 60 * 1_000));
+        assert!(shared.sensitive.expire(end));
+
+        // What the window is told moves with the wall clock it is shown against.
+        let (wall, now) = (1_900_000_000_000, 5_000_000);
+        assert_eq!(steady_to_wall(now + 60_000, wall, now), wall + 60_000);
+    }
+
+    /// Runs two closures on their own threads and fails if either is still stuck after five seconds.
+    pub(crate) fn both_finish(
+        first: impl FnOnce() + Send + 'static,
+        second: impl FnOnce() + Send + 'static,
+    ) {
+        let (done, finished) = mpsc::channel();
+        let sender = done.clone();
+        thread::spawn(move || {
+            first();
+            let _ = sender.send("first");
+        });
+        thread::spawn(move || {
+            second();
+            let _ = done.send("second");
+        });
+        for _ in 0..2 {
+            finished
+                .recv_timeout(Duration::from_secs(5))
+                .expect("a thread is stuck: the two locks were taken in opposite orders");
+        }
+    }
+
+    #[test]
+    fn status_answer_never_deadlocks_with_a_status_then_recent_reader() {
+        let shared = Arc::new(shared());
+        let answering = Arc::clone(&shared);
+        let reading = Arc::clone(&shared);
+
+        both_finish(
+            move || {
+                for _ in 0..3_000 {
+                    handle(Request::Status, &answering, None);
+                }
+            },
+            move || {
+                for _ in 0..300 {
+                    let status = lock(&reading.status);
+                    thread::sleep(Duration::from_millis(1));
+                    let recent = lock(&reading.recent);
+                    drop((status, recent));
+                }
+            },
+        );
     }
 
     #[test]
@@ -731,6 +1187,162 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_setting_replaced_by_its_default_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        drop(Store::open(&db).unwrap());
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute(
+                "INSERT INTO setting (key, value) VALUES ('retention', ?1)",
+                [r#"{"samples_hours":10,"minutes_days":60,"records_days":400}"#],
+            )
+            .unwrap();
+        let store = Store::open(&db).unwrap();
+        let shared = shared();
+
+        report_setting_notes(&store, &shared.status);
+
+        let last_error = lock(&shared.status).last_error.clone().unwrap();
+        assert!(last_error.contains("samples_hours"), "{last_error}");
+        assert_eq!(store.settings().unwrap().retention.minutes_days, 60);
+    }
+
+    fn damaged_history(dir: &Path) -> PathBuf {
+        let db = dir.join("vestigium.db");
+        fs::write(&db, vec![0x5A; 4096]).unwrap();
+        db
+    }
+
+    #[test]
+    fn the_status_names_the_file_set_aside_after_a_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = damaged_history(dir.path());
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &shared.status);
+
+        let status = lock(&shared.status).clone();
+        let reset = status
+            .monitor
+            .history_reset
+            .expect("the recovery is reported");
+        assert!(
+            reset.file.starts_with("vestigium.db.corrupt-"),
+            "{}",
+            reset.file
+        );
+        assert!(dir.path().join(&reset.file).is_file());
+        assert!(!reset.tweaks && !reset.settings && !reset.machine);
+        assert!(status.last_error.unwrap().contains(&reset.file));
+    }
+
+    #[test]
+    fn a_healthy_start_reports_no_history_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, aside) = Store::open_recovering(&dir.path().join("vestigium.db")).unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &shared.status);
+
+        assert_eq!(lock(&shared.status).monitor.history_reset, None);
+        assert_eq!(lock(&shared.status).last_error, None);
+    }
+
+    #[test]
+    fn a_restart_reports_the_set_aside_file_while_it_is_still_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = damaged_history(dir.path());
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let first = shared();
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &first.status);
+        let reset = lock(&first.status).monitor.history_reset.clone().unwrap();
+        drop(store);
+
+        let (mut store, aside) = Store::open_recovering(&db).unwrap();
+        let second = shared();
+        report_history_reset(&mut store, dir.path(), aside.as_ref(), &second.status);
+
+        assert_eq!(aside, None);
+        assert_eq!(
+            lock(&second.status).monitor.history_reset,
+            Some(reset.clone())
+        );
+
+        fs::remove_file(dir.path().join(&reset.file)).unwrap();
+        let third = shared();
+        report_history_reset(&mut store, dir.path(), None, &third.status);
+        assert_eq!(lock(&third.status).monitor.history_reset, None);
+    }
+
+    #[test]
+    fn a_remembered_name_that_points_outside_the_data_folder_is_not_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        fs::create_dir(&data).unwrap();
+        fs::write(dir.path().join("outside.db"), b"x").unwrap();
+        let (mut store, _) = Store::open_recovering(&data.join("vestigium.db")).unwrap();
+        store
+            .set_history_reset(&HistoryReset {
+                file: "..\\outside.db".to_string(),
+                at_ms: 1,
+                tweaks: true,
+                settings: true,
+                machine: true,
+            })
+            .unwrap();
+        let shared = shared();
+
+        report_history_reset(&mut store, &data, None, &shared.status);
+
+        assert_eq!(lock(&shared.status).monitor.history_reset, None);
+    }
+
+    #[test]
+    fn a_history_that_opens_late_serves_the_requests_that_follow() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("data");
+        fs::write(&blocker, b"a file where the data folder should be").unwrap();
+        let shared = shared();
+        let mut second = SecondConnection::new(blocker.join("vestigium.db"));
+        let settings = Settings {
+            language: LanguagePref::PtBr,
+            ..Settings::default()
+        };
+
+        let closed = serve(Request::SetSettings(settings), &shared, &mut second);
+        assert!(matches!(
+            closed,
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert!(lock(&shared.status).last_error.is_some());
+
+        fs::remove_file(&blocker).unwrap();
+        let opened = serve(Request::SetSettings(settings), &shared, &mut second);
+
+        assert_eq!(opened, Response::Done);
+        let stored = Store::open(&blocker.join("vestigium.db")).unwrap();
+        assert_eq!(stored.settings().unwrap(), settings);
+    }
+
+    #[test]
+    fn a_request_that_needs_no_history_does_not_open_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        let shared = shared();
+        let mut second = SecondConnection::new(db.clone());
+
+        let answer = serve(Request::Now, &shared, &mut second);
+
+        assert!(matches!(answer, Response::Now(_)));
+        assert!(!db.exists());
+    }
+
+    #[test]
     fn clear_history_empties_the_store_and_what_the_screens_read() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::open(&dir.path().join("vestigium.db")).unwrap();
@@ -760,9 +1372,46 @@ mod tests {
             handle(Request::ClearHistory, &shared, Some(&mut store)),
             Response::Done
         );
-        assert!(shared.cleared.load(Ordering::Acquire));
+        assert_eq!(shared.epoch.current(), 1);
         assert_eq!(lock(&shared.readings).iter().count(), 0);
         assert_eq!(*lock(&shared.recent), RecentState::default());
+    }
+
+    #[test]
+    fn a_failed_clear_keeps_the_live_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vestigium.db");
+        let mut store = Store::open(&db).unwrap();
+        let shared = shared();
+        lock(&shared.readings).push(Reading {
+            ts_ms: wall_ms(),
+            cpu_pct: 5.0,
+            mem_used_pct: Some(30.0),
+            disk_active_pct: 1.0,
+            disk_latency_ms: 0.5,
+            gpu_pct: None,
+            probe_lag_ms: 1.0,
+        });
+        let refuser = rusqlite::Connection::open(&db).unwrap();
+        refuser
+            .execute_batch(
+                "INSERT INTO gap (start_ms, end_ms, reason) VALUES (1, 2, 0);
+                 CREATE TRIGGER refuse_clear BEFORE DELETE ON gap
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END",
+            )
+            .unwrap();
+
+        let answer = handle(Request::ClearHistory, &shared, Some(&mut store));
+
+        assert!(matches!(
+            answer,
+            Response::Error {
+                code: ErrorCode::Failed,
+                ..
+            }
+        ));
+        assert_eq!(shared.epoch.current(), 0, "a failed clear starts no epoch");
+        assert_eq!(lock(&shared.readings).iter().count(), 1);
     }
 
     #[test]
@@ -791,6 +1440,8 @@ mod tests {
                 scans: Vec::new(),
                 dumps: Vec::new(),
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 tweaks: Vec::new(),
                 tests: Vec::new(),
             }
@@ -811,6 +1462,8 @@ mod tests {
                 scans: vec![1],
                 dumps: Vec::new(),
                 deleted: 0,
+                refused: 0,
+                failed: 0,
                 tweaks: Vec::new(),
                 tests: Vec::new(),
             }
@@ -856,6 +1509,31 @@ mod tests {
     }
 
     #[test]
+    fn the_pause_status_and_the_gate_never_disagree_while_the_status_is_held() {
+        let shared = Arc::new(shared());
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (shared, done) = (shared.clone(), done.clone());
+            thread::spawn(move || {
+                for round in 0..200_000 {
+                    set_paused(&shared, round % 2 == 0, None);
+                }
+                done.store(true, Ordering::Release);
+            })
+        };
+        let mut disagreements = 0;
+        while !done.load(Ordering::Acquire) {
+            let status = lock(&shared.status);
+            if status.paused != (shared.gate.state() == GateState::Paused) {
+                disagreements += 1;
+            }
+        }
+        writer.join().unwrap();
+
+        assert_eq!(disagreements, 0);
+    }
+
+    #[test]
     fn program_recent_answers_from_the_ring() {
         let shared = shared();
         let build = vestigium_core::ProcessSample {
@@ -883,32 +1561,55 @@ mod tests {
     #[test]
     fn a_timed_pause_reports_its_end_until_resumed() {
         let shared = shared();
+        let until = wall_ms() + 600_000;
 
         handle(
             Request::SetPaused {
                 paused: true,
-                until_ms: Some(1_700_000_000_000),
+                until_ms: Some(until),
             },
             &shared,
             None,
         );
-        assert!(matches!(
-            handle(Request::Status, &shared, None),
-            Response::Status(AgentStatus {
-                paused_until_ms: Some(1_700_000_000_000),
-                ..
-            })
-        ));
+        let Response::Status(status) = handle(Request::Status, &shared, None) else {
+            panic!("not a status");
+        };
+        assert!((status.paused_until_ms.unwrap() - until).abs() < 2_000);
 
         handle(
             Request::SetPaused {
                 paused: false,
-                until_ms: Some(1_700_000_000_000),
+                until_ms: Some(until),
             },
             &shared,
             None,
         );
         assert_eq!(lock(&shared.status).paused_until_ms, None);
+    }
+
+    #[test]
+    fn timed_pause_ignores_a_wall_clock_jump() {
+        let shared = shared();
+        handle(
+            Request::SetPaused {
+                paused: true,
+                until_ms: Some(wall_ms() + 600_000),
+            },
+            &shared,
+            None,
+        );
+
+        // Kept ten minutes ahead on the steady clock, which only the sleeping system moves.
+        let end = lock(&shared.status).paused_until_ms.unwrap();
+        assert!((end - (interrupt_ms() + 600_000)).abs() < 2_000, "{end}");
+
+        // A wall-clock step changes what the window is shown, never how long is left.
+        let (steady, wall) = (end - 600_000, 1_900_000_000_000);
+        let wall_after_step = wall - 3_600_000;
+        assert_eq!(
+            steady_to_wall(end, wall_after_step, steady) - wall_after_step,
+            600_000
+        );
     }
 
     #[test]

@@ -28,7 +28,7 @@ export type CheckResult =
 
 type Available = Extract<CheckResult, { status: "available" }>;
 
-type Progress =
+export type Progress =
   | { kind: "chunk"; done: number; total: number | null }
   | { kind: "installing" }
   | { kind: "failed"; message: string };

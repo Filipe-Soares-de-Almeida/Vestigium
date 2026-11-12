@@ -3,45 +3,67 @@
   import Icon from "../components/Icon.svelte";
   import Mark from "../components/Mark.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
+  import ToneMark from "../components/ToneMark.svelte";
   import { formatDuration, formatTime } from "../lib/format";
+  import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
-  import { buildGroups, entryHref } from "../lib/groups";
+  import { buildGroups, entryHref, hasLate, hasLive } from "../lib/groups";
   import { t, tn } from "../lib/i18n.svelte";
+  import { passState } from "../lib/monitor";
   import { morph } from "../lib/morph.svelte";
   import { href } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
   import { today } from "../lib/today.svelte";
+  import { notCurrent } from "./health/words";
   import { occurrenceMark } from "./today/text";
 
   const status = $derived(shellStatus());
   const tiles = $derived(buildGroups().filter((g) => !g.hidden));
 
+  /** What a card says: a line and a mark; no mark while its data is still being read. */
+  type Card = { line: string; kind: StatusKind | null };
+
   const open = $derived(health.dto?.open.length ?? 0);
   const critical = $derived(health.critical);
-  const healthLine = $derived(
-    open === 0
-      ? t("ui.home.health.none")
-      : critical
-        ? `${tn("ui.shell.nav.health.open", open)} · ${tn("ui.shell.nav.health.critical", critical)}`
-        : tn("ui.shell.nav.health.open", open),
-  );
-  const healthKind: StatusKind = $derived(critical ? "critical" : open ? "attention" : "ok");
-  const tweakLine = $derived(
-    tweaks.recommended ? tn("ui.shell.nav.tweaks.signals", tweaks.recommended) : t("ui.home.tweaks.none"),
-  );
-  const tweakKind: StatusKind = $derived(tweaks.recommended ? "attention" : "ok");
+  const healthCard = $derived.by((): Card => {
+    if (health.dto === null) {
+      return health.error !== null
+        ? { line: t("ui.home.health.failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    if (open === 0) return notCurrent(passState(app.link, Date.now())) ?? { line: t("ui.home.health.none"), kind: "ok" };
+    const line = critical
+      ? `${tn("ui.shell.nav.health.open", open)} · ${tn("ui.shell.nav.health.critical", critical)}`
+      : tn("ui.shell.nav.health.open", open);
+    return { line, kind: critical ? "critical" : "attention" };
+  });
+  const tweakCard = $derived.by((): Card => {
+    if (tweaks.dto === null) {
+      return tweaks.error !== null
+        ? { line: t("ui.home.tweaks.failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    return tweaks.recommended
+      ? { line: tn("ui.shell.nav.tweaks.signals", tweaks.recommended), kind: "attention" }
+      : { line: t("ui.home.tweaks.none"), kind: "ok" };
+  });
 
   const worst = $derived(today.worst);
   const worstMark = $derived(worst ? occurrenceMark(worst) : { kind: "ok" as StatusKind, word: "" });
-  const activityLine = $derived(
-    worst
-      ? t("ui.home.activity.worst", {
-          time: formatTime(worst.kind === "PostMortem" ? worst.end_ms : worst.start_ms),
-          duration: formatDuration(worst.end_ms - worst.start_ms),
-        })
-      : t("ui.home.activity.none"),
-  );
+  const activityCard = $derived.by((): Card => {
+    if (!today.loaded) {
+      return today.failed
+        ? { line: t("ui.home.activity.marks_failed"), kind: "no_reading" }
+        : { line: t("ui.common.loading"), kind: null };
+    }
+    if (!worst) return { line: t("ui.home.activity.none"), kind: "ok" };
+    const line = t("ui.home.activity.worst", {
+      time: formatTime(worst.kind === "PostMortem" ? worst.end_ms : worst.start_ms),
+      duration: formatDuration(worst.end_ms - worst.start_ms),
+    });
+    return { line, kind: worstMark.kind };
+  });
 
 </script>
 
@@ -53,15 +75,15 @@
         <span class="mark"><Mark /></span>
         <div class="who">
           <h1>{t("ui.shell.title")}</h1>
-          <p class="state"><i class={status.tone} aria-hidden="true"></i>{status.text}</p>
+          <p class="state"><ToneMark tone={status.tone} />{status.text}</p>
         </div>
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>
         <li>
-          <a class="card" href={href.health()} data-morph="qs:health" onclick={() => morph.remember("qs:health")} aria-label="{t('ui.group.health')}: {healthLine}">
-            <span class="ic"><Icon name="health" /><span class="dot"><StatusMark kind={healthKind} size={14} reveal /></span></span>
+          <a class="card" href={href.health()} data-morph="qs:health" onclick={() => morph.remember("qs:health")} aria-label="{t('ui.group.health')}: {healthCard.line}">
+            <span class="ic"><Icon name="health" />{#if healthCard.kind}<span class="dot"><StatusMark kind={healthCard.kind} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.health")}</b>
-            <small>{healthLine}</small>
+            <small>{healthCard.line}</small>
           </a>
         </li>
         <li>
@@ -70,18 +92,18 @@
             href={worst ? href.occurrence(worst.id) : href.activity()}
             data-morph="qs:today"
             onclick={() => morph.remember("qs:today")}
-            aria-label="{t('ui.group.activity')}: {activityLine}"
+            aria-label="{t('ui.group.activity')}: {activityCard.line}"
           >
-            <span class="ic"><Icon name="today" /><span class="dot"><StatusMark kind={worstMark.kind} word={worstMark.word || undefined} size={14} reveal /></span></span>
+            <span class="ic"><Icon name="today" />{#if activityCard.kind}<span class="dot"><StatusMark kind={activityCard.kind} word={worst && today.loaded ? worstMark.word || undefined : undefined} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.activity")}</b>
-            <small>{activityLine}</small>
+            <small>{activityCard.line}</small>
           </a>
         </li>
         <li>
-          <a class="card" href={href.tweaks()} data-morph="qs:tweaks" onclick={() => morph.remember("qs:tweaks")} aria-label="{t('ui.group.tweaks')}: {tweakLine}">
-            <span class="ic"><Icon name="tweaks" /><span class="dot"><StatusMark kind={tweakKind} size={14} reveal /></span></span>
+          <a class="card" href={href.tweaks()} data-morph="qs:tweaks" onclick={() => morph.remember("qs:tweaks")} aria-label="{t('ui.group.tweaks')}: {tweakCard.line}">
+            <span class="ic"><Icon name="tweaks" />{#if tweakCard.kind}<span class="dot"><StatusMark kind={tweakCard.kind} size={14} reveal /></span>{/if}</span>
             <b>{t("ui.group.tweaks")}</b>
-            <small>{tweakLine}</small>
+            <small>{tweakCard.line}</small>
           </a>
         </li>
         <li>
@@ -100,7 +122,14 @@
       {#each tiles as group (group.key)}
         <li>
           <a class="tile" href={entryHref(group)} data-morph="g:{group.key}" onclick={() => morph.remember(`g:${group.key}`)}>
-            <span class="tile-ic"><Icon name={group.icon} /></span>
+            <span class="tile-ic">
+              <Icon name={group.icon} />
+              {#if hasLate(group)}
+                <span class="dot"><StatusMark kind="attention" word={t("ui.helper.timeout.title")} size={14} reveal /></span>
+              {:else if hasLive(group)}
+                <span class="dot"><StatusMark kind="info" word={t("ui.captures.nav.running")} size={14} reveal /></span>
+              {/if}
+            </span>
             <span class="text"><b>{group.name}</b><small>{group.sub}</small></span>
           </a>
         </li>
@@ -163,25 +192,19 @@
     color: var(--ink2);
     font-size: 13.5px;
   }
-  .state i {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-  .state i.ok {
-    background: var(--good);
-  }
-  .state i.paused,
-  .state i.off {
-    box-shadow: inset 0 0 0 2px var(--ink3);
-  }
   .quick {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
+    min-width: 0;
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  .quick li {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
   }
   .card,
   .tile {
@@ -208,9 +231,10 @@
   }
   .card {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2px;
     align-content: start;
-    width: 204px;
+    min-width: 204px;
     padding: 12px;
   }
   .settings {
@@ -271,6 +295,13 @@
     font-size: 12.5px;
     line-height: 1.4;
   }
+  /* One line each, so a longer text widens its card instead of making it taller. */
+  .card b,
+  .card small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .find {
     position: relative;
     z-index: 3;
@@ -302,10 +333,11 @@
     padding: 16px 16px 18px;
   }
   .tile-ic {
+    position: relative;
     margin-top: 1px;
     color: var(--accent);
   }
-  .tile-ic :global(svg) {
+  .tile-ic > :global(svg) {
     width: 30px;
     height: 30px;
   }
@@ -344,18 +376,7 @@
       padding-right: 32px;
     }
     .card {
-      width: 192px;
-    }
-  }
-  @media (forced-colors: active) {
-    .state i.ok {
-      forced-color-adjust: none;
-      background: CanvasText;
-    }
-    .state i.paused,
-    .state i.off {
-      forced-color-adjust: none;
-      box-shadow: inset 0 0 0 2px CanvasText;
+      min-width: 192px;
     }
   }
 </style>

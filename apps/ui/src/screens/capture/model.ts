@@ -190,14 +190,77 @@ export function hitchesWithCall(dto: CaptureDto, app: AppFrames): number | null 
 /** Apps whose frames ran late, most first. */
 export const lateApps = (dto: CaptureDto): AppFrames[] => dto.apps.filter((a) => a.hitches > 0);
 
+/** Above this share of late frames an app is marked, never named: one that draws only on demand looks late when idle. */
+export const OFTEN_PCT = 5;
+
+/** The app's late frames as a percentage of its frames. */
+export const lateShare = (app: AppFrames): number => (app.frames === 0 ? 0 : (app.hitches / app.frames) * 100);
+
+/** An app with more late frames than `OFTEN_PCT` of its frames. */
+export const hitchesOften = (app: AppFrames): boolean => app.hitches * 100 > OFTEN_PCT * app.frames;
+
 export const minutesOf = (c: { start_ms: number; end_ms: number }) =>
   Math.max(1, Math.round((c.end_ms - c.start_ms) / 60_000));
 
 export const framesFailed = (dto: CaptureDto) => dto.frames !== "Ok";
 export const kernelFailed = (dto: CaptureDto) => dto.kernel !== "Ok";
+/** A source that measured nothing at all, as opposed to one that stopped partway. */
+export const framesGone = (dto: CaptureDto) => dto.frames !== "Ok" && "Unavailable" in dto.frames;
+export const kernelGone = (dto: CaptureDto) => dto.kernel !== "Ok" && "Unavailable" in dto.kernel;
+
+export type Part = "kernel" | "frames" | "probe";
+
+/** How much of the capture one source measured. */
+export interface Coverage {
+  part: Part;
+  /** Seconds measured, out of `total`. */
+  covered: number;
+  total: number;
+  state: "full" | "partial" | "none";
+  /** The source's own words for why it fell short; empty when it measured everything. */
+  reason: string;
+}
+
+/** Seconds each source measured: the kernel trace and the frames can fall short, the probe runs throughout. */
+export function coverageOf(dto: CaptureDto): Coverage[] {
+  const total = Math.max(1, Math.round((dto.end_ms - dto.start_ms) / 1000));
+  const of = (part: "kernel" | "frames", source: CaptureDto["frames"], empty: boolean): Coverage => {
+    if (source === "Ok") {
+      return { part, covered: empty ? 0 : total, total, state: empty ? "none" : "full", reason: "" };
+    }
+    if ("Unavailable" in source) return { part, covered: 0, total, state: "none", reason: source.Unavailable };
+    const covered = Math.min(total, source.Partial.covered_secs);
+    return { part, covered, total, state: "partial", reason: source.Partial.reason };
+  };
+  return [
+    of("kernel", dto.kernel, dto.drivers.length === 0),
+    of("frames", dto.frames, false),
+    { part: "probe", covered: total, total, state: "full", reason: "" },
+  ];
+}
+
+/** Sources that measured less than the whole capture. */
+export const shortfalls = (dto: CaptureDto): Coverage[] => coverageOf(dto).filter((c) => c.state !== "full");
+
+/**
+ * What the capture can say: it names a culprit, it could not measure everything and so cannot say,
+ * it measured everything and saw stalls or an app with many late frames but no culprit, or it saw
+ * nothing at all.
+ */
+export type Verdict = "found" | "incomplete" | "nocul" | "clean";
+
+export function verdictOf(dto: CaptureDto): Verdict {
+  if (conclusionOf(dto, driverRows(dto)).kind !== "none") return "found";
+  if (shortfalls(dto).length > 0) return "incomplete";
+  if (dto.hiccups.length > 0 || dto.apps.some(hitchesOften)) return "nocul";
+  return "clean";
+}
 
 /** Why a source could not be measured, as the helper worded it. */
-export const reasonOf = (source: CaptureDto["frames"]): string => (source === "Ok" ? "" : source.Unavailable);
+export const reasonOf = (source: CaptureDto["frames"]): string => {
+  if (source === "Ok") return "";
+  return "Unavailable" in source ? source.Unavailable : source.Partial.reason;
+};
 
 /** The number that changes between captures: one driver's long calls or one app's late frames. */
 export interface Digest {

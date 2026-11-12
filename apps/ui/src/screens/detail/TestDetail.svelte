@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
 
   import Block from "../../components/Block.svelte";
+  import ErrorView from "../../components/ErrorView.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
   import { app } from "../../lib/app.svelte";
   import { formatDuration, formatNumber, formatPercent } from "../../lib/format";
@@ -30,12 +31,19 @@
     if (hwtests.dto === null) void hwtests.load();
   });
 
+  function retry(): void {
+    hwtests.error = null;
+    void hwtests.load();
+  }
+
   const where = (s: Subject) =>
     s === "Pc" ? t("ui.detail.pc") : "Disk" in s ? s.Disk.replace(/^\d+\s*/, "") || s.Disk : s.Volume.replace(/\\$/, "");
   const device = (s: Subject) => (s === "Pc" ? href.tests("memory") : "Disk" in s ? href.tests(s.Disk.split(" ")[0]) : href.tests());
 </script>
 
-{#if hwtests.dto === null}
+{#if hwtests.dto === null && hwtests.error !== null}
+  <DetailPage fallback={href.tests()} title={t("ui.tests.title")}><ErrorView error={hwtests.error} heading="h2" onretry={retry} /></DetailPage>
+{:else if hwtests.dto === null}
   <DetailPage fallback={href.tests()} title={t("ui.tests.title")}><span></span></DetailPage>
 {:else if run}
   <DetailPage fallback={device(run.subject)} title={t(`ui.detail.test.${kindOf(run)}`)} sub={where(run.subject)}>
@@ -73,6 +81,7 @@
         <p class="line">{t("ui.detail.surface.range", { from: formatBytes(surface.from_bytes), to: formatBytes(surface.to_bytes), total: formatBytes(surface.disk_bytes) })}</p>
         <p class="line">{surface.unreadable_blocks ? t("ui.detail.surface.unreadable", { count: formatNumber(surface.unreadable_blocks) }) : t("ui.detail.surface.clean")}</p>
         {#if surface.failure}<p class="line">{surface.failure}</p>{/if}
+        {#if surface.outside_io}<p class="line">{t("ui.detail.surface.outside")}</p>{/if}
       </Block>
       {#if surface.worst.length && level !== "Simple"}
         <Block title={t("ui.detail.surface.worst")}>

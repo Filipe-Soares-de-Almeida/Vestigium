@@ -8,8 +8,11 @@ mod history;
 mod hwtests;
 mod live;
 mod process;
+mod protected;
 mod tweaks;
 mod update;
+#[cfg(test)]
+mod wire;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -41,6 +44,8 @@ fn main() {
             commands::settings,
             commands::start_capture,
             commands::capture_run,
+            commands::cancel_capture,
+            commands::cancel_helper_read,
             commands::import_captures,
             commands::captures,
             commands::capture,

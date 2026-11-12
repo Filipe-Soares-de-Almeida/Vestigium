@@ -17,6 +17,7 @@ use vestigium_core::hwtest::{
 use vestigium_core::{MachineInfo, Media};
 
 use crate::agent::UiError;
+use crate::capture::Ended;
 
 /// How far back the Tests page lists earlier runs.
 pub const RUNS_SHOWN_MS: i64 = 365 * 24 * 3_600_000;
@@ -94,6 +95,11 @@ pub struct TestsDto {
     pub running: Option<RunningTest>,
     pub scan: Option<ScanUnderWay>,
     pub bench_file_bytes: u64,
+    /// Free space a volume needs before the speed test may start: the file and a margin.
+    pub bench_needed_bytes: u64,
+    /// When this Windows session began, as wall-clock milliseconds: a repair a check queued runs
+    /// at the next boot, so a check older than this no longer leaves a volume marked.
+    pub boot_ms: i64,
 }
 
 /// SMART or NVMe detail of one disk, read when asked: reading an idle HDD spins it up.
@@ -148,6 +154,7 @@ pub struct TestFinished {
     pub id: Option<i64>,
     pub run: Option<TestRun>,
     pub exit_code: Option<u32>,
+    pub ended: Ended,
 }
 
 pub fn memory_now() -> MemoryDto {
@@ -283,14 +290,19 @@ pub fn read_progress(path: &Path) -> Option<SurfaceProgress> {
         .flatten()
 }
 
-/// A disk scan the helper still runs: a fresh progress file with no result beside it.
+/// The file whose appearance ends the disk scan that writes `<stem>.surface`.
+pub fn stop_file_of(tests_dir: &Path, stem: &str) -> PathBuf {
+    tests_dir.join(format!("{stem}.stop"))
+}
+
+/// A disk scan the helper still runs: a fresh progress file with no result in its `.surface` yet.
 pub fn scan_under_way(tests_dir: &Path, now_ms: i64) -> Option<ScanUnderWay> {
     let entries = std::fs::read_dir(tests_dir).ok()?;
     entries
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "progress"))
-        .filter(|p| !p.with_extension("surface").exists())
+        .filter(|p| std::fs::metadata(p.with_extension("surface")).map_or(true, |m| m.len() == 0))
         .filter_map(|p| {
             let progress = read_progress(&p)?;
             let stem = p.file_stem()?.to_str()?.to_string();
@@ -409,6 +421,40 @@ mod tests {
         assert_eq!(letter_of("C:"), Some('C'));
         assert_eq!(letter_of(r"\\server\share"), None);
         assert_eq!(letter_of("1:"), None);
+    }
+
+    fn write_progress(dir: &Path, stem: &str, ts_ms: i64) {
+        let progress = SurfaceProgress {
+            disk: 1,
+            ts_ms,
+            at_bytes: 5,
+            from_bytes: 0,
+            disk_bytes: 10,
+            bands: [0; vestigium_core::hwtest::BANDS],
+            unreadable_blocks: 0,
+        };
+        let mut bytes = vec![TEST_RUN_VERSION];
+        bytes.extend(postcard::to_allocvec(&progress).unwrap());
+        std::fs::write(dir.join(format!("{stem}.progress")), &bytes).unwrap();
+    }
+
+    #[test]
+    fn an_empty_surface_file_beside_fresh_progress_is_a_scan_under_way() {
+        let dir = tempfile::tempdir().unwrap();
+        write_progress(dir.path(), "7", 10_000);
+        std::fs::write(dir.path().join("7.surface"), []).unwrap();
+        let found = scan_under_way(dir.path(), 20_000).unwrap();
+        assert_eq!(found.stem, "7");
+        assert!(scan_under_way(dir.path(), 200_000).is_none(), "stale");
+        std::fs::write(dir.path().join("7.surface"), [1, 2, 3]).unwrap();
+        assert!(scan_under_way(dir.path(), 20_000).is_none(), "finished");
+    }
+
+    #[test]
+    fn the_stop_file_sits_beside_the_scan_result() {
+        let dir = Path::new(r"C:\data	ests");
+        let result = dir.join("9.surface");
+        assert_eq!(stop_file_of(dir, "9"), result.with_extension("stop"));
     }
 
     #[test]

@@ -1,14 +1,29 @@
 use std::io::{BufRead, BufReader, Read};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
+use std::time::{Duration, Instant};
+
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject,
+};
 
 use crate::CollectError;
 
 /// PresentMon's ETW session for the deep capture.
 pub const PRESENTMON_SESSION: &str = "Vestigium PresentMon";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// How long past its own timer a PresentMon run may last before it is killed.
+const DEADLINE_MARGIN_SECS: u64 = 15;
+/// How often a run that waits for output looks at its cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(200);
 
 /// One presented frame: the app's own cadence, start time in raw QPC.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,24 +38,95 @@ pub struct FrameRow {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PresentMonOutcome {
     pub rows: u64,
+    /// Data lines read after the header, whether or not they gave a frame.
+    pub lines: u64,
+    /// Data lines that gave no frame.
+    pub skipped: u64,
+    /// Lines read before any header with the needed columns; all of them when none was found.
+    pub stray_lines: u64,
     pub exit_code: Option<i32>,
     pub stderr: String,
+    /// Seconds the run was asked for; 0 when it is not known.
+    pub requested_secs: u64,
+    /// Whole seconds the process ran.
+    pub ran_secs: u64,
+    /// The process outlived its deadline and was killed.
+    pub timed_out: bool,
+    /// The run was ended on request before its timer.
+    pub cancelled: bool,
 }
 
+/// A run ends about a second after its timer; this much shorter than asked is an early end.
+const EARLY_SLACK_SECS: u64 = 3;
+
 impl PresentMonOutcome {
-    /// Why the frames cannot be trusted, if they cannot: presents seen but none finished.
+    fn ended_early(&self) -> bool {
+        self.requested_secs > 0 && self.ran_secs + EARLY_SLACK_SECS < self.requested_secs
+    }
+
+    /// Why the frames cannot be trusted, if they cannot: presents seen but none finished, or no
+    /// frame at all from a run that failed or stopped early.
     pub fn unavailable(&self) -> Option<String> {
-        if self.rows == 0 && self.stderr.contains("overflowed present events") {
+        if self.rows > 0 {
+            return None;
+        }
+        if self.stderr.contains("overflowed present events") {
             return Some("PresentMon saw presents but finished none".into());
         }
-        if self.exit_code != Some(0) && self.rows == 0 {
+        if self.timed_out {
+            return Some(format!(
+                "PresentMon did not stop in time and was ended after {} s",
+                self.ran_secs
+            ));
+        }
+        if self.exit_code != Some(0) {
             return Some(format!(
                 "PresentMon exited with {:?}: {}",
                 self.exit_code,
                 self.stderr.trim()
             ));
         }
-        None
+        if self.lines > 0 {
+            return Some(format!(
+                "PresentMon wrote {} lines but none gave a frame",
+                self.lines
+            ));
+        }
+        if self.stray_lines > 0 {
+            return Some("PresentMon's output had no header with the columns needed".into());
+        }
+        self.ended_early().then(|| {
+            format!(
+                "PresentMon stopped after {} of {} s",
+                self.ran_secs, self.requested_secs
+            )
+        })
+    }
+
+    /// The seconds the frames cover and why that is less than asked, when frames were read but the
+    /// run failed or stopped before its timer.
+    pub fn partial(&self) -> Option<(u64, String)> {
+        if self.rows == 0 || (self.exit_code == Some(0) && !self.ended_early() && !self.timed_out) {
+            return None;
+        }
+        let covered = if self.requested_secs > 0 {
+            self.ran_secs.min(self.requested_secs)
+        } else {
+            self.ran_secs
+        };
+        let how = match self.exit_code {
+            _ if self.timed_out => "did not stop in time and was ended".to_string(),
+            Some(0) => "stopped".to_string(),
+            Some(code) => format!("exited with {code}"),
+            None => "ended without an exit code".to_string(),
+        };
+        Some((
+            covered,
+            format!(
+                "PresentMon {how} after {} of {} s",
+                self.ran_secs, self.requested_secs
+            ),
+        ))
     }
 }
 
@@ -99,19 +185,137 @@ impl CsvColumns {
     }
 }
 
-/// Runs PresentMon at `exe` for `seconds` with no window, handing each frame to `on_frame`.
+/// What a CSV reader has taken from PresentMon's output so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct FrameCount {
+    frames: u64,
+    lines: u64,
+    stray_lines: u64,
+}
+
+/// Reads PresentMon's CSV line by line: the first line with the needed columns is the header, and
+/// every later non-empty line is data that either gives a frame or is counted as skipped.
+#[derive(Debug, Default)]
+struct FrameReader {
+    columns: Option<CsvColumns>,
+    count: FrameCount,
+}
+
+impl FrameReader {
+    fn line(&mut self, line: &str, on_frame: &mut impl FnMut(FrameRow)) {
+        let Some(columns) = &self.columns else {
+            self.columns = CsvColumns::new(line);
+            if self.columns.is_none() && !line.trim().is_empty() {
+                self.count.stray_lines += 1;
+            }
+            return;
+        };
+        if line.trim().is_empty() {
+            return;
+        }
+        self.count.lines += 1;
+        if let Some(frame) = columns.row(line) {
+            self.count.frames += 1;
+            on_frame(frame);
+        }
+    }
+}
+
+/// Runs PresentMon at `exe` for `seconds` with no window, handing each frame to `on_frame`; a run
+/// that outlives its timer by more than a margin, or that `cancel` ends, is killed.
 pub fn run_presentmon(
     exe: &Path,
     seconds: u64,
+    cancel: &AtomicBool,
+    on_frame: impl FnMut(FrameRow),
+) -> Result<PresentMonOutcome, CollectError> {
+    let deadline = Duration::from_secs(seconds + DEADLINE_MARGIN_SECS);
+    run_until(
+        exe,
+        &presentmon_args(seconds),
+        seconds,
+        deadline,
+        cancel,
+        on_frame,
+    )
+}
+
+/// A job object that ends every process in it when its handle closes.
+struct KillOnClose(HANDLE);
+
+impl KillOnClose {
+    /// A job holding `child`; `None` when Windows refuses one (the child then runs unguarded).
+    fn holding(child: &Child) -> Option<KillOnClose> {
+        // SAFETY: the job handle is owned by the returned value and closed once; the limit
+        // structure outlives the call; the child's raw handle is valid while `child` lives.
+        unsafe {
+            let job = CreateJobObjectW(None, None).ok()?;
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ready = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .is_ok()
+                && AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())).is_ok();
+            if ready {
+                Some(KillOnClose(job))
+            } else {
+                let _ = CloseHandle(job);
+                None
+            }
+        }
+    }
+
+    /// Ends every process in the job at once, children included.
+    fn kill(&self) {
+        // SAFETY: the handle is a live job object owned by `self`.
+        unsafe {
+            let _ = TerminateJobObject(self.0, 1);
+        }
+    }
+}
+
+impl Drop for KillOnClose {
+    fn drop(&mut self) {
+        // SAFETY: the handle is owned by `self` and closed once.
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(test)]
+fn run_with_args(
+    exe: &Path,
+    args: &[String],
+    requested_secs: u64,
+    deadline: Duration,
+    on_frame: impl FnMut(FrameRow),
+) -> Result<PresentMonOutcome, CollectError> {
+    let never = AtomicBool::new(false);
+    run_until(exe, args, requested_secs, deadline, &never, on_frame)
+}
+
+fn run_until(
+    exe: &Path,
+    args: &[String],
+    requested_secs: u64,
+    deadline: Duration,
+    cancel: &AtomicBool,
     mut on_frame: impl FnMut(FrameRow),
 ) -> Result<PresentMonOutcome, CollectError> {
+    let started = Instant::now();
     let mut child = Command::new(exe)
-        .args(presentmon_args(seconds))
+        .args(args)
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    let job = KillOnClose::holding(&child);
     let mut stderr = child.stderr.take();
     let errors = thread::spawn(move || {
         let mut text = String::new();
@@ -120,24 +324,63 @@ pub fn run_presentmon(
         }
         text
     });
-    let mut outcome = PresentMonOutcome::default();
+    let (lines, incoming) = mpsc::channel();
     if let Some(stdout) = child.stdout.take() {
-        let mut columns = None;
-        for line in BufReader::new(stdout).lines() {
-            let line = line?;
-            match &columns {
-                None => columns = CsvColumns::new(&line),
-                Some(cols) => {
-                    if let Some(frame) = cols.row(&line) {
-                        outcome.rows += 1;
-                        on_frame(frame);
-                    }
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let failed = line.is_err();
+                if lines.send(line).is_err() || failed {
+                    break;
+                }
+            }
+        });
+    }
+    let mut outcome = PresentMonOutcome {
+        requested_secs,
+        ..Default::default()
+    };
+    let mut reader = FrameReader::default();
+    let mut read_error = None;
+    loop {
+        let left = deadline.saturating_sub(started.elapsed());
+        match incoming.recv_timeout(left.min(CANCEL_POLL)) {
+            Ok(Ok(line)) => reader.line(&line, &mut on_frame),
+            Ok(Err(e)) => {
+                read_error = Some(e);
+                break;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                if cancel.load(Ordering::Acquire) {
+                    outcome.cancelled = true;
+                    break;
+                }
+                if started.elapsed() >= deadline {
+                    outcome.timed_out = true;
+                    break;
                 }
             }
         }
     }
-    outcome.exit_code = child.wait()?.code();
+    if outcome.timed_out || outcome.cancelled || read_error.is_some() {
+        match &job {
+            Some(job) => job.kill(),
+            None => {
+                let _ = child.kill();
+            }
+        }
+    }
+    let status = child.wait();
+    outcome.rows = reader.count.frames;
+    outcome.lines = reader.count.lines;
+    outcome.skipped = reader.count.lines - reader.count.frames;
+    outcome.stray_lines = reader.count.stray_lines;
+    outcome.ran_secs = started.elapsed().as_secs();
     outcome.stderr = errors.join().unwrap_or_default();
+    if let Some(e) = read_error {
+        return Err(e.into());
+    }
+    outcome.exit_code = status?.code();
     Ok(outcome)
 }
 
@@ -210,19 +453,270 @@ mod tests {
             rows: 0,
             exit_code: Some(0),
             stderr: "warning: 175 overflowed present events detected.".into(),
+            ..Default::default()
         };
         assert!(outcome.unavailable().is_some());
         let quiet = PresentMonOutcome {
             rows: 0,
             exit_code: Some(0),
-            stderr: String::new(),
+            requested_secs: 300,
+            ran_secs: 301,
+            ..Default::default()
         };
         assert_eq!(quiet.unavailable(), None);
+        assert_eq!(quiet.partial(), None);
         let failed = PresentMonOutcome {
             rows: 0,
             exit_code: Some(5),
             stderr: "failed to start trace session (access denied)".into(),
+            ..Default::default()
         };
         assert!(failed.unavailable().unwrap().contains("access denied"));
+    }
+
+    #[test]
+    fn a_run_that_ends_before_its_timer_covers_less() {
+        let whole = PresentMonOutcome {
+            rows: 900,
+            exit_code: Some(0),
+            requested_secs: 300,
+            ran_secs: 301,
+            ..Default::default()
+        };
+        assert_eq!((whole.unavailable(), whole.partial()), (None, None));
+
+        let died = PresentMonOutcome {
+            rows: 900,
+            exit_code: Some(0),
+            requested_secs: 300,
+            ran_secs: 180,
+            ..Default::default()
+        };
+        assert_eq!(died.unavailable(), None);
+        let (covered, why) = died.partial().expect("partial");
+        assert_eq!(covered, 180);
+        assert!(why.contains("180 of 300"), "{why}");
+
+        let silent = PresentMonOutcome {
+            rows: 0,
+            exit_code: Some(0),
+            requested_secs: 300,
+            ran_secs: 20,
+            ..Default::default()
+        };
+        assert!(silent.unavailable().unwrap().contains("20 of 300"));
+        assert_eq!(silent.partial(), None);
+    }
+
+    #[test]
+    fn presentmon_that_exits_early_with_rows_is_partial() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("rows.csv");
+        std::fs::write(
+            &csv,
+            "Application,ProcessID,CPUStartQPC,MsBetweenPresents\r\ngame.exe,7,100,8.0\r\ngame.exe,7,200,9.0\r\n",
+        )
+        .unwrap();
+        let args: Vec<String> = ["/D", "/C", "type", csv.to_str().unwrap(), "&", "exit", "1"]
+            .map(String::from)
+            .to_vec();
+
+        let mut seen = 0;
+        let outcome = run_with_args(
+            Path::new("cmd.exe"),
+            &args,
+            300,
+            Duration::from_secs(60),
+            |_| seen += 1,
+        )
+        .unwrap();
+
+        assert_eq!((seen, outcome.rows, outcome.exit_code), (2, 2, Some(1)));
+        assert_eq!(outcome.unavailable(), None);
+        let (covered, why) = outcome.partial().expect("a run that died is partial");
+        assert!(covered < 300);
+        assert!(why.contains("exited with 1"), "{why}");
+    }
+
+    fn read_all(text: &str) -> (FrameCount, usize) {
+        let mut reader = FrameReader::default();
+        let mut frames = 0;
+        for line in text.lines() {
+            reader.line(line, &mut |_| frames += 1);
+        }
+        (reader.count, frames)
+    }
+
+    #[test]
+    fn a_run_whose_lines_give_no_frame_is_unavailable() {
+        let (count, frames) = read_all(&format!(
+            "{HEADER}
+bad,x,,,,,,,,,,y
+bad,z,,,,,,,,,,w
+"
+        ));
+        assert_eq!((frames, count.lines, count.frames), (0, 2, 0));
+        let outcome = PresentMonOutcome {
+            lines: count.lines,
+            skipped: count.lines - count.frames,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert!(outcome.unavailable().unwrap().contains("2 lines"));
+    }
+
+    #[test]
+    fn a_header_matching_no_column_is_unavailable() {
+        let (count, _) = read_all(
+            "Program,Pid,Start
+game.exe,7,100
+game.exe,7,200
+",
+        );
+        assert_eq!((count.lines, count.stray_lines), (0, 3));
+        let outcome = PresentMonOutcome {
+            stray_lines: count.stray_lines,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert!(outcome.unavailable().unwrap().contains("no header"));
+    }
+
+    #[test]
+    fn some_frames_with_some_lost_lines_stay_available() {
+        let good = "game.exe,4242,0x1,DXGI,1,0,100,NA,16.7,0.2,1.0,123456789,16.6,3.0,13.6";
+        let (count, frames) = read_all(&format!(
+            "{HEADER}
+{good}
+broken
+
+"
+        ));
+        assert_eq!((frames, count.lines, count.frames), (1, 2, 1));
+        let outcome = PresentMonOutcome {
+            rows: count.frames,
+            lines: count.lines,
+            skipped: 1,
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(outcome.unavailable(), None);
+    }
+
+    #[test]
+    fn a_line_before_the_header_is_not_a_data_line() {
+        let (count, _) = read_all(&format!(
+            "starting trace
+{HEADER}
+"
+        ));
+        assert_eq!((count.lines, count.stray_lines), (0, 1));
+    }
+
+    #[test]
+    fn a_run_of_unreadable_lines_is_counted_from_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("rows.csv");
+        std::fs::write(
+            &csv,
+            "Application,ProcessID,CPUStartQPC,MsBetweenPresents
+game.exe,x,y,1
+game.exe,x,y,2
+",
+        )
+        .unwrap();
+        let args: Vec<String> = ["/D", "/C", "type", csv.to_str().unwrap()]
+            .map(String::from)
+            .to_vec();
+
+        let outcome = run_with_args(
+            Path::new("cmd.exe"),
+            &args,
+            0,
+            Duration::from_secs(60),
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!((outcome.rows, outcome.lines, outcome.skipped), (0, 2, 2));
+        assert!(outcome.unavailable().is_some());
+    }
+
+    fn ping_for(secs: u32) -> Vec<String> {
+        ["-n", &secs.to_string(), "127.0.0.1"]
+            .map(String::from)
+            .to_vec()
+    }
+
+    #[test]
+    fn a_cancelled_run_is_killed_well_before_its_deadline() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let trigger = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(600));
+            flag.store(true, Ordering::Release);
+        });
+        let started = Instant::now();
+        let outcome = run_until(
+            Path::new("ping.exe"),
+            &ping_for(40),
+            300,
+            Duration::from_secs(120),
+            &cancel,
+            |_| {},
+        )
+        .unwrap();
+        trigger.join().unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(outcome.cancelled && !outcome.timed_out);
+    }
+
+    #[test]
+    fn presentmon_that_never_exits_is_killed_after_the_deadline() {
+        let started = Instant::now();
+        let outcome = run_with_args(
+            Path::new("ping.exe"),
+            &ping_for(40),
+            300,
+            Duration::from_secs(2),
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(outcome.timed_out);
+        assert!(outcome.unavailable().unwrap().contains("did not stop"));
+    }
+
+    #[test]
+    fn a_run_that_was_ended_keeps_its_rows_as_partial() {
+        let outcome = PresentMonOutcome {
+            rows: 40,
+            exit_code: Some(1),
+            requested_secs: 300,
+            ran_secs: 315,
+            timed_out: true,
+            ..Default::default()
+        };
+        assert_eq!(outcome.unavailable(), None);
+        let (covered, why) = outcome.partial().expect("partial");
+        assert_eq!(covered, 300);
+        assert!(why.contains("did not stop in time"), "{why}");
+    }
+
+    #[test]
+    fn closing_the_job_ends_the_process_in_it() {
+        let mut child = Command::new("ping.exe")
+            .args(ping_for(40))
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let job = KillOnClose::holding(&child).expect("a job object");
+        drop(job);
+        let started = Instant::now();
+        child.wait().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }

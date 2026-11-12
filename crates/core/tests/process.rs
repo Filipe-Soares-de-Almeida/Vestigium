@@ -331,7 +331,7 @@ fn program(name: &str, cpu_pct: f32, private_mb: u64) -> ProcessSample {
 
 #[test]
 fn program_ring_returns_one_program_over_its_span() {
-    let mut ring = ProgramRing::new(10_000);
+    let mut ring = ProgramRing::new(10_000, 100);
     ring.push(0, &[program("a.exe", 1.0, 10), program("b.exe", 2.0, 20)]);
     ring.push(5_000, &[program("b.exe", 3.0, 30)]);
     ring.push(10_000, &[program("a.exe", 4.0, 40)]);
@@ -360,11 +360,21 @@ fn program_ring_returns_one_program_over_its_span() {
 
 #[test]
 fn program_ring_forgets_names_it_no_longer_holds() {
-    let mut ring = ProgramRing::new(1_000);
+    let mut ring = ProgramRing::new(1_000, 100);
     for i in 0..400 {
         ring.push(i * 2_000, &[program(&format!("p{i}.exe"), 1.0, 1)]);
     }
 
     assert_eq!(ring.history("p399.exe").len(), 1);
     assert!(ring.history("p0.exe").is_empty());
+}
+
+#[test]
+fn program_ring_stays_bounded_when_stamps_go_back() {
+    let mut ring = ProgramRing::new(600_000, 120);
+    for i in 0..500 {
+        ring.push(10_000_000 - i * 5_000, &[program("a.exe", 1.0, 1)]);
+    }
+
+    assert_eq!(ring.history("a.exe").len(), 120);
 }

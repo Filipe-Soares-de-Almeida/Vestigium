@@ -4515,9 +4515,10 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vestigium-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "postcard",
+ "rusqlite",
  "serde",
  "tempfile",
  "tray-icon 0.26.1",
@@ -4533,11 +4534,11 @@ dependencies = [
 
 [[package]]
 name = "vestigium-brand"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "vestigium-budget"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "vestigium-collect",
  "vestigium-core",
@@ -4546,8 +4547,9 @@ dependencies = [
 
 [[package]]
 name = "vestigium-collect"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "postcard",
  "tempfile",
  "thiserror 2.0.21",
  "vestigium-core",
@@ -4556,7 +4558,7 @@ dependencies = [
 
 [[package]]
 name = "vestigium-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "postcard",
  "serde",
@@ -4564,26 +4566,28 @@ dependencies = [
 
 [[package]]
 name = "vestigium-helper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "postcard",
  "tempfile",
  "vestigium-collect",
  "vestigium-core",
+ "vestigium-ipc",
  "windows",
  "winresource",
 ]
 
 [[package]]
 name = "vestigium-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
+ "vestigium-core",
 ]
 
 [[package]]
 name = "vestigium-icons"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "miniz_oxide 0.9.1",
  "vestigium-brand",
@@ -4591,7 +4595,7 @@ dependencies = [
 
 [[package]]
 name = "vestigium-ipc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4602,7 +4606,7 @@ dependencies = [
 
 [[package]]
 name = "vestigium-scenarios"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "vestigium-collect",
  "windows",
@@ -4610,7 +4614,7 @@ dependencies = [
 
 [[package]]
 name = "vestigium-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "miniz_oxide 0.9.1",
  "postcard",
@@ -4624,9 +4628,10 @@ dependencies = [
 
 [[package]]
 name = "vestigium-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "postcard",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",

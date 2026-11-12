@@ -4,7 +4,7 @@ What a report says about a freeze, a stutter, a program that stopped responding 
 
 | Kind | When |
 |---|---|
-| **Freeze** | The whole PC stopped responding for at least a quarter of a second. Under 1 second it is light, up to 5 seconds medium, longer severe. |
+| **Freeze** | The whole PC stopped responding for at least a quarter of a second. Under 1 second it is light, up to 5 seconds medium, longer severe. Vestigium sees it as its own probe not running, so the report says the PC probably stopped: a delay of Vestigium's own process looks the same. |
 | **Stutters** | Several short hitches in a row, the kind that break a game, a call or a video. Caught while sensitive mode is on. |
 | **Program not responding** | One program's window stopped responding while the rest of the PC worked. Windows marks a window this way after 5 seconds. |
 | **Windows event** | Windows logged a problem by itself, such as resetting its connection to a disk, retrying a disk operation, restarting the graphics driver or a hardware error. |
@@ -29,7 +29,7 @@ If a report points at a driver or at stutters, it offers **Investigate stutters*
 
 ## Unexpected shutdowns
 
-The monitor keeps its last few minutes on disk, so a report after an unexpected shutdown shows what the PC was doing in the two minutes before it went off. The headline says which kind it was: a blue screen, the PC turned off with the power button while not responding, a shutdown during sleep or wake, a power cut during shutdown, or a shutdown with nothing logged. When Windows saved a crash dump, the report links to what [Dumps](./Dumps.md) read from it.
+The monitor keeps its last few minutes on disk, so a report after an unexpected shutdown shows what the PC was doing in the two minutes before it went off. The headline says which kind it was: a blue screen, the PC turned off with the power button while not responding, a shutdown during sleep or wake, or a shutdown with nothing logged. When Windows saved a crash dump, the report links to what [Dumps](./Dumps.md) read from it.
 
 ## Copy report
 

@@ -11,6 +11,11 @@ pub enum Channel {
 }
 
 impl Channel {
+    /// Every variant, in declaration order.
+    pub const ALL: [Channel; 2] = [Channel::System, Channel::Application];
+}
+
+impl Channel {
     /// The log's name as the Event Log API spells it.
     pub fn path(self) -> &'static str {
         match self {
@@ -47,6 +52,28 @@ pub enum EventMeaning {
     NoCrashDump,
     /// A run of the Windows Memory Diagnostic ended.
     MemoryDiagnostic,
+}
+
+impl EventMeaning {
+    /// Every variant, in declaration order.
+    pub const ALL: [EventMeaning; 16] = [
+        EventMeaning::StorageReset,
+        EventMeaning::DiskRetry,
+        EventMeaning::DiskBadBlock,
+        EventMeaning::PagingError,
+        EventMeaning::DisplayReset,
+        EventMeaning::HardwareError,
+        EventMeaning::PowerLoss,
+        EventMeaning::UnexpectedShutdown,
+        EventMeaning::BugCheck,
+        EventMeaning::CpuFirmwareLimit,
+        EventMeaning::LowVirtualMemory,
+        EventMeaning::AppHang,
+        EventMeaning::AppCrash,
+        EventMeaning::ServiceCrash,
+        EventMeaning::NoCrashDump,
+        EventMeaning::MemoryDiagnostic,
+    ];
 }
 
 /// One kind of event worth keeping: always a provider and an id, since ids repeat across providers.

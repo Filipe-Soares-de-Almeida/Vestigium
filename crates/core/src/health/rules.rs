@@ -8,7 +8,7 @@ use crate::{EventMeaning, Media, NextStep, WinEvent};
 use super::{
     Concern, DAY_MS, DelayKind, DiskHealth, Finding, FindingKind, HealthFact, HealthInputs,
     Measure, NVME_WORN_PCT, Reference, SmartAttribute, Subject, WATCHED_ATTRIBUTES,
-    failures_between,
+    failures_between, watched_count,
 };
 
 const GB: u64 = 1 << 30;
@@ -29,16 +29,27 @@ const HEALTHY_BOOT_S: f32 = 60.0;
 const DIRTY_RESTARTS: u32 = 2;
 const UNFINISHED_SHUTDOWNS: u32 = 2;
 const FAILURE_FLOOR: u32 = 3;
+/// An open failures-rising finding closes only below this count in the last week...
+const FAILURE_CLOSE_FLOOR: u32 = FAILURE_FLOOR - 1;
+/// ...or below this multiple of the weekly average before it; opening needs twice that average.
+const FAILURE_CLOSE_FACTOR: f32 = 1.5;
+const FAILURE_OPEN_FACTOR: f32 = 2.0;
 /// Blocks of an HDD slow twice in a row, from which its surface asks for attention.
 const SLOW_BLOCKS: u64 = 10;
 const TREND_DAYS: i64 = 35;
 /// Events shown as evidence of one finding, newest first.
 const EVENTS_SHOWN: usize = 10;
 const DELAYS_SHOWN: usize = 5;
+/// The NVMe critical-warning bit for a temperature outside the safe range; it clears on cooling.
+const NVME_TEMPERATURE_BIT: u8 = 0b10;
 
 /// Every finding of one health pass, the most worrying first and in table order otherwise.
 pub fn evaluate(inputs: &HealthInputs) -> Vec<Finding> {
-    let mut found: Vec<Finding> = inputs.disks.iter().filter_map(disk_smart).collect();
+    let mut found: Vec<Finding> = inputs
+        .disks
+        .iter()
+        .filter_map(|d| disk_smart(d, is_hdd(inputs, &d.name)))
+        .collect();
     found.extend(low_space(inputs));
     found.extend(page_file(inputs));
     found.extend(memory_often(inputs));
@@ -106,21 +117,39 @@ fn matching<'a>(
         .filter(move |e| e.meaning == meaning && (ids.is_empty() || ids.contains(&e.id)))
 }
 
-fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
+/// Whether the named disk is a hard drive; a disk the machine facts do not list is not.
+fn is_hdd(inputs: &HealthInputs, name: &str) -> bool {
+    inputs
+        .machine
+        .disks
+        .iter()
+        .any(|d| d.name == name && d.media == Media::Hdd)
+}
+
+/// The watched attributes count only on a hard drive, where their raw value is a plain counter.
+fn disk_smart(disk: &DiskHealth, hdd: bool) -> Option<Finding> {
     let watched: Vec<SmartAttribute> = disk
         .attributes
         .iter()
-        .filter(|a| WATCHED_ATTRIBUTES.contains(&a.id) && a.raw > 0)
-        .copied()
+        .filter(|a| hdd && WATCHED_ATTRIBUTES.contains(&a.id))
+        .map(|a| SmartAttribute {
+            raw: u64::from(watched_count(a)),
+            ..*a
+        })
+        .filter(|a| a.raw > 0)
         .collect();
-    let nvme_critical = disk
+    let nvme_critical = disk.nvme.is_some_and(|n| {
+        n.critical_warning & !NVME_TEMPERATURE_BIT != 0
+            || n.available_spare_pct < n.spare_threshold_pct
+    });
+    let nvme_hot = disk
         .nvme
-        .is_some_and(|n| n.critical_warning != 0 || n.available_spare_pct < n.spare_threshold_pct);
+        .is_some_and(|n| n.critical_warning & NVME_TEMPERATURE_BIT != 0);
     let nvme_worn = disk
         .nvme
         .is_some_and(|n| n.percentage_used >= NVME_WORN_PCT || n.media_errors > 0);
     let critical = disk.predict_failure || nvme_critical;
-    if !critical && !nvme_worn && watched.is_empty() {
+    if !critical && !nvme_worn && !nvme_hot && watched.is_empty() {
         return None;
     }
     let mut evidence = Vec::new();
@@ -137,9 +166,9 @@ fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
             )
         }
         None => {
-            let raw: u64 = watched.iter().map(|a| a.raw).sum();
+            let highest = watched.iter().map(|a| a.raw).max().unwrap_or(0);
             (
-                Measure::Count(u32::try_from(raw).unwrap_or(u32::MAX)),
+                Measure::Count(u32::try_from(highest).unwrap_or(u32::MAX)),
                 Reference::AtMost(Measure::Count(0)),
             )
         }
@@ -149,6 +178,8 @@ fn disk_smart(disk: &DiskHealth) -> Option<Finding> {
             Concern::Critical,
             vec![NextStep::BackUpNow, NextStep::ReplaceDisk],
         )
+    } else if nvme_hot && !nvme_worn && watched.is_empty() {
+        (Concern::Attention, vec![NextStep::CheckCooling])
     } else {
         (
             Concern::Attention,
@@ -515,7 +546,12 @@ fn failures_rising(inputs: &HealthInputs) -> Option<Finding> {
     let last_week = failures_between(&inputs.events, week_start, now + 1);
     let before = failures_between(&inputs.events, now - TREND_DAYS * DAY_MS, week_start);
     let weekly_before = before as f32 / ((TREND_DAYS - 7) / 7) as f32;
-    if last_week < FAILURE_FLOOR || (last_week as f32) < 2.0 * weekly_before {
+    let (floor, factor) = if inputs.is_open(FindingKind::FailuresRising, &Subject::Pc) {
+        (FAILURE_CLOSE_FLOOR, FAILURE_CLOSE_FACTOR)
+    } else {
+        (FAILURE_FLOOR, FAILURE_OPEN_FACTOR)
+    };
+    if last_week < floor || (last_week as f32) < factor * weekly_before {
         return None;
     }
     Some(finding(
@@ -632,7 +668,7 @@ fn disk_unreadable(inputs: &HealthInputs) -> Vec<Finding> {
                 scan.unreadable_blocks,
                 vec![NextStep::BackUpNow, NextStep::ReplaceDisk],
             )
-        } else if scan.media == Media::Hdd && slow >= SLOW_BLOCKS {
+        } else if scan.media == Media::Hdd && slow >= SLOW_BLOCKS && !scan.outside_io {
             (
                 Concern::Attention,
                 slow,

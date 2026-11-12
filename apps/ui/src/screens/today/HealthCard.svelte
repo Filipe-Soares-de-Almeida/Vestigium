@@ -5,10 +5,11 @@
   import StatusMark from "../../components/StatusMark.svelte";
   import { app } from "../../lib/app.svelte";
   import { health } from "../../lib/health.svelte";
+  import { passState } from "../../lib/monitor";
   import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
   import { areaOf } from "../health/areas";
-  import { findingTitle } from "../health/words";
+  import { findingTitle, notCurrent } from "../health/words";
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   /** Open findings, critical first, each with the area it opens. */
@@ -19,8 +20,9 @@
       .map((f) => ({ f, area: areaOf(f.kind) })),
   );
   const line = $derived.by(() => {
+    if (health.dto === null) return health.error !== null ? t("ui.home.health.failed") : t("ui.common.loading");
     const { critical, attention } = health;
-    if (!critical && !attention) return t("ui.home.health.none");
+    if (!critical && !attention) return notCurrent(passState(app.link, Date.now()))?.line ?? t("ui.home.health.none");
     if (critical && attention) {
       return t("ui.health.card.mixed", {
         critical: tn("ui.health.card.n_critical", critical),

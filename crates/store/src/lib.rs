@@ -2,6 +2,7 @@
 
 mod batch;
 mod captures;
+mod codes;
 mod dumps;
 mod health;
 mod hwtests;
@@ -19,7 +20,7 @@ pub use dumps::DumpRow;
 pub use health::FindingRecord;
 pub use hwtests::TestRunRow;
 pub use prune::PruneReport;
-pub use schema::{Batch, SCHEMA_VERSION, Store};
+pub use schema::{Batch, CarryOver, SCHEMA_VERSION, SetAside, Store};
 pub use segment::{Segment, Series, decode, encode};
 pub use smart::SmartReading;
 pub use tweaks::TweakChangeRow;
@@ -39,6 +40,8 @@ pub enum StoreError {
     Corrupt,
     #[error("database schema {found} is newer than this version supports ({supported})")]
     NewerSchema { found: u32, supported: u32 },
+    #[error("the history database is in {found} journal mode, but WAL mode is required")]
+    JournalMode { found: String },
     #[error("cannot create the data folder: {0}")]
     Io(#[from] std::io::Error),
     #[error("no history database yet")]

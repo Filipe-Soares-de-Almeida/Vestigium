@@ -210,12 +210,13 @@ impl EpisodeDetector {
                 }
             }
             for disk in &sample.disks {
-                if disk.latency_ms >= 100.0 && disk.active_pct >= 50.0 {
+                let latency = disk.latency_ms.filter(|ms| *ms >= 100.0);
+                if let Some(latency_ms) = latency.filter(|_| disk.active_pct >= 50.0) {
                     above.push((
                         EpisodeKind::DiskLatencyHint {
                             disk: disk.name.clone(),
                         },
-                        disk.latency_ms,
+                        latency_ms,
                         Weigh::MeanIo,
                         3_000,
                     ));

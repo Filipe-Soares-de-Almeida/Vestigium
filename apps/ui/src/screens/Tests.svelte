@@ -5,6 +5,8 @@
   import Block from "../components/Block.svelte";
   import type { MarkKind } from "../components/ConcernMark.svelte";
   import ErrorView from "../components/ErrorView.svelte";
+  import HelperDialogs from "../components/HelperDialogs.svelte";
+  import HelperLine from "../components/HelperLine.svelte";
   import HistList from "../components/HistList.svelte";
   import Icon, { type IconName } from "../components/Icon.svelte";
   import Loading from "../components/Loading.svelte";
@@ -15,6 +17,7 @@
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
   import { errorText } from "../lib/errors";
+  import { helperJobs } from "../lib/helper.svelte";
   import { formatNumber, formatPercent } from "../lib/format";
   import { t, tn } from "../lib/i18n.svelte";
   import { relatedLinks } from "../lib/related.svelte";
@@ -51,6 +54,7 @@
     outcomeMark,
     quickCovered,
     quickOf,
+    repairMark,
     runningDevice,
     shareOf,
     span,
@@ -114,6 +118,14 @@
     void hwtests.load();
   }
 
+  async function stop(): Promise<void> {
+    try {
+      await hwtests.stop();
+    } catch (error) {
+      toast.show(errorText(error));
+    }
+  }
+
   function started(outcome: Started): void {
     if (outcome.kind === "declined") toast.show(t("ui.tests.toast.declined"));
     else if (outcome.kind === "failed") toast.show(outcome.error ? errorText(outcome.error) : t("ui.tests.toast.busy"));
@@ -150,6 +162,10 @@
   }
 
   function bench(v: VolumeDto): void {
+    if (dto && v.free_bytes < dto.bench_needed_bytes) {
+      toast.show(t("ui.tests.toast.no_room", { volume: vol(v.root), needed: formatBytes(dto.bench_needed_bytes) }));
+      return;
+    }
     const d = dto?.disks.find((x) => x.number === v.disk);
     if (d?.media === "Ssd") ask({ kind: "bench", volume: v });
     else void hwtests.benchmark(v.root).then(started);
@@ -185,7 +201,7 @@
     }
     if (running?.kind === "VolumeCheck") {
       const root = typeof running.subject === "object" && "Volume" in running.subject ? running.subject.Volume : "";
-      return { title: t("ui.tests.live.check", { volume: vol(root) }), note: t("ui.tests.live.check.note"), frac: null, facts: [], bad: false, stoppable: false };
+      return { title: t("ui.tests.live.check", { volume: vol(root) }), note: t("ui.tests.live.check.note"), frac: null, facts: [], bad: false, stoppable: true, confirm: true };
     }
     const s = p?.kind === "surface" ? p : dto.scan?.progress;
     if (running?.kind === "DiskSurface" || dto.scan) {
@@ -294,10 +310,19 @@
         <span class="pbar" class:indeterminate={live.frac === null} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={live.frac === null ? undefined : Math.round(live.frac * 100)}>
           <i style:width={live.frac === null ? undefined : `${live.frac * 100}%`}></i>
         </span>
-        {#if live.stoppable}
-          <button type="button" class="btn" onclick={() => void hwtests.stop()}>{t("ui.tests.cancel")}</button>
+        {#if live.stoppable && "confirm" in live}
+          {#if hwtests.stopping}
+            <button type="button" class="btn" disabled aria-disabled="true">{t("ui.helper.cancelling")}</button>
+          {:else}
+            <button type="button" class="btn" onclick={() => helperJobs.ask("check")}>{t("ui.helper.cancel.check")}</button>
+          {/if}
+        {:else if live.stoppable}
+          <button type="button" class="btn" onclick={() => void stop()}>{t("ui.tests.cancel")}</button>
         {/if}
       </div>
+      {#if "confirm" in live && hwtests.stopping}
+        <p class="note" role="status">{t("ui.helper.cancelling.note")}</p>
+      {/if}
       {#if live.facts.length}
         <p class="note facts-line" class:bad={live.bad}>{#each live.facts as f, i (i)}<span>{f}</span>{/each}</p>
       {/if}
@@ -534,6 +559,7 @@
       {#each volumesOf(d) as v (v.root)}
         {@const check = lastCheck(dto!, v.root)}
         {@const c = check ? checkOf(check) : null}
+        {@const mark = repairMark(dto!, v.root)}
         <div class="vol">
           {#if v.file_system !== "NTFS"}
             <p class="p">{t("ui.tests.check.not_ntfs", { fs: v.file_system ?? "?" })}</p>
@@ -542,11 +568,20 @@
               {@const cs = statusOf(c.result === "ProblemsFound" ? "Attention" : c.result === "NoProblems" ? "Ok" : "Unknown")}
               <p class="state"><StatusMark kind={cs.kind} word={t(`ui.tests.check.${c.result}`)} /></p>
             {/if}
+            <HelperLine job="check" volume={v.root} />
             <dl class="kv">
               <div><dt>{t("ui.tests.fs.volume")}</dt><dd>{vol(v.root)}</dd></div>
               <div><dt>{t("ui.tests.fs.last")}</dt><dd>{check ? at(check.ended_ms) : t("ui.tests.check.never")}</dd></div>
             </dl>
-            {#if c?.result === "ProblemsFound"}<p class="note">{t("ui.tests.check.repair", { volume: v.root.slice(0, 2) })}</p>{/if}
+            {#if mark}
+              <div class="panel" role="status">
+                <span class="pi"><StatusMark kind="attention" word="" /></span>
+                <div>
+                  <h3>{t(`ui.tests.check.panel.${mark}`, { volume: vol(v.root) })}</h3>
+                  <p>{t("ui.tests.check.panel.body")}</p>
+                </div>
+              </div>
+            {/if}
             {#if level === "Technical" && c?.output}<pre class="out">{c.output}</pre>{/if}
             <div class="acts">
               <button type="button" class="btn" disabled={busy} onclick={() => void hwtests.volume(v.root).then(started)}><Icon name="fsck" />{t("ui.tests.check.start")}</button>
@@ -652,6 +687,8 @@
     <ReadHistory runs={surfaceRuns(dto, readDisk)} disk={readDisk} name={diskName(readDisk)} {level} onclose={() => (reading = null)} />
   {/if}
 {/if}
+
+<HelperDialogs job="check" onconfirm={() => void stop()} />
 
 <dialog class="confirm" bind:this={dialog} aria-labelledby="ask-title" onclose={() => (asking = null)}>
   {#if asking?.kind === "bench"}
@@ -933,6 +970,34 @@
   }
   .acts.end {
     justify-content: flex-end;
+  }
+  .panel {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    max-width: 72ch;
+    margin: 14px 0 0;
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, var(--busy) 40%, var(--stroke));
+    border-radius: 12px;
+    background: var(--row);
+  }
+  .panel .pi {
+    display: flex;
+    margin-top: 2px;
+  }
+  .panel .pi :global(.word) {
+    display: none;
+  }
+  .panel h3 {
+    margin: 0 0 4px;
+    font: 600 15px/1.4 var(--f);
+  }
+  .panel p {
+    margin: 0;
+    color: var(--ink2);
+    font-size: 15px;
+    line-height: 1.5;
   }
   @media (forced-colors: active) {
     .pbar i,
