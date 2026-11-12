@@ -1,5 +1,5 @@
 # Builds the per-machine installer (Program Files, administrator permission to install), with the watcher,
-# the elevated helper and PresentMon beside the window.
+# the elevated helper, PresentMon and the third-party license notices beside the window.
 # Usage: powershell -ExecutionPolicy Bypass -File tools/bundle.ps1
 $ErrorActionPreference = 'Stop'
 
@@ -32,6 +32,9 @@ try {
 
     Set-Location (Join-Path $root 'apps\ui')
     Invoke-Step 'npm ci' { npm ci --no-audit --no-fund }
+    # Stops when third-party.json no longer matches the dependency graph, else writes the notices.
+    $notices = Join-Path $binaries 'THIRD-PARTY-NOTICES.txt'
+    Invoke-Step 'third-party notices' { cargo run --release --locked -p vestigium-notices -- --check --notices $notices }
     # With a signing key in the environment, the installer also gets the signature the updater checks.
     $configs = @('--config', 'src-tauri/tauri.bundle.conf.json')
     if ($env:TAURI_SIGNING_PRIVATE_KEY) { $configs += @('--config', 'src-tauri/tauri.updater.conf.json') }

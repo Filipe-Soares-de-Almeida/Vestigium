@@ -150,5 +150,6 @@ Settings › Privacy and data opens the folder and deletes the history after a c
 
 ## License
 
-Vestigium is released under the [MIT License](LICENSE). The installer also carries Intel's PresentMon,
-under its own license, which is installed beside it.
+Vestigium is released under the [MIT License](LICENSE). `THIRD-PARTY-NOTICES.txt`, installed beside it,
+gives the license of every open-source component it includes, and Intel's PresentMon, also in the
+installer, keeps its own license files in `licenses\PresentMon`.

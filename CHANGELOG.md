@@ -22,6 +22,10 @@ How to use this file:
 
 ## [Unreleased]
 
+### Added
+
+- License notices of every open-source component in the install folder.
+
 ## [0.1.1] - 2026-11-11
 
 ### Added
