@@ -36,6 +36,10 @@ How to use this file:
 - Show the highlights of the new version in the update dialog.
 - Point the issue forms and the wiki at About Vestigium for the version.
 
+### Fixed
+
+- Fix SSDs showing Attention for SMART counters that only warn on HDDs.
+
 ## [0.1.1] - 2026-11-11
 
 ### Added

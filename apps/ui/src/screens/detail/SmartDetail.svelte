@@ -14,7 +14,7 @@
   import type { SmartPoint } from "../../lib/types";
   import { at } from "../dumps/words";
   import { formatDayShort } from "../occurrence/format";
-  import { attrName, WATCHED } from "../tests/words";
+  import { attrName, smartWarns, WATCHED } from "../tests/words";
   import DetailPage from "./DetailPage.svelte";
   import Facts from "./Facts.svelte";
   import Missing from "./Missing.svelte";
@@ -24,12 +24,12 @@
   const device = $derived(hwtests.dto?.disks.find((d) => d.number === disk) ?? null);
   const health = $derived(hwtests.details[disk]?.health ?? null);
   const attribute = $derived(health?.attributes.find((a) => a.id === attr) ?? null);
-  const watched = $derived(WATCHED.includes(attr));
-  /** A watched count above zero needs a look; the others only inform. */
+  /** Watched attributes warn on a hard drive only; elsewhere they inform like the others. */
+  const watched = $derived(WATCHED.includes(attr) && device?.media === "Hdd");
   const standing = $derived<{ kind: StatusKind; word: string }>(
     !watched
       ? { kind: "info", word: t("ui.detail.smart.state.info") }
-      : (attribute?.raw ?? 0) > 0
+      : attribute && device && smartWarns(attribute, device.media)
         ? { kind: "attention", word: t("ui.status.attention") }
         : { kind: "ok", word: t("ui.detail.smart.state.ok") },
   );
@@ -62,7 +62,9 @@
       ]}
     />
     <Block title={t("ui.detail.smart.meaning")}>
-      <p class="p">{watched ? t("ui.detail.smart.watched") : t("ui.detail.smart.plain")}</p>
+      <p class="p">
+        {watched ? t("ui.detail.smart.watched") : WATCHED.includes(attr) ? t("ui.detail.smart.solid") : t("ui.detail.smart.plain")}
+      </p>
       <p class="note">{t("ui.detail.smart.normalized", { current: attribute.current, worst: attribute.worst })}</p>
     </Block>
     <Block title={t("ui.detail.smart.days")}>

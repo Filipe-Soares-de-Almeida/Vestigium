@@ -60,6 +60,7 @@
     span,
     surfaceEstimate,
     surfaceOf,
+    smartWarns,
     surfaceWord,
     WATCHED,
   } from "./tests/words";
@@ -547,7 +548,7 @@
         {/if}
         <RowList>
           {#each attrs.filter((a) => level !== "Simple" || WATCHED.includes(a.id)) as a (a.id)}
-            {@render smartRow(attrName(a.id), formatNumber(a.raw), WATCHED.includes(a.id) && a.raw > 0 ? "attention" : null, href.detail("smart", [d.number, a.id], { from: here(), label: diskName(d) }))}
+            {@render smartRow(attrName(a.id), formatNumber(a.raw), smartWarns(a, d.media) ? "attention" : null, href.detail("smart", [d.number, a.id], { from: here(), label: diskName(d) }))}
           {/each}
         </RowList>
       {:else}
