@@ -9,6 +9,8 @@
   import Appearance from "./settings/Appearance.svelte";
   import History from "./settings/History.svelte";
   import Language from "./settings/Language.svelte";
+  import News from "./settings/News.svelte";
+  import NewsVersion from "./settings/NewsVersion.svelte";
   import Privacy from "./settings/Privacy.svelte";
   import Reports from "./settings/Reports.svelte";
   import Updates from "./settings/Updates.svelte";
@@ -21,6 +23,8 @@
     return (SETTINGS_PAGES as readonly string[]).includes(wanted ?? "") ? (wanted as Category) : "appearance";
   });
   const settings = $derived(app.settings?.settings ?? null);
+  /** The release notes pages under Updates, which read no setting. */
+  const news = $derived(router.current.screen === "settings" ? router.current.news : null);
   /** The line under each page's title: what the page is about, the watcher's state or the version. */
   const sub = $derived.by(() => {
     if (current === "watching") return shellStatus().text;
@@ -29,7 +33,11 @@
   });
 </script>
 
-{#if settings === null}
+{#if news?.version}
+  <NewsVersion version={news.version} entry={news.entry} />
+{:else if news}
+  <News />
+{:else if settings === null}
   <PageHead title={t(`ui.settings.category.${current}`)} sub={t("ui.settings.unavailable")} />
 {:else}
   <PageHead

@@ -146,6 +146,17 @@ class Updates {
     this.failed = false;
   }
 
+  /** The version a check found, as a release with its day in local time. */
+  get offered(): Release | null {
+    const found = this.found;
+    if (!found) return null;
+    const day = found.date_ms === null ? null : new Date(found.date_ms);
+    const date = day
+      ? `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`
+      : null;
+    return { version: found.version, date, summary: found.summary, groups: found.groups };
+  }
+
   /** Every released version up to this one, for Settings. */
   async allNotes(): Promise<Release[]> {
     return invoke<Release[]>("release_notes", { lang: lang(), after: null }).catch(() => []);

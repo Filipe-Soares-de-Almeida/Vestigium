@@ -273,4 +273,23 @@
     max-width: 1180px;
     outline: none;
   }
+  /* A screen whose page is `.fill` takes the height left in the window and scrolls inside its own areas. */
+  .content:has(:global(.screen > .fill)) {
+    overflow: hidden;
+  }
+  .content:has(:global(.screen > .fill)) .grid {
+    grid-template-rows: minmax(0, 1fr);
+    height: 100%;
+    padding-bottom: 20px;
+  }
+  .content:has(:global(.screen > .fill)) main {
+    display: flex;
+    flex-direction: column;
+  }
+  .screen:has(> :global(.fill)) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
 </style>

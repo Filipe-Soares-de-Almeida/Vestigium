@@ -1,7 +1,7 @@
 // Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
 // #/disks, #/memory, #/activity/programs, #/activity/all, #/period/<start ms>[?day=YYYY-MM-DD], #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
 // #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
-// #/settings[/<category>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
+// #/settings[/<category>], #/settings/updates/news[/<version>][?entry=<kind>-<index>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
 
 export type ActivityTab = "today" | "now";
@@ -39,7 +39,13 @@ export type Route =
   | { screen: "tweaks"; key: string | null; group: TweakGroup | null }
   /** `device` is "memory" or a physical disk number. */
   | { screen: "tests"; device: string | null }
-  | { screen: "settings"; category: string | null };
+  /** `news` is set on the release notes pages under Updates: every version, or one with an entry to show. */
+  | { screen: "settings"; category: string | null; news: NewsPage | null };
+
+export interface NewsPage {
+  version: string | null;
+  entry: string | null;
+}
 
 export type Screen = Route["screen"];
 
@@ -77,6 +83,10 @@ export const href = {
     key ? `#/tweaks/${encodeURIComponent(key)}` : group && group !== "recommended" ? `#/tweaks?group=${group}` : "#/tweaks",
   tests: (device?: string) => (device ? `#/tests/${device}` : "#/tests"),
   settings: (category?: string) => (category ? `#/settings/${category}` : "#/settings"),
+  news: (version?: string | null, entry?: string | null) => {
+    const page = version ? `#/settings/updates/news/${encodeURIComponent(version)}` : "#/settings/updates/news";
+    return version && entry ? `${page}?entry=${encodeURIComponent(entry)}` : page;
+  },
 };
 
 export function parse(hash: string): Route {
@@ -136,7 +146,14 @@ export function parse(hash: string): Route {
     };
   }
   if (screen === "tests") return { screen: "tests", device: arg === "memory" || /^\d+$/.test(arg ?? "") ? arg : null };
-  if (screen === "settings") return { screen: "settings", category: arg || null };
+  if (screen === "settings") {
+    const news = arg === "updates" && rest[0] === "news";
+    return {
+      screen: "settings",
+      category: arg || null,
+      news: news ? { version: rest[1] ? decodeURIComponent(rest[1]) : null, entry: rest[1] ? params.get("entry") : null } : null,
+    };
+  }
   return { screen: "home" };
 }
 
@@ -166,6 +183,7 @@ class Router {
     if (route.screen === "period") return `period/${route.start}`;
     if (route.screen === "detail") return `detail/${route.kind}/${route.parts.join("/")}`;
     if (route.screen === "health") return `health/${route.area ?? ""}`;
+    if (route.screen === "settings" && route.news) return `settings/news/${route.news.version ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }
 }
