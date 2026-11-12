@@ -74,13 +74,15 @@ $footer = @'
 
 ### Install
 
-Download `{installer}` below and run it. It installs for your user only and needs no administrator rights.
+Download `{installer}` below and run it. It installs for every account on the PC, in
+`C:\Program Files\Vestigium`, so Windows asks for an administrator's permission; the monitor and the window
+then run as your user.
 
 Vestigium {version} is not code-signed yet. Windows may show "Windows protected your PC": check that the file
 came from this page and that its SHA-256 matches `SHA256SUMS.txt`, then choose **More info**, then
-**Run anyway**. Windows asks for administrator rights only when you start a task that needs them, and that
-prompt names an unknown publisher. On Windows 11 with Smart App Control turned on, Windows blocks apps that
-are not signed.
+**Run anyway**. After the install, Windows asks for administrator rights only when you start a task that
+needs them; every such prompt names an unknown publisher. On Windows 11 with Smart App Control turned on,
+Windows blocks apps that are not signed.
 
 ### Verify your download
 
