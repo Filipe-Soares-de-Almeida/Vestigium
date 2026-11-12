@@ -932,7 +932,7 @@
     top: 3px;
     bottom: 3px;
     left: 0;
-    border-radius: 3px;
+    border-radius: 2px;
     background: var(--press);
   }
   .mono,
