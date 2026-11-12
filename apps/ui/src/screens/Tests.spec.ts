@@ -5,9 +5,9 @@ import { answer } from "../dev/test-ipc";
 import { show, until } from "../dev/test-mount";
 import { t } from "../lib/i18n.svelte";
 import { hwtests } from "../lib/tests.svelte";
-import type { TestRunDto, TestsDto, VolumeCheck, VolumeResult } from "../lib/types";
+import type { DiskDetailDto, Media, SmartAttribute, TestRunDto, TestsDto, VolumeCheck, VolumeResult } from "../lib/types";
 import Tests from "./Tests.svelte";
-import { repairMark } from "./tests/words";
+import { diskState, nvmeMarks, repairMark, smartWarns } from "./tests/words";
 
 const NOW = Date.now();
 const HOUR = 3_600_000;
@@ -120,4 +120,42 @@ test("another_volumes_check_does_not_mark_this_one", () => {
   const dto = page([check(1, HOUR, "ProblemsFound", false, true)]);
 
   expect(repairMark(dto, "D:\\")).toBeNull();
+});
+
+const attr = (id: number, raw: number): SmartAttribute => ({ id, current: 100, worst: 100, raw });
+
+/** The disk state of disk 0 as `media` with the given SMART attributes and no test runs. */
+function stateWith(media: Media, attributes: SmartAttribute[]) {
+  const dto = page([]);
+  const disk = { ...dto.disks[0], media };
+  const detail: DiskDetailDto = { health: { name: disk.name, read_ms: NOW, predict_failure: false, attributes, nvme: null }, nvme: null };
+  return diskState(dto, disk, detail, false).mark;
+}
+
+test("a_watched_counter_above_zero_warns_on_a_hard_drive_only", () => {
+  expect(smartWarns(attr(187, 1), "Hdd")).toBe(true);
+  expect(smartWarns(attr(187, 1), "Ssd")).toBe(false);
+  expect(smartWarns(attr(187, 1), "Unknown")).toBe(false);
+  expect(smartWarns(attr(9, 4000), "Hdd")).toBe(false);
+  expect(smartWarns(attr(5, 0), "Hdd")).toBe(false);
+});
+
+test("attribute_188_warns_by_its_low_16_bits", () => {
+  expect(smartWarns(attr(188, 0x1_0000_0000), "Hdd")).toBe(false);
+  expect(smartWarns(attr(188, 0x1_0000_0002), "Hdd")).toBe(true);
+});
+
+test("an_ssd_with_a_watched_counter_above_zero_is_not_marked_attention", () => {
+  expect(stateWith("Ssd", [attr(187, 1)])).not.toBe("Attention");
+  expect(stateWith("Hdd", [attr(187, 1)])).toBe("Attention");
+});
+
+test("nvme_rows_take_the_levels_of_the_health_findings", () => {
+  const healthy = { critical_warning: 0, temperature_c: 40, available_spare_pct: 100, spare_threshold_pct: 10, percentage_used: 3, media_errors: 0 };
+  expect(nvmeMarks(healthy)).toEqual({ used: null, spare: null, media: null });
+  expect(nvmeMarks({ ...healthy, percentage_used: 90, available_spare_pct: 5, media_errors: 2 })).toEqual({
+    used: "attention",
+    spare: "critical",
+    media: "attention",
+  });
 });

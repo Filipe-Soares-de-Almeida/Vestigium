@@ -1,5 +1,6 @@
 // Written by the `wire` test of the window crate; do not edit by hand.
 // Refresh with `UPDATE_FIXTURES=1 cargo test -p vestigium-ui wire`.
+import type { AboutVersions } from "../../lib/about";
 import type { Advice, AgentLink, AgentStatus, AppFrames, Applier, BenchMode, BenchResult, Benchmark, BootDelay, BootReport, BootTime, BugCheckDto, Bus, CaptureDto, CaptureFinished, CaptureNote, CaptureRun, CaptureSource, CaptureSummary, Cause, Channel, ColorTheme, Columns, Concern, Confidence, CoreLoad, CrashControlDto, CrashKind, Culprit, DelayKind, DeleteFinished, DetailLevel, DiagnosticDetail, DiagnosticResult, DiskDetailDto, DiskDto, DiskHealth, DiskInfo, DiskLoad, DriverLatency, DumpCulprit, DumpDto, DumpKind, DumpScanFinished, DumpsDto, Ended, Episode, EpisodeDetailDto, EpisodeKind, EventMeaning, Evidence, Fact, FactKind, FaultDto, FindingDto, FindingKind, FrameHitch, Gap, GapReason, HangOutcome, HangSpan, HealthDto, HealthFact, Helped, HelpedVerdict, HistoryReset, HistoryState, Hive, HungWindow, Lanes, LanguagePref, LiveMessage, LivePoint, LongRoutine, MachineInfo, MarksDto, Measure, Media, MemoryDiagnostic, MemoryDto, MemoryError, MemoryQuick, Metric, MonitorSource, MonitorState, MonitorStatus, NextStep, NowFrame, NvmeDetail, NvmeHealth, Occurrence, OccurrenceDto, OccurrenceKind, OccurrenceSummary, PageFile, Pattern, PcState, ProbeHiccup, ProcessFacts, ProcessSample, ProcessTop, ProgramMarks, ProgramPoint, Reading, Reference, Region, Resolution, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, RunningTest, Sample, ScanFinished, ScanUnderWay, SecurityProduct, SettingChange, SettingResult, SettingValue, Settings, SettingsDto, Severity, Signature, SlowBlock, SmartAttribute, SmartPoint, SourceFailure, StartupList, Subject, SurfaceProgress, SurfaceScan, Suspect, Takes, TestData, TestFinished, TestKind, TestOutcome, TestProgress, TestRun, TestRunDto, TestSpan, TestsDto, ThemePref, TimelineDto, TrayState, Trigger, TweakChange, TweakId, TweakRow, TweakSetting, TweakSignal, TweakStatus, TweakValue, TweaksApplied, TweaksDto, UiError, UiErrorKind, VolumeCheck, VolumeDto, VolumeResult, WinEvent, Window } from "../../lib/types";
 import type { CheckResult, NotesGroup, Progress, Release, UpdatePrefs } from "../../lib/update.svelte";
 import type { About } from "../../screens/settings/data";
@@ -1511,14 +1512,14 @@ export const notesGroupSamples = [
 ] satisfies NotesGroup[];
 
 export const releaseSamples = [
-  {"version":"0.2.0","date":"2026-11-10","groups":[{"kind":"Added","items":["One thing."]}]},
-  {"version":"0.2.0","date":null,"groups":[{"kind":"Added","items":["One thing."]}]},
+  {"version":"0.2.0","date":"2026-11-10","summary":"Faster reports.","groups":[{"kind":"Added","items":["One thing."]}]},
+  {"version":"0.2.0","date":null,"summary":null,"groups":[{"kind":"Added","items":["One thing."]}]},
 ] satisfies Release[];
 
 export const checkResultSamples = [
   {"status":"up_to_date"},
-  {"status":"available","version":"0.2.0","date_ms":1790000000000,"groups":[{"kind":"Added","items":["One thing."]}]},
-  {"status":"available","version":"0.2.0","date_ms":null,"groups":[]},
+  {"status":"available","version":"0.2.0","date_ms":1790000000000,"summary":"Faster reports.","groups":[{"kind":"Added","items":["One thing."]}]},
+  {"status":"available","version":"0.2.0","date_ms":null,"summary":null,"groups":[]},
 ] satisfies CheckResult[];
 
 export const progressSamples = [
@@ -1532,3 +1533,9 @@ export const aboutSamples = [
   {"version":"0.1.0","data_bytes":1000000},
   {"version":"0.1.0","data_bytes":null},
 ] satisfies About[];
+
+export const aboutVersionsSamples = [
+  {"version":"0.1.1","released":"2026-11-11","monitor":{"run":"running","version":"0.1.1","protocol":null},"helper":"0.1.1","schema":13,"protocol":22,"windows":{"edition":"Windows 11 Pro","family":"Windows 11","release":"24H2","build":"26100.2605","version":"10.0.26100.2605"},"webview":"131.0.2903.112"},
+  {"version":"0.1.1","released":"2026-11-11","monitor":{"run":"stopped","version":"0.1.1","protocol":null},"helper":"0.1.1","schema":13,"protocol":22,"windows":{"edition":"Windows 11 Pro","family":"Windows 11","release":"24H2","build":"26100.2605","version":"10.0.26100.2605"},"webview":"131.0.2903.112"},
+  {"version":"0.1.1","released":null,"monitor":{"run":"other","version":null,"protocol":13},"helper":null,"schema":13,"protocol":22,"windows":null,"webview":null},
+] satisfies AboutVersions[];

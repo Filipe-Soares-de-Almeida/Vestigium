@@ -10,7 +10,7 @@ advisory if a fix is published.
 
 Please include:
 
-- the Vestigium version (Settings › Updates) and your Windows version and build,
+- the Vestigium version and your Windows version and build (About Vestigium › Copy information),
 - what an attacker can do, and what they need first: a local account, administrator rights or a network
   position,
 - the steps to reproduce it, or a proof of concept,

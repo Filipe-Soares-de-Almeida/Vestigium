@@ -1,17 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-
-  import ReleaseNotes from "../../components/ReleaseNotes.svelte";
+  import RowCard from "../../components/RowCard.svelte";
+  import RowList from "../../components/RowList.svelte";
   import { t } from "../../lib/i18n.svelte";
-  import { type Release, updates } from "../../lib/update.svelte";
+  import { href } from "../../lib/router.svelte";
+  import { updates } from "../../lib/update.svelte";
   import Row from "./Row.svelte";
   import Toggle from "./Toggle.svelte";
-
-  let notes = $state<Release[] | null>(null);
-
-  onMount(() => {
-    void updates.allNotes().then((found) => (notes = found));
-  });
 
   const status = $derived.by((): { text: string; error: boolean } | null => {
     if (updates.checking) return { text: t("ui.settings.updates.checking"), error: false };
@@ -42,13 +36,9 @@
   </div>
 </Row>
 <Row id="upd-news" title={t("ui.settings.updates.news")} wide>
-  {#if notes === null}
-    <p class="empty">{t("ui.common.loading")}</p>
-  {:else if notes.length}
-    <ReleaseNotes releases={notes} />
-  {:else}
-    <p class="empty">{t("ui.settings.updates.news_none")}</p>
-  {/if}
+  <RowList>
+    <RowCard href={href.news()} icon="notes" title={t("ui.settings.updates.news_row")} />
+  </RowList>
 </Row>
 
 <style>

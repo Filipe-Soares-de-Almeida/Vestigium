@@ -15,6 +15,8 @@ const COMMANDS: &[&str] = &[
     "settings",
     "about",
     "open_data_folder",
+    "about_versions",
+    "open_page",
     "clear_history",
     "start_capture",
     "capture_run",

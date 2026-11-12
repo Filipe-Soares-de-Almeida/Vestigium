@@ -53,7 +53,7 @@ body:
     id: version
     attributes:
       label: Vestigium version
-      description: Settings › Updates shows the installed version.
+      description: In the window, select the version at the bottom of the side pane. About Vestigium shows it, and Copy information copies it with the Windows version and build.
       placeholder: "0.1.0"
     validations:
       required: true

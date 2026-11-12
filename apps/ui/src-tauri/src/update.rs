@@ -26,6 +26,8 @@ pub struct Group {
 pub struct Release {
     pub version: String,
     pub date: Option<String>,
+    /// The paragraph between the version's heading and its first group, as one line.
+    pub summary: Option<String>,
     pub groups: Vec<Group>,
 }
 
@@ -47,6 +49,7 @@ pub enum CheckResult {
     Available {
         version: String,
         date_ms: Option<i64>,
+        summary: Option<String>,
         groups: Vec<Group>,
     },
 }
@@ -77,6 +80,7 @@ pub fn releases(text: &str) -> Vec<Release> {
             out.push(Release {
                 version,
                 date,
+                summary: summary(body),
                 groups: groups(body),
             });
         }
@@ -106,7 +110,25 @@ pub fn releases(text: &str) -> Vec<Release> {
     out
 }
 
-/// The groups of one version's notes: `### Heading` lines and `- ` entries, wrapped lines joined.
+/// The plain text before a version's first `### Heading`, its lines joined; `None` when blank.
+pub fn summary(body: &str) -> Option<String> {
+    let text = body
+        .lines()
+        .take_while(|line| !line.starts_with("### "))
+        .map(plain)
+        .filter(|line| !line.is_empty() && !is_link_reference(line))
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some(text)
+}
+
+/// A `[name]: url` line at the foot of a changelog.
+fn is_link_reference(line: &str) -> bool {
+    line.starts_with('[') && line.contains("]: ")
+}
+
+/// The groups of one version's notes: `### Heading` lines and `- ` entries, wrapped lines joined;
+/// anything before the first heading is left out.
 pub fn groups(body: &str) -> Vec<Group> {
     let mut out: Vec<Group> = Vec::new();
     let mut open_item = false;
@@ -184,8 +206,8 @@ pub fn notes_between(
         .collect()
 }
 
-/// The notes a feed carries: a JSON object of languages, or plain notes in English.
-pub fn feed_groups(body: &str, lang: &str) -> Vec<Group> {
+/// The summary and groups a feed carries: a JSON object of languages, or plain notes in English.
+pub fn feed_notes(body: &str, lang: &str) -> (Option<String>, Vec<Group>) {
     let text = match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(body) {
         Ok(map) => map
             .get(lang)
@@ -195,7 +217,7 @@ pub fn feed_groups(body: &str, lang: &str) -> Vec<Group> {
             .to_string(),
         Err(_) => body.to_string(),
     };
-    groups(&text)
+    (summary(&text), groups(&text))
 }
 
 fn translation(lang: &str) -> Option<&'static str> {
@@ -283,13 +305,17 @@ pub async fn update_check(
     write_prefs(&app, &prefs)?;
     let result = match &found {
         None => CheckResult::UpToDate,
-        Some(update) => CheckResult::Available {
-            version: update.version.clone(),
-            date_ms: update
-                .date
-                .map(|d| (d.unix_timestamp_nanos() / 1_000_000) as i64),
-            groups: feed_groups(update.body.as_deref().unwrap_or_default(), &lang),
-        },
+        Some(update) => {
+            let (summary, groups) = feed_notes(update.body.as_deref().unwrap_or_default(), &lang);
+            CheckResult::Available {
+                version: update.version.clone(),
+                date_ms: update
+                    .date
+                    .map(|d| (d.unix_timestamp_nanos() / 1_000_000) as i64),
+                summary,
+                groups,
+            }
+        }
     };
     *state.found.lock().unwrap_or_else(|p| p.into_inner()) = found;
     Ok(result)
@@ -357,7 +383,7 @@ pub fn update_cancel(state: State<'_, UpdateState>) {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "# Changelog\n\n<!--\n- Every change adds its entries.\n-->\n\n## [Unreleased]\n\n### Added\n\n- Not out yet.\n\n## [0.2.0] - 2026-11-18\n\n### Added\n\n- Holding Ctrl pauses the `Now` screen,\n  like Task Manager.\n- See all programs.\n\n### Fixed\n\n- Health opens with its data.\n\n## [0.1.0] - 2026-11-01\n\n### Added\n\n- First version.\n\n[Unreleased]: https://example.invalid/compare/v0.2.0...HEAD\n[0.2.0]: https://example.invalid/v0.2.0\n";
+    const SAMPLE: &str = "# Changelog\n\n<!--\n- Every change adds its entries.\n-->\n\n## [Unreleased]\n\n### Added\n\n- Not out yet.\n\n## [0.2.0] - 2026-11-18\n\n### Added\n\n- Holding Ctrl pauses the `Now` screen,\n  like Task Manager.\n- See all programs.\n\n### Fixed\n\n- Health opens with its data.\n\n## [0.1.0] - 2026-11-01\n\nThe first\nrelease, `Now` included.\n\n### Added\n\n- First version.\n\n[Unreleased]: https://example.invalid/compare/v0.2.0...HEAD\n[0.2.0]: https://example.invalid/v0.2.0\n";
 
     #[test]
     fn release_not_found_is_a_failed_check() {
@@ -385,6 +411,36 @@ mod tests {
     }
 
     #[test]
+    fn the_paragraph_before_the_first_group_is_the_summary() {
+        let list = releases(SAMPLE);
+        assert_eq!(list[0].summary, None);
+        assert_eq!(
+            list[1].summary.as_deref(),
+            Some("The first release, Now included.")
+        );
+        assert_eq!(list[1].groups.len(), 1);
+        assert_eq!(list[1].groups[0].items, ["First version."]);
+    }
+
+    #[test]
+    fn a_paragraph_or_entry_before_the_first_group_is_not_an_entry() {
+        let body = "A lead paragraph.\n- Not an entry.\n\n### Fixed\n\n- A fix.\n";
+        assert_eq!(
+            groups(body),
+            [Group {
+                kind: "Fixed".into(),
+                items: vec!["A fix.".into()],
+            }]
+        );
+        assert_eq!(
+            summary(body).as_deref(),
+            Some("A lead paragraph. - Not an entry.")
+        );
+        assert_eq!(summary("\n\n### Added\n\n- One.\n"), None);
+        assert_eq!(summary("\n[0.1.0]: https://example.invalid/v0.1.0\n"), None);
+    }
+
+    #[test]
     fn notes_cover_the_versions_since_the_last_one_seen() {
         let since = notes_between(SAMPLE, None, Some("0.1.0"), "0.2.0");
         assert_eq!(since.len(), 1);
@@ -409,14 +465,32 @@ mod tests {
         })
         .to_string();
         assert_eq!(
-            feed_groups(&body, "pt-BR")[0].items,
+            feed_notes(&body, "pt-BR").1[0].items,
             ["The translated fix."]
         );
-        assert_eq!(feed_groups(&body, "fr")[0].items, ["A fix."]);
+        assert_eq!(feed_notes(&body, "fr").1[0].items, ["A fix."]);
         assert_eq!(
-            feed_groups("### Added\n\n- Plain notes.", "pt-BR")[0].items,
+            feed_notes("### Added\n\n- Plain notes.", "pt-BR").1[0].items,
             ["Plain notes."]
         );
+    }
+
+    #[test]
+    fn feed_notes_carry_the_summary_of_their_language() {
+        let body = serde_json::json!({
+            "en": "Faster reports.\n\n### Fixed\n\n- A fix.",
+            "pt-BR": "Relatórios mais rápidos.\n\n### Fixed\n\n- Uma correção.",
+        })
+        .to_string();
+        assert_eq!(
+            feed_notes(&body, "pt-BR").0.as_deref(),
+            Some("Relatórios mais rápidos.")
+        );
+        assert_eq!(
+            feed_notes(&body, "fr").0.as_deref(),
+            Some("Faster reports.")
+        );
+        assert_eq!(feed_notes("### Added\n\n- Plain notes.", "en").0, None);
     }
 
     #[test]
@@ -444,5 +518,16 @@ mod tests {
                 release.version
             );
         }
+        let first = |text| {
+            releases(text)
+                .into_iter()
+                .find(|r| r.version == "0.1.0")
+                .and_then(|r| r.summary)
+        };
+        assert_eq!(first(CHANGELOG).as_deref(), Some("The first release."));
+        assert_eq!(
+            first(CHANGELOG_PT_BR).as_deref(),
+            Some("A primeira versão.")
+        );
     }
 }

@@ -18,7 +18,7 @@
   import { findingTitle, findingView } from "./health/words";
   import { formatBytes } from "./occurrence/format";
   import { statusOf } from "./tests/status";
-  import { attrName, diskState, WATCHED } from "./tests/words";
+  import { attrName, diskState, smartWarns, WATCHED } from "./tests/words";
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const dto = $derived(hwtests.dto);
@@ -41,7 +41,7 @@
     });
   }
 
-  /** The SMART attributes that warn and have been read for this disk. */
+  /** The watched SMART attributes read for this disk. */
   const watched = (d: DiskDto) =>
     (hwtests.details[d.number]?.health?.attributes ?? []).filter((a) => WATCHED.includes(a.id));
 
@@ -78,7 +78,7 @@
               <RowCard href={href.detail("smart", [d.number, a.id], { from: here(), label: t("ui.group.disks") })} title={attrName(a.id)}>
                 {#snippet right()}
                   <b class="value">{a.raw}</b>
-                  {#if a.raw > 0}<StatusMark kind="attention" reveal />{/if}
+                  {#if smartWarns(a, d.media)}<StatusMark kind="attention" reveal />{/if}
                 {/snippet}
               </RowCard>
             {/each}

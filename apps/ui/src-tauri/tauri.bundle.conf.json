@@ -6,6 +6,7 @@
       "binaries/PresentMon-2.6.0-x64"
     ],
     "resources": {
+      "binaries/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt",
       "binaries/licenses/PresentMon/LICENSE.txt": "licenses/PresentMon/LICENSE.txt",
       "binaries/licenses/PresentMon/THIRD_PARTY.txt": "licenses/PresentMon/THIRD_PARTY.txt"
     }

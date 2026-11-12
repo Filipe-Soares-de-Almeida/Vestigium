@@ -19,12 +19,14 @@ export interface NotesGroup {
 export interface Release {
   version: string;
   date: string | null;
+  /** The paragraph before the version's first group, as one line. */
+  summary: string | null;
   groups: NotesGroup[];
 }
 
 export type CheckResult =
   | { status: "up_to_date" }
-  | { status: "available"; version: string; date_ms: number | null; groups: NotesGroup[] };
+  | { status: "available"; version: string; date_ms: number | null; summary: string | null; groups: NotesGroup[] };
 
 type Available = Extract<CheckResult, { status: "available" }>;
 
@@ -142,6 +144,17 @@ class Updates {
     if (this.download || this.installing) return;
     this.dialog = null;
     this.failed = false;
+  }
+
+  /** The version a check found, as a release with its day in local time. */
+  get offered(): Release | null {
+    const found = this.found;
+    if (!found) return null;
+    const day = found.date_ms === null ? null : new Date(found.date_ms);
+    const date = day
+      ? `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`
+      : null;
+    return { version: found.version, date, summary: found.summary, groups: found.groups };
   }
 
   /** Every released version up to this one, for Settings. */

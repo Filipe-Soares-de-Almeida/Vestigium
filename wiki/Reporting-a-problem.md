@@ -34,7 +34,7 @@ Open [New issue](https://github.com/Filipe-Soares-de-Almeida/Vestigium/issues/ne
 | **Translation problem** | A wrong, unclear, missing or cut-off text in the window or the tray menu |
 | **Accessibility barrier** | Something hard or impossible to use with your keyboard, screen reader, display settings or other assistive technology |
 
-The forms ask for your Vestigium version, shown in **Settings › Updates › Installed version**, and your Windows version and build, shown by running `winver` from the Start menu.
+The forms ask for your Vestigium version and your Windows version and build. In the window, select the version at the bottom of the side pane: **About Vestigium** shows them, **Copy information** copies them as a block to paste into the form, and **Report a problem** opens the bug report form with them filled in.
 
 - **A question** about using Vestigium: ask in [Discussions, Q&A](https://github.com/Filipe-Soares-de-Almeida/Vestigium/discussions/categories/q-a).
 - **A security vulnerability**: report it privately from the [Security tab](https://github.com/Filipe-Soares-de-Almeida/Vestigium/security/advisories/new), never in a public issue.
