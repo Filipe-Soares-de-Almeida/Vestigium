@@ -40,7 +40,7 @@ use vestigium_core::hwtest::{
 /// What every command works with: the database, the pipe and the live stream.
 pub struct AppState {
     history: Arc<Mutex<History>>,
-    link: Arc<Link>,
+    pub(crate) link: Arc<Link>,
     /// The running live stream; dropping its sender ends it.
     live: Mutex<LiveSlot>,
     /// The deep capture this window started, until its helper exits.

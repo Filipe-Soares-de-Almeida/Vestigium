@@ -35,7 +35,7 @@ use vestigium_ipc::{
 };
 use vestigium_store::{CaptureSummary, StoreError};
 
-use crate::about::AboutDto;
+use crate::about::{AboutDto, MonitorRun, MonitorVersion, VersionsDto};
 use crate::agent::{AgentLink, SettingsDto, UiError};
 use crate::capture::{
     CaptureFinished, CaptureRun, DeleteFinished, DumpScanFinished, Ended, ScanFinished,
@@ -51,6 +51,7 @@ use crate::hwtests::{
 };
 use crate::live::{Lanes, LiveMessage, LivePoint};
 use crate::process::ProcessFactsDto;
+use crate::system::WindowsVersion;
 use crate::tweaks::{TweakRowDto, TweaksApplied, TweaksDto};
 use crate::update::{CheckResult, Group, Progress, Release, UpdatePrefs};
 
@@ -60,6 +61,7 @@ const HEADER: &str = "// Written by the `wire` test of the window crate; do not 
 const TYPES: &str = "../../lib/types";
 const UPDATE: &str = "../../lib/update.svelte";
 const ABOUT: &str = "../../screens/settings/data";
+const ABOUT_DIALOG: &str = "../../lib/about";
 /// Types of `lib/types.ts` the window sends but never receives, so no sample exists for them.
 const SENT_ONLY: [&str; 1] = ["TweakPick"];
 
@@ -2397,8 +2399,44 @@ fn render() -> String {
             })
             .to_vec(),
     );
+    wire.add(ABOUT_DIALOG, "AboutVersions", about_versions());
 
     wire.text()
+}
+
+/// One sample per state of the watcher, with Windows and WebView2 read and unread.
+fn about_versions() -> Vec<VersionsDto> {
+    let windows = WindowsVersion {
+        edition: string("Windows 11 Pro"),
+        family: string("Windows 11"),
+        release: Some(string("24H2")),
+        build: string("26100.2605"),
+        version: string("10.0.26100.2605"),
+    };
+    let runs = variants!(MonitorRun:
+        Running => MonitorRun::Running,
+        Stopped => MonitorRun::Stopped,
+        Other => MonitorRun::Other,
+    );
+    runs.into_iter()
+        .map(|run| {
+            let read = run != MonitorRun::Other;
+            VersionsDto {
+                version: "0.1.1",
+                released: read.then(|| string("2026-11-11")),
+                monitor: MonitorVersion {
+                    run,
+                    version: read.then(|| string("0.1.1")),
+                    protocol: (!read).then_some(13),
+                },
+                helper: read.then(|| string("0.1.1")),
+                schema: 13,
+                protocol: 22,
+                windows: read.then(|| windows.clone()),
+                webview: read.then(|| string("131.0.2903.112")),
+            }
+        })
+        .collect()
 }
 
 fn history_states() -> Vec<(HistoryState, Resolution)> {

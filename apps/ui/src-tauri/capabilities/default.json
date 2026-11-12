@@ -24,6 +24,7 @@
     "allow-settings",
     "allow-about",
     "allow-open-data-folder",
+    "allow-about-versions",
     "allow-clear-history",
     "allow-start-capture",
     "allow-capture-run",

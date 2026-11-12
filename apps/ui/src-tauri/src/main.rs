@@ -9,6 +9,7 @@ mod hwtests;
 mod live;
 mod process;
 mod protected;
+mod system;
 mod tweaks;
 mod update;
 #[cfg(test)]
@@ -72,6 +73,7 @@ fn main() {
             commands::test_running,
             about::about,
             about::open_data_folder,
+            about::about_versions,
             update::update_prefs,
             update::set_update_prefs,
             update::release_notes,

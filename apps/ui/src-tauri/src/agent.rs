@@ -154,12 +154,48 @@ pub struct SettingsDto {
     pub editable: bool,
 }
 
+/// What the watcher said about itself when the window last greeted it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Peer {
+    /// Its version; only a watcher that accepts this window's protocol says it.
+    pub version: Option<String>,
+    /// The protocol it speaks.
+    pub protocol: Option<u32>,
+}
+
+impl Peer {
+    /// What a Hello answer tells: the version and protocol, or the protocol a refusal names.
+    fn from_answer(answer: &Response) -> Peer {
+        match answer {
+            Response::Hello {
+                protocol,
+                agent_version,
+            } => Peer {
+                version: Some(agent_version.clone()),
+                protocol: Some(*protocol),
+            },
+            Response::Error { message, .. } => Peer {
+                version: None,
+                protocol: spoken_protocol(message),
+            },
+            _ => Peer::default(),
+        }
+    }
+}
+
+/// The protocol a watcher's refusal names: "protocol 22 is not supported; this agent speaks 13".
+fn spoken_protocol(message: &str) -> Option<u32> {
+    message.rsplit_once("speaks ")?.1.trim().parse().ok()
+}
+
 /// The one pipe connection to the watcher, shared by every command and the live stream.
 pub struct Link {
     agent_exe: Option<PathBuf>,
     /// The pipe to connect to; the user's own unless a test names one.
     pipe: Option<String>,
     client: Mutex<Option<PipeClient>>,
+    /// The answer to the last Hello; `None` until one came, or when the pipe has another owner.
+    peer: Mutex<Option<Peer>>,
 }
 
 impl Link {
@@ -168,7 +204,13 @@ impl Link {
             agent_exe,
             pipe: None,
             client: Mutex::new(None),
+            peer: Mutex::new(None),
         }
+    }
+
+    /// What the watcher said in the last handshake.
+    pub fn peer(&self) -> Option<Peer> {
+        lock(&self.peer).clone()
     }
 
     /// A link to the pipe called `pipe`, for tests that run a watcher of their own.
@@ -287,10 +329,13 @@ impl Link {
             Some(pipe) => pipe.clone(),
             None => pipe_name(&current_user_sid()?),
         };
+        *lock(&self.peer) = None;
         let mut client = PipeClient::connect(&pipe, exe)?;
-        same_protocol(client.call(&Request::Hello {
+        let answer = client.call(&Request::Hello {
             protocol: PROTOCOL_VERSION,
-        })?)?;
+        })?;
+        *lock(&self.peer) = Some(Peer::from_answer(&answer));
+        same_protocol(answer)?;
         Ok(client)
     }
 }
@@ -610,6 +655,58 @@ mod tests {
             agent_version: "0.0.0".into(),
         };
         assert!(same_protocol(same).is_ok());
+    }
+
+    #[test]
+    fn the_handshake_keeps_the_watchers_version() {
+        let name = unique_pipe();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || server.serve(answer));
+        let link = link_to(&name);
+        assert_eq!(link.peer(), None);
+
+        assert!(matches!(link.status(), AgentLink::Running(_)));
+
+        assert_eq!(
+            link.peer(),
+            Some(Peer {
+                version: Some("test".into()),
+                protocol: Some(PROTOCOL_VERSION),
+            })
+        );
+    }
+
+    #[test]
+    fn a_refused_handshake_keeps_the_protocol_the_watcher_speaks() {
+        let name = unique_pipe();
+        let server = PipeServer::bind(&name).unwrap();
+        std::thread::spawn(move || {
+            server.serve(|request| match request {
+                Request::Hello { protocol } => Response::Error {
+                    code: ErrorCode::Protocol,
+                    message: format!("protocol {protocol} is not supported; this agent speaks 13"),
+                },
+                other => answer(other),
+            })
+        });
+        let link = link_to(&name);
+
+        assert_eq!(link.status(), AgentLink::Mismatch);
+
+        assert_eq!(
+            link.peer(),
+            Some(Peer {
+                version: None,
+                protocol: Some(13),
+            })
+        );
+    }
+
+    #[test]
+    fn a_refusal_without_a_protocol_names_none() {
+        assert_eq!(spoken_protocol("this agent speaks 13"), Some(13));
+        assert_eq!(spoken_protocol("protocol 22 is not supported"), None);
+        assert_eq!(spoken_protocol("this agent speaks many"), None);
     }
 
     #[test]
