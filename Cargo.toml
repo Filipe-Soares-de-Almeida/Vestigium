@@ -12,6 +12,7 @@ members = [
     "crates/store",
     "tools/budget",
     "tools/icons",
+    "tools/notices",
     "tools/scenarios",
 ]
 
