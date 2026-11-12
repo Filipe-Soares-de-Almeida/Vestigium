@@ -39,6 +39,7 @@ How to use this file:
 ### Fixed
 
 - Fix SSDs showing Attention for SMART counters that only warn on HDDs.
+- Fix the NVMe spare and media error rows showing the wrong level.
 
 ## [0.1.1] - 2026-11-11
 

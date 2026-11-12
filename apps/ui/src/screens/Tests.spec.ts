@@ -7,7 +7,7 @@ import { t } from "../lib/i18n.svelte";
 import { hwtests } from "../lib/tests.svelte";
 import type { DiskDetailDto, Media, SmartAttribute, TestRunDto, TestsDto, VolumeCheck, VolumeResult } from "../lib/types";
 import Tests from "./Tests.svelte";
-import { diskState, repairMark, smartWarns } from "./tests/words";
+import { diskState, nvmeMarks, repairMark, smartWarns } from "./tests/words";
 
 const NOW = Date.now();
 const HOUR = 3_600_000;
@@ -148,4 +148,14 @@ test("attribute_188_warns_by_its_low_16_bits", () => {
 test("an_ssd_with_a_watched_counter_above_zero_is_not_marked_attention", () => {
   expect(stateWith("Ssd", [attr(187, 1)])).not.toBe("Attention");
   expect(stateWith("Hdd", [attr(187, 1)])).toBe("Attention");
+});
+
+test("nvme_rows_take_the_levels_of_the_health_findings", () => {
+  const healthy = { critical_warning: 0, temperature_c: 40, available_spare_pct: 100, spare_threshold_pct: 10, percentage_used: 3, media_errors: 0 };
+  expect(nvmeMarks(healthy)).toEqual({ used: null, spare: null, media: null });
+  expect(nvmeMarks({ ...healthy, percentage_used: 90, available_spare_pct: 5, media_errors: 2 })).toEqual({
+    used: "attention",
+    spare: "critical",
+    media: "attention",
+  });
 });

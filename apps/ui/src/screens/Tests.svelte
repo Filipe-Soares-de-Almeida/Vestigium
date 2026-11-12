@@ -51,6 +51,7 @@
     surfaceRuns,
     unreadableText,
     memoryState,
+    nvmeMarks,
     outcomeMark,
     quickCovered,
     quickOf,
@@ -529,15 +530,16 @@
         {/if}
       {:else if detail.nvme}
         {@const n = detail.nvme}
+        {@const marks = nvmeMarks(n.health)}
         <RowList>
-          {@render smartRow(t("ui.tests.nvme.used"), formatPercent(n.health.percentage_used), n.health.percentage_used >= 90 ? "attention" : null, null)}
-          {@render smartRow(t("ui.tests.nvme.spare"), formatPercent(n.health.available_spare_pct), n.health.available_spare_pct < n.health.spare_threshold_pct ? "attention" : null, null)}
+          {@render smartRow(t("ui.tests.nvme.used"), formatPercent(n.health.percentage_used), marks.used, null)}
+          {@render smartRow(t("ui.tests.nvme.spare"), formatPercent(n.health.available_spare_pct), marks.spare, null)}
           {@render smartRow(t("ui.tests.nvme.temp"), `${n.health.temperature_c} °C`, null, null)}
           {#if level !== "Simple"}
             {@render smartRow(t("ui.tests.nvme.written"), formatBytes(n.data_written_bytes), null, null)}
             {@render smartRow(t("ui.tests.nvme.hours"), formatNumber(n.power_on_hours), null, null)}
             {@render smartRow(t("ui.tests.nvme.unsafe"), formatNumber(n.unsafe_shutdowns), null, null)}
-            {@render smartRow(t("ui.tests.nvme.media"), formatNumber(n.health.media_errors), n.health.media_errors ? "critical" : null, null)}
+            {@render smartRow(t("ui.tests.nvme.media"), formatNumber(n.health.media_errors), marks.media, null)}
           {/if}
         </RowList>
         {#if level === "Technical"}<p class="note mono">{t("ui.tests.nvme.tech", { warning: n.health.critical_warning.toString(16).padStart(2, "0"), errors: formatNumber(n.error_log_entries) })}</p>{/if}

@@ -9,6 +9,7 @@ import type {
   Media,
   MemoryDiagnostic,
   MemoryQuick,
+  NvmeHealth,
   Region,
   RunningTest,
   SmartAttribute,
@@ -37,6 +38,15 @@ export const attrName = (id: number) => (NAMED.includes(id) ? t(`ui.tests.attr.$
 /** Whether a SMART attribute warns: a watched count above zero on a hard drive, 188 by its low 16 bits. */
 export const smartWarns = (a: SmartAttribute, media: Media) =>
   media === "Hdd" && WATCHED.includes(a.id) && (a.id === 188 ? a.raw % 0x10000 : a.raw) > 0;
+
+type Warn = "attention" | "critical" | null;
+
+/** The level of each NVMe health row, as the Health findings rate the same values. */
+export const nvmeMarks = (h: NvmeHealth): { used: Warn; spare: Warn; media: Warn } => ({
+  used: h.percentage_used >= 90 ? "attention" : null,
+  spare: h.available_spare_pct < h.spare_threshold_pct ? "critical" : null,
+  media: h.media_errors > 0 ? "attention" : null,
+});
 
 /** Bands of the surface scan, as the map and its legend name them. */
 export const BANDS = ["0", "1", "2", "3", "4", "5"] as const;
