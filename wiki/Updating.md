@@ -26,7 +26,7 @@ While a test or a capture is running, the button waits: **Wait for the test or c
 
 ## After an update
 
-The next time the window opens, it shows **What's new in …** once, with the notes of every version since the one you had. **Settings › Updates › What's new** lists the notes of every version. With the window in Portuguese, the notes appear in Portuguese where a translation exists.
+The next time the window opens, it shows **What's new in …** once, with the highlights of the new version, and a link to the others when several versions are new. **Settings › Updates › What's new** opens a page with a card for every version: its highlights, and all its changes one click away. With the window in Portuguese, the notes appear in Portuguese where a translation exists.
 
 ## Updating by hand
 
