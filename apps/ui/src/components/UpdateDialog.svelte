@@ -61,7 +61,7 @@
     <div class="in">
       <h2 id="update-title">{t("ui.update.available.title", { version: found.version })}</h2>
       <p>{t("ui.update.available.body", { current: updates.version })}</p>
-      <ReleaseNotes groups={found.groups} />
+      <ReleaseNotes summary={found.summary} groups={found.groups} />
       {#if progress}
         <div class="progress" role="status">
           <div

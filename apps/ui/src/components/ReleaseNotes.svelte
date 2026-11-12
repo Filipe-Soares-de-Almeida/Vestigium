@@ -3,7 +3,7 @@
   import type { NotesGroup, Release } from "../lib/update.svelte";
 
   // A version's notes: its headings in the window's words, and the entries under each.
-  let { releases, groups }: { releases?: Release[]; groups?: NotesGroup[] } = $props();
+  let { releases, groups, summary }: { releases?: Release[]; groups?: NotesGroup[]; summary?: string | null } = $props();
 
   const KINDS = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"];
   const heading = (kind: string) => (KINDS.includes(kind) ? t(`ui.update.group.${kind}`) : kind);
@@ -19,12 +19,14 @@
 {/snippet}
 
 <div class="notes">
+  {#if summary}<p class="sum">{summary}</p>{/if}
   {#if groups}
     {@render list(groups)}
   {/if}
   {#each releases ?? [] as release (release.version)}
     <section>
       <p class="ver"><b>{t("ui.update.version", { version: release.version })}</b>{#if release.date}<small>{release.date}</small>{/if}</p>
+      {#if release.summary}<p class="sum">{release.summary}</p>{/if}
       {@render list(release.groups)}
     </section>
   {/each}
@@ -43,6 +45,11 @@
   }
   .ver b {
     font: 600 15px/1.3 var(--fd);
+  }
+  .sum {
+    margin: 6px 0 0;
+    font-size: 14px;
+    line-height: 1.5;
   }
   .ver small {
     color: var(--ink3);

@@ -25,6 +25,7 @@ How to use this file:
 ### Added
 
 - License notices of every open-source component in the install folder.
+- Summary line of each version in the release notes.
 
 ## [0.1.1] - 2026-11-11
 

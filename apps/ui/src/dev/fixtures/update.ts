@@ -12,6 +12,7 @@ const NOTES = [
   {
     version: "0.1.1",
     date: "2026-11-18",
+    summary: null,
     groups: [
       { kind: "Added", items: ["Holding Ctrl on the Now screen pauses it on the second it was pressed."] },
       { kind: "Fixed", items: ["A freeze report opens on the part you clicked in the day's timeline."] },
@@ -20,6 +21,7 @@ const NOTES = [
   {
     version: "0.1.0",
     date: "2026-11-11",
+    summary: "The first release.",
     groups: [{ kind: "Added", items: ["The first release: freeze reports, crash dumps, driver captures, Health, Tests and Optimizations."] }],
   },
 ];
@@ -43,6 +45,7 @@ export const handlers: Record<string, Handler> = {
       status: "available",
       version: "0.2.0",
       date_ms: Date.now(),
+      summary: null,
       groups: [
         { kind: "Changed", items: ["Reports explain storage stalls in simpler words."] },
         { kind: "Fixed", items: ["The day's timeline keeps its zoom when the day rolls over."] },

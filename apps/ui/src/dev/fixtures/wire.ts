@@ -1511,14 +1511,14 @@ export const notesGroupSamples = [
 ] satisfies NotesGroup[];
 
 export const releaseSamples = [
-  {"version":"0.2.0","date":"2026-11-10","groups":[{"kind":"Added","items":["One thing."]}]},
-  {"version":"0.2.0","date":null,"groups":[{"kind":"Added","items":["One thing."]}]},
+  {"version":"0.2.0","date":"2026-11-10","summary":"Faster reports.","groups":[{"kind":"Added","items":["One thing."]}]},
+  {"version":"0.2.0","date":null,"summary":null,"groups":[{"kind":"Added","items":["One thing."]}]},
 ] satisfies Release[];
 
 export const checkResultSamples = [
   {"status":"up_to_date"},
-  {"status":"available","version":"0.2.0","date_ms":1790000000000,"groups":[{"kind":"Added","items":["One thing."]}]},
-  {"status":"available","version":"0.2.0","date_ms":null,"groups":[]},
+  {"status":"available","version":"0.2.0","date_ms":1790000000000,"summary":"Faster reports.","groups":[{"kind":"Added","items":["One thing."]}]},
+  {"status":"available","version":"0.2.0","date_ms":null,"summary":null,"groups":[]},
 ] satisfies CheckResult[];
 
 export const progressSamples = [

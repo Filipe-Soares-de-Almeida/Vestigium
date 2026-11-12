@@ -2344,25 +2344,30 @@ fn render() -> String {
     wire.add(
         UPDATE,
         "Release",
-        [Some(string("2026-11-10")), None]
-            .map(|date| Release {
-                version: string("0.2.0"),
-                date,
-                groups: update_groups(),
-            })
-            .to_vec(),
+        [
+            (Some(string("2026-11-10")), Some(string("Faster reports."))),
+            (None, None),
+        ]
+        .map(|(date, summary)| Release {
+            version: string("0.2.0"),
+            date,
+            summary,
+            groups: update_groups(),
+        })
+        .to_vec(),
     );
     wire.add(
         UPDATE,
         "CheckResult",
         variants!(CheckResult:
             UpToDate => CheckResult::UpToDate,
-            Available => CheckResult::Available { version: string("0.2.0"), date_ms: Some(1_790_000_000_000), groups: update_groups() },
+            Available => CheckResult::Available { version: string("0.2.0"), date_ms: Some(1_790_000_000_000), summary: Some(string("Faster reports.")), groups: update_groups() },
         )
         .into_iter()
         .chain([CheckResult::Available {
             version: string("0.2.0"),
             date_ms: None,
+            summary: None,
             groups: Vec::new(),
         }])
         .collect(),

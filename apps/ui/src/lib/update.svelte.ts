@@ -19,12 +19,14 @@ export interface NotesGroup {
 export interface Release {
   version: string;
   date: string | null;
+  /** The paragraph before the version's first group, as one line. */
+  summary: string | null;
   groups: NotesGroup[];
 }
 
 export type CheckResult =
   | { status: "up_to_date" }
-  | { status: "available"; version: string; date_ms: number | null; groups: NotesGroup[] };
+  | { status: "available"; version: string; date_ms: number | null; summary: string | null; groups: NotesGroup[] };
 
 type Available = Extract<CheckResult, { status: "available" }>;
 
