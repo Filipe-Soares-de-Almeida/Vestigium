@@ -4,6 +4,7 @@
   import Mark from "../components/Mark.svelte";
   import StatusMark, { type StatusKind } from "../components/StatusMark.svelte";
   import ToneMark from "../components/ToneMark.svelte";
+  import { aboutDialog } from "../lib/aboutDialog.svelte";
   import { formatDuration, formatTime } from "../lib/format";
   import { app } from "../lib/app.svelte";
   import { health } from "../lib/health.svelte";
@@ -15,6 +16,7 @@
   import { shellStatus } from "../lib/status";
   import { tweaks } from "../lib/tweaks.svelte";
   import { today } from "../lib/today.svelte";
+  import { updates } from "../lib/update.svelte";
   import { notCurrent } from "./health/words";
   import { occurrenceMark } from "./today/text";
 
@@ -75,7 +77,15 @@
         <span class="mark"><Mark /></span>
         <div class="who">
           <h1>{t("ui.shell.title")}</h1>
-          <p class="state"><ToneMark tone={status.tone} />{status.text}</p>
+          <p class="state">
+            <ToneMark tone={status.tone} />{status.text}
+            {#if updates.version}
+              <span class="sep" aria-hidden="true">·</span>
+              <button type="button" class="ver" aria-haspopup="dialog" onclick={() => aboutDialog.show()}>
+                {t("ui.settings.updates.version_hint", { version: updates.version })}
+              </button>
+            {/if}
+          </p>
         </div>
       </div>
       <ul class="quick" aria-label={t("ui.home.situation")}>
@@ -191,6 +201,27 @@
     margin: 0 0 4px;
     color: var(--ink2);
     font-size: 13.5px;
+  }
+  .sep {
+    margin-left: 2px;
+  }
+  .ver {
+    height: 26px;
+    margin-left: -6px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--ink2);
+    font: inherit;
+    cursor: pointer;
+  }
+  .ver:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .ver:active {
+    background: var(--row-press);
   }
   .quick {
     display: flex;

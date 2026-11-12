@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
 
+  import AboutDialog from "./components/AboutDialog.svelte";
   import Banner from "./components/Banner.svelte";
   import CaptureStrip from "./components/CaptureStrip.svelte";
   import ErrorView from "./components/ErrorView.svelte";
@@ -190,6 +191,7 @@
 <Toast />
 <UpdateDialog />
 <HistoryResetDialog />
+<AboutDialog />
 
 <style>
   .win {

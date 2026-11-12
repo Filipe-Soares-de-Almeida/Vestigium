@@ -2,10 +2,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use vestigium_ipc::PROTOCOL_VERSION;
 use vestigium_store::SCHEMA_VERSION;
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::core::{PCWSTR, w};
 
 use crate::agent::{AgentLink, Link, Peer, UiError};
 use crate::commands::AppState;
@@ -15,6 +18,8 @@ use crate::system::{WindowsVersion, file_version, windows_version};
 const CHANGELOG: &str = include_str!("../../../../CHANGELOG.md");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HELPER: &str = "Vestigium.Helper.exe";
+const REPOSITORY: &str = "https://github.com/Filipe-Soares-de-Almeida/Vestigium";
+const AUTHOR: &str = "https://github.com/Filipe-Soares-de-Almeida";
 
 /// What the About dialog shows: each program's version, the formats, Windows and WebView2.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -107,6 +112,55 @@ fn released(changelog: &str, version: &str) -> Option<String> {
         .into_iter()
         .find(|release| release.version == version)?
         .date
+}
+
+/// The pages the About dialog opens in the browser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Page {
+    Repository,
+    Wiki,
+    Privacy,
+    License,
+    Author,
+}
+
+fn address(page: Page) -> String {
+    match page {
+        Page::Repository => REPOSITORY.to_string(),
+        Page::Wiki => format!("{REPOSITORY}/wiki"),
+        Page::Privacy => format!("{REPOSITORY}/wiki/Privacy-and-data"),
+        Page::License => format!("{REPOSITORY}/blob/main/LICENSE"),
+        Page::Author => AUTHOR.to_string(),
+    }
+}
+
+/// Opens one of the About dialog's pages in the default browser.
+#[tauri::command]
+pub fn open_page(page: Page) -> Result<(), UiError> {
+    open_url(&address(page))
+}
+
+fn open_url(url: &str) -> Result<(), UiError> {
+    let wide: Vec<u16> = url.encode_utf16().chain([0]).collect();
+    // SAFETY: both strings are null-terminated and live through the call.
+    let done = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            PCWSTR(wide.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW returns a value above 32 when it worked and an error code otherwise.
+    match done.0 as usize {
+        code if code > 32 => Ok(()),
+        code => Err(UiError::Failed(format!(
+            "the browser did not open (code {code})"
+        ))),
+    }
 }
 
 /// What Settings shows about the program and the history it keeps on this PC.
@@ -271,6 +325,25 @@ mod tests {
         assert_eq!(released(changelog, "0.1.1").as_deref(), Some("2026-11-11"));
         assert_eq!(released(changelog, "0.1.0").as_deref(), Some("2026-11-08"));
         assert_eq!(released(changelog, "0.2.0"), None);
+    }
+
+    #[test]
+    fn every_page_is_on_github_over_https() {
+        let page: Page = serde_json::from_value(serde_json::json!("privacy")).unwrap();
+        assert_eq!(
+            address(page),
+            "https://github.com/Filipe-Soares-de-Almeida/Vestigium/wiki/Privacy-and-data"
+        );
+        for page in [
+            Page::Repository,
+            Page::Wiki,
+            Page::Privacy,
+            Page::License,
+            Page::Author,
+        ] {
+            assert!(address(page).starts_with("https://github.com/"), "{page:?}");
+        }
+        assert!(address(Page::License).ends_with("/blob/main/LICENSE"));
     }
 
     #[test]

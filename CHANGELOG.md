@@ -27,6 +27,7 @@ How to use this file:
 - License notices of every open-source component in the install folder.
 - Release notes page with the highlights of each version.
 - Summary line of each version in the release notes.
+- About dialog with each program's version and the credits.
 
 ### Changed
 

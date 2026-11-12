@@ -74,6 +74,7 @@ fn main() {
             about::about,
             about::open_data_folder,
             about::about_versions,
+            about::open_page,
             update::update_prefs,
             update::set_update_prefs,
             update::release_notes,

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { aboutDialog } from "../lib/aboutDialog.svelte";
   import { buildGroups, followed, groupOf, itemHref } from "../lib/groups";
   import { t } from "../lib/i18n.svelte";
   import { href, router } from "../lib/router.svelte";
   import { shellStatus } from "../lib/status";
+  import { updates } from "../lib/update.svelte";
   import Finder from "./Finder.svelte";
   import Icon from "./Icon.svelte";
   import Mark from "./Mark.svelte";
@@ -18,8 +20,17 @@
 
 <nav class="pane" aria-label={t("ui.shell.nav.label")}>
   <div class="tb" data-tauri-drag-region="deep">
-    <Mark size={16} />
-    <span>{t("ui.shell.title")}</span>
+    <button
+      type="button"
+      class="name"
+      aria-haspopup="dialog"
+      aria-label={t("ui.about.title")}
+      title={t("ui.about.title")}
+      onclick={() => aboutDialog.show()}
+    >
+      <Mark size={16} />
+      <span>{t("ui.shell.title")}</span>
+    </button>
   </div>
   <a class="home" href={href.home()}>
     <Icon name="home" />
@@ -47,7 +58,14 @@
       {/each}
     </ul>
   {/if}
-  <p class="foot"><ToneMark tone={status.tone} />{status.text}</p>
+  <div class="foot">
+    <p class="state"><ToneMark tone={status.tone} />{status.text}</p>
+    {#if updates.version}
+      <button type="button" class="ver" aria-haspopup="dialog" onclick={() => aboutDialog.show()}>
+        <Icon name="info" />{t("ui.settings.updates.version_hint", { version: updates.version })}
+      </button>
+    {/if}
+  </div>
 </nav>
 
 <style>
@@ -63,13 +81,30 @@
     display: flex;
     flex: none;
     align-items: center;
-    gap: 10px;
     height: 40px;
-    padding-left: 16px;
+    padding-left: 8px;
+  }
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 30px;
+    padding: 0 10px 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
     color: var(--ink2);
     font-size: 12px;
+    cursor: pointer;
   }
-  :global(:root[data-inactive]) .tb {
+  .name:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .name:active {
+    background: var(--row-press);
+  }
+  :global(:root[data-inactive]) .name {
     color: var(--ink3);
   }
   .home {
@@ -153,7 +188,9 @@
     background: var(--accent);
   }
   .item:focus-visible,
-  .home:focus-visible {
+  .home:focus-visible,
+  .name:focus-visible,
+  .ver:focus-visible {
     outline: 2px solid var(--ink);
     outline-offset: -2px;
   }
@@ -170,15 +207,48 @@
     font-size: 12.5px;
   }
   .foot {
-    display: flex;
+    display: grid;
     flex: none;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    padding: 12px 20px 14px;
+    gap: 2px;
+    padding: 9px 12px 10px;
     border-top: 1px solid var(--stroke2);
     color: var(--ink2);
     font: 400 12.5px/1.35 var(--f);
+  }
+  .state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    margin: 0;
+    padding: 0 8px;
+  }
+  .ver {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: 100%;
+    height: 28px;
+    padding: 0 10px 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--ink2);
+    font: inherit;
+    cursor: pointer;
+  }
+  .ver:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .ver:active {
+    background: var(--row-press);
+  }
+  .ver > :global(svg) {
+    flex: none;
+    width: 14px;
+    height: 14px;
   }
   @media (forced-colors: active) {
     .item[aria-current="page"]::before {
