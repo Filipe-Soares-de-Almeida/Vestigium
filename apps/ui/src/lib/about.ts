@@ -1,8 +1,10 @@
 // What the About dialog reads from the window's Rust side, and the lists it builds from it.
 import { invoke } from "@tauri-apps/api/core";
 
+import en from "../../../../locales/en.json";
 import shipped from "../../src-tauri/third-party.json";
 import { lang, t } from "./i18n.svelte";
+import type { Settings } from "./types";
 
 /** Whether the monitor runs: `other` speaks another protocol, or the pipe has another owner. */
 export type MonitorRun = "running" | "stopped" | "other";
@@ -42,7 +44,7 @@ export interface AboutVersions {
 }
 
 /** The pages the dialog opens in the browser; the window's Rust side holds their addresses. */
-export type Page = "repository" | "wiki" | "privacy" | "license" | "author";
+export type Page = "repository" | "wiki" | "privacy" | "license" | "author" | "report";
 
 export function aboutVersions(): Promise<AboutVersions> {
   return invoke("about_versions");
@@ -56,6 +58,45 @@ export function openPage(page: Page): Promise<void> {
 export const AUTHOR = "Filipe Soares de Almeida";
 
 export const FILES = { window: "Vestigium.Window.exe", monitor: "Vestigium.exe", helper: "Vestigium.Helper.exe" };
+
+/** The settings the copied block names; `null` when they could not be read. */
+export type BlockSettings = Pick<Settings, "language" | "detail_level"> | null;
+
+const english = en as Record<string, string>;
+
+/**
+ * What "Copy information" puts on the clipboard: the Versions tab as Markdown, in English in
+ * every language, as the issue form is.
+ */
+export function copyBlock(facts: AboutVersions, settings: BlockSettings, shown: "en" | "pt-BR"): string {
+  const { monitor, windows } = facts;
+  const other = monitor.run === "other";
+  const runs = monitor.run === "stopped" ? "not running" : "running";
+  const monitorValue = other
+    ? `another version${monitor.protocol === null ? "" : `, protocol ${monitor.protocol}`} (${FILES.monitor}, running)`
+    : `${monitor.version ?? "unknown"} (${FILES.monitor}, ${runs})`;
+  const app = [
+    `Vestigium version: ${facts.version}`,
+    `Window: ${facts.version} (${FILES.window})`,
+    `Monitor: ${monitorValue}`,
+    `Administrator helper: ${facts.helper ?? "not found"} (${FILES.helper})`,
+    `History schema: ${facts.schema}`,
+    `Pipe protocol: ${facts.protocol}${other && monitor.protocol !== null ? ` (monitor: ${monitor.protocol})` : ""}`,
+  ];
+  const pc = windows
+    ? [
+        `Windows: ${windows.family}`,
+        `Windows build: ${windows.version}`,
+        `Edition: ${windows.release ? `${windows.edition} ${windows.release}` : windows.edition}, 64-bit`,
+      ]
+    : [];
+  if (facts.webview) pc.push(`WebView2: ${facts.webview}`);
+  const language = english[shown === "pt-BR" ? "ui.settings.language.PtBr" : "ui.settings.language.En"];
+  const prefs = [`Language: ${language}${settings?.language === "System" ? ", as Windows" : ""}`];
+  if (settings) prefs.push(`Detail level: ${english[`ui.common.detail.${settings.detail_level}`]}`);
+  const group = (title: string, lines: string[]) => [`### ${title}`, ...lines.map((line) => `- ${line}`)].join("\n");
+  return [group("Vestigium", app), ...(pc.length ? [group("Windows", pc)] : []), group("Settings", prefs)].join("\n\n");
+}
 
 /** A version that differs from the window's, or `null` when it is the same or unknown. */
 export function otherVersion(version: string | null, app: string): string | null {

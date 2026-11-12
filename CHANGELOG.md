@@ -28,6 +28,7 @@ How to use this file:
 - Release notes page with the highlights of each version.
 - Summary line of each version in the release notes.
 - About dialog with each program's version and the credits.
+- Copy information and Report a problem buttons in the About dialog.
 
 ### Changed
 

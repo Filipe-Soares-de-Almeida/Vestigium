@@ -2,10 +2,11 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { answer } from "../dev/test-ipc";
 import { show, until } from "../dev/test-mount";
-import { type AboutVersions, COMPONENTS, filterRows, allRows } from "../lib/about";
+import { type AboutVersions, COMPONENTS, allRows, copyBlock, filterRows } from "../lib/about";
 import { aboutDialog } from "../lib/aboutDialog.svelte";
 import { app } from "../lib/app.svelte";
 import { t } from "../lib/i18n.svelte";
+import { toast } from "../lib/toast.svelte";
 import { updates } from "../lib/update.svelte";
 import Home from "../screens/Home.svelte";
 import AboutDialog from "./AboutDialog.svelte";
@@ -209,4 +210,33 @@ test("the_component_count_shows_only_while_a_filter_narrows_the_list", async () 
   field.value = "no such thing";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await until(() => text(dialog.querySelector("tbody")) === t("ui.about.components.none"), "the empty list");
+});
+
+test("copy_information_puts_the_english_block_on_the_clipboard_and_says_so", async () => {
+  const written: string[] = [];
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (copied: string) => void written.push(copied) },
+  });
+  const dialog = await opened();
+  expect(text(dialog)).toContain(t("ui.about.copy_note"));
+
+  [...dialog.querySelectorAll<HTMLButtonElement>(".foot button")].find((b) => text(b) === t("ui.about.copy"))!.click();
+
+  await until(() => written.length === 1, "the copy");
+  expect(written[0]).toBe(copyBlock(SAME, app.settings!.settings, "en"));
+  await until(() => toast.on && toast.message === t("ui.about.copied"), "the toast");
+  expect(text(dialog.querySelector(".toast"))).toBe(t("ui.about.copied"));
+});
+
+test("report_a_problem_opens_the_bug_report_form", async () => {
+  const calls = answer({ about_versions: () => SAME, open_page: () => null });
+  const page = show(AboutDialog);
+  aboutDialog.show();
+  await until(() => page.querySelector("dl") !== null, "the dialog");
+
+  [...page.querySelectorAll<HTMLButtonElement>(".foot button")].find((b) => text(b) === t("ui.about.report"))!.click();
+
+  await until(() => calls.of("open_page").length === 1, "the form");
+  expect(calls.of("open_page")[0]).toEqual({ page: "report" });
 });

@@ -123,6 +123,8 @@ pub enum Page {
     Privacy,
     License,
     Author,
+    /// The bug report form.
+    Report,
 }
 
 fn address(page: Page) -> String {
@@ -132,7 +134,46 @@ fn address(page: Page) -> String {
         Page::Privacy => format!("{REPOSITORY}/wiki/Privacy-and-data"),
         Page::License => format!("{REPOSITORY}/blob/main/LICENSE"),
         Page::Author => AUTHOR.to_string(),
+        Page::Report => report_url(VERSION, windows_version().as_ref()),
     }
+}
+
+/// The bug report form with the version, Windows and build fields it asks for filled in.
+fn report_url(version: &str, windows: Option<&WindowsVersion>) -> String {
+    let mut url = format!(
+        "{REPOSITORY}/issues/new?template=01-bug-report.yml&version={}",
+        query_value(version)
+    );
+    if let Some(windows) = windows {
+        url.push_str(&format!(
+            "&windows={}&build={}",
+            query_value(form_windows(windows)),
+            query_value(&windows.version)
+        ));
+    }
+    url
+}
+
+/// The option of the form's Windows list that names this PC's Windows.
+fn form_windows(windows: &WindowsVersion) -> &'static str {
+    match (windows.family.as_str(), windows.release.as_deref()) {
+        ("Windows 11", _) => "Windows 11",
+        ("Windows 10", Some("22H2")) => "Windows 10 22H2",
+        _ => "Other or not sure",
+    }
+}
+
+/// `text` percent-encoded for a query string: everything but letters, digits and `-._~`.
+fn query_value(text: &str) -> String {
+    text.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 /// Opens one of the About dialog's pages in the default browser.
@@ -340,10 +381,48 @@ mod tests {
             Page::Privacy,
             Page::License,
             Page::Author,
+            Page::Report,
         ] {
             assert!(address(page).starts_with("https://github.com/"), "{page:?}");
         }
         assert!(address(Page::License).ends_with("/blob/main/LICENSE"));
+    }
+
+    fn windows(family: &str, release: Option<&str>, version: &str) -> WindowsVersion {
+        WindowsVersion {
+            edition: format!("{family} Pro"),
+            family: family.to_string(),
+            release: release.map(str::to_string),
+            build: version.trim_start_matches("10.0.").to_string(),
+            version: version.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_report_form_opens_with_the_version_windows_and_build_filled_in() {
+        let eleven = windows("Windows 11", Some("24H2"), "10.0.26100.2605");
+        assert_eq!(
+            report_url("0.1.1", Some(&eleven)),
+            "https://github.com/Filipe-Soares-de-Almeida/Vestigium/issues/new\
+             ?template=01-bug-report.yml&version=0.1.1&windows=Windows%2011\
+             &build=10.0.26100.2605"
+        );
+        let ten = windows("Windows 10", Some("22H2"), "10.0.19045.5000");
+        assert!(report_url("0.1.1", Some(&ten)).contains("&windows=Windows%2010%2022H2&"));
+        let older = windows("Windows 10", Some("21H2"), "10.0.19044.1");
+        assert!(report_url("0.1.1", Some(&older)).contains("&windows=Other%20or%20not%20sure&"));
+        assert!(!report_url("0.1.1", None).contains("windows="));
+    }
+
+    #[test]
+    fn the_report_form_still_has_the_fields_it_is_filled_with() {
+        let form = include_str!("../../../../.github/ISSUE_TEMPLATE/01-bug-report.yml");
+        for field in ["id: version", "id: windows", "id: build"] {
+            assert!(form.contains(field), "the form has no {field}");
+        }
+        for option in ["- Windows 11", "- Windows 10 22H2", "- Other or not sure"] {
+            assert!(form.contains(option), "the Windows list has no {option}");
+        }
     }
 
     #[test]

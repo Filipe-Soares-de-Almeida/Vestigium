@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
-  import { FILES, monitorHint, otherVersion, openPage, type Page } from "../lib/about";
+  import { FILES, copyBlock, monitorHint, otherVersion, openPage, type Page } from "../lib/about";
   import { aboutDialog } from "../lib/aboutDialog.svelte";
   import { app } from "../lib/app.svelte";
   import { errorText } from "../lib/errors";
@@ -9,9 +9,12 @@
   import { releaseDay } from "../lib/notes";
   import { toast } from "../lib/toast.svelte";
   import { updates } from "../lib/update.svelte";
+  import { copyText } from "../screens/occurrence/browser";
   import AboutCredits from "./AboutCredits.svelte";
+  import Icon from "./Icon.svelte";
   import Mark from "./Mark.svelte";
   import StatusMark from "./StatusMark.svelte";
+  import Toast from "./Toast.svelte";
 
   // The About dialog: the version line, what runs on this PC, and the credits.
   type Tab = "versions" | "credits";
@@ -64,6 +67,12 @@
     } catch {
       toast.show(t("ui.about.open_failed"));
     }
+  }
+
+  async function copy(): Promise<void> {
+    if (!facts) return;
+    const copied = await copyText(copyBlock(facts, settings, lang()));
+    toast.show(t(copied ? "ui.about.copied" : "ui.about.copy_failed"));
   }
 </script>
 
@@ -198,6 +207,7 @@
             {/if}
           </dl>
         </section>
+        <p class="note copied">{t("ui.about.copy_note")}</p>
       {:else if aboutDialog.failure !== null}
         <p class="note" role="status">{errorText(aboutDialog.failure)}</p>
       {:else}
@@ -209,9 +219,13 @@
   </div>
 
   <footer class="foot">
+    <button type="button" class="btn" onclick={() => open("report")}><Icon name="outside" />{t("ui.about.report")}</button>
     <span class="sp"></span>
+    <button type="button" class="btn accent" disabled={!facts} onclick={copy}><Icon name="copy" />{t("ui.about.copy")}</button>
     <button type="button" class="btn" onclick={() => aboutDialog.close()}>{t("ui.about.close")}</button>
   </footer>
+  <!-- The window's toast sits under the modal backdrop, so the dialog shows its own. -->
+  <Toast />
 </dialog>
 
 <style>
@@ -363,6 +377,13 @@
   }
   .note {
     margin: 0;
+  }
+  .note.copied {
+    margin-top: 16px;
+  }
+  .foot :global(svg) {
+    width: 16px;
+    height: 16px;
   }
   .foot {
     display: flex;
