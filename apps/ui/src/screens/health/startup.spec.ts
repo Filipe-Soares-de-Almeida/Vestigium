@@ -115,7 +115,7 @@ test("the_lede_counts_from_the_button_then_from_windows_then_says_nothing_was_me
   expect(text(boot())).toContain(t("ui.health.startup.lede.power", { when: "" }).slice(0, 20));
   expect(text(boot({ from_power_ms: null }))).toContain(t("ui.health.startup.lede.kernel", { when: "" }).slice(0, 20));
   const none = text(boot({ from_power_ms: null, to_desktop_ms: null }));
-  expect(none).toContain(t("ui.health.startup.lede.unmeasured", { when: "" }).slice(0, 30));
+  expect(none).toContain(t("ui.health.startup.lede.unmeasured", { when: "" }).slice(-25));
   expect(ledeParts([boot({ from_power_ms: null, to_desktop_ms: null })]).some((p) => p.bold)).toBe(false);
   expect(text(boot({ probable_wait: true }))).toContain(t("ui.health.startup.lede.wait"));
   expect(ledeParts([])[0]).toEqual({ text: t("ui.health.startup.lede.none"), bold: true });
