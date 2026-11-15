@@ -1,5 +1,5 @@
 /** The elevated jobs a person can cancel or see give up: each is a card on its own screen. */
-export type JobKey = "capture" | "check" | "dumps" | "health";
+export type JobKey = "capture" | "check" | "dumps" | "health" | "trace";
 
 /** How the last attempt of a job ended without a result. */
 export interface Attempt {

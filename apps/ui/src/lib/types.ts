@@ -841,6 +841,14 @@ export interface ScanFinished {
   exit_code: number | null;
 }
 
+/** What copying the boot trace returned once its helper exited. */
+export interface BootTraceCopied {
+  /** The copy, when the helper reported success; otherwise `null`. */
+  path: string | null;
+  /** 0 copied, 6 Windows has no trace to copy, anything else failed. */
+  exit_code: number | null;
+}
+
 /** Where a dump came from, which says how much it can tell. */
 export type DumpKind = "KernelMini" | "KernelMemory" | "LiveKernel" | "App";
 

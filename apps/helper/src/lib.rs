@@ -1,5 +1,6 @@
 //! Vestigium's elevated helper: one job from a closed list, then exit.
 
+pub mod boot_trace;
 pub mod capture;
 pub mod chkdsk;
 pub mod delete;

@@ -27,6 +27,7 @@ How to use this file:
 - Startup page with each phase of every startup and its trend.
 - Storage Sense shortcut for the Temp folder on the startup page.
 - Page of each startup with its phases on a time chart.
+- Copy of the latest startup's Windows trace, kept three at a time.
 
 ### Changed
 

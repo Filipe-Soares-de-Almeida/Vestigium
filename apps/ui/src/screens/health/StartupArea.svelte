@@ -20,6 +20,7 @@
   import { formatDayShort } from "../occurrence/format";
   import Finding from "./Finding.svelte";
   import PhaseChart from "./PhaseChart.svelte";
+  import TraceAction from "./TraceAction.svelte";
   import {
     bootSub,
     causeText,
@@ -174,6 +175,11 @@
       {:else}
         <RowCard icon="trash" title={t("ui.health.startup.temp.title")} sub={tempSub(dto.temp)}>
           {#snippet expand()}{@render tempBody()}{/snippet}
+        </RowCard>
+      {/if}
+      {#if last}
+        <RowCard icon="wave" title={t("ui.health.startup.trace.title")} sub={t("ui.health.startup.trace.sub")}>
+          {#snippet expand()}<TraceAction />{/snippet}
         </RowCard>
       {/if}
     </RowList>

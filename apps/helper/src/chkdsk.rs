@@ -98,7 +98,7 @@ pub fn check_volume(drive_type: u32, file_system: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn system_directory() -> Option<PathBuf> {
+pub(crate) fn system_directory() -> Option<PathBuf> {
     let mut dir = [0u16; 260];
     // SAFETY: the buffer is writable for its whole length.
     let len = unsafe { GetSystemDirectoryW(Some(&mut dir)) } as usize;

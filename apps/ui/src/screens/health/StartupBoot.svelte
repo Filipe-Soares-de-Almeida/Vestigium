@@ -16,6 +16,7 @@
   import type { DetailLevel } from "../../lib/types";
   import type { Zoom } from "../../lib/zoom.svelte";
   import BootPhasesChart from "./BootPhasesChart.svelte";
+  import TraceAction from "./TraceAction.svelte";
   import {
     bootKind,
     formatSeconds,
@@ -157,6 +158,14 @@
       </RowList>
     {:else}
       <p class="empty">{k("boot.fail.none")}</p>
+    {/if}
+  </Block>
+
+  <Block title={k("trace.block")}>
+    {#if latest}
+      <TraceAction />
+    {:else}
+      <p class="empty">{k("trace.gone")}</p>
     {/if}
   </Block>
 

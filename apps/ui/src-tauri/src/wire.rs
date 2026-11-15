@@ -53,6 +53,7 @@ use crate::live::{Lanes, LiveMessage, LivePoint};
 use crate::process::ProcessFactsDto;
 use crate::startup::{BootDto, StartupAppDto, StartupAreaDto};
 use crate::system::WindowsVersion;
+use crate::trace::BootTraceCopied;
 use crate::tweaks::{TweakRowDto, TweaksApplied, TweaksDto};
 use crate::update::{CheckResult, Group, Progress, Release, UpdatePrefs};
 
@@ -2112,6 +2113,26 @@ fn render() -> String {
                 exit_code,
             })
             .to_vec(),
+    );
+    wire.add(
+        TYPES,
+        "BootTraceCopied",
+        vec![
+            BootTraceCopied {
+                path: Some(string(
+                    r"C:\Users\someone\AppData\Local\Vestigium\data\boot-traces\1790000000000.etl",
+                )),
+                exit_code: Some(0),
+            },
+            BootTraceCopied {
+                path: None,
+                exit_code: Some(6),
+            },
+            BootTraceCopied {
+                path: None,
+                exit_code: None,
+            },
+        ],
     );
     wire.add(TYPES, "DumpKind", DumpKind::ALL.to_vec());
     wire.add(TYPES, "FaultDto", faults());

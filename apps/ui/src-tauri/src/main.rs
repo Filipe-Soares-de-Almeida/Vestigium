@@ -11,6 +11,7 @@ mod process;
 mod protected;
 mod startup;
 mod system;
+mod trace;
 mod tweaks;
 mod update;
 #[cfg(test)]
@@ -55,6 +56,7 @@ fn main() {
             commands::startup_area,
             startup::open_storage_sense,
             commands::start_scan,
+            commands::copy_boot_trace,
             commands::dumps,
             commands::start_dump_scan,
             commands::delete_dumps,

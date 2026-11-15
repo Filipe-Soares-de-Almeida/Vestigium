@@ -38,6 +38,7 @@
     "allow-startup-area",
     "allow-open-storage-sense",
     "allow-start-scan",
+    "allow-copy-boot-trace",
     "allow-dumps",
     "allow-start-dump-scan",
     "allow-delete-dumps",

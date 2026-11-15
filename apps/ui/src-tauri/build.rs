@@ -29,6 +29,7 @@ const COMMANDS: &[&str] = &[
     "startup_area",
     "open_storage_sense",
     "start_scan",
+    "copy_boot_trace",
     "dumps",
     "start_dump_scan",
     "delete_dumps",

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
@@ -32,6 +32,10 @@ use crate::hwtests::{
 };
 use crate::live::{LIVE_PERIOD, LiveMessage, LiveSlot, run_live};
 use crate::startup::StartupAreaDto;
+use crate::trace::{
+    BootTraceCopied, PARTIAL_STALE, TRACE_CEILING, TRACES_KEPT, boot_trace_args, boot_trace_file,
+    drop_stale_partials, prune_boot_traces,
+};
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
@@ -48,9 +52,10 @@ pub struct AppState {
     capture_run: Arc<Mutex<Option<CaptureRun>>>,
     /// How to stop that capture: the flag its wait watches and the file its helper polls.
     capture_stop: Arc<Mutex<Option<CaptureStop>>>,
-    /// Set to stop waiting for a health scan or a dump read in progress.
+    /// Set to stop waiting for a health scan, a dump read or a boot trace copy in progress.
     scan_cancel: Arc<AtomicBool>,
     dump_cancel: Arc<AtomicBool>,
+    trace_cancel: Arc<AtomicBool>,
     /// The hardware test this window started, until it ends.
     test: Arc<Mutex<Option<RunningTest>>>,
     /// The thread of a test that runs in this window, which closing the window waits for.
@@ -67,6 +72,7 @@ impl Default for AppState {
             capture_stop: Arc::new(Mutex::new(None)),
             scan_cancel: Arc::new(AtomicBool::new(false)),
             dump_cancel: Arc::new(AtomicBool::new(false)),
+            trace_cancel: Arc::new(AtomicBool::new(false)),
             test: Arc::new(Mutex::new(None)),
             test_thread: Arc::new(Mutex::new(None)),
         }
@@ -331,22 +337,24 @@ pub fn cancel_capture(state: State<'_, AppState>) -> Result<(), UiError> {
     }
 }
 
-/// Which helper read a cancel stops waiting for.
+/// Which helper job a cancel stops waiting for.
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HelperRead {
     Scan,
     Dumps,
+    Trace,
 }
 
-/// Makes the window stop waiting for a health scan or a dump read in progress; the read command
-/// then answers `Cancelled`. The helper is not told: it ends by its own limits and the watcher
+/// Makes the window stop waiting for a health scan, a dump read or a boot trace copy in progress;
+/// the command then answers `Cancelled`. The helper is not told: it ends by its own limits and the watcher
 /// imports whatever it still writes.
 #[tauri::command]
 pub fn cancel_helper_read(state: State<'_, AppState>, read: HelperRead) {
     let flag = match read {
         HelperRead::Scan => &state.scan_cancel,
         HelperRead::Dumps => &state.dump_cancel,
+        HelperRead::Trace => &state.trace_cancel,
     };
     flag.store(true, Ordering::Release);
 }
@@ -398,6 +406,34 @@ pub async fn start_scan(state: State<'_, AppState>) -> Result<ScanFinished, UiEr
             _ => Vec::new(),
         };
         Ok(ScanFinished { scans, exit_code })
+    })
+    .await
+}
+
+/// Copies the boot trace Windows keeps in the elevated helper and waits for it; Windows asks for
+/// permission first. The newest copies stay in the data folder and the older ones are deleted.
+#[tauri::command]
+pub async fn copy_boot_trace(state: State<'_, AppState>) -> Result<BootTraceCopied, UiError> {
+    let cancel = state.trace_cancel.clone();
+    cancel.store(false, Ordering::Release);
+    blocking(move || {
+        let db = History::default_path()
+            .ok_or_else(|| UiError::Failed("the LOCALAPPDATA folder is not set".into()))?;
+        let helper = sibling_helper().ok_or_else(|| UiError::Failed(HELPER_UNAVAILABLE.into()))?;
+        let out = boot_trace_file(&db, now_ms())
+            .ok_or_else(|| UiError::Failed("no data folder".into()))?;
+        let folder = out
+            .parent()
+            .ok_or_else(|| UiError::Failed("no data folder".into()))?;
+        std::fs::create_dir_all(folder).map_err(|err| UiError::Failed(err.to_string()))?;
+        let process = launch_elevated(&helper, &boot_trace_args(&out))?;
+        let exit_code = wait_result(&process, TRACE_CEILING, &cancel)?;
+        drop_stale_partials(folder, PARTIAL_STALE, SystemTime::now());
+        let path = (exit_code == Some(0) && out.is_file()).then(|| {
+            prune_boot_traces(folder, TRACES_KEPT);
+            out.to_string_lossy().into_owned()
+        });
+        Ok(BootTraceCopied { path, exit_code })
     })
     .await
 }
