@@ -92,10 +92,45 @@ const slowBoot: FindingDto = {
   next_steps: [],
 };
 
+/** A slow profile step, open while `?startup=slow` or `?startup=wait` names a slow latest startup. */
+function slowProfile(which: "slow" | "wait"): FindingDto {
+  const slow = which === "slow";
+  const boot = now - 20 * 60_000;
+  return {
+    id: 5,
+    opened_ms: now - 18 * DAY,
+    updated_ms: boot,
+    closed_ms: null,
+    kind: "SlowBoot",
+    subject: "Pc",
+    concern: "Attention",
+    value: { Seconds: slow ? 152 : 134 },
+    first_value: { Seconds: 151 },
+    reference: { AtMost: { Seconds: 60 } },
+    evidence: [
+      {
+        BootPhases: {
+          ts_ms: boot,
+          firmware_ms: slow ? 15_200 : 15_500,
+          to_signin_ms: slow ? 19_000 : 708_000,
+          profile_ms: slow ? 152_000 : 134_000,
+          tpm_wait_ms: slow ? 37_000 : null,
+          to_desktop_ms: slow ? 173_000 : 843_000,
+          from_power_ms: slow ? 188_200 : 858_500,
+        },
+      },
+      { TempFolder: { ts_ms: now - 25 * 60_000, folders: slow ? 213_879 : 137_412, files: slow ? 80_958 : 40_210, capped: false } },
+    ],
+    next_steps: ["CleanTemp"],
+  };
+}
+
 function data(): HealthDto {
   const level = query.get("health") ?? "critical";
-  const open =
+  const startup = query.get("startup");
+  const base =
     level === "none" ? [] : level === "attention" ? [unfinishedShutdowns, lowSpace] : [failingDisk, unfinishedShutdowns, lowSpace];
+  const open = startup === "slow" || startup === "wait" ? [...base, slowProfile(startup)] : base;
   return {
     open,
     closed: [slowBoot],

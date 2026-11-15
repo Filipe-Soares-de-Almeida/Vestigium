@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import type {
   AgentLink,
+  BootTraceCopied,
   CaptureDto,
   CaptureRun,
   CaptureSummary,
@@ -23,6 +24,7 @@ import type {
   ProgramPoint,
   SettingsDto,
   SmartPoint,
+  StartupAreaDto,
   TestsDto,
   TimelineDto,
   TweakPick,
@@ -107,8 +109,8 @@ export function cancelCapture(): Promise<void> {
   return invoke("cancel_capture");
 }
 
-/** Makes the window stop waiting for a full scan or a dump read in progress; its command then rejects as cancelled. */
-export function cancelHelperRead(read: "scan" | "dumps"): Promise<void> {
+/** Makes the window stop waiting for a full scan, a dump read or a boot trace copy in progress; its command then rejects as cancelled. */
+export function cancelHelperRead(read: "scan" | "dumps" | "trace"): Promise<void> {
   return invoke("cancel_helper_read", { read });
 }
 
@@ -130,9 +132,29 @@ export function health(): Promise<HealthDto> {
   return invoke("health");
 }
 
+/** The latest boots with their phases, the Temp folder and the programs Windows starts at sign-in. */
+export function startupArea(): Promise<StartupAreaDto> {
+  return invoke("startup_area");
+}
+
+/** Opens Windows' Storage Sense settings, which clean the Temp folder. */
+export function openStorageSense(): Promise<void> {
+  return invoke("open_storage_sense");
+}
+
 /** Runs a full scan in the elevated helper and waits for it; Windows asks for permission first. */
 export function startScan(): Promise<ScanFinished> {
   return invoke("start_scan");
+}
+
+/** Copies the boot trace Windows keeps in the elevated helper and waits for it; Windows asks for permission first. */
+export function copyBootTrace(): Promise<BootTraceCopied> {
+  return invoke("copy_boot_trace");
+}
+
+/** Opens the folder of the boot trace copies in File Explorer. */
+export function openBootTraceFolder(): Promise<void> {
+  return invoke("open_data_folder", { folder: "boot-traces" });
 }
 
 /** The dumps Windows kept, what each says, the space they take and Windows' blue screen reports. */

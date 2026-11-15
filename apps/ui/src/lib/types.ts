@@ -150,7 +150,8 @@ export type NextStep =
   | "RunMemoryDiagnostic"
   | "RunMemTest86"
   | "RepairVolume"
-  | "ReadCrashDump";
+  | "ReadCrashDump"
+  | "CleanTemp";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -722,6 +723,15 @@ export interface BootReport {
   skipped: number;
 }
 
+/** What the signed-in user's Temp folder held when it was counted. */
+export interface TempSize {
+  ts_ms: number;
+  folders: number;
+  files: number;
+  /** The count stopped at its limit, so the folder holds at least this much. */
+  capped: boolean;
+}
+
 export type HealthFact =
   | { Attribute: SmartAttribute }
   | "PredictFailure"
@@ -740,7 +750,19 @@ export type HealthFact =
   | { MemoryDiagnostic: { ts_ms: number; bad_pages: number | null } }
   | { MemoryQuickTest: { ts_ms: number; errors: number; tested_bytes: number } }
   | { SurfaceScan: { ts_ms: number; unreadable_blocks: number; slow_blocks: number; whole_disk: boolean } }
-  | { VolumeCheck: { ts_ms: number } };
+  | { VolumeCheck: { ts_ms: number } }
+  | {
+      BootPhases: {
+        ts_ms: number;
+        firmware_ms: number | null;
+        to_signin_ms: number | null;
+        profile_ms: number | null;
+        tpm_wait_ms: number | null;
+        to_desktop_ms: number | null;
+        from_power_ms: number | null;
+      };
+    }
+  | { TempFolder: TempSize };
 
 /** One health finding; `closed_ms` is null while it still holds. */
 export interface FindingDto {
@@ -767,9 +789,63 @@ export interface HealthDto {
   boot: BootReport | null;
 }
 
+/** A startup app Explorer ran from a Run key, with when it started and when it was running. */
+export interface StartupRun {
+  command: string;
+  start_ms: number;
+  end_ms: number | null;
+}
+
+/** One boot with its phases worked out, in milliseconds; a phase is null where the logs lack it. */
+export interface BootDto {
+  kernel_start_ms: number;
+  /** 0 full boot, 1 hybrid boot (Fast Startup), 2 resume from hibernation. */
+  boot_type: number | null;
+  firmware_ms: number | null;
+  /** Kernel start to sign-in; above 30 s it includes the person at the sign-in screen. */
+  to_signin_ms: number | null;
+  probable_wait: boolean;
+  profile_ms: number | null;
+  /** Part of the profile step spent before Windows declared the TPM ready. */
+  tpm_wait_ms: number | null;
+  desktop_ms: number | null;
+  to_desktop_ms: number | null;
+  /** Firmware plus kernel start to desktop: the time from the power button. */
+  from_power_ms: number | null;
+  apps: StartupRun[];
+  /** Windows' own boot logger hit its size limit, so Windows did not measure this boot. */
+  logger_full: boolean;
+  failed_drivers: string[];
+}
+
+/** A program Windows starts at sign-in. */
+export interface StartupAppDto {
+  name: string;
+  /** The address of this entry's row on the optimizations page, for `href.tweaks`. */
+  key: string;
+  enabled: boolean;
+  /** A security product: never offered for switching off. */
+  protected: boolean;
+}
+
+/** The startup page: the latest boots (oldest first), the Temp folder and the startup programs. */
+export interface StartupAreaDto {
+  boots: BootDto[];
+  temp: TempSize | null;
+  startup_apps: StartupAppDto[];
+}
+
 /** What a full scan returned once its helper exited. */
 export interface ScanFinished {
   scans: number[];
+  exit_code: number | null;
+}
+
+/** What copying the boot trace returned once its helper exited. */
+export interface BootTraceCopied {
+  /** The copy, when the helper reported success; otherwise `null`. */
+  path: string | null;
+  /** 0 copied, 6 Windows has no trace to copy, anything else failed. */
   exit_code: number | null;
 }
 

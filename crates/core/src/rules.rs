@@ -218,6 +218,8 @@ pub enum NextStep {
     RepairVolume,
     /// Open the crash dump, which says what Windows blamed.
     ReadCrashDump,
+    /// Clear the user's temporary files, which the profile service walks at every sign-in.
+    CleanTemp,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

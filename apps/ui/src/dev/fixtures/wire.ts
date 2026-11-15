@@ -1,7 +1,7 @@
 // Written by the `wire` test of the window crate; do not edit by hand.
 // Refresh with `UPDATE_FIXTURES=1 cargo test -p vestigium-ui wire`.
 import type { AboutVersions } from "../../lib/about";
-import type { Advice, AgentLink, AgentStatus, AppFrames, Applier, BenchMode, BenchResult, Benchmark, BootDelay, BootReport, BootTime, BugCheckDto, Bus, CaptureDto, CaptureFinished, CaptureNote, CaptureRun, CaptureSource, CaptureSummary, Cause, Channel, ColorTheme, Columns, Concern, Confidence, CoreLoad, CrashControlDto, CrashKind, Culprit, DelayKind, DeleteFinished, DetailLevel, DiagnosticDetail, DiagnosticResult, DiskDetailDto, DiskDto, DiskHealth, DiskInfo, DiskLoad, DriverLatency, DumpCulprit, DumpDto, DumpKind, DumpScanFinished, DumpsDto, Ended, Episode, EpisodeDetailDto, EpisodeKind, EventMeaning, Evidence, Fact, FactKind, FaultDto, FindingDto, FindingKind, FrameHitch, Gap, GapReason, HangOutcome, HangSpan, HealthDto, HealthFact, Helped, HelpedVerdict, HistoryReset, HistoryState, Hive, HungWindow, Lanes, LanguagePref, LiveMessage, LivePoint, LongRoutine, MachineInfo, MarksDto, Measure, Media, MemoryDiagnostic, MemoryDto, MemoryError, MemoryQuick, Metric, MonitorSource, MonitorState, MonitorStatus, NextStep, NowFrame, NvmeDetail, NvmeHealth, Occurrence, OccurrenceDto, OccurrenceKind, OccurrenceSummary, PageFile, Pattern, PcState, ProbeHiccup, ProcessFacts, ProcessSample, ProcessTop, ProgramMarks, ProgramPoint, Reading, Reference, Region, Resolution, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, RunningTest, Sample, ScanFinished, ScanUnderWay, SecurityProduct, SettingChange, SettingResult, SettingValue, Settings, SettingsDto, Severity, Signature, SlowBlock, SmartAttribute, SmartPoint, SourceFailure, StartupList, Subject, SurfaceProgress, SurfaceScan, Suspect, Takes, TestData, TestFinished, TestKind, TestOutcome, TestProgress, TestRun, TestRunDto, TestSpan, TestsDto, ThemePref, TimelineDto, TrayState, Trigger, TweakChange, TweakId, TweakRow, TweakSetting, TweakSignal, TweakStatus, TweakValue, TweaksApplied, TweaksDto, UiError, UiErrorKind, VolumeCheck, VolumeDto, VolumeResult, WinEvent, Window } from "../../lib/types";
+import type { Advice, AgentLink, AgentStatus, AppFrames, Applier, BenchMode, BenchResult, Benchmark, BootDelay, BootDto, BootReport, BootTime, BootTraceCopied, BugCheckDto, Bus, CaptureDto, CaptureFinished, CaptureNote, CaptureRun, CaptureSource, CaptureSummary, Cause, Channel, ColorTheme, Columns, Concern, Confidence, CoreLoad, CrashControlDto, CrashKind, Culprit, DelayKind, DeleteFinished, DetailLevel, DiagnosticDetail, DiagnosticResult, DiskDetailDto, DiskDto, DiskHealth, DiskInfo, DiskLoad, DriverLatency, DumpCulprit, DumpDto, DumpKind, DumpScanFinished, DumpsDto, Ended, Episode, EpisodeDetailDto, EpisodeKind, EventMeaning, Evidence, Fact, FactKind, FaultDto, FindingDto, FindingKind, FrameHitch, Gap, GapReason, HangOutcome, HangSpan, HealthDto, HealthFact, Helped, HelpedVerdict, HistoryReset, HistoryState, Hive, HungWindow, Lanes, LanguagePref, LiveMessage, LivePoint, LongRoutine, MachineInfo, MarksDto, Measure, Media, MemoryDiagnostic, MemoryDto, MemoryError, MemoryQuick, Metric, MonitorSource, MonitorState, MonitorStatus, NextStep, NowFrame, NvmeDetail, NvmeHealth, Occurrence, OccurrenceDto, OccurrenceKind, OccurrenceSummary, PageFile, Pattern, PcState, ProbeHiccup, ProcessFacts, ProcessSample, ProcessTop, ProgramMarks, ProgramPoint, Reading, Reference, Region, Resolution, RestorePoint, Retention, RoutineKind, RoutineStats, RunAs, RunningTest, Sample, ScanFinished, ScanUnderWay, SecurityProduct, SettingChange, SettingResult, SettingValue, Settings, SettingsDto, Severity, Signature, SlowBlock, SmartAttribute, SmartPoint, SourceFailure, StartupAppDto, StartupAreaDto, StartupList, StartupRun, Subject, SurfaceProgress, SurfaceScan, Suspect, Takes, TempSize, TestData, TestFinished, TestKind, TestOutcome, TestProgress, TestRun, TestRunDto, TestSpan, TestsDto, ThemePref, TimelineDto, TrayState, Trigger, TweakChange, TweakId, TweakRow, TweakSetting, TweakSignal, TweakStatus, TweakValue, TweaksApplied, TweaksDto, UiError, UiErrorKind, VolumeCheck, VolumeDto, VolumeResult, WinEvent, Window } from "../../lib/types";
 import type { CheckResult, NotesGroup, Progress, Release, UpdatePrefs } from "../../lib/update.svelte";
 import type { About } from "../../screens/settings/data";
 
@@ -169,6 +169,7 @@ export const nextStepSamples = [
   "RunMemTest86",
   "RepairVolume",
   "ReadCrashDump",
+  "CleanTemp",
 ] satisfies NextStep[];
 
 export const causeSamples = [
@@ -278,7 +279,7 @@ export const suspectSamples = [
   {"cause":{"Memory":{"process":null}},"confidence":"Medium","evidence":[],"next_steps":[]},
   {"cause":{"DriverModule":{"module":"example.sys","intermediary":true}},"confidence":"High","evidence":[],"next_steps":[]},
   {"cause":{"PowerCut":{"no_dump":false}},"confidence":"Low","evidence":[],"next_steps":[]},
-  {"cause":"Unclear","confidence":"Medium","evidence":[{"Event":{"ts_ms":1790000000000,"provider":"example-provider","id":129,"meaning":"StorageReset"}},{"Metric":{"ts_ms":1790000000000,"metric":"DiskLatencyMs","value":450.5,"threshold":100.0,"subject":"0 C:"}},{"Process":{"pid":4120,"name":"example.exe","metric":"PrivateBytes","value":1500000000.0}},{"Hang":{"name":"example.exe","duration_ms":31000}},{"Routine":{"module":"example.sys","kind":"Dpc","count":120,"max_us":900,"at_least_100us":40,"at_least_1ms":2,"core_pct":4.5}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Isr","us":1500}},{"Frames":{"app":"example.exe","frames":600,"hitches":12,"worst_ms":80.5,"median_ms":8.5}},{"Hitch":{"ts_ms":1790000000000,"app":"example.exe","frame_ms":70.5}},{"Hiccup":{"ts_ms":1790000000000,"lag_ms":250.5}},{"CaptureLoss":{"lost_events":17}},{"Metric":{"ts_ms":1790000000000,"metric":"CpuPct","value":99.5,"threshold":90.0,"subject":null}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Dpc","us":800}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Isr","us":800}}],"next_steps":["UpdateStorageDriver","CheckDiskCable","RunDiskTest","FindDiskHeavyApp","CloseMemoryHeavyApp","CheckCooling","CheckPowerPlan","UpdateGpuDriver","EnableSensitiveMode","DeepCapture","ReportToAppVendor","UpdateDriver","BackUpNow","ReplaceDisk","FreeDiskSpace","LetWindowsManagePageFile","CheckHardwareStability","KeepOneAntivirus","ReviewStartupApps","WaitForShutdown","MoveWindowsToSsd","RunMemoryDiagnostic","RunMemTest86","RepairVolume","ReadCrashDump"]},
+  {"cause":"Unclear","confidence":"Medium","evidence":[{"Event":{"ts_ms":1790000000000,"provider":"example-provider","id":129,"meaning":"StorageReset"}},{"Metric":{"ts_ms":1790000000000,"metric":"DiskLatencyMs","value":450.5,"threshold":100.0,"subject":"0 C:"}},{"Process":{"pid":4120,"name":"example.exe","metric":"PrivateBytes","value":1500000000.0}},{"Hang":{"name":"example.exe","duration_ms":31000}},{"Routine":{"module":"example.sys","kind":"Dpc","count":120,"max_us":900,"at_least_100us":40,"at_least_1ms":2,"core_pct":4.5}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Isr","us":1500}},{"Frames":{"app":"example.exe","frames":600,"hitches":12,"worst_ms":80.5,"median_ms":8.5}},{"Hitch":{"ts_ms":1790000000000,"app":"example.exe","frame_ms":70.5}},{"Hiccup":{"ts_ms":1790000000000,"lag_ms":250.5}},{"CaptureLoss":{"lost_events":17}},{"Metric":{"ts_ms":1790000000000,"metric":"CpuPct","value":99.5,"threshold":90.0,"subject":null}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Dpc","us":800}},{"LongRoutine":{"ts_ms":1790000000000,"module":"example.sys","kind":"Isr","us":800}}],"next_steps":["UpdateStorageDriver","CheckDiskCable","RunDiskTest","FindDiskHeavyApp","CloseMemoryHeavyApp","CheckCooling","CheckPowerPlan","UpdateGpuDriver","EnableSensitiveMode","DeepCapture","ReportToAppVendor","UpdateDriver","BackUpNow","ReplaceDisk","FreeDiskSpace","LetWindowsManagePageFile","CheckHardwareStability","KeepOneAntivirus","ReviewStartupApps","WaitForShutdown","MoveWindowsToSsd","RunMemoryDiagnostic","RunMemTest86","RepairVolume","ReadCrashDump","CleanTemp"]},
 ] satisfies Suspect[];
 
 export const triggerSamples = [
@@ -828,6 +829,11 @@ export const bootReportSamples = [
   {"boots":[{"ts_ms":1790000000000,"boot_ms":45000,"main_path_ms":30000,"post_boot_ms":15000}],"delays":[{"ts_ms":1790000000000,"kind":"App","name":"example","total_ms":9000,"degradation_ms":4000,"security":false},{"ts_ms":1790000000000,"kind":"Driver","name":"example","total_ms":9000,"degradation_ms":4000,"security":false},{"ts_ms":1790000000000,"kind":"Service","name":"example","total_ms":9000,"degradation_ms":4000,"security":false},{"ts_ms":1790000000000,"kind":"Phase","name":"example","total_ms":9000,"degradation_ms":4000,"security":false},{"ts_ms":1790000000000,"kind":"Device","name":"example","total_ms":9000,"degradation_ms":4000,"security":false}],"skipped":2},
 ] satisfies BootReport[];
 
+export const tempSizeSamples = [
+  {"ts_ms":1790000000000,"folders":24000,"files":80000,"capped":false},
+  {"ts_ms":1790000000000,"folders":24000,"files":80000,"capped":true},
+] satisfies TempSize[];
+
 export const healthFactSamples = [
   {"Attribute":{"id":5,"current":100,"worst":99,"raw":12}},
   "PredictFailure",
@@ -847,6 +853,9 @@ export const healthFactSamples = [
   {"MemoryQuickTest":{"ts_ms":1790000000000,"errors":1,"tested_bytes":1000000}},
   {"SurfaceScan":{"ts_ms":1790000000000,"unreadable_blocks":3,"slow_blocks":8,"whole_disk":true}},
   {"VolumeCheck":{"ts_ms":1790000000000}},
+  {"BootPhases":{"ts_ms":1790000000000,"firmware_ms":12000,"to_signin_ms":9000,"profile_ms":75000,"tpm_wait_ms":40000,"to_desktop_ms":95000,"from_power_ms":107000}},
+  {"TempFolder":{"ts_ms":1790000000000,"folders":24000,"files":80000,"capped":false}},
+  {"BootPhases":{"ts_ms":1790000000000,"firmware_ms":null,"to_signin_ms":null,"profile_ms":null,"tpm_wait_ms":null,"to_desktop_ms":null,"from_power_ms":null}},
   {"MemoryDiagnostic":{"ts_ms":1790000000000,"bad_pages":null}},
   {"Delay":{"ts_ms":1790000000000,"kind":"App","name":"example","total_ms":9000,"degradation_ms":4000,"security":false}},
   {"Delay":{"ts_ms":1790000000000,"kind":"Driver","name":"example","total_ms":9000,"degradation_ms":4000,"security":false}},
@@ -908,10 +917,37 @@ export const healthDtoSamples = [
   {"open":[{"id":1,"opened_ms":1790000000000,"updated_ms":1790000100000,"closed_ms":null,"kind":"DiskSmart","subject":"Pc","concern":"Attention","value":{"Count":0},"reference":{"AtMost":{"Count":0}},"evidence":[],"next_steps":[],"first_value":null},{"id":2,"opened_ms":1790000000000,"updated_ms":1790000100000,"closed_ms":null,"kind":"LowSpace","subject":"Pc","concern":"Attention","value":{"Count":1},"reference":{"AtMost":{"Count":0}},"evidence":[],"next_steps":[],"first_value":null}],"closed":[{"id":1,"opened_ms":1790000000000,"updated_ms":1790000100000,"closed_ms":1790000200000,"kind":"DiskSmart","subject":"Pc","concern":"Attention","value":{"Count":0},"reference":{"AtMost":{"Count":0}},"evidence":[],"next_steps":[],"first_value":{"Count":9}},{"id":2,"opened_ms":1790000000000,"updated_ms":1790000100000,"closed_ms":1790000200000,"kind":"LowSpace","subject":"Pc","concern":"Attention","value":{"Count":1},"reference":{"AtMost":{"Count":0}},"evidence":[],"next_steps":[],"first_value":{"Count":9}}],"last_scan_ms":null,"boot":null},
 ] satisfies HealthDto[];
 
+export const startupRunSamples = [
+  {"command":"Example Capture","start_ms":1790000080000,"end_ms":1790000082000},
+  {"command":"Example Capture","start_ms":1790000080000,"end_ms":null},
+] satisfies StartupRun[];
+
+export const bootDtoSamples = [
+  {"kernel_start_ms":1790000000000,"boot_type":0,"firmware_ms":14000,"to_signin_ms":18000,"probable_wait":false,"profile_ms":42000,"tpm_wait_ms":22000,"desktop_ms":10000,"to_desktop_ms":70000,"from_power_ms":84000,"apps":[{"command":"Example Capture","start_ms":1790000080000,"end_ms":1790000082000},{"command":"Example Capture","start_ms":1790000080000,"end_ms":null}],"logger_full":true,"failed_drivers":["exampledrv"]},
+  {"kernel_start_ms":1790100000000,"boot_type":null,"firmware_ms":null,"to_signin_ms":null,"probable_wait":true,"profile_ms":null,"tpm_wait_ms":null,"desktop_ms":null,"to_desktop_ms":null,"from_power_ms":null,"apps":[],"logger_full":false,"failed_drivers":[]},
+] satisfies BootDto[];
+
+export const startupAppDtoSamples = [
+  {"name":"Example Capture","key":"StartupApp:Example Capture","enabled":true,"protected":false},
+  {"name":"Example Capture","key":"StartupApp:Example Capture","enabled":false,"protected":false},
+  {"name":"Example Capture","key":"StartupApp:Example Capture","enabled":true,"protected":true},
+] satisfies StartupAppDto[];
+
+export const startupAreaDtoSamples = [
+  {"boots":[{"kernel_start_ms":1790000000000,"boot_type":0,"firmware_ms":14000,"to_signin_ms":18000,"probable_wait":false,"profile_ms":42000,"tpm_wait_ms":22000,"desktop_ms":10000,"to_desktop_ms":70000,"from_power_ms":84000,"apps":[{"command":"Example Capture","start_ms":1790000080000,"end_ms":1790000082000},{"command":"Example Capture","start_ms":1790000080000,"end_ms":null}],"logger_full":true,"failed_drivers":["exampledrv"]},{"kernel_start_ms":1790100000000,"boot_type":null,"firmware_ms":null,"to_signin_ms":null,"probable_wait":true,"profile_ms":null,"tpm_wait_ms":null,"desktop_ms":null,"to_desktop_ms":null,"from_power_ms":null,"apps":[],"logger_full":false,"failed_drivers":[]}],"temp":{"ts_ms":1790000000000,"folders":24000,"files":80000,"capped":false},"startup_apps":[{"name":"Example Capture","key":"StartupApp:Example Capture","enabled":true,"protected":false},{"name":"Example Capture","key":"StartupApp:Example Capture","enabled":false,"protected":false},{"name":"Example Capture","key":"StartupApp:Example Capture","enabled":true,"protected":true}]},
+  {"boots":[],"temp":null,"startup_apps":[]},
+] satisfies StartupAreaDto[];
+
 export const scanFinishedSamples = [
   {"scans":[1,2],"exit_code":0},
   {"scans":[1,2],"exit_code":null},
 ] satisfies ScanFinished[];
+
+export const bootTraceCopiedSamples = [
+  {"path":"C:\\Users\\someone\\AppData\\Local\\Vestigium\\data\\boot-traces\\1790000000000.etl","exit_code":0},
+  {"path":null,"exit_code":6},
+  {"path":null,"exit_code":null},
+] satisfies BootTraceCopied[];
 
 export const dumpKindSamples = [
   "KernelMini",

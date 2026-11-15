@@ -6,8 +6,8 @@ use std::thread;
 
 use vestigium_collect::{HealthSource, physical_drive};
 use vestigium_core::health::{
-    Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, PageFile, SecurityProduct,
-    Subject, VolumeSpace, evaluate, reconcile, unread_kinds,
+    BootFacts, Concern, DiskHealth, FindingChange, FindingKind, HealthInputs, PageFile,
+    SecurityProduct, Subject, TempSize, VolumeSpace, evaluate, reconcile, unread_kinds,
 };
 use vestigium_core::hwtest::{Bus, TEST_REACH_DAYS};
 use vestigium_core::{EpisodeKind, MachineInfo, Media};
@@ -23,6 +23,16 @@ const DAY_MS: i64 = 24 * 60 * 60_000;
 const EVENT_DAYS: i64 = 35;
 /// How often the Security Center is asked; its COM libraries stay loaded after a call.
 const ANTIVIRUS_EVERY_MS: i64 = DAY_MS;
+/// Days of boots the first read after a start covers, so a new install sees its past boots.
+const BOOT_DAYS_FIRST: u32 = 90;
+/// Days of boots a later read covers: enough to catch a resume or a fact logged late.
+const BOOT_DAYS: u32 = 7;
+/// How often the boots are read again once the first two passes after a start have read them.
+const BOOTS_EVERY_MS: i64 = DAY_MS;
+/// How often the Temp folder is counted.
+const TEMP_EVERY_MS: i64 = DAY_MS;
+/// Boots one pass hands the rules.
+const BOOTS_KEPT: u32 = 60;
 /// Stack of the reader thread: it calls into Windows and holds no deep call chain.
 const STACK_BYTES: usize = 512 << 10;
 
@@ -56,6 +66,10 @@ pub struct HealthReadings {
     antivirus: Option<Vec<SecurityProduct>>,
     /// The Security Center was asked, so the pages it touched can be handed back.
     asked_security_center: bool,
+    /// Boots read in this pass, to store; `None` when the pass did not read them.
+    boots: Option<Vec<BootFacts>>,
+    /// The Temp count of this pass, when it counted.
+    temp: Option<TempSize>,
 }
 
 impl HealthReadings {
@@ -82,6 +96,10 @@ pub struct HealthReader<S> {
     disks: BTreeMap<String, DiskHealth>,
     antivirus: Option<Vec<SecurityProduct>>,
     antivirus_read_ms: Option<i64>,
+    /// Successful boot reads since the agent started, and when the last one was.
+    boot_reads: u32,
+    boots_read_ms: Option<i64>,
+    temp_read_ms: Option<i64>,
 }
 
 impl<S: HealthSource> HealthReader<S> {
@@ -91,6 +109,9 @@ impl<S: HealthSource> HealthReader<S> {
             disks: BTreeMap::new(),
             antivirus: None,
             antivirus_read_ms: None,
+            boot_reads: 0,
+            boots_read_ms: None,
+            temp_read_ms: None,
         }
     }
 
@@ -114,6 +135,33 @@ impl<S: HealthSource> HealthReader<S> {
         if asked_security_center {
             self.antivirus = self.source.antivirus();
             self.antivirus_read_ms = self.antivirus.is_some().then_some(request.ts_ms);
+        }
+        // The first two passes after a start read the boots (the second catches the startup apps
+        // logged after the first); then once a day, for resumes.
+        let boots = (self.boot_reads < 2
+            || self
+                .boots_read_ms
+                .is_none_or(|at| request.ts_ms - at >= BOOTS_EVERY_MS))
+        .then(|| {
+            let days = if self.boot_reads == 0 {
+                BOOT_DAYS_FIRST
+            } else {
+                BOOT_DAYS
+            };
+            self.source.boots(days)
+        })
+        .flatten();
+        if boots.is_some() {
+            self.boot_reads += 1;
+            self.boots_read_ms = Some(request.ts_ms);
+        }
+        let temp = self
+            .temp_read_ms
+            .is_none_or(|at| request.ts_ms - at >= TEMP_EVERY_MS)
+            .then(|| self.source.temp(request.ts_ms))
+            .flatten();
+        if temp.is_some() {
+            self.temp_read_ms = Some(request.ts_ms);
         }
         let mut unread: HashSet<String> = HashSet::new();
         let mut failed: HashSet<String> = HashSet::new();
@@ -157,6 +205,8 @@ impl<S: HealthSource> HealthReader<S> {
             page_files: self.source.page_files(),
             antivirus: self.antivirus.clone(),
             asked_security_center,
+            boots,
+            temp,
         }
     }
 }
@@ -186,6 +236,12 @@ impl HealthKeeper {
                 self.smart_day.insert(health.name.clone(), day);
             }
         }
+        for boot in readings.boots.iter().flatten() {
+            store.put_boot(boot)?;
+        }
+        if let Some(temp) = &readings.temp {
+            store.put_temp(temp)?;
+        }
         let machine = &readings.machine;
         let now_ms = readings.ts_ms;
         self.smart_day
@@ -211,6 +267,8 @@ impl HealthKeeper {
             events: store.events(now_ms - EVENT_DAYS * DAY_MS, now_ms)?,
             antivirus: readings.antivirus.clone(),
             boot: store.last_scan()?.and_then(|scan| scan.boot),
+            boots: store.boots(BOOTS_KEPT)?,
+            temp: store.last_temp()?,
             tests: store
                 .test_runs(now_ms - TEST_REACH_DAYS * DAY_MS, now_ms)?
                 .into_iter()
@@ -274,6 +332,14 @@ impl HealthSource for AnySource {
 
     fn antivirus(&mut self) -> Option<Vec<SecurityProduct>> {
         self.0.antivirus()
+    }
+
+    fn boots(&mut self, days: u32) -> Option<Vec<BootFacts>> {
+        self.0.boots(days)
+    }
+
+    fn temp(&mut self, now_ms: i64) -> Option<TempSize> {
+        self.0.temp(now_ms)
     }
 }
 
@@ -419,6 +485,9 @@ mod tests {
         antivirus_down: Rc<Cell<bool>>,
         page_files_down: Rc<Cell<bool>>,
         disks_down: Rc<Cell<bool>>,
+        /// The days each boot read asked for.
+        asked_boots: Rc<RefCell<Vec<u32>>>,
+        asked_temp: Rc<RefCell<u32>>,
     }
 
     impl HealthSource for FakeHealth {
@@ -485,6 +554,37 @@ mod tests {
                 });
             }
             Some(products)
+        }
+
+        fn boots(&mut self, days: u32) -> Option<Vec<BootFacts>> {
+            self.asked_boots.borrow_mut().push(days);
+            let reads = self.asked_boots.borrow().len() as i64;
+            Some(vec![BootFacts {
+                kernel_start_ms: NOW - DAY_MS,
+                firmware_ms: Some(13_500),
+                profile_start_ms: Some(NOW - DAY_MS + 20_000),
+                profile_end_ms: Some(NOW - DAY_MS + 28_000),
+                // A later read of the same boot knows more of it.
+                apps: (reads > 1)
+                    .then(|| vestigium_core::health::StartupRun {
+                        command: "Example.exe".into(),
+                        start_ms: NOW - DAY_MS + 47_000,
+                        end_ms: None,
+                    })
+                    .into_iter()
+                    .collect(),
+                ..BootFacts::default()
+            }])
+        }
+
+        fn temp(&mut self, now_ms: i64) -> Option<TempSize> {
+            *self.asked_temp.borrow_mut() += 1;
+            Some(TempSize {
+                ts_ms: now_ms,
+                folders: 3_558,
+                files: 3_547,
+                capped: false,
+            })
         }
     }
 
@@ -774,6 +874,37 @@ mod tests {
         assert!(!run(&mut pass, &mut store, NOW + 3_600_000, &[]).asked_security_center);
         assert!(run(&mut pass, &mut store, NOW + DAY_MS, &[]).asked_security_center);
         assert_eq!(*asked.borrow(), 2);
+    }
+
+    #[test]
+    fn boots_are_read_twice_after_a_start_then_daily_and_temp_daily() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = store(&dir);
+        let fake = FakeHealth {
+            free_gb: 50,
+            ..FakeHealth::default()
+        };
+        let (boots, temp) = (fake.asked_boots.clone(), fake.asked_temp.clone());
+        let mut pass = HealthPass::new(fake);
+
+        for at in [
+            NOW,
+            NOW + 3_600_000,
+            NOW + 7_200_000,
+            NOW + DAY_MS + 3_600_000,
+        ] {
+            run(&mut pass, &mut store, at, &[]);
+        }
+        assert_eq!(*boots.borrow(), [BOOT_DAYS_FIRST, BOOT_DAYS, BOOT_DAYS]);
+        assert_eq!(*temp.borrow(), 2);
+        let stored = store.boots(10).unwrap();
+        assert_eq!(stored.len(), 1, "the same boot read again is one row");
+        assert_eq!(
+            stored[0].apps.len(),
+            1,
+            "and keeps what the later read added"
+        );
+        assert_eq!(store.last_temp().unwrap().map(|t| t.folders), Some(3_558));
     }
 
     fn open_kinds(store: &Store) -> Vec<FindingKind> {

@@ -10,6 +10,8 @@ pub const WRITE_FAILED: u8 = 3;
 pub const CAPTURE_RUNNING: u8 = 4;
 /// Exit code for a deep capture ended by its stop file; nothing was written.
 pub const CANCELLED: u8 = 5;
+/// Exit code for a boot trace job when Windows has no trace file to copy.
+pub const TRACE_MISSING: u8 = 6;
 pub const MINUTES: std::ops::RangeInclusive<u64> = 1..=vestigium_core::CAPTURE_MINUTES_MAX;
 /// Physical drive numbers a disk scan accepts.
 pub const DISKS: std::ops::RangeInclusive<u32> = 0..=127;
@@ -38,6 +40,8 @@ pub enum Job {
     },
     /// Checks the file system of volume `letter` online, without repairing, into `out`.
     VolumeCheck { letter: char, out: PathBuf },
+    /// Copies the boot trace Windows keeps, which a standard user cannot read, into `out`.
+    BootTrace { out: PathBuf },
 }
 
 /// The drive letter of `C:`, and nothing else.
@@ -77,6 +81,14 @@ pub fn parse(args: &[String]) -> Result<Job, String> {
                 out: PathBuf::from(out),
             }),
             _ => Err("health-scan takes --out <file> and nothing else".to_string()),
+        };
+    }
+    if name == "boot-trace" {
+        return match rest {
+            [flag, out] if flag == "--out" => Ok(Job::BootTrace {
+                out: PathBuf::from(out),
+            }),
+            _ => Err("boot-trace takes --out <file> and nothing else".to_string()),
         };
     }
     if name == "dump-scan" {
@@ -243,6 +255,28 @@ mod tests {
             &["health-scan", "--minutes", "5"],
             &["health-scan", "--out", "a", "--out", "b"],
             &["health-scan", "--out", "a", "--run", "cmd.exe"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn boot_trace_takes_only_its_output() {
+        let out = r"C:\Vestigium\data\boot-traces\1.etl";
+        assert_eq!(
+            parse(&args(&["boot-trace", "--out", out])),
+            Ok(Job::BootTrace {
+                out: PathBuf::from(out)
+            })
+        );
+        for bad in [
+            &["boot-trace"][..],
+            &["boot-trace", "--out"],
+            &["boot-trace", "--out", "a", "--out", "b"],
+            &["boot-trace", "--out", "a", "--source", r"C:\Windows\x.etl"],
+            &["boot-trace", "--source", r"C:\Windows\x.etl"],
+            &["boot-trace", "--out", "a", "extra"],
+            &["boot-trace", "a"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }

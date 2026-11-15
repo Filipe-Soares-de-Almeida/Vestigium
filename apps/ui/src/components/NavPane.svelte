@@ -145,6 +145,7 @@
   }
   .items {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     flex: 1;
     align-content: start;
     gap: 2px;

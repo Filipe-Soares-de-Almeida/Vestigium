@@ -19,11 +19,12 @@ mod presentmon;
 mod probe;
 mod process_info;
 mod processes;
+mod temp;
 mod timer;
 mod tweaks;
 
 pub use blackbox::{BlackboxRing, RING_RECORDS, RingContents};
-pub use boot::{BOOT_LOG, boot_report};
+pub use boot::{BOOT_LOG, boot_report, boot_timeline};
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
 pub use dumps::{
@@ -59,6 +60,7 @@ pub use presentmon::{
 pub use probe::{ProbeConfig, spawn_probe};
 pub use process_info::{image_path, run_as, signature};
 pub use processes::ProcessSnapshotter;
+pub use temp::{TEMP_MAX_ENTRIES, TEMP_MAX_TIME, count_tree, temp_folder};
 pub use timer::{
     HighResTimer, Waited, Wake, interrupt_ms, local_hour_minute, monotonic_ms, unbiased_ms, wall_ms,
 };

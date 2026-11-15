@@ -20,13 +20,17 @@
   import { areaOf, AREAS, areaState, findArea, statusKindOf } from "./health/areas";
   import Finding from "./health/Finding.svelte";
   import Scan from "./health/Scan.svelte";
+  import StartupArea from "./health/StartupArea.svelte";
+  import StartupBoot from "./health/StartupBoot.svelte";
   import { formatDayShort } from "./occurrence/format";
   import { areaUnknownText, checkText, findingTitle, lede, markWord, when } from "./health/words";
 
-  let { area: areaId }: { area: string | null } = $props();
+  let { area: areaId, boot = null }: { area: string | null; boot?: number | null } = $props();
 
   const level = $derived(app.settings?.settings.detail_level ?? "Simple");
   const area = $derived(findArea(areaId));
+  /** The page of one startup replaces the area's own head and body. */
+  const onBoot = $derived(boot !== null && area?.id === "startup");
   /** How the hourly check stands, from the watcher's last answer; nothing when it says nothing. */
   const pass = $derived(passState(app.link, Date.now()));
   const states = $derived(health.dto ? AREAS.map((a) => areaState(a, health.dto!, pass)) : []);
@@ -104,7 +108,9 @@
   {/if}
 {/snippet}
 
-{#if area}
+{#if onBoot && boot !== null}
+  <StartupBoot {boot} {level} />
+{:else if area}
   <PageHead title={t(`ui.health.area.${area.id}`)} meta={current ? areaMeta : undefined} />
 {:else}
   <PageHead
@@ -113,10 +119,14 @@
   />
 {/if}
 
-{#if health.dto === null && health.error !== null}
+{#if onBoot}
+  <!-- The startup page above reads its own data. -->
+{:else if health.dto === null && health.error !== null}
   <div class="gap"><ErrorView error={health.error} heading="h2" onretry={retry} /></div>
 {:else if health.dto === null}
   <Loading />
+{:else if current && area?.id === "startup"}
+  <StartupArea finding={current.open[0] ?? null} {level} />
 {:else if current}
   {#each current.open as finding, i (finding.id)}
     <Finding {finding} {level} first={i === 0} />
@@ -164,8 +174,11 @@
                 : tn("ui.health.area.fine", s.checks.length)}
         >
           {#snippet right()}
-            <StatusMark {kind} reveal word={markWord(s.mark, s.why)} />
-            <span class="count">{s.open.length ? tn("ui.health.area.points", s.open.length) : ""}</span>
+            <StatusMark
+              {kind}
+              reveal
+              word={s.open.length ? `${markWord(s.mark, s.why)} · ${tn("ui.health.area.points", s.open.length)}` : markWord(s.mark, s.why)}
+            />
           {/snippet}
         </RowCard>
       {/each}
@@ -191,10 +204,6 @@
     display: inline-flex;
     margin-right: 4px;
     vertical-align: 1px;
-  }
-  .count {
-    min-width: 64px;
-    text-align: right;
   }
   .okl {
     display: grid;

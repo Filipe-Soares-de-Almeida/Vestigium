@@ -2,6 +2,7 @@ mod boot;
 mod reliability;
 mod rules;
 mod smart;
+mod timeline;
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,10 @@ pub use rules::evaluate;
 pub use smart::{
     NVME_WORN_PCT, NvmeDetail, NvmeHealth, SmartAttribute, WATCHED_ATTRIBUTES, nvme_detail,
     nvme_health, smart_attributes, watched_count,
+};
+pub use timeline::{
+    BOOT_VERSION, BootFacts, BootLog, BootPhases, BootSource, PROBABLE_WAIT_MS, StartupRun,
+    TempSize,
 };
 
 /// Layout of the `Finding` BLOB written today.
@@ -241,6 +246,10 @@ pub struct HealthInputs {
     pub events: Vec<WinEvent>,
     pub antivirus: Option<Vec<SecurityProduct>>,
     pub boot: Option<BootReport>,
+    /// The latest boots read from the event logs, oldest first.
+    pub boots: Vec<BootFacts>,
+    /// The newest count of the signed-in user's Temp folder.
+    pub temp: Option<TempSize>,
     /// Test runs of the last `TEST_REACH_DAYS`, oldest first.
     pub tests: Vec<TestRun>,
     /// Findings already open, which stay open until their value is clearly back in range.
@@ -311,6 +320,17 @@ pub enum HealthFact {
     VolumeCheck {
         ts_ms: i64,
     },
+    /// The phases of one boot; `ts_ms` is when its kernel started.
+    BootPhases {
+        ts_ms: i64,
+        firmware_ms: Option<u32>,
+        to_signin_ms: Option<u32>,
+        profile_ms: Option<u32>,
+        tpm_wait_ms: Option<u32>,
+        to_desktop_ms: Option<u32>,
+        from_power_ms: Option<u32>,
+    },
+    TempFolder(TempSize),
 }
 
 /// A risk found on the PC, with its value, the healthy range and the facts behind it.
@@ -349,6 +369,10 @@ pub fn unread_kinds(inputs: &HealthInputs) -> Vec<FindingKind> {
     }
     if inputs.page_files.is_none() {
         kinds.push(FindingKind::PageFile);
+    }
+    let timed = inputs.boots.iter().any(|b| b.phases().profile_ms.is_some());
+    if !timed && inputs.boot.as_ref().is_none_or(|r| r.boots.is_empty()) {
+        kinds.push(FindingKind::SlowBoot);
     }
     kinds
 }

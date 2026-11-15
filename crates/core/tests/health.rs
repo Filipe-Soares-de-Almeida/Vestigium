@@ -1,8 +1,8 @@
 use vestigium_core::health::{
-    BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingChange,
-    FindingKind, HealthFact, HealthInputs, Measure, NvmeHealth, PageFile, Reference,
-    SecurityProduct, SmartAttribute, StoredFinding, Subject, VolumeSpace, evaluate, nvme_detail,
-    nvme_health, reconcile, smart_attributes, unread_kinds,
+    BootDelay, BootFacts, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding,
+    FindingChange, FindingKind, HealthFact, HealthInputs, Measure, NvmeHealth, PageFile, Reference,
+    SecurityProduct, SmartAttribute, StoredFinding, Subject, TempSize, VolumeSpace, evaluate,
+    nvme_detail, nvme_health, reconcile, smart_attributes, unread_kinds,
 };
 use vestigium_core::hwtest::{
     MemoryQuick, Outcome, SurfaceAggregator, TestData, TestRun, VolumeCheck, VolumeResult,
@@ -44,6 +44,8 @@ fn healthy() -> HealthInputs {
         events: Vec::new(),
         antivirus: Some(vec![product("Built-in antivirus", true)]),
         boot: None,
+        boots: Vec::new(),
+        temp: None,
         tests: Vec::new(),
         open: Vec::new(),
     }
@@ -647,6 +649,167 @@ fn slow_boot_names_what_slowed_it_and_spares_security() {
     assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
 }
 
+/// A boot `days` ago whose sign-in came `signin_ms` after the kernel and whose profile took `profile_ms`.
+fn timed_boot(days: i64, profile_ms: i64, signin_ms: i64) -> BootFacts {
+    let start = NOW - days * DAY;
+    BootFacts {
+        kernel_start_ms: start,
+        firmware_ms: Some(12_000),
+        signin_ms: Some(start + signin_ms),
+        profile_start_ms: Some(start + signin_ms),
+        profile_end_ms: Some(start + signin_ms + profile_ms),
+        desktop_ms: Some(start + signin_ms + profile_ms + 5_000),
+        ..BootFacts::default()
+    }
+}
+
+fn temp(folders: u32, capped: bool) -> TempSize {
+    TempSize {
+        ts_ms: NOW - DAY,
+        folders,
+        files: folders * 3,
+        capped,
+    }
+}
+
+#[test]
+fn a_slow_profile_step_with_a_large_temp_folder_names_the_folder() {
+    let mut inputs = healthy();
+    inputs.boots = vec![timed_boot(5, 20_000, 3_000), timed_boot(1, 75_000, 3_000)];
+    inputs.temp = Some(temp(24_000, false));
+
+    let found = evaluate(&inputs);
+    let slow = find(&found, FindingKind::SlowBoot).unwrap();
+
+    assert_eq!(slow.subject, Subject::Pc);
+    assert_eq!(slow.concern, Concern::Attention);
+    assert_eq!(slow.value, Measure::Seconds(75.0));
+    assert_eq!(slow.reference, Reference::AtMost(Measure::Seconds(30.0)));
+    assert_eq!(
+        slow.evidence,
+        [
+            HealthFact::BootPhases {
+                ts_ms: NOW - DAY,
+                firmware_ms: Some(12_000),
+                to_signin_ms: Some(3_000),
+                profile_ms: Some(75_000),
+                tpm_wait_ms: None,
+                to_desktop_ms: Some(83_000),
+                from_power_ms: Some(95_000),
+            },
+            HealthFact::TempFolder(temp(24_000, false)),
+        ]
+    );
+    assert_eq!(slow.next_steps, [NextStep::CleanTemp]);
+}
+
+#[test]
+fn a_small_temp_folder_is_not_blamed_and_a_capped_count_is() {
+    let mut inputs = healthy();
+    inputs.boots = vec![timed_boot(1, 75_000, 3_000)];
+    inputs.temp = Some(temp(19_999, false));
+    let found = evaluate(&inputs);
+    let slow = find(&found, FindingKind::SlowBoot).unwrap();
+    assert_eq!(slow.evidence.len(), 1);
+    assert!(slow.next_steps.is_empty());
+
+    inputs.temp = Some(temp(5_000, true));
+    let found = evaluate(&inputs);
+    let slow = find(&found, FindingKind::SlowBoot).unwrap();
+    assert_eq!(slow.evidence[1], HealthFact::TempFolder(temp(5_000, true)));
+    assert_eq!(slow.next_steps, [NextStep::CleanTemp]);
+}
+
+#[test]
+fn a_fast_profile_step_is_not_slow() {
+    let mut inputs = healthy();
+    inputs.temp = Some(temp(50_000, false));
+    inputs.boots = vec![timed_boot(1, 45_000, 3_000)];
+    assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
+
+    inputs.boots = vec![timed_boot(1, 60_000, 3_000)];
+    assert_eq!(
+        find(&evaluate(&inputs), FindingKind::SlowBoot),
+        None,
+        "the limit itself is still fine"
+    );
+}
+
+#[test]
+fn only_a_long_wait_at_the_sign_in_screen_is_not_slow() {
+    let mut inputs = healthy();
+    inputs.boots = vec![timed_boot(1, 5_000, 10 * 60_000)];
+    assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
+}
+
+#[test]
+fn the_latest_boot_with_a_profile_step_decides() {
+    let mut inputs = healthy();
+    let resume = BootFacts {
+        kernel_start_ms: NOW - 1_000,
+        ..BootFacts::default()
+    };
+    inputs.boots = vec![timed_boot(2, 75_000, 3_000), resume];
+    assert!(find(&evaluate(&inputs), FindingKind::SlowBoot).is_some());
+
+    inputs.boots = vec![timed_boot(2, 75_000, 3_000), timed_boot(1, 15_000, 3_000)];
+    assert_eq!(find(&evaluate(&inputs), FindingKind::SlowBoot), None);
+}
+
+#[test]
+fn a_timed_boot_still_lists_the_delays_windows_flagged() {
+    let mut inputs = healthy();
+    inputs.boots = vec![timed_boot(1, 75_000, 3_000)];
+    inputs.boot = Some(BootReport {
+        boots: Vec::new(),
+        delays: vec![BootDelay {
+            ts_ms: NOW - 2 * DAY,
+            kind: DelayKind::App,
+            name: "some.exe".into(),
+            total_ms: 9_000,
+            degradation_ms: 4_000,
+            security: false,
+        }],
+        ..BootReport::default()
+    });
+    let found = evaluate(&inputs);
+    let slow = find(&found, FindingKind::SlowBoot).unwrap();
+
+    assert!(matches!(slow.evidence[1], HealthFact::Delay(_)));
+    assert_eq!(slow.next_steps, [NextStep::ReviewStartupApps]);
+}
+
+#[test]
+fn startup_with_nothing_measured_is_unread_never_fine() {
+    let mut inputs = healthy();
+    assert_eq!(unread_kinds(&inputs), [FindingKind::SlowBoot]);
+
+    inputs.boot = Some(BootReport::default());
+    assert_eq!(unread_kinds(&inputs), [FindingKind::SlowBoot]);
+
+    inputs.boots = vec![BootFacts::default()];
+    assert_eq!(
+        unread_kinds(&inputs),
+        [FindingKind::SlowBoot],
+        "a boot with no profile step measured nothing"
+    );
+
+    inputs.boots = vec![timed_boot(1, 10_000, 3_000)];
+    assert!(unread_kinds(&inputs).is_empty());
+
+    inputs.boots = Vec::new();
+    inputs.boot = Some(BootReport {
+        boots: vec![BootTime {
+            ts_ms: NOW - DAY,
+            boot_ms: 50_000,
+            main_path_ms: 30_000,
+            post_boot_ms: 20_000,
+        }],
+        ..BootReport::default()
+    });
+    assert!(unread_kinds(&inputs).is_empty());
+}
+
 #[test]
 fn falls_while_shutting_down_are_not_crashes() {
     let mut inputs = healthy();
@@ -900,7 +1063,14 @@ fn reconcile_keeps_an_open_finding_whose_source_was_not_read() {
     let fresh = evaluate(&inputs);
     let unread = unread_kinds(&inputs);
 
-    assert_eq!(unread, [FindingKind::TwoAntivirus, FindingKind::PageFile]);
+    assert_eq!(
+        unread,
+        [
+            FindingKind::TwoAntivirus,
+            FindingKind::PageFile,
+            FindingKind::SlowBoot
+        ]
+    );
     assert_eq!(
         reconcile(&open, &fresh, &unread),
         Vec::new(),
@@ -911,7 +1081,9 @@ fn reconcile_keeps_an_open_finding_whose_source_was_not_read() {
         vec![FindingChange::Close { id: 7 }],
         "a source read as empty still closes it"
     );
-    assert!(unread_kinds(&healthy()).is_empty());
+    let mut read = healthy();
+    read.boots = vec![timed_boot(2, 10_000, 3_000)];
+    assert!(unread_kinds(&read).is_empty());
 }
 
 #[test]

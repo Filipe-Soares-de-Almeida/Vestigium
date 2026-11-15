@@ -163,7 +163,7 @@
                       {:else if router.current.screen === "captures"}
                         <Captures forOccurrence={router.current.forOccurrence} />
                       {:else if router.current.screen === "health"}
-                        <Health area={router.current.area} />
+                        <Health area={router.current.area} boot={router.current.boot} />
                       {:else if router.current.screen === "dumps"}
                         <Lazy load={() => import("./screens/Dumps.svelte")} props={{ id: router.current.id, group: router.current.group }} />
                       {:else if router.current.screen === "tweaks"}

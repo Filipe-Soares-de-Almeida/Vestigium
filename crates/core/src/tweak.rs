@@ -442,12 +442,29 @@ pub struct StartupEntry {
     pub exe: String,
 }
 
+/// Whether a startup entry runs at sign-in and whether it belongs to a security product.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupState {
+    pub enabled: bool,
+    pub protected: bool,
+}
+
 impl StartupEntry {
     pub fn approval(&self) -> Setting {
         Setting::StartupApproval {
             hive: self.hive,
             list: self.list,
             name: self.name.clone(),
+        }
+    }
+
+    /// The entry's state from the approval value Explorer keeps for it; `None` when it has none.
+    pub fn state(&self, approval: Option<&Value>) -> StartupState {
+        let disabled =
+            matches!(approval, Some(Value::Bytes(b)) if b.first().is_some_and(|f| f & 1 == 1));
+        StartupState {
+            enabled: !disabled,
+            protected: is_security(&self.name) || is_security(&self.exe),
         }
     }
 }
@@ -680,10 +697,10 @@ fn startup_advice(entry: &StartupEntry, inputs: &TweakInputs) -> Advice {
     let setting = entry.approval();
     let settings = [setting.clone()];
     let from = value(inputs, &setting).cloned().unwrap_or(Value::Absent);
-    let disabled = matches!(&from, Value::Bytes(b) if b.first().is_some_and(|f| f & 1 == 1));
-    let status = if is_security(&entry.name) || is_security(&entry.exe) {
+    let state = entry.state(Some(&from));
+    let status = if state.protected {
         Status::Protected
-    } else if disabled {
+    } else if !state.enabled {
         Status::AlreadySet
     } else {
         Status::Ready

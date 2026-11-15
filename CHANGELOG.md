@@ -22,6 +22,27 @@ How to use this file:
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-15
+
+Every startup timed phase by phase, with what slowed it down.
+
+### Added
+
+- Startup page with each phase of every startup and its trend.
+- Storage Sense shortcut for the Temp folder on the startup page.
+- Page of each startup with its phases on a time chart.
+- Copy of the latest startup's Windows trace, kept three at a time.
+
+### Changed
+
+- Judge startup time from every startup the event logs record.
+
+### Fixed
+
+- Fix the startup area saying normal when nothing was measured.
+- Keep each Health area's status mark beside its arrow.
+- Fix side pane names overflowing when a status word appears.
+
 ## [0.1.2] - 2026-11-12
 
 The About dialog, a page for the release notes and SSD health fixes.
@@ -168,7 +189,8 @@ The first release.
 - A per-user installer in English and Brazilian Portuguese that needs no administrator rights and, when
   you ask, deletes the history on uninstall.
 
-[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Filipe-Soares-de-Almeida/Vestigium/releases/tag/v0.1.0

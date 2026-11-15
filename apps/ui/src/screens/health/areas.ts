@@ -23,7 +23,7 @@ export const AREAS: Area[] = [
 ];
 
 /** What the watcher can read only through a full scan. */
-const NEEDS_SCAN: FindingKind[] = ["SlowBoot"];
+const NEEDS_SCAN: FindingKind[] = [];
 /** What only a test the person runs can find; with no finding there is nothing to claim. */
 const FROM_TESTS: FindingKind[] = ["MemoryTestErrors", "DiskUnreadable", "VolumeErrors"];
 

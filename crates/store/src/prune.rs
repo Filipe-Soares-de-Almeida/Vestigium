@@ -36,6 +36,8 @@ pub struct PruneReport {
     pub tweak_changes: usize,
     pub test_runs: usize,
     pub smart_readings: usize,
+    pub boots: usize,
+    pub temp_readings: usize,
 }
 
 impl Store {
@@ -123,6 +125,14 @@ impl Store {
                 "DELETE FROM smart_reading WHERE read_ms < ?1",
                 params![records_cutoff],
             )?,
+            boots: tx.execute(
+                "DELETE FROM boot WHERE start_ms < ?1",
+                params![records_cutoff],
+            )?,
+            temp_readings: tx.execute(
+                "DELETE FROM temp_reading WHERE read_ms < ?1",
+                params![records_cutoff],
+            )?,
         };
         tx.commit()?;
         Ok(report)
@@ -144,6 +154,8 @@ impl Store {
             "dump",
             "test_run",
             "smart_reading",
+            "boot",
+            "temp_reading",
         ] {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
         }

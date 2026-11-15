@@ -14,6 +14,7 @@ use crate::agent::{AgentLink, Link, Peer, UiError};
 use crate::commands::AppState;
 use crate::history::History;
 use crate::system::{WindowsVersion, file_version, windows_version};
+use crate::trace::TRACE_FOLDER;
 
 const CHANGELOG: &str = include_str!("../../../../CHANGELOG.md");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -182,7 +183,8 @@ pub fn open_page(page: Page) -> Result<(), UiError> {
     open_url(&address(page))
 }
 
-fn open_url(url: &str) -> Result<(), UiError> {
+/// Opens an address with the program Windows has for it: a web page or a Settings page.
+pub(crate) fn open_url(url: &str) -> Result<(), UiError> {
     let wide: Vec<u16> = url.encode_utf16().chain([0]).collect();
     // SAFETY: both strings are null-terminated and live through the call.
     let done = unsafe {
@@ -228,10 +230,29 @@ pub async fn about() -> Result<AboutDto, UiError> {
     .map_err(|err| UiError::Failed(err.to_string()))?
 }
 
-/// Opens the data folder in File Explorer.
+/// The folders of the data folder the window may open besides the data folder itself.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataFolder {
+    BootTraces,
+}
+
+impl DataFolder {
+    fn name(self) -> &'static str {
+        match self {
+            DataFolder::BootTraces => TRACE_FOLDER,
+        }
+    }
+}
+
+/// Opens the data folder, or one of its known folders, in File Explorer.
 #[tauri::command]
-pub fn open_data_folder() -> Result<(), UiError> {
+pub fn open_data_folder(folder: Option<DataFolder>) -> Result<(), UiError> {
     let dir = data_dir()
+        .map(|dir| match folder {
+            Some(known) => dir.join(known.name()),
+            None => dir,
+        })
         .filter(|dir| dir.is_dir())
         .ok_or_else(|| UiError::Failed("the data folder does not exist yet".into()))?;
     // The final path, so Explorer finds a folder Windows redirects for a packaged parent process.
@@ -307,6 +328,15 @@ mod tests {
             PathBuf::from(r"\\server\share\data")
         );
         assert_eq!(plain(PathBuf::from(r"D:\data")), PathBuf::from(r"D:\data"));
+    }
+
+    #[test]
+    fn the_page_names_a_known_folder_and_never_a_path() {
+        let known: DataFolder = serde_json::from_str("\"boot-traces\"").unwrap();
+        assert_eq!(known.name(), "boot-traces");
+        for free in ["\"C:\\Windows\"", "\"..\"", "\"scans\"", "\"\""] {
+            assert!(serde_json::from_str::<DataFolder>(free).is_err(), "{free}");
+        }
     }
 
     #[test]

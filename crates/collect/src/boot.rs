@@ -1,4 +1,4 @@
-use vestigium_core::health::BootReport;
+use vestigium_core::health::{BootFacts, BootLog, BootReport, BootSource};
 use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
 use windows::Win32::System::EventLog::{
     EVT_HANDLE, EVT_SYSTEM_PROPERTY_ID, EVT_VARIANT, EvtClose, EvtCreateRenderContext, EvtNext,
@@ -32,18 +32,116 @@ pub fn boot_report(days: u32) -> Result<BootReport, CollectError> {
         "*[System[(EventID>=100 and EventID<=110) and TimeCreated[timediff(@SystemTime) <= {}]]]",
         u64::from(days) * DAY_MS
     );
+    let mut report = BootReport::default();
+    query_events(BOOT_LOG, &query, |read| match read {
+        Some((id, ts_ms, data)) => {
+            report.add(id, ts_ms, data);
+        }
+        None => report.skipped += 1,
+    })?;
+    Ok(report)
+}
+
+/// Where each boot timing event is logged: channel, provider and the ids read from it.
+const TIMELINE_SOURCES: [(&str, &str, BootSource, &[u16]); 9] = [
+    (
+        "System",
+        "Microsoft-Windows-Kernel-Boot",
+        BootSource::KernelBoot,
+        &[27, 30],
+    ),
+    (
+        "System",
+        "Microsoft-Windows-Kernel-General",
+        BootSource::KernelGeneral,
+        &[12],
+    ),
+    (
+        "System",
+        "Microsoft-Windows-Winlogon",
+        BootSource::Winlogon,
+        &[7001],
+    ),
+    ("System", "TPM", BootSource::Tpm, &[18]),
+    (
+        "System",
+        "Microsoft-Windows-TPM-WMI",
+        BootSource::Tpm,
+        &[1025],
+    ),
+    (
+        "System",
+        "Service Control Manager",
+        BootSource::ServiceControl,
+        &[7026],
+    ),
+    (
+        "Microsoft-Windows-User Profile Service/Operational",
+        "Microsoft-Windows-User Profiles Service",
+        BootSource::UserProfile,
+        &[1, 2],
+    ),
+    (
+        "Microsoft-Windows-Shell-Core/Operational",
+        "Microsoft-Windows-Shell-Core",
+        BootSource::ShellCore,
+        &[62171, 9707, 9708],
+    ),
+    (
+        "Microsoft-Windows-Kernel-EventTracing/Admin",
+        "Microsoft-Windows-Kernel-EventTracing",
+        BootSource::EventTracing,
+        &[4],
+    ),
+];
+
+/// Every boot of the last `days`, phase by phase, from logs any user may read. A source that is
+/// missing or refused leaves its fields empty; the System log failing is an error.
+pub fn boot_timeline(days: u32) -> Result<Vec<BootFacts>, CollectError> {
+    let mut log = BootLog::default();
+    for (channel, provider, source, ids) in TIMELINE_SOURCES {
+        let ids = ids
+            .iter()
+            .map(|id| format!("EventID={id}"))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        let query = format!(
+            "*[System[Provider[@Name='{provider}'] and ({ids}) and TimeCreated[timediff(@SystemTime) <= {}]]]",
+            u64::from(days) * DAY_MS
+        );
+        let result = query_events(channel, &query, |read| match read {
+            Some((id, ts_ms, data)) => {
+                log.add(source, id, ts_ms, data);
+            }
+            None => log.skipped += 1,
+        });
+        if let Err(err) = result
+            && channel == "System"
+        {
+            return Err(err);
+        }
+    }
+    Ok(log.boots())
+}
+
+/// Hands `each` the id, time and `<EventData>` of every event `query` finds in `channel`, oldest
+/// first, or `None` for an event that could not be read.
+fn query_events(
+    channel: &str,
+    query: &str,
+    mut each: impl FnMut(Option<(u16, i64, &str)>),
+) -> Result<(), CollectError> {
     // SAFETY: a forward query over one channel; closed by `Handle`.
     let results = Handle(unsafe {
         EvtQuery(
             None,
-            &HSTRING::from(BOOT_LOG),
+            &HSTRING::from(channel),
             &HSTRING::from(query),
             EvtQueryChannelPath.0 | EvtQueryForwardDirection.0,
         )?
     });
     // SAFETY: a context for the system properties; closed by `Handle`.
     let context = Handle(unsafe { EvtCreateRenderContext(None, EvtRenderContextSystem.0)? });
-    let mut report = BootReport::default();
     read_events(
         // SAFETY: `batch` receives up to BATCH event handles, each closed by `Handle` below.
         |batch| unsafe {
@@ -56,14 +154,11 @@ pub fn boot_report(days: u32) -> Result<BootReport, CollectError> {
             let read = id_and_time(context.0, event.0)
                 .and_then(|at| Some((at, render_text(event.0, EvtRenderEventXml)?)));
             match read {
-                Some(((id, ts_ms), xml)) => {
-                    report.add(id, ts_ms, &event_data(&xml));
-                }
-                None => report.skipped += 1,
+                Some(((id, ts_ms), xml)) => each(Some((id, ts_ms, &event_data(&xml)))),
+                None => each(None),
             }
         },
-    )?;
-    Ok(report)
+    )
 }
 
 /// Hands every event `next` delivers to `each`, until the list ends; any other error from `next`

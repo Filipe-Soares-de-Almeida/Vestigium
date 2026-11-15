@@ -8,9 +8,9 @@ use std::sync::atomic::AtomicBool;
 
 use serde::Serialize;
 use vestigium_core::health::{
-    BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingKind,
-    HealthFact, Measure, NvmeDetail, NvmeHealth, PageFile, Reference, SecurityProduct,
-    SmartAttribute, Subject,
+    BootDelay, BootPhases, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding,
+    FindingKind, HealthFact, Measure, NvmeDetail, NvmeHealth, PageFile, Reference, SecurityProduct,
+    SmartAttribute, StartupRun, Subject, TempSize,
 };
 use vestigium_core::hwtest::{
     BANDS, BenchMode, BenchResult, Benchmark, Bus, DiagnosticDetail, DiagnosticResult,
@@ -51,7 +51,9 @@ use crate::hwtests::{
 };
 use crate::live::{Lanes, LiveMessage, LivePoint};
 use crate::process::ProcessFactsDto;
+use crate::startup::{BootDto, StartupAppDto, StartupAreaDto};
 use crate::system::WindowsVersion;
+use crate::trace::BootTraceCopied;
 use crate::tweaks::{TweakRowDto, TweaksApplied, TweaksDto};
 use crate::update::{CheckResult, Group, Progress, Release, UpdatePrefs};
 
@@ -326,6 +328,7 @@ fn next_steps() -> Vec<NextStep> {
         RunMemTest86 => NextStep::RunMemTest86,
         RepairVolume => NextStep::RepairVolume,
         ReadCrashDump => NextStep::ReadCrashDump,
+        CleanTemp => NextStep::CleanTemp,
     )
 }
 
@@ -757,7 +760,18 @@ fn health_facts() -> Vec<HealthFact> {
         MemoryQuickTest => HealthFact::MemoryQuickTest { ts_ms: 1_790_000_000_000, errors: 1, tested_bytes: 1_000_000 },
         SurfaceScan => HealthFact::SurfaceScan { ts_ms: 1_790_000_000_000, unreadable_blocks: 3, slow_blocks: 8, whole_disk: true },
         VolumeCheck => HealthFact::VolumeCheck { ts_ms: 1_790_000_000_000 },
+        BootPhases => HealthFact::BootPhases { ts_ms: 1_790_000_000_000, firmware_ms: Some(12_000), to_signin_ms: Some(9_000), profile_ms: Some(75_000), tpm_wait_ms: Some(40_000), to_desktop_ms: Some(95_000), from_power_ms: Some(107_000) },
+        TempFolder => HealthFact::TempFolder(TempSize { ts_ms: 1_790_000_000_000, folders: 24_000, files: 80_000, capped: false }),
     );
+    all.push(HealthFact::BootPhases {
+        ts_ms: 1_790_000_000_000,
+        firmware_ms: None,
+        to_signin_ms: None,
+        profile_ms: None,
+        tpm_wait_ms: None,
+        to_desktop_ms: None,
+        from_power_ms: None,
+    });
     all.push(HealthFact::MemoryDiagnostic {
         ts_ms: 1_790_000_000_000,
         bad_pages: None,
@@ -832,6 +846,72 @@ fn health_dto(full: bool) -> HealthDto {
         closed: first(finding_dtos(true), 2),
         last_scan_ms: full.then_some(1_790_000_000_000),
         boot: full.then(boot_report),
+    }
+}
+
+fn startup_runs() -> Vec<StartupRun> {
+    [Some(1_790_000_082_000), None]
+        .map(|end_ms| StartupRun {
+            command: string("Example Capture"),
+            start_ms: 1_790_000_080_000,
+            end_ms,
+        })
+        .to_vec()
+}
+
+fn boot_dtos() -> Vec<BootDto> {
+    let full = BootDto {
+        kernel_start_ms: 1_790_000_000_000,
+        boot_type: Some(0),
+        phases: BootPhases {
+            firmware_ms: Some(14_000),
+            to_signin_ms: Some(18_000),
+            probable_wait: false,
+            profile_ms: Some(42_000),
+            tpm_wait_ms: Some(22_000),
+            desktop_ms: Some(10_000),
+            to_desktop_ms: Some(70_000),
+            from_power_ms: Some(84_000),
+        },
+        apps: startup_runs(),
+        logger_full: true,
+        failed_drivers: vec![string("exampledrv")],
+    };
+    let empty = BootDto {
+        kernel_start_ms: 1_790_100_000_000,
+        boot_type: None,
+        phases: BootPhases {
+            probable_wait: true,
+            ..BootPhases::default()
+        },
+        apps: Vec::new(),
+        logger_full: false,
+        failed_drivers: Vec::new(),
+    };
+    vec![full, empty]
+}
+
+fn startup_app_dtos() -> Vec<StartupAppDto> {
+    [(true, false), (false, false), (true, true)]
+        .map(|(enabled, protected)| StartupAppDto {
+            name: string("Example Capture"),
+            key: string("StartupApp:Example Capture"),
+            enabled,
+            protected,
+        })
+        .to_vec()
+}
+
+fn startup_area_dto(full: bool) -> StartupAreaDto {
+    StartupAreaDto {
+        boots: if full { boot_dtos() } else { Vec::new() },
+        temp: full.then_some(TempSize {
+            ts_ms: 1_790_000_000_000,
+            folders: 24_000,
+            files: 80_000,
+            capped: false,
+        }),
+        startup_apps: if full { startup_app_dtos() } else { Vec::new() },
     }
 }
 
@@ -2001,6 +2081,18 @@ fn render() -> String {
         delay_kinds().into_iter().map(boot_delay).collect(),
     );
     wire.add(TYPES, "BootReport", vec![boot_report()]);
+    wire.add(
+        TYPES,
+        "TempSize",
+        [false, true]
+            .map(|capped| TempSize {
+                ts_ms: 1_790_000_000_000,
+                folders: 24_000,
+                files: 80_000,
+                capped,
+            })
+            .to_vec(),
+    );
     wire.add(TYPES, "HealthFact", health_facts());
     wire.add(TYPES, "FindingDto", {
         let mut all = finding_dtos(true);
@@ -2008,6 +2100,10 @@ fn render() -> String {
         all
     });
     wire.add(TYPES, "HealthDto", both(health_dto));
+    wire.add(TYPES, "StartupRun", startup_runs());
+    wire.add(TYPES, "BootDto", boot_dtos());
+    wire.add(TYPES, "StartupAppDto", startup_app_dtos());
+    wire.add(TYPES, "StartupAreaDto", both(startup_area_dto));
     wire.add(
         TYPES,
         "ScanFinished",
@@ -2017,6 +2113,26 @@ fn render() -> String {
                 exit_code,
             })
             .to_vec(),
+    );
+    wire.add(
+        TYPES,
+        "BootTraceCopied",
+        vec![
+            BootTraceCopied {
+                path: Some(string(
+                    r"C:\Users\someone\AppData\Local\Vestigium\data\boot-traces\1790000000000.etl",
+                )),
+                exit_code: Some(0),
+            },
+            BootTraceCopied {
+                path: None,
+                exit_code: Some(6),
+            },
+            BootTraceCopied {
+                path: None,
+                exit_code: None,
+            },
+        ],
     );
     wire.add(TYPES, "DumpKind", DumpKind::ALL.to_vec());
     wire.add(TYPES, "FaultDto", faults());

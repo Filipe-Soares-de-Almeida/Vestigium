@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use vestigium_core::health::{BootReport, Finding, Measure, Subject};
+use vestigium_core::health::{BootFacts, BootReport, Finding, Measure, Subject, TempSize};
 use vestigium_core::hwtest::{Outcome, TestKind, TestRun, caused_by_test};
 use vestigium_core::{
     CaptureCauses, Covered, DeepCapture, DumpCulprit, DumpKind, Episode, EpisodeKind, EventMeaning,
@@ -725,6 +725,12 @@ impl History {
             last_scan_ms: scan.as_ref().map(|s| s.ts_ms),
             boot: scan.and_then(|s| s.boot),
         })
+    }
+
+    /// The latest `limit` boots, oldest first, and the newest count of the Temp folder.
+    pub fn boots(&mut self, limit: u32) -> Result<(Vec<BootFacts>, Option<TempSize>), StoreError> {
+        let read = self.read(|store| Ok((store.boots(limit)?, store.last_temp()?)))?;
+        Ok(read.unwrap_or_default())
     }
 
     /// The dumps Windows kept, what each says, the space they take and the blue screens Windows

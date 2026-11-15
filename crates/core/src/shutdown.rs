@@ -125,7 +125,7 @@ fn binary(xml: &str) -> Option<Vec<u8>> {
 }
 
 /// Days from 1970-01-01 to a date of the proleptic Gregorian calendar.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
     let year_of_era = y - era * 400;

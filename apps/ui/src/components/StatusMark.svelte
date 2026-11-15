@@ -9,12 +9,15 @@
     kind,
     size = 16,
     reveal = false,
+    bare = false,
     word,
   }: {
     kind: StatusKind;
     size?: number;
     /** In a list row the word stays hidden until the row is hovered or focused. */
     reveal?: boolean;
+    /** The word is kept for screen readers and the tooltip, never drawn. */
+    bare?: boolean;
     /** Replaces the default word for the kind. */
     word?: string;
   } = $props();
@@ -22,7 +25,7 @@
   const text = $derived(word ?? t(`ui.status.${kind}`));
 </script>
 
-<span class="status {kind}" class:reveal title={text}>
+<span class="status {kind}" class:reveal class:bare title={text}>
   <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
     {#if kind === "critical"}
       <circle cx="8" cy="8" r="7.2" fill="currentColor" />
@@ -85,6 +88,14 @@
     stroke-width: 1.7;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+  .bare .word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
   .reveal .word {
     max-width: 0;

@@ -7,7 +7,7 @@ use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
 };
 
-use vestigium_helper::{capture, chkdsk, delete, dumps, job, scan, surface, tweak};
+use vestigium_helper::{boot_trace, capture, chkdsk, delete, dumps, job, scan, surface, tweak};
 
 fn main() -> ExitCode {
     // Libraries loaded from here on come from System32 only; a failure leaves the build-time limit.
@@ -29,5 +29,6 @@ fn main() -> ExitCode {
             out,
         } => surface::run(disk, from_mib, &out),
         job::Job::VolumeCheck { letter, out } => chkdsk::run(letter, &out),
+        job::Job::BootTrace { out } => boot_trace::run(&out),
     }
 }
