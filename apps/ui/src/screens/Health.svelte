@@ -164,8 +164,11 @@
                 : tn("ui.health.area.fine", s.checks.length)}
         >
           {#snippet right()}
-            <StatusMark {kind} reveal word={markWord(s.mark, s.why)} />
-            <span class="count">{s.open.length ? tn("ui.health.area.points", s.open.length) : ""}</span>
+            <StatusMark
+              {kind}
+              reveal
+              word={s.open.length ? `${markWord(s.mark, s.why)} · ${tn("ui.health.area.points", s.open.length)}` : markWord(s.mark, s.why)}
+            />
           {/snippet}
         </RowCard>
       {/each}
@@ -191,10 +194,6 @@
     display: inline-flex;
     margin-right: 4px;
     vertical-align: 1px;
-  }
-  .count {
-    min-width: 64px;
-    text-align: right;
   }
   .okl {
     display: grid;

@@ -22,6 +22,10 @@ How to use this file:
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep each Health area's status mark beside its arrow.
+
 ## [0.1.2] - 2026-11-12
 
 The About dialog, a page for the release notes and SSD health fixes.
