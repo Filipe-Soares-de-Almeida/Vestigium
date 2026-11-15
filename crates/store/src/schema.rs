@@ -7,7 +7,7 @@ use crate::codes::{channel_code, gap_code, meaning_code};
 use crate::segment::MAX_SEGMENT_SPAN_MS;
 use crate::{Segment, Series, StoreError};
 
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
 /// SQLite page cache, in KiB; the agent only appends, so a small cache is enough.
 const CACHE_KIB: i64 = 256;
 
@@ -184,6 +184,19 @@ const MIGRATIONS: &[&str] = &[
     // Gap reason 6, samples that could not be written, is now stored; a reader of version 12
     // refuses the file instead of failing on the unknown code.
     "SELECT 1;",
+    // Every boot's timing, read from the event logs once per boot, and the daily Temp size.
+    "CREATE TABLE IF NOT EXISTS boot (
+        id       INTEGER PRIMARY KEY,
+        version  INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL UNIQUE,
+        data     BLOB    NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS temp_reading (
+        read_ms INTEGER PRIMARY KEY,
+        folders INTEGER NOT NULL,
+        files   INTEGER NOT NULL,
+        capped  INTEGER NOT NULL
+    );",
 ];
 
 /// What a new database takes over from a file set aside; each statement is its own table.

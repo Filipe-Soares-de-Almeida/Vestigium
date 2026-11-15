@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::shutdown::days_from_civil;
 use crate::xml::data_named;
 
+/// Layout of the `BootFacts` BLOB the store keeps.
+pub const BOOT_VERSION: u8 = 1;
 /// Sign-in later than this after the kernel started is taken as the person at the sign-in screen.
 pub const PROBABLE_WAIT_MS: u32 = 30_000;
 /// Events up to this long before a boot's first event still belong to it (same-instant logging).

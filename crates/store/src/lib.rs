@@ -1,6 +1,7 @@
 //! Local SQLite history of Vestigium.
 
 mod batch;
+mod boots;
 mod captures;
 mod codes;
 mod dumps;

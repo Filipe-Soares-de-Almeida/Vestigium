@@ -17,7 +17,7 @@ pub use smart::{
     nvme_health, smart_attributes, watched_count,
 };
 pub use timeline::{
-    BootFacts, BootLog, BootPhases, BootSource, PROBABLE_WAIT_MS, StartupRun,
+    BOOT_VERSION, BootFacts, BootLog, BootPhases, BootSource, PROBABLE_WAIT_MS, StartupRun,
     TempSize,
 };
 
