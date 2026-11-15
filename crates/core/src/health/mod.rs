@@ -2,6 +2,7 @@ mod boot;
 mod reliability;
 mod rules;
 mod smart;
+mod timeline;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,7 @@ pub use smart::{
     NVME_WORN_PCT, NvmeDetail, NvmeHealth, SmartAttribute, WATCHED_ATTRIBUTES, nvme_detail,
     nvme_health, smart_attributes, watched_count,
 };
+pub use timeline::{BootFacts, BootLog, BootPhases, BootSource, PROBABLE_WAIT_MS, StartupRun};
 
 /// Layout of the `Finding` BLOB written today.
 pub const FINDING_VERSION: u8 = 1;

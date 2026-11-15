@@ -23,7 +23,7 @@ mod timer;
 mod tweaks;
 
 pub use blackbox::{BlackboxRing, RING_RECORDS, RingContents};
-pub use boot::{BOOT_LOG, boot_report};
+pub use boot::{BOOT_LOG, boot_report, boot_timeline};
 pub use cpu::{CoreTimes, CpuReading, CpuSampler, core_loads};
 pub use disk::{disk_media, physical_drive};
 pub use dumps::{
