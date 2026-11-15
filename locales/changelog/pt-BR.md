@@ -7,6 +7,27 @@ At release time, copy the version's section from CHANGELOG.md, keep its headings
 entries. A version missing here shows its English notes.
 -->
 
+## [0.1.3] - 2026-11-15
+
+Cada inicialização medida fase por fase, com o que a atrasou.
+
+### Added
+
+- Página Inicialização com cada fase de cada inicialização e a tendência.
+- Atalho para o Sensor de Armazenamento da pasta Temp na página Inicialização.
+- Página de cada inicialização com as fases num gráfico de tempo.
+- Cópia do trace do Windows da última inicialização, guardando as três mais novas.
+
+### Changed
+
+- Avalia o tempo de inicialização por todas as inicializações registradas nos logs.
+
+### Fixed
+
+- Corrige a área Inicialização dizendo normal quando nada foi medido.
+- Mantém a marca de situação de cada área da Saúde ao lado da seta.
+- Corrige nomes do painel lateral transbordando quando aparece a palavra de situação.
+
 ## [0.1.2] - 2026-11-12
 
 A caixa Sobre, uma página para as notas de versão e correções na saúde dos SSDs.
