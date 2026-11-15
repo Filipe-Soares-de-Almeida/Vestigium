@@ -62,11 +62,15 @@ test("a_pass_that_stopped_finishing_makes_the_checks_unknown_with_the_time_of_th
   expect(checkText(state.checks[0], pass)).toContain(t("ui.health.check.unread_since", { time: "" }).trim().slice(0, 8));
 });
 
-test("a_check_that_needs_a_scan_stays_as_it_was_whatever_the_pass_says", () => {
+test("startup_needs_no_scan_but_is_unknown_while_nothing_is_measured", () => {
   const startup = AREAS.find((a) => a.id === "startup")!;
 
-  expect(areaState(startup, { ...quiet, last_scan_ms: null }).why).toBe("scan");
-  expect(areaState(startup, quiet, { stale: true, since: NOW - 4 * HOUR, silent: false, unread: [] }).mark).toBe("Ok");
+  expect(areaState(startup, { ...quiet, last_scan_ms: null }).mark).toBe("Ok");
+
+  const unread = areaState(startup, quiet, { stale: false, since: null, silent: false, unread: ["SlowBoot" as FindingKind] });
+  expect(unread.mark).toBe("Unknown");
+  expect(unread.why).toBe("unread");
+  expect(checkText(unread.checks[0])).toBe(t("ui.health.check.SlowBoot.Unknown"));
 });
 
 test("a_failing_pass_shows_the_last_good_time_and_never_all_normal", () => {

@@ -150,7 +150,8 @@ export type NextStep =
   | "RunMemoryDiagnostic"
   | "RunMemTest86"
   | "RepairVolume"
-  | "ReadCrashDump";
+  | "ReadCrashDump"
+  | "CleanTemp";
 
 export type Cause =
   | { Storage: { disk: string | null } }
@@ -722,6 +723,15 @@ export interface BootReport {
   skipped: number;
 }
 
+/** What the signed-in user's Temp folder held when it was counted. */
+export interface TempSize {
+  ts_ms: number;
+  folders: number;
+  files: number;
+  /** The count stopped at its limit, so the folder holds at least this much. */
+  capped: boolean;
+}
+
 export type HealthFact =
   | { Attribute: SmartAttribute }
   | "PredictFailure"
@@ -740,7 +750,19 @@ export type HealthFact =
   | { MemoryDiagnostic: { ts_ms: number; bad_pages: number | null } }
   | { MemoryQuickTest: { ts_ms: number; errors: number; tested_bytes: number } }
   | { SurfaceScan: { ts_ms: number; unreadable_blocks: number; slow_blocks: number; whole_disk: boolean } }
-  | { VolumeCheck: { ts_ms: number } };
+  | { VolumeCheck: { ts_ms: number } }
+  | {
+      BootPhases: {
+        ts_ms: number;
+        firmware_ms: number | null;
+        to_signin_ms: number | null;
+        profile_ms: number | null;
+        tpm_wait_ms: number | null;
+        to_desktop_ms: number | null;
+        from_power_ms: number | null;
+      };
+    }
+  | { TempFolder: TempSize };
 
 /** One health finding; `closed_ms` is null while it still holds. */
 export interface FindingDto {

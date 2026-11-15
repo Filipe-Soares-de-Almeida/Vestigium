@@ -562,6 +562,8 @@ mod tests {
             Some(vec![BootFacts {
                 kernel_start_ms: NOW - DAY_MS,
                 firmware_ms: Some(13_500),
+                profile_start_ms: Some(NOW - DAY_MS + 20_000),
+                profile_end_ms: Some(NOW - DAY_MS + 28_000),
                 // A later read of the same boot knows more of it.
                 apps: (reads > 1)
                     .then(|| vestigium_core::health::StartupRun {

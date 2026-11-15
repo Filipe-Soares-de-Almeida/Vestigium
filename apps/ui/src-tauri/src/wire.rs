@@ -10,7 +10,7 @@ use serde::Serialize;
 use vestigium_core::health::{
     BootDelay, BootReport, BootTime, Concern, DelayKind, DiskHealth, Finding, FindingKind,
     HealthFact, Measure, NvmeDetail, NvmeHealth, PageFile, Reference, SecurityProduct,
-    SmartAttribute, Subject,
+    SmartAttribute, Subject, TempSize,
 };
 use vestigium_core::hwtest::{
     BANDS, BenchMode, BenchResult, Benchmark, Bus, DiagnosticDetail, DiagnosticResult,
@@ -326,6 +326,7 @@ fn next_steps() -> Vec<NextStep> {
         RunMemTest86 => NextStep::RunMemTest86,
         RepairVolume => NextStep::RepairVolume,
         ReadCrashDump => NextStep::ReadCrashDump,
+        CleanTemp => NextStep::CleanTemp,
     )
 }
 
@@ -757,7 +758,18 @@ fn health_facts() -> Vec<HealthFact> {
         MemoryQuickTest => HealthFact::MemoryQuickTest { ts_ms: 1_790_000_000_000, errors: 1, tested_bytes: 1_000_000 },
         SurfaceScan => HealthFact::SurfaceScan { ts_ms: 1_790_000_000_000, unreadable_blocks: 3, slow_blocks: 8, whole_disk: true },
         VolumeCheck => HealthFact::VolumeCheck { ts_ms: 1_790_000_000_000 },
+        BootPhases => HealthFact::BootPhases { ts_ms: 1_790_000_000_000, firmware_ms: Some(12_000), to_signin_ms: Some(9_000), profile_ms: Some(75_000), tpm_wait_ms: Some(40_000), to_desktop_ms: Some(95_000), from_power_ms: Some(107_000) },
+        TempFolder => HealthFact::TempFolder(TempSize { ts_ms: 1_790_000_000_000, folders: 24_000, files: 80_000, capped: false }),
     );
+    all.push(HealthFact::BootPhases {
+        ts_ms: 1_790_000_000_000,
+        firmware_ms: None,
+        to_signin_ms: None,
+        profile_ms: None,
+        tpm_wait_ms: None,
+        to_desktop_ms: None,
+        from_power_ms: None,
+    });
     all.push(HealthFact::MemoryDiagnostic {
         ts_ms: 1_790_000_000_000,
         bad_pages: None,
@@ -2001,6 +2013,18 @@ fn render() -> String {
         delay_kinds().into_iter().map(boot_delay).collect(),
     );
     wire.add(TYPES, "BootReport", vec![boot_report()]);
+    wire.add(
+        TYPES,
+        "TempSize",
+        [false, true]
+            .map(|capped| TempSize {
+                ts_ms: 1_790_000_000_000,
+                folders: 24_000,
+                files: 80_000,
+                capped,
+            })
+            .to_vec(),
+    );
     wire.add(TYPES, "HealthFact", health_facts());
     wire.add(TYPES, "FindingDto", {
         let mut all = finding_dtos(true);

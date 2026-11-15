@@ -6,8 +6,8 @@ use crate::shutdown::{SHUTTING_DOWN, power_loss_detail};
 use crate::{EventMeaning, Media, NextStep, WinEvent};
 
 use super::{
-    Concern, DAY_MS, DelayKind, DiskHealth, Finding, FindingKind, HealthFact, HealthInputs,
-    Measure, NVME_WORN_PCT, Reference, SmartAttribute, Subject, WATCHED_ATTRIBUTES,
+    BootDelay, BootFacts, Concern, DAY_MS, DelayKind, DiskHealth, Finding, FindingKind, HealthFact,
+    HealthInputs, Measure, NVME_WORN_PCT, Reference, SmartAttribute, Subject, WATCHED_ATTRIBUTES,
     failures_between, watched_count,
 };
 
@@ -26,6 +26,9 @@ const DISPLAY_RESETS: u32 = 2;
 const DISPLAY_RESETS_CRITICAL: u32 = 5;
 const SLOW_BOOT_MS: u32 = 90_000;
 const HEALTHY_BOOT_S: f32 = 60.0;
+const SLOW_PROFILE_MS: u32 = 60_000;
+const HEALTHY_PROFILE_S: f32 = 30.0;
+const TEMP_CAUSE_FOLDERS: u32 = 20_000;
 const DIRTY_RESTARTS: u32 = 2;
 const UNFINISHED_SHUTDOWNS: u32 = 2;
 const FAILURE_FLOOR: u32 = 3;
@@ -452,6 +455,76 @@ fn two_antivirus(inputs: &HealthInputs) -> Option<Finding> {
 }
 
 fn slow_boot(inputs: &HealthInputs) -> Option<Finding> {
+    let timed = inputs
+        .boots
+        .iter()
+        .rev()
+        .find(|b| b.phases().profile_ms.is_some());
+    match timed {
+        Some(boot) => slow_profile(inputs, boot),
+        None => slow_report(inputs),
+    }
+}
+
+/// The boot's user profile step against the limit, with the Temp folder and the report's delays.
+fn slow_profile(inputs: &HealthInputs, boot: &BootFacts) -> Option<Finding> {
+    let phases = boot.phases();
+    let profile_ms = phases.profile_ms?;
+    if profile_ms <= SLOW_PROFILE_MS {
+        return None;
+    }
+    let mut evidence = vec![HealthFact::BootPhases {
+        ts_ms: boot.kernel_start_ms,
+        firmware_ms: phases.firmware_ms,
+        to_signin_ms: phases.to_signin_ms,
+        profile_ms: phases.profile_ms,
+        tpm_wait_ms: phases.tpm_wait_ms,
+        to_desktop_ms: phases.to_desktop_ms,
+        from_power_ms: phases.from_power_ms,
+    }];
+    let mut next_steps = Vec::new();
+    if let Some(temp) = inputs
+        .temp
+        .filter(|t| t.folders >= TEMP_CAUSE_FOLDERS || t.capped)
+    {
+        evidence.push(HealthFact::TempFolder(temp));
+        next_steps.push(NextStep::CleanTemp);
+    }
+    let delays = recent_delays(inputs);
+    if delays
+        .iter()
+        .any(|d| d.kind == DelayKind::App && !d.security)
+    {
+        next_steps.push(NextStep::ReviewStartupApps);
+    }
+    evidence.extend(delays.into_iter().cloned().map(HealthFact::Delay));
+    Some(finding(
+        FindingKind::SlowBoot,
+        Subject::Pc,
+        Concern::Attention,
+        Measure::Seconds(profile_ms as f32 / 1000.0),
+        Reference::AtMost(Measure::Seconds(HEALTHY_PROFILE_S)),
+        evidence,
+        next_steps,
+    ))
+}
+
+/// The slowest startup delays of the last 30 days from the elevated Diagnostics-Performance report.
+fn recent_delays(inputs: &HealthInputs) -> Vec<&BootDelay> {
+    let from = inputs.now_ms - 30 * DAY_MS;
+    let mut delays: Vec<_> = inputs
+        .boot
+        .iter()
+        .flat_map(|r| r.delays.iter())
+        .filter(|d| d.ts_ms >= from)
+        .collect();
+    delays.sort_by_key(|d| std::cmp::Reverse(d.degradation_ms));
+    delays.truncate(DELAYS_SHOWN);
+    delays
+}
+
+/// The judgement on the Diagnostics-Performance report alone, for a PC with no timed boot.
+fn slow_report(inputs: &HealthInputs) -> Option<Finding> {
     let report = inputs.boot.as_ref()?;
     let from = inputs.now_ms - 30 * DAY_MS;
     let latest = report
@@ -459,13 +532,11 @@ fn slow_boot(inputs: &HealthInputs) -> Option<Finding> {
         .iter()
         .filter(|b| b.ts_ms >= from)
         .max_by_key(|b| b.ts_ms);
-    let mut delays: Vec<_> = report.delays.iter().filter(|d| d.ts_ms >= from).collect();
+    let delays = recent_delays(inputs);
     let slow = latest.is_some_and(|b| b.boot_ms > SLOW_BOOT_MS);
     if !slow && delays.is_empty() {
         return None;
     }
-    delays.sort_by_key(|d| std::cmp::Reverse(d.degradation_ms));
-    delays.truncate(DELAYS_SHOWN);
     let value = latest.map_or(Measure::Count(delays.len() as u32), |b| {
         Measure::Seconds(b.boot_ms as f32 / 1000.0)
     });

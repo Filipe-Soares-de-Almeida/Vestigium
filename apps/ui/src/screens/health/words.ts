@@ -12,6 +12,7 @@ import type {
   NextStep,
   Reference,
   Subject,
+  TempSize,
 } from "../../lib/types";
 import { formatBytes, formatDayShort, formatMs, sameDay } from "../occurrence/format";
 import { lineFor, type Line, type Texts } from "../occurrence/report";
@@ -233,6 +234,8 @@ function factTexts(fact: OtherFact): Texts {
     };
   }
   if ("Delay" in fact) return delayTexts(fact.Delay);
+  if ("BootPhases" in fact) return phasesTexts(fact.BootPhases);
+  if ("TempFolder" in fact) return tempTexts(fact.TempFolder);
   if ("Failures" in fact) {
     const f = fact.Failures;
     return {
@@ -281,6 +284,41 @@ function factTexts(fact: OtherFact): Texts {
   };
 }
 
+function phasesTexts(p: Extract<HealthFact, { BootPhases: unknown }>["BootPhases"]): Texts {
+  const none = k("ev.phases.none");
+  const shown = (ms: number | null) => (ms === null ? none : formatMs(ms));
+  const raw = (ms: number | null) => (ms === null ? none : `${formatNumber(ms)} ms`);
+  const total = p.from_power_ms ?? p.to_desktop_ms;
+  return {
+    plain:
+      total === null
+        ? k("ev.phases.profile", { profile: shown(p.profile_ms) })
+        : k("ev.phases", { total: formatMs(total), profile: shown(p.profile_ms) }),
+    figures: k("ev.phases.figures", {
+      firmware: shown(p.firmware_ms),
+      signin: shown(p.to_signin_ms),
+      profile: shown(p.profile_ms),
+      tpm: shown(p.tpm_wait_ms),
+      desktop: shown(p.to_desktop_ms),
+    }),
+    tech: k("ev.phases.tech", {
+      firmware: raw(p.firmware_ms),
+      signin: raw(p.to_signin_ms),
+      profile: raw(p.profile_ms),
+      tpm: raw(p.tpm_wait_ms),
+      desktop: raw(p.to_desktop_ms),
+    }),
+  };
+}
+
+function tempTexts(size: TempSize): Texts {
+  return {
+    plain: kn(size.capped ? "ev.temp.capped" : "ev.temp", size.folders),
+    figures: kn("ev.temp.figures", size.files),
+    tech: k("ev.temp.tech", { date: when(size.ts_ms), folders: formatNumber(size.folders), files: formatNumber(size.files) }),
+  };
+}
+
 function delayTexts(d: BootDelay): Texts {
   const extra = formatMs(d.degradation_ms);
   return {
@@ -300,7 +338,8 @@ export function checkText(check: Check, pass: PassState | null = null): string {
   if (check.mark === "Ok") return k(`check.${check.kind}`);
   if (check.why === "silent") return k("check.silent");
   if (check.why === "stale") return pass?.since != null ? k("check.unread_since", { time: when(pass.since) }) : k("check.unread");
-  if (check.why === "unread") return k("check.unread");
+  // An unread startup check means no startup was measured, which has its own line.
+  if (check.why === "unread") return check.kind === "SlowBoot" ? k("check.SlowBoot.Unknown") : k("check.unread");
   return k(`check.${check.kind}.Unknown`);
 }
 

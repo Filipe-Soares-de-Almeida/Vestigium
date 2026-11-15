@@ -22,8 +22,13 @@ How to use this file:
 
 ## [Unreleased]
 
+### Changed
+
+- Judge startup time from every startup the event logs record.
+
 ### Fixed
 
+- Show startup as not measured instead of normal without data.
 - Keep each Health area's status mark beside its arrow.
 - Fix side pane names overflowing when a status word appears.
 

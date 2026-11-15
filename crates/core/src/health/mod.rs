@@ -320,6 +320,17 @@ pub enum HealthFact {
     VolumeCheck {
         ts_ms: i64,
     },
+    /// The phases of one boot; `ts_ms` is when its kernel started.
+    BootPhases {
+        ts_ms: i64,
+        firmware_ms: Option<u32>,
+        to_signin_ms: Option<u32>,
+        profile_ms: Option<u32>,
+        tpm_wait_ms: Option<u32>,
+        to_desktop_ms: Option<u32>,
+        from_power_ms: Option<u32>,
+    },
+    TempFolder(TempSize),
 }
 
 /// A risk found on the PC, with its value, the healthy range and the facts behind it.
@@ -358,6 +369,10 @@ pub fn unread_kinds(inputs: &HealthInputs) -> Vec<FindingKind> {
     }
     if inputs.page_files.is_none() {
         kinds.push(FindingKind::PageFile);
+    }
+    let timed = inputs.boots.iter().any(|b| b.phases().profile_ms.is_some());
+    if !timed && inputs.boot.as_ref().is_none_or(|r| r.boots.is_empty()) {
+        kinds.push(FindingKind::SlowBoot);
     }
     kinds
 }
