@@ -25,6 +25,7 @@ How to use this file:
 ### Fixed
 
 - Keep each Health area's status mark beside its arrow.
+- Fix side pane names overflowing when a status word appears.
 
 ## [0.1.2] - 2026-11-12
 
