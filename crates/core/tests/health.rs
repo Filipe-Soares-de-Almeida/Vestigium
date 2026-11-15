@@ -44,6 +44,8 @@ fn healthy() -> HealthInputs {
         events: Vec::new(),
         antivirus: Some(vec![product("Built-in antivirus", true)]),
         boot: None,
+        boots: Vec::new(),
+        temp: None,
         tests: Vec::new(),
         open: Vec::new(),
     }

@@ -2,7 +2,9 @@ mod disks;
 mod security;
 mod system;
 
-use vestigium_core::health::{DiskHealth, PageFile, SecurityProduct, VolumeSpace};
+use vestigium_core::health::{
+    BootFacts, DiskHealth, PageFile, SecurityProduct, TempSize, VolumeSpace,
+};
 use vestigium_core::hwtest::Bus;
 
 pub use disks::{disk_bus, disk_health, disk_nvme, disk_size};
@@ -20,6 +22,16 @@ pub trait HealthSource {
     fn system_drive(&mut self) -> Option<u32>;
     fn page_files(&mut self) -> Option<Vec<PageFile>>;
     fn antivirus(&mut self) -> Option<Vec<SecurityProduct>>;
+    /// Every boot of the last `days`, from the event logs; `None` when they could not be read.
+    fn boots(&mut self, days: u32) -> Option<Vec<BootFacts>> {
+        let _ = days;
+        None
+    }
+    /// The signed-in user's Temp folder, counted up to its cap.
+    fn temp(&mut self, now_ms: i64) -> Option<TempSize> {
+        let _ = now_ms;
+        None
+    }
 }
 
 /// The live machine, read without elevation.
@@ -49,5 +61,19 @@ impl HealthSource for WindowsHealth {
 
     fn antivirus(&mut self) -> Option<Vec<SecurityProduct>> {
         antivirus()
+    }
+
+    fn boots(&mut self, days: u32) -> Option<Vec<BootFacts>> {
+        crate::boot_timeline(days).ok()
+    }
+
+    fn temp(&mut self, now_ms: i64) -> Option<TempSize> {
+        let folder = crate::temp_folder()?;
+        Some(crate::count_tree(
+            &folder,
+            crate::TEMP_MAX_ENTRIES,
+            crate::TEMP_MAX_TIME,
+            now_ms,
+        ))
     }
 }

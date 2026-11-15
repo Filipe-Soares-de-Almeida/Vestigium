@@ -246,6 +246,10 @@ pub struct HealthInputs {
     pub events: Vec<WinEvent>,
     pub antivirus: Option<Vec<SecurityProduct>>,
     pub boot: Option<BootReport>,
+    /// The latest boots read from the event logs, oldest first.
+    pub boots: Vec<BootFacts>,
+    /// The newest count of the signed-in user's Temp folder.
+    pub temp: Option<TempSize>,
     /// Test runs of the last `TEST_REACH_DAYS`, oldest first.
     pub tests: Vec<TestRun>,
     /// Findings already open, which stay open until their value is clearly back in range.
