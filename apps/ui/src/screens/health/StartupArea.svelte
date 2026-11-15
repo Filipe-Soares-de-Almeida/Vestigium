@@ -10,12 +10,13 @@
   import RowCard from "../../components/RowCard.svelte";
   import RowList from "../../components/RowList.svelte";
   import StatusMark from "../../components/StatusMark.svelte";
-  import { openStorageSense, startupArea } from "../../lib/api";
+  import { openStorageSense } from "../../lib/api";
   import { errorText } from "../../lib/errors";
   import { t, tn } from "../../lib/i18n.svelte";
   import { href } from "../../lib/router.svelte";
+  import { startup } from "../../lib/startup.svelte";
   import { toast } from "../../lib/toast.svelte";
-  import type { DetailLevel, FindingDto, StartupAreaDto } from "../../lib/types";
+  import type { DetailLevel, FindingDto } from "../../lib/types";
   import { formatDayShort } from "../occurrence/format";
   import Finding from "./Finding.svelte";
   import PhaseChart from "./PhaseChart.svelte";
@@ -47,8 +48,8 @@
   /** The startup apps whose name is this one belong to Vestigium itself, which is switched off in Settings. */
   const OWN_NAME = "Vestigium";
 
-  let dto = $state<StartupAreaDto | null>(null);
-  let error = $state<unknown>(null);
+  const dto = $derived(startup.dto);
+  const error = $derived(startup.error);
 
   const boots = $derived(dto?.boots ?? []);
   const last = $derived(boots.length ? boots[boots.length - 1] : null);
@@ -56,17 +57,8 @@
   const newestFirst = $derived([...boots].reverse());
   const canDisable = $derived(dto?.startup_apps.some((a) => a.enabled && !a.protected && a.name !== OWN_NAME) ?? false);
 
-  async function load(): Promise<void> {
-    error = null;
-    try {
-      dto = await startupArea();
-    } catch (e) {
-      error = e;
-    }
-  }
-
   onMount(() => {
-    void load();
+    void startup.load();
   });
 
   async function openStorage(): Promise<void> {
@@ -82,7 +74,7 @@
 </script>
 
 {#if dto === null && error !== null}
-  <div class="gap"><ErrorView {error} heading="h2" onretry={load} /></div>
+  <div class="gap"><ErrorView {error} heading="h2" onretry={() => startup.load()} /></div>
 {:else if dto === null}
   <Loading />
 {:else}
@@ -206,6 +198,7 @@
                     title: totalText(boot),
                     sub: bootSub(boot),
                     mark: verdict,
+                    href: href.startupBoot(boot.kernel_start_ms),
                   };
                 })}
               />

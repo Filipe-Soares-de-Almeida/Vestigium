@@ -2,11 +2,12 @@
   import Spark from "../../components/Spark.svelte";
   import ZoomBar from "../../components/ZoomBar.svelte";
   import { t, tn } from "../../lib/i18n.svelte";
+  import { go, href } from "../../lib/router.svelte";
   import type { BootDto } from "../../lib/types";
   import type { Zoom } from "../../lib/zoom.svelte";
   import { ceilingOf, formatSeconds, type Phase, phaseOf, series, stamp } from "./startup";
 
-  /** One phase across the startups shown, from zero, with the zoom the other time charts have. */
+  /** One phase across the startups shown, from zero, with the zoom the other time charts have; a pick opens that startup. */
   let { boots, phase }: { boots: BootDto[]; phase: Phase } = $props();
 
   let zoom = $state<Zoom>();
@@ -35,6 +36,8 @@
   {ceiling}
   ceilingLabel="{ceiling} s"
   reference={limit === null ? undefined : { value: limit, label: `${limit} s` }}
+  onpick={(i) => go(href.startupBoot(boots[i].kernel_start_ms))}
+  pickLabel={t("ui.health.startup.boot.open")}
   bind:zoom
   bind:plot
 />

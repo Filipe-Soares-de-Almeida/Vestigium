@@ -86,7 +86,7 @@ test("an_unverified_health_check_shows_a_banner_only_on_the_health_screen", () =
   expect(show(Banner).querySelector(".banner")).toBeNull();
   expect(shellStatus().tone).toBe("unverified");
 
-  router.commit({ screen: "health", area: null }, null);
+  router.commit({ screen: "health", area: null, boot: null }, null);
   const onHealth = show(Banner);
   expect(onHealth.querySelector(".banner")?.textContent).toContain(t("ui.shell.unverified.title"));
   expect(onHealth.querySelectorAll("button")).toHaveLength(0);

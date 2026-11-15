@@ -26,6 +26,7 @@ How to use this file:
 
 - Startup page with each phase of every startup and its trend.
 - Storage Sense shortcut for the Temp folder on the startup page.
+- Page of each startup with its phases on a time chart.
 
 ### Changed
 

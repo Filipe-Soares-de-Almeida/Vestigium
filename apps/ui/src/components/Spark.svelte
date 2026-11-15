@@ -17,6 +17,8 @@
     ceilingLabel,
     missing = "—",
     reference,
+    onpick,
+    pickLabel,
     zoom: exposed = $bindable(),
     plot: plotEl = $bindable(),
   }: {
@@ -42,6 +44,10 @@
     missing?: string;
     /** A dashed line across the plot at a limit, named at its right. */
     reference?: { value: number; label: string };
+    /** Opens the reading under the pointer on a click, or the one the arrows are on with Enter. */
+    onpick?: (index: number) => void;
+    /** Names what picking does, as the last line of the readout; only with `onpick`. */
+    pickLabel?: string;
     /** The chart's zoom, for a ZoomBar placed elsewhere on the page. */
     zoom?: Zoom;
     /** The plot element, which gets focus back when the zoom is reset. */
@@ -162,6 +168,9 @@
       said = readout(next);
     } else if (zoom.key(event.key, cursor !== null ? ((xs[cursor] - lo) / span) * width : width / 2)) {
       event.preventDefault();
+    } else if (event.key === "Enter" && onpick && cursor !== null) {
+      event.preventDefault();
+      onpick(cursor);
     } else if (event.key === "Escape") {
       cursorAt = null;
     }
@@ -173,6 +182,7 @@
   <div
     class="plot"
     class:pan={zoom.view !== null}
+    class:pick={onpick !== undefined}
     tabindex="0"
     role="application"
     aria-label={label}
@@ -186,6 +196,11 @@
       cursorAt = i === null ? null : xs[i];
     }}
     onpointerup={() => zoom.release()}
+    onclick={(event) => {
+      if (!onpick || zoom.wasDragged()) return;
+      const i = nearest(event.clientX - event.currentTarget.getBoundingClientRect().left);
+      if (i !== null) onpick(i);
+    }}
     onpointercancel={() => zoom.release()}
     onpointerleave={() => (cursorAt = null)}
     onfocus={() => (cursorAt ??= xs.length ? xs[xs.length - 1] : null)}
@@ -207,7 +222,7 @@
       {@const px = ((xs[cursor] - lo) / span) * width}
       <span class="rule" style:left="{px}px"></span>
       {#if values[cursor] !== null}<span class="dot" style:left="{px}px" style:top="{yOf(values[cursor] as number)}px"></span>{/if}
-      <ChartTip left={px} bound={width} heading={when(xs[cursor])} rows={[{ key: "v", label, value: worded(cursor) }]} />
+      <ChartTip left={px} bound={width} heading={when(xs[cursor])} rows={[{ key: "v", label, value: worded(cursor) }, ...(onpick && pickLabel ? [{ key: "pick", label: pickLabel, value: "" }] : [])]} />
     {/if}
   </div>
   <p class="axis">
@@ -227,6 +242,9 @@
   }
   .plot:focus-visible {
     outline: none;
+  }
+  .plot.pick {
+    cursor: pointer;
   }
   .plot.pan {
     cursor: grab;

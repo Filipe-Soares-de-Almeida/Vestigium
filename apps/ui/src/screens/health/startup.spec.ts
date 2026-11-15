@@ -4,15 +4,21 @@ import { setLang, t } from "../../lib/i18n.svelte";
 import type { BootDto } from "../../lib/types";
 import {
   appsMs,
+  bootKind,
   ceilingOf,
   failures,
   formatSeconds,
   judge,
   ledeParts,
+  neighbours,
   niceCeiling,
   phaseMs,
+  profileAfterTpmMs,
   series,
+  startupWhen,
   valueText,
+  waterfall,
+  waterfallCeiling,
 } from "./startup";
 
 const KERNEL = 1_800_000_000_000;
@@ -126,4 +132,85 @@ test("failed_drivers_count_the_startups_they_failed_in_once_each", () => {
     { name: "dam", count: 2 },
     { name: "otherdrv", count: 1 },
   ]);
+});
+
+const segment = (boot: BootDto, id: string) => waterfall(boot).segments.find((s) => s.id === id)!;
+
+test("the_waterfall_places_each_phase_after_the_one_before_it_from_the_power_button", () => {
+  const w = waterfall(boot());
+
+  expect(w.fromWindows).toBe(false);
+  expect(w.segments.map((s) => [s.id, s.from, s.to])).toEqual([
+    ["firmware", 0, 14],
+    ["signin", 14, 34],
+    ["profile", 34, 42],
+    ["desktop", 42, 50],
+    ["apps", null, null],
+  ]);
+  expect(w.tpmAt).toBeNull();
+  expect(w.end).toBe(50);
+});
+
+test("the_waterfall_puts_the_startup_apps_from_the_desktop_to_the_first_app_and_the_tpm_line_in_the_profile", () => {
+  const run = { command: "app.exe", start_ms: KERNEL + 46_900, end_ms: null };
+  const w = waterfall(boot({ apps: [run], tpm_wait_ms: 5_000 }));
+
+  expect(w.segments[4]).toEqual({ id: "apps", from: 50, to: 60.9 });
+  expect(w.tpmAt).toBe(39);
+  expect(w.end).toBe(60.9);
+});
+
+test("the_waterfall_counts_from_the_start_of_windows_when_the_firmware_time_is_missing", () => {
+  const w = waterfall(boot({ firmware_ms: null, from_power_ms: null }));
+
+  expect(w.fromWindows).toBe(true);
+  expect(w.segments[0]).toEqual({ id: "firmware", from: null, to: null });
+  expect(segment(boot({ firmware_ms: null }), "signin")).toEqual({ id: "signin", from: 0, to: 20 });
+  expect(w.segments[3].to).toBe(36);
+});
+
+test("a_phase_that_was_not_measured_is_not_placed_and_has_no_length", () => {
+  const w = waterfall(boot({ desktop_ms: null, to_desktop_ms: null, profile_ms: null }));
+
+  expect(w.segments.find((s) => s.id === "profile")).toEqual({ id: "profile", from: null, to: null });
+  expect(w.segments.find((s) => s.id === "desktop")).toEqual({ id: "desktop", from: null, to: null });
+  expect(w.tpmAt).toBeNull();
+  const nothing = waterfall(boot({ firmware_ms: null, to_signin_ms: null, profile_ms: null, desktop_ms: null, to_desktop_ms: null }));
+  expect(nothing.segments.every((s) => s.from === null && s.to === null)).toBe(true);
+  expect(nothing.end).toBe(0);
+});
+
+test("a_tpm_wait_of_zero_draws_no_tpm_line", () => {
+  expect(waterfall(boot({ tpm_wait_ms: 0 })).tpmAt).toBeNull();
+});
+
+test("the_waterfall_axis_ends_at_a_round_number_past_the_last_phase", () => {
+  expect(waterfallCeiling(waterfall(boot()))).toBe(60);
+  expect(waterfallCeiling(waterfall(boot({ to_desktop_ms: 173_000, desktop_ms: 145_000, profile_ms: 8_000 })))).toBe(200);
+});
+
+test("the_profile_after_the_tpm_is_what_is_left_of_the_profile_step", () => {
+  expect(profileAfterTpmMs(boot({ profile_ms: 152_000, tpm_wait_ms: 37_000 }))).toBe(115_000);
+  expect(profileAfterTpmMs(boot({ tpm_wait_ms: 0 }))).toBeNull();
+  expect(profileAfterTpmMs(boot({ tpm_wait_ms: null }))).toBeNull();
+});
+
+test("the_kind_of_startup_comes_from_the_recorded_type_and_is_empty_for_any_other", () => {
+  expect([0, 1, 2, 7, null].map((boot_type) => bootKind(boot({ boot_type })))).toEqual(["full", "fast", "resume", null, null]);
+});
+
+test("the_neighbours_of_a_startup_are_the_ones_next_to_it_in_the_list", () => {
+  const list = [0, 1, 2].map((n) => boot({ kernel_start_ms: KERNEL + n }));
+
+  expect(neighbours(list, KERNEL + 1)).toEqual({ boot: list[1], prev: list[0], next: list[2] });
+  expect(neighbours(list, KERNEL)).toMatchObject({ prev: null, next: list[1] });
+  expect(neighbours(list, KERNEL + 2)).toMatchObject({ prev: list[1], next: null });
+  expect(neighbours(list, 5)).toEqual({ boot: null, prev: null, next: null });
+});
+
+test("a_startup_is_dated_with_the_day_and_the_time_never_today", () => {
+  const text = startupWhen(Date.now());
+
+  expect(text).not.toContain(t("ui.health.today_at", { time: "" }).trim());
+  expect(text).toMatch(/\d{1,2}:\d{2}/);
 });

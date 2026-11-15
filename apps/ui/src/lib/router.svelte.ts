@@ -1,6 +1,6 @@
 // Screens are addressed by the URL hash: #/ (home), #/activity[?tab=now], #/history[?m=YYYY-MM&p=month|week|2w&d=YYYY-MM-DD],
 // #/disks, #/memory, #/activity/programs, #/activity/all, #/period/<start ms>[?day=YYYY-MM-DD], #/occurrence/<id>[?day=YYYY-MM-DD], #/captures[?for=<occurrence id>],
-// #/capture/<id>, #/health[/<area>], #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
+// #/capture/<id>, #/health[/<area>], #/health/startup/<kernel start ms>, #/dumps[/<id>], #/tweaks[/<key>], #/tests[/<device>],
 // #/settings[/<category>], #/settings/updates/news[/<version>][?entry=<kind>-<index>]. #/today and #/now open those tabs of #/activity. A `g=<group>` query names the
 // sidebar group an entry shared by two groups was opened from.
 
@@ -34,7 +34,8 @@ export type Route =
   | { screen: "occurrence"; id: number; fromDay: string | null }
   | { screen: "captures"; forOccurrence: number | null }
   | { screen: "capture"; id: number }
-  | { screen: "health"; area: string | null }
+  /** `boot` is the kernel start of one startup, on the startup area only. */
+  | { screen: "health"; area: string | null; boot: number | null }
   | { screen: "dumps"; id: number | null; group: DumpGroup | null }
   | { screen: "tweaks"; key: string | null; group: TweakGroup | null }
   /** `device` is "memory" or a physical disk number. */
@@ -77,6 +78,7 @@ export const href = {
   captures: (forOccurrence?: number) => (forOccurrence ? `#/captures?for=${forOccurrence}` : "#/captures"),
   capture: (id: number) => `#/capture/${id}`,
   health: (area?: string) => (area ? `#/health/${area}` : "#/health"),
+  startupBoot: (kernelStartMs: number) => `#/health/startup/${kernelStartMs}`,
   dumps: (id?: number | null, group?: DumpGroup | null) =>
     id ? `#/dumps/${id}` : group ? `#/dumps?group=${group}` : "#/dumps",
   tweaks: (key?: string | null, group?: TweakGroup | null) =>
@@ -128,7 +130,10 @@ export function parse(hash: string): Route {
     const given = new URLSearchParams(query).get("for") ?? "";
     return { screen: "captures", forOccurrence: /^\d+$/.test(given) ? Number(given) : null };
   }
-  if (screen === "health") return { screen: "health", area: arg || null };
+  if (screen === "health") {
+    const boot = arg === "startup" && /^\d+$/.test(rest[0] ?? "") ? Number(rest[0]) : null;
+    return { screen: "health", area: arg || null, boot };
+  }
   if (screen === "dumps") {
     const asked = params.get("group");
     return {
@@ -182,7 +187,7 @@ class Router {
     if (route.screen === "occurrence" || route.screen === "capture") return `${route.screen}/${route.id}`;
     if (route.screen === "period") return `period/${route.start}`;
     if (route.screen === "detail") return `detail/${route.kind}/${route.parts.join("/")}`;
-    if (route.screen === "health") return `health/${route.area ?? ""}`;
+    if (route.screen === "health") return `health/${route.area ?? ""}/${route.boot ?? ""}`;
     if (route.screen === "settings" && route.news) return `settings/news/${route.news.version ?? ""}`;
     return route.screen === "captures" ? `captures/${route.forOccurrence ?? ""}` : route.screen;
   }

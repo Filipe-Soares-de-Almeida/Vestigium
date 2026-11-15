@@ -9,6 +9,7 @@ import { health } from "../lib/health.svelte";
 import { errorText } from "../lib/errors";
 import { t } from "../lib/i18n.svelte";
 import { href } from "../lib/router.svelte";
+import { startup } from "../lib/startup.svelte";
 import { toast } from "../lib/toast.svelte";
 import type { DetailLevel, FindingDto, HealthDto } from "../lib/types";
 import Health from "./Health.svelte";
@@ -181,7 +182,7 @@ test("the_temp_row_opens_storage_sense_and_a_failed_open_shows_a_toast", async (
   expect(toast.message).toBe(errorText(refusal("failed")));
 });
 
-test("the_startups_list_holds_every_startup_newest_first_in_its_own_scrolling_box", async () => {
+test("the_startups_list_holds_every_startup_newest_first_each_linking_to_its_page_in_its_own_scrolling_box", async () => {
   const { page } = await open("slow");
   const boots = startupCase("slow").boots;
   const list = row(page, t("ui.health.startup.boots.title.other", { count: boots.length }));
@@ -192,7 +193,35 @@ test("the_startups_list_holds_every_startup_newest_first_in_its_own_scrolling_bo
   const items = list.querySelectorAll("ol.hist li");
   expect(items).toHaveLength(boots.length);
   expect(items[0].textContent).toContain(k("boots.profile", { time: "2 min 32 s" }));
-  expect(items[0].querySelector("a")).toBeNull();
+  expect(items[0].querySelector("a")?.getAttribute("href")).toBe(href.startupBoot(boots[boots.length - 1].kernel_start_ms));
+  expect(items[items.length - 1].querySelector("a")?.getAttribute("href")).toBe(href.startupBoot(boots[0].kernel_start_ms));
+});
+
+test("picking_a_startup_on_a_phase_chart_opens_its_page", async () => {
+  const { page } = await open("slow");
+  const boots = startupCase("slow").boots;
+  const profile = phaseRow(page, "profile");
+  click(profile.querySelector("button"));
+  await until(() => profile.querySelector(".plot") !== null, "the chart");
+  const plot = profile.querySelector<HTMLElement>(".plot")!;
+
+  plot.focus();
+  flushSync();
+  plot.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+  plot.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  expect(location.hash).toBe(href.startupBoot(boots[boots.length - 2].kernel_start_ms));
+  location.hash = "";
+});
+
+test("the_area_keeps_showing_what_was_read_before_while_it_reads_again", async () => {
+  startup.dto = startupCase("fast");
+  answer({ startup_area: () => new Promise(() => {}) });
+
+  const page = show(StartupArea, { finding: null, level: "Simple" });
+
+  expect(page.querySelector(".lede")).not.toBeNull();
+  expect(page.querySelector(".loading")).toBeNull();
 });
 
 test("a_failed_read_shows_the_error_and_try_again_loads_the_page", async () => {
@@ -224,4 +253,6 @@ test("the_startup_area_of_health_shows_this_page_in_place_of_the_generic_checks"
 
 beforeEach(() => {
   toast.on = false;
+  startup.dto = null;
+  startup.error = null;
 });

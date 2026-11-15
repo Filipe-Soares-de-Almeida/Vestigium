@@ -196,3 +196,78 @@ export function tempSub(temp: TempSize | null): string {
 }
 
 export const tempIsLarge = (temp: TempSize | null): boolean => temp !== null && temp.folders >= TEMP_LARGE;
+
+/** "Nov 13, 11:42": the day and the time of a startup, never "today", so a title reads in either language. */
+export function startupWhen(ms: number): string {
+  return `${formatDayShort(ms)}, ${formatTime(ms)}`;
+}
+
+/** The kind of startup the system recorded, as the suffix of its text key; `null` when it did not say. */
+export function bootKind(boot: BootDto): "full" | "fast" | "resume" | null {
+  if (boot.boot_type === 0) return "full";
+  if (boot.boot_type === 1) return "fast";
+  if (boot.boot_type === 2) return "resume";
+  return null;
+}
+
+/** The startups before and after the one starting at `ms`, in the order the list holds them (oldest first). */
+export function neighbours(boots: BootDto[], ms: number): { boot: BootDto | null; prev: BootDto | null; next: BootDto | null } {
+  const at = boots.findIndex((b) => b.kernel_start_ms === ms);
+  if (at < 0) return { boot: null, prev: null, next: null };
+  return { boot: boots[at], prev: boots[at - 1] ?? null, next: boots[at + 1] ?? null };
+}
+
+/** How long the profile took once the TPM was ready; `null` when no wait was recorded. */
+export function profileAfterTpmMs(boot: BootDto): number | null {
+  if (boot.tpm_wait_ms === null || boot.tpm_wait_ms <= 0 || boot.profile_ms === null) return null;
+  return Math.max(0, boot.profile_ms - boot.tpm_wait_ms);
+}
+
+/** A phase placed on the seconds axis; both ends are `null` when its place or length is not known. */
+export interface Segment {
+  id: PhaseId;
+  from: number | null;
+  to: number | null;
+}
+
+export interface Waterfall {
+  segments: Segment[];
+  /** Firmware time is missing, so the axis counts from the start of Windows. */
+  fromWindows: boolean;
+  /** Where the TPM became ready, on the same axis; `null` when the profile did not wait for it. */
+  tpmAt: number | null;
+  /** The last second any phase reaches. */
+  end: number;
+}
+
+/** The phases of one startup as segments on an axis of seconds from the power button, or from Windows when firmware is missing. */
+export function waterfall(boot: BootDto): Waterfall {
+  const fw = boot.firmware_ms ?? 0;
+  const place = (id: PhaseId, from: number | null, to: number | null): Segment => ({
+    id,
+    from: from === null || to === null ? null : from / 1000,
+    to: from === null || to === null ? null : to / 1000,
+  });
+  const after = (from: number | null, ms: number | null) => (from === null || ms === null ? null : from + ms);
+
+  const signinEnd = after(fw, boot.to_signin_ms);
+  const profileEnd = after(signinEnd, boot.profile_ms);
+  const desktopEnd = boot.to_desktop_ms === null ? null : fw + boot.to_desktop_ms;
+  const segments = [
+    place("firmware", boot.firmware_ms === null ? null : 0, boot.firmware_ms),
+    place("signin", fw, signinEnd),
+    place("profile", signinEnd, profileEnd),
+    place("desktop", profileEnd, boot.desktop_ms === null ? null : desktopEnd),
+    place("apps", desktopEnd, after(desktopEnd, appsMs(boot))),
+  ];
+  const tpm = boot.tpm_wait_ms !== null && boot.tpm_wait_ms > 0 ? after(signinEnd, boot.tpm_wait_ms) : null;
+  return {
+    segments,
+    fromWindows: boot.firmware_ms === null,
+    tpmAt: tpm === null ? null : tpm / 1000,
+    end: Math.max(0, ...segments.map((s) => s.to ?? 0)),
+  };
+}
+
+/** The top of the waterfall's axis: round, with a little room after the last phase. */
+export const waterfallCeiling = (w: Waterfall): number => niceCeiling(w.end * 1.03);
