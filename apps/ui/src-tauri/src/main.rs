@@ -9,6 +9,7 @@ mod hwtests;
 mod live;
 mod process;
 mod protected;
+mod startup;
 mod system;
 mod tweaks;
 mod update;
@@ -51,6 +52,7 @@ fn main() {
             commands::captures,
             commands::capture,
             commands::health,
+            commands::startup_area,
             commands::start_scan,
             commands::dumps,
             commands::start_dump_scan,

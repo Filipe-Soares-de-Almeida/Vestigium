@@ -31,6 +31,7 @@ use crate::hwtests::{
     write_versioned,
 };
 use crate::live::{LIVE_PERIOD, LiveMessage, LiveSlot, run_live};
+use crate::startup::StartupAreaDto;
 use crate::tweaks::{TweakPick, TweaksApplied, TweaksDto};
 use vestigium_core::health::Subject;
 use vestigium_core::hwtest::{
@@ -366,6 +367,13 @@ pub async fn import_captures(state: State<'_, AppState>) -> Result<Vec<i64>, UiE
 pub async fn health(state: State<'_, AppState>) -> Result<HealthDto, UiError> {
     let history = state.history.clone();
     blocking(move || Ok(lock(&history).health(now_ms())?)).await
+}
+
+/// The startup page: the latest boots with their phases, the Temp folder and the startup programs.
+#[tauri::command]
+pub async fn startup_area(state: State<'_, AppState>) -> Result<StartupAreaDto, UiError> {
+    let history = state.history.clone();
+    blocking(move || crate::startup::read(&mut lock(&history))).await
 }
 
 /// Runs a full scan in the elevated helper and waits for it; Windows asks for permission first.

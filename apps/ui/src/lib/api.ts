@@ -23,6 +23,7 @@ import type {
   ProgramPoint,
   SettingsDto,
   SmartPoint,
+  StartupAreaDto,
   TestsDto,
   TimelineDto,
   TweakPick,
@@ -128,6 +129,11 @@ export function capture(id: number): Promise<CaptureDto | null> {
 /** Open health findings, those closed lately and the last full scan, read from the history. */
 export function health(): Promise<HealthDto> {
   return invoke("health");
+}
+
+/** The latest boots with their phases, the Temp folder and the programs Windows starts at sign-in. */
+export function startupArea(): Promise<StartupAreaDto> {
+  return invoke("startup_area");
 }
 
 /** Runs a full scan in the elevated helper and waits for it; Windows asks for permission first. */

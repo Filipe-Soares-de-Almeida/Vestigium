@@ -65,7 +65,7 @@ pub struct TempSize {
 }
 
 /// The phases of one boot, in milliseconds; `None` where a source is missing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct BootPhases {
     pub firmware_ms: Option<u32>,
     /// Kernel start to sign-in; above `PROBABLE_WAIT_MS` it includes the person at the sign-in screen.

@@ -472,6 +472,25 @@ fn startup_app_is_never_a_security_product() {
     assert!(security.changes.is_empty() && security.signals.is_empty());
 }
 
+#[test]
+fn startup_state_reads_the_approval_and_the_vendor() {
+    let entry = |name: &str, exe: &str| StartupEntry {
+        hive: Hive::CurrentUser,
+        list: StartupList::Run,
+        name: name.into(),
+        exe: exe.into(),
+    };
+    let chat = entry("ChatClient", "Chat.exe");
+    let off = Value::Bytes(disabled_approval(NOW));
+    let on = Value::Bytes(vec![2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert!(chat.state(None).enabled);
+    assert!(chat.state(Some(&Value::Absent)).enabled);
+    assert!(chat.state(Some(&on)).enabled);
+    assert!(!chat.state(Some(&off)).enabled);
+    assert!(!chat.state(None).protected);
+    assert!(entry("Kaspersky Tray", "avp.exe").state(None).protected);
+}
+
 fn startup_status(name: &str, exe: &str) -> Status {
     let mut pc = inputs();
     pc.startup = vec![StartupEntry {
