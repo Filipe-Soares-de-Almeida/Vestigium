@@ -13,7 +13,18 @@
   import { diskName } from "../../lib/groups";
   import { findingView, subjectName, valueText } from "./words";
 
-  let { finding, level, first = false }: { finding: FindingDto; level: DetailLevel; first?: boolean } = $props();
+  let {
+    finding,
+    level,
+    first = false,
+    bare = false,
+  }: {
+    finding: FindingDto;
+    level: DetailLevel;
+    first?: boolean;
+    /** Shown inside another section: no title and no divider above. */
+    bare?: boolean;
+  } = $props();
 
   const view = $derived(findingView(finding, level));
   /** The tweak that answers each kind of point, where one does. */
@@ -73,10 +84,12 @@
   });
 </script>
 
-<section class="finding" class:first aria-labelledby="finding-{finding.id}">
-  <header class="sec-h">
-    <h2 id="finding-{finding.id}">{view.title}</h2>
-  </header>
+<section class="finding" class:first class:bare aria-labelledby={bare ? undefined : `finding-${finding.id}`} aria-label={bare ? view.title : undefined}>
+  {#if !bare}
+    <header class="sec-h">
+      <h2 id="finding-{finding.id}">{view.title}</h2>
+    </header>
+  {/if}
   <div class="grid" class:map={map !== null}>
     <div class="text">
       <p class="state">
@@ -125,6 +138,11 @@
   }
   .finding.first {
     margin-top: 24px;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .finding.bare {
+    margin-top: 0;
     padding-top: 0;
     border-top: 0;
   }

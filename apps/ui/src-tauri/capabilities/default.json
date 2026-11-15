@@ -36,6 +36,7 @@
     "allow-capture",
     "allow-health",
     "allow-startup-area",
+    "allow-open-storage-sense",
     "allow-start-scan",
     "allow-dumps",
     "allow-start-dump-scan",

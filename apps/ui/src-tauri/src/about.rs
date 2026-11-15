@@ -182,7 +182,8 @@ pub fn open_page(page: Page) -> Result<(), UiError> {
     open_url(&address(page))
 }
 
-fn open_url(url: &str) -> Result<(), UiError> {
+/// Opens an address with the program Windows has for it: a web page or a Settings page.
+pub(crate) fn open_url(url: &str) -> Result<(), UiError> {
     let wide: Vec<u16> = url.encode_utf16().chain([0]).collect();
     // SAFETY: both strings are null-terminated and live through the call.
     let done = unsafe {

@@ -136,6 +136,11 @@ export function startupArea(): Promise<StartupAreaDto> {
   return invoke("startup_area");
 }
 
+/** Opens Windows' Storage Sense settings, which clean the Temp folder. */
+export function openStorageSense(): Promise<void> {
+  return invoke("open_storage_sense");
+}
+
 /** Runs a full scan in the elevated helper and waits for it; Windows asks for permission first. */
 export function startScan(): Promise<ScanFinished> {
   return invoke("start_scan");

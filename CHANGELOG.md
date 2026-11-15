@@ -22,6 +22,11 @@ How to use this file:
 
 ## [Unreleased]
 
+### Added
+
+- Startup page with each phase of every startup and its trend.
+- Storage Sense shortcut for the Temp folder on the startup page.
+
 ### Changed
 
 - Judge startup time from every startup the event logs record.

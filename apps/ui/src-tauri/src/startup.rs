@@ -120,6 +120,12 @@ pub fn area(
     }
 }
 
+/// Opens Windows' Storage Sense settings, which clean the Temp folder.
+#[tauri::command]
+pub fn open_storage_sense() -> Result<(), UiError> {
+    crate::about::open_url("ms-settings:storagesense")
+}
+
 /// Reads the stored boots and the startup programs Windows runs now.
 pub fn read(history: &mut History) -> Result<StartupAreaDto, UiError> {
     let (boots, temp) = history.boots(BOOTS_SHOWN)?;

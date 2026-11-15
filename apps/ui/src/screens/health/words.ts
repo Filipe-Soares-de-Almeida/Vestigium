@@ -289,11 +289,10 @@ function phasesTexts(p: Extract<HealthFact, { BootPhases: unknown }>["BootPhases
   const shown = (ms: number | null) => (ms === null ? none : formatMs(ms));
   const raw = (ms: number | null) => (ms === null ? none : `${formatNumber(ms)} ms`);
   const total = p.from_power_ms ?? p.to_desktop_ms;
+  const tpm = p.tpm_wait_ms !== null && p.tpm_wait_ms > 0 && p.profile_ms !== null ? ".tpm" : "";
+  const args = { profile: shown(p.profile_ms), tpm: shown(p.tpm_wait_ms) };
   return {
-    plain:
-      total === null
-        ? k("ev.phases.profile", { profile: shown(p.profile_ms) })
-        : k("ev.phases", { total: formatMs(total), profile: shown(p.profile_ms) }),
+    plain: total === null ? k(`ev.phases.profile${tpm}`, args) : k(`ev.phases${tpm}`, { ...args, total: formatMs(total) }),
     figures: k("ev.phases.figures", {
       firmware: shown(p.firmware_ms),
       signin: shown(p.to_signin_ms),

@@ -7,16 +7,21 @@
     href,
     onclick,
     icon,
+    lead,
     title,
     sub,
     right,
     chevron = true,
     static: still = false,
+    open = $bindable(false),
+    expand,
   }: {
     /** A link row; without it the row is a button. */
     href?: string;
     onclick?: () => void;
     icon?: IconName;
+    /** Leading content in place of the icon, such as a status symbol. */
+    lead?: Snippet;
     title: string;
     sub?: string;
     /** Trailing content, usually a StatusMark with `reveal`. */
@@ -24,12 +29,22 @@
     chevron?: boolean;
     /** A row that only shows a value and opens nothing. */
     static?: boolean;
+    /** What the row opens below itself; with it the row is a button that shows or hides this. */
+    expand?: Snippet;
+    open?: boolean;
   } = $props();
+
+  const id = $props.id();
 </script>
 
-<li>
-  {#if still}
-    <div class="card still">
+<li class:expandable={expand !== undefined} class:open>
+  {#if expand}
+    <button class="card" type="button" aria-expanded={open} aria-controls={open ? `${id}-body` : undefined} onclick={() => (open = !open)} data-reveal>
+      {@render body()}
+    </button>
+    {#if open}<div class="expand" id="{id}-body">{@render expand()}</div>{/if}
+  {:else if still}
+    <div class="card still" data-reveal>
       {@render body()}
     </div>
   {:else if href}
@@ -44,7 +59,7 @@
 </li>
 
 {#snippet body()}
-  {#if icon}<span class="icon"><Icon name={icon} /></span>{/if}
+  {#if lead}<span class="icon">{@render lead()}</span>{:else if icon}<span class="icon"><Icon name={icon} /></span>{/if}
   <span class="main">
     <span class="title">{title}</span>
     {#if sub}<span class="sub">{sub}</span>{/if}
@@ -127,6 +142,33 @@
     display: flex;
     flex: none;
     color: var(--ink3);
+    transition: transform 0.12s;
+  }
+  .expandable .chev {
+    transform: rotate(90deg);
+  }
+  .expandable.open .chev {
+    transform: rotate(-90deg);
+  }
+  .expandable.open > .card {
+    border-radius: 6px 6px 0 0;
+  }
+  .expand {
+    padding: 14px 16px 18px 52px;
+    border-top: 1px solid var(--stroke2);
+    border-radius: 0 0 6px 6px;
+    background: var(--row);
+  }
+  .expand > :global(:first-child) {
+    margin-top: 0;
+  }
+  .expand > :global(:last-child) {
+    margin-bottom: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chev {
+      transition: none;
+    }
   }
   @media (forced-colors: active) {
     .card:focus-visible {

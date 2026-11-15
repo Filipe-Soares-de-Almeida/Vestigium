@@ -15,8 +15,13 @@
     floor,
     ceiling,
     ceilingLabel,
+    missing = "—",
+    reference,
+    zoom: exposed = $bindable(),
+    plot: plotEl = $bindable(),
   }: {
-    values: number[];
+    /** A `null` is a reading that was not taken: the line breaks there instead of dropping to zero. */
+    values: (number | null)[];
     /** When each value was read; without it the values are evenly spaced. */
     at?: number[];
     /** What the line shows, also its accessible name and the readout's row. */
@@ -33,6 +38,14 @@
     ceiling?: number;
     /** Names the top of a fixed scale, such as "100%". */
     ceilingLabel?: string;
+    /** How the readout words a reading that was not taken. */
+    missing?: string;
+    /** A dashed line across the plot at a limit, named at its right. */
+    reference?: { value: number; label: string };
+    /** The chart's zoom, for a ZoomBar placed elsewhere on the page. */
+    zoom?: Zoom;
+    /** The plot element, which gets focus back when the zoom is reset. */
+    plot?: HTMLElement;
   } = $props();
 
   const W = 600;
@@ -62,6 +75,7 @@
       return step * 6;
     },
   });
+  exposed = zoom;
 
   const lo = $derived(zoom.from);
   const span = $derived(zoom.span || 1);
@@ -74,9 +88,9 @@
     return Array.from({ length: last - first + 1 }, (_, k) => first + k);
   });
   const scale = $derived.by(() => {
-    const seen = shown.map((i) => values[i]);
-    const min = floor ?? Math.min(...seen);
-    const max = Math.max(ceiling ?? Math.max(...seen), min);
+    const seen = shown.flatMap((i) => (values[i] === null ? [] : [values[i] as number]));
+    const min = floor ?? (seen.length ? Math.min(...seen) : 0);
+    const max = Math.max(ceiling ?? (seen.length ? Math.max(...seen) : min), min);
     return { min, span: max - min };
   });
 
@@ -94,21 +108,28 @@
     return H - 8 - share * (H - 20);
   };
 
-  /** The line in stretches with no gap, and the area under each. */
+  /** The line in stretches with no gap, the area under each, and the readings that stand alone. */
   const paths = $derived.by(() => {
     const runs: number[][] = [];
+    let cut = true;
     for (const i of shown) {
+      if (values[i] === null) {
+        cut = true;
+        continue;
+      }
       const run = runs[runs.length - 1];
-      if (run && !(at && xs[i] - xs[run[run.length - 1]] > step * GAP_STEPS)) run.push(i);
+      if (!cut && run && !(at && xs[i] - xs[run[run.length - 1]] > step * GAP_STEPS)) run.push(i);
       else runs.push([i]);
+      cut = false;
     }
     const drawn = runs.filter((run) => run.length > 1);
-    const point = (i: number) => `${xOf(i).toFixed(1)} ${yOf(values[i]).toFixed(1)}`;
+    const alone = runs.filter((run) => run.length === 1).map((run) => run[0]);
+    const point = (i: number) => `${xOf(i).toFixed(1)} ${yOf(values[i] as number).toFixed(1)}`;
     const line = drawn.map((run) => run.map((i, k) => `${k ? "L" : "M"}${point(i)}`).join("")).join("");
     const area = drawn
       .map((run) => `M${xOf(run[0]).toFixed(1)} ${H}${run.map((i) => `L${point(i)}`).join("")}L${xOf(run[run.length - 1]).toFixed(1)} ${H}Z`)
       .join("");
-    return { line, area };
+    return { line, area, alone };
   });
 
   /** The reading nearest the pointer, among those on screen. */
@@ -118,8 +139,10 @@
     return shown.reduce((best, i) => (Math.abs(xs[i] - target) < Math.abs(xs[best] - target) ? i : best), shown[0]);
   }
 
+  const worded = (i: number) => (values[i] === null ? missing : format(values[i] as number));
+
   function readout(i: number): string {
-    return `${when(xs[i])}: ${label} ${format(values[i])}`;
+    return `${when(xs[i])}: ${label} ${worded(i)}`;
   }
 
   function onkeydown(event: KeyboardEvent): void {
@@ -153,6 +176,7 @@
     tabindex="0"
     role="application"
     aria-label={label}
+    bind:this={plotEl}
     bind:clientWidth={width}
     use:wheelZoom={zoom}
     onpointerdown={(event) => zoom.press(event, event.currentTarget)}
@@ -173,11 +197,17 @@
       <path d={paths.area} class="area" />
       <path d={paths.line} class="stroke" />
     </svg>
+    {#each paths.alone as i (i)}
+      <span class="lone" style:left="{(xOf(i) / W) * 100}%" style:top="{yOf(values[i] as number)}px"></span>
+    {/each}
+    {#if reference}
+      <span class="limit" style:top="{yOf(reference.value)}px" aria-hidden="true"><span>{reference.label}</span></span>
+    {/if}
     {#if cursor !== null && cursor < values.length}
       {@const px = ((xs[cursor] - lo) / span) * width}
       <span class="rule" style:left="{px}px"></span>
-      <span class="dot" style:left="{px}px" style:top="{yOf(values[cursor])}px"></span>
-      <ChartTip left={px} bound={width} heading={when(xs[cursor])} rows={[{ key: "v", label, value: format(values[cursor]) }]} />
+      {#if values[cursor] !== null}<span class="dot" style:left="{px}px" style:top="{yOf(values[cursor] as number)}px"></span>{/if}
+      <ChartTip left={px} bound={width} heading={when(xs[cursor])} rows={[{ key: "v", label, value: worded(cursor) }]} />
     {/if}
   </div>
   <p class="axis">
@@ -223,6 +253,30 @@
     font-size: 11px;
     line-height: 12px;
     pointer-events: none;
+  }
+  .lone {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: var(--accent);
+    pointer-events: none;
+  }
+  .limit {
+    position: absolute;
+    right: 0;
+    left: 0;
+    border-top: 1px dashed var(--ink3);
+    pointer-events: none;
+  }
+  .limit span {
+    position: absolute;
+    right: 0;
+    bottom: 3px;
+    color: var(--ink3);
+    font-size: 11px;
+    line-height: 12px;
   }
   .rule {
     position: absolute;

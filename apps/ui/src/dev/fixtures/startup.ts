@@ -5,7 +5,7 @@
 import type { BootDto, StartupAppDto, StartupAreaDto, StartupRun } from "../../lib/types";
 import type { Handler } from "../mock";
 
-type Case = "slow" | "fast" | "wait" | "none";
+export type Case = "slow" | "fast" | "wait" | "none";
 
 const query = new URLSearchParams(location.search);
 const MINUTE = 60_000;
@@ -42,12 +42,12 @@ const ROWS: Row[] = [
   { at: "2026-10-31 12:43", fw: 15.5, signin: 708, profile: 134, tpmReady: null, desktop: 843, apps: null },
   { at: "2026-11-05 11:42", fw: 15.0, signin: 554, profile: 153, tpmReady: null, desktop: 709, apps: null },
   { at: "2026-11-07 18:40", fw: 21.1, signin: 41, profile: 159, tpmReady: 92, desktop: 201, apps: null },
-  { at: "2026-11-08 09:37", fw: 19.7, signin: 17, profile: 183, tpmReady: 58, desktop: 201, apps: null, drivers: ["exampledrv"] },
+  { at: "2026-11-08 09:37", fw: 19.7, signin: 17, profile: 183, tpmReady: 58, desktop: 201, apps: null, drivers: ["dam", "exampledrv"] },
   { at: "2026-11-08 09:45", fw: 13.8, signin: 9, profile: 110, tpmReady: 33, desktop: 121, apps: null, type: 1 },
-  { at: "2026-11-09 11:43", fw: 15.2, signin: 28, profile: 361, tpmReady: 79, desktop: 390, apps: null },
-  { at: "2026-11-10 11:53", fw: 14.9, signin: 15, profile: 208, tpmReady: 83, desktop: 224, apps: null },
-  { at: "2026-11-13 11:42", fw: 14.9, signin: 21, profile: 123, tpmReady: 51, desktop: 145, apps: null },
-  { at: "2026-11-15 11:15", fw: 15.2, signin: 19, profile: 152, tpmReady: 56, desktop: 173, apps: null },
+  { at: "2026-11-09 11:43", fw: 15.2, signin: 28, profile: 361, tpmReady: 79, desktop: 390, apps: null, drivers: ["dam"] },
+  { at: "2026-11-10 11:53", fw: 14.9, signin: 15, profile: 208, tpmReady: 83, desktop: 224, apps: null, drivers: ["dam"] },
+  { at: "2026-11-13 11:42", fw: 14.9, signin: 21, profile: 123, tpmReady: 51, desktop: 145, apps: null, drivers: ["dam"] },
+  { at: "2026-11-15 11:15", fw: 15.2, signin: 19, profile: 152, tpmReady: 56, desktop: 173, apps: null, drivers: ["dam"] },
   { at: "2026-11-15 13:11", fw: null, signin: 16.6, profile: 144, tpmReady: 38.9, desktop: null, apps: null },
   { at: "2026-11-15 13:40", fw: 13.6, signin: 20.3, profile: 43.1, tpmReady: 57.3, desktop: 70.6, apps: 81.0 },
   { at: "2026-11-15 13:57", fw: 13.6, signin: 20.6, profile: 50.6, tpmReady: 66.4, desktop: 79.4, apps: 89.9 },
@@ -65,7 +65,8 @@ const LAST: Record<Exclude<Case, "none">, string> = {
 const ms = (seconds: number) => Math.round(seconds * 1000);
 const stamp = (at: string) => Date.parse(`${at.replace(" ", "T")}:00Z`);
 
-const APP_COMMANDS = [String.raw`C:\Program Files\Vestigium\vestigium.exe`, String.raw`C:\Program Files\Example Capture\capture.exe`];
+/** The program file names the window gets: the Rust side drops the folder and the arguments. */
+const APP_COMMANDS = ["vestigium.exe", "capture.exe"];
 
 function runs(row: Row, start: number): StartupRun[] {
   if (row.apps === null) return [];
@@ -118,9 +119,8 @@ const startupApps: StartupAppDto[] = [
   { name: "SecurityTray", key: "StartupApp:SecurityTray", enabled: true, protected: true },
 ];
 
-function data(): StartupAreaDto {
-  const wanted = query.get("startup");
-  const which: Case = wanted === "fast" || wanted === "wait" || wanted === "none" ? wanted : "slow";
+/** The page's data for one case; the boots are dated relative to now. */
+export function startupCase(which: Case): StartupAreaDto {
   if (which === "none") return { boots: [], temp: null, startup_apps: startupApps };
   return {
     boots: boots(which),
@@ -129,6 +129,12 @@ function data(): StartupAreaDto {
   };
 }
 
+function data(): StartupAreaDto {
+  const wanted = query.get("startup");
+  return startupCase(wanted === "fast" || wanted === "wait" || wanted === "none" ? wanted : "slow");
+}
+
 export const handlers: Record<string, Handler> = {
   startup_area: () => data(),
+  open_storage_sense: () => null,
 };

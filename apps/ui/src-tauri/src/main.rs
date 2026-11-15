@@ -53,6 +53,7 @@ fn main() {
             commands::capture,
             commands::health,
             commands::startup_area,
+            startup::open_storage_sense,
             commands::start_scan,
             commands::dumps,
             commands::start_dump_scan,

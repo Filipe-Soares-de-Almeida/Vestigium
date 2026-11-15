@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "capture",
     "health",
     "startup_area",
+    "open_storage_sense",
     "start_scan",
     "dumps",
     "start_dump_scan",

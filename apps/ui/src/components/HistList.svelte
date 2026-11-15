@@ -25,7 +25,7 @@
       {#if entry.href}
         <a class="row" href={entry.href} data-reveal>{@render body(entry)}<span class="ch"><Icon name="chevron" /></span></a>
       {:else}
-        <span class="row plain">{@render body(entry)}</span>
+        <span class="row plain" data-reveal>{@render body(entry)}</span>
       {/if}
     </li>
   {/each}

@@ -20,6 +20,7 @@
   import { areaOf, AREAS, areaState, findArea, statusKindOf } from "./health/areas";
   import Finding from "./health/Finding.svelte";
   import Scan from "./health/Scan.svelte";
+  import StartupArea from "./health/StartupArea.svelte";
   import { formatDayShort } from "./occurrence/format";
   import { areaUnknownText, checkText, findingTitle, lede, markWord, when } from "./health/words";
 
@@ -117,6 +118,8 @@
   <div class="gap"><ErrorView error={health.error} heading="h2" onretry={retry} /></div>
 {:else if health.dto === null}
   <Loading />
+{:else if current && area?.id === "startup"}
+  <StartupArea finding={current.open[0] ?? null} {level} />
 {:else if current}
   {#each current.open as finding, i (finding.id)}
     <Finding {finding} {level} first={i === 0} />
