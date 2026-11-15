@@ -36,4 +36,20 @@ fn main() {
             boot.logger_full,
         );
     }
+    if let Some(temp) = vestigium_collect::temp_folder() {
+        let started = std::time::Instant::now();
+        let size = vestigium_collect::count_tree(
+            &temp,
+            vestigium_collect::TEMP_MAX_ENTRIES,
+            vestigium_collect::TEMP_MAX_TIME,
+            0,
+        );
+        println!(
+            "Temp: {} folders, {} files, capped {} in {:?}",
+            size.folders,
+            size.files,
+            size.capped,
+            started.elapsed()
+        );
+    }
 }

@@ -52,6 +52,16 @@ pub struct BootFacts {
     pub failed_drivers: Vec<String>,
 }
 
+/// What the signed-in user's Temp folder holds; the profile service walks all of it at sign-in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TempSize {
+    pub ts_ms: i64,
+    pub folders: u32,
+    pub files: u32,
+    /// The count stopped at its limit, so the folder holds at least this much.
+    pub capped: bool,
+}
+
 /// The phases of one boot, in milliseconds; `None` where a source is missing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BootPhases {
