@@ -106,7 +106,8 @@ mod tests {
     use super::*;
 
     fn tree(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("vestigium-count-{name}-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("vestigium-count-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for dir in ["a/b/c", "a/d", "e"] {
             std::fs::create_dir_all(root.join(dir)).unwrap();
